@@ -1,93 +1,107 @@
-# evercore
+# EverCore
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
+EverCore is the **algorithm library** behind EverMind's memory system — stateless, dependency-free of any storage, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in EverOS.
 
-## Getting started
+## Why split EverCore from EverOS?
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- **Algorithm engineers iterate fast.** EverCore is "the algorithm team's home base" — every change to extraction strategies, prompts, fusion math, ranker weights happens here without going through service-layer ceremony.
+- **Pure functions, easy to reason about.** No DB, no filesystem, no business state. All operators are plain in-memory transforms with explicit input / output types.
+- **One codebase serves both the open-source and the commercial cloud builds.** The same `evercore.*` packages are consumed by both editions.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+The full architecture rationale lives in [`docs/design.md`](docs/design.md).
 
-## Add your files
+## Repository layout
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+This repo is a **monorepo** of 8 publishable distributions sharing the `evercore.*` namespace via [PEP 420](https://peps.python.org/pep-0420/), managed with [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/):
 
+| Distribution | What it provides |
+|---|---|
+| [`evercore-core`](packages/evercore-core/) | Types, LLM client + providers, prompt validators, testing helpers |
+| [`evercore-boundary`](packages/evercore-boundary/) | MemCell extractors (`Chat` / `Workspace` / `Agent`) + tokenize / split |
+| [`evercore-clustering`](packages/evercore-clustering/) | `cluster_by_geometry` / `cluster_by_llm` over `ClusterState` |
+| [`evercore-rank`](packages/evercore-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank |
+| [`evercore-parser`](packages/evercore-parser/) | Multimodal raw-file → `ParsedContent` |
+| [`evercore-user-memory`](packages/evercore-user-memory/) | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
+| [`evercore-agent-memory`](packages/evercore-agent-memory/) | `AgentCase` / `AgentSkill` extractors |
+| [`evercore-knowledge`](packages/evercore-knowledge/) | `KnowledgeMemory` extractors |
+
+## Quick start
+
+```bash
+git clone git@gitlab.com:npc-work/aic/ai/evercore.git
+cd evercore
+
+uv sync --all-packages          # editable-install all 8 packages into a shared venv
+uv run pytest                   # run the workspace-wide test suite
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/npc-work/aic/ai/evercore.git
-git branch -M main
-git push -uf origin main
+
+Install only what you need on the consumer side:
+
+```bash
+pip install evercore-user-memory      # auto-pulls evercore-core + boundary + clustering
+pip install evercore-rank             # auto-pulls evercore-core
+pip install evercore-knowledge        # auto-pulls evercore-core + parser
 ```
 
-## Integrate with your tools
+## Releasing
 
-* [Set up project integrations](https://gitlab.com/npc-work/aic/ai/evercore/-/settings/integrations)
+Every distribution is released **independently**: each `packages/evercore-*/pyproject.toml` carries its own `version = "..."` and follows its own SemVer cadence. There is no umbrella version — bumping `evercore-rank` does not require bumping anything else. (Rationale: see [`docs/design.md`](docs/design.md) §1.3 "Why no meta package".)
 
-## Collaborate with your team
+### Cutting a release
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+1. Bump the `version = "..."` field in the relevant `packages/evercore-<name>/pyproject.toml` and land the change on `main` via MR.
+2. From `main`, push a per-package tag:
+   ```bash
+   git tag evercore-clustering/v0.2.0
+   git push origin evercore-clustering/v0.2.0
+   ```
+3. The `.gitlab-ci.yml` `build` stage runs `uv build` for the matching package; the publish stage uploads the wheel + sdist to PyPI using `UV_PUBLISH_TOKEN` from CI variables.
 
-## Test and Deploy
+### Tag naming
 
-Use the built-in continuous integration in GitLab.
+Format: `<dist-name>/v<semver>`. The slash separator keeps per-distribution tags unambiguous from any future repository-wide tag.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+```text
+evercore-core/v0.1.0
+evercore-rank/v0.2.0
+evercore-user-memory/v0.1.3
+```
 
-***
+### Local dry-run
 
-# Editing this README
+```bash
+cd packages/evercore-clustering
+uv build                                 # writes packages/<dist>/dist/*.whl + *.tar.gz
+uv publish --dry-run                     # validate without uploading
+uv publish --token "$PYPI_TOKEN"         # actual upload (admins only)
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### Pre-flight checklist
 
-## Suggestions for a good README
+Before pushing a release tag:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+- [ ] `uv run pytest` is green on `main`.
+- [ ] `uv run ruff check . && uv run ruff format --check .` pass.
+- [ ] The bumped `version` honours SemVer relative to the previous tag (no breaking change in a minor / patch).
+- [ ] Downstream packages' `>=X.Y,<2.0` ranges still allow the new version.
 
-## Name
-Choose a self-explaining name for your project.
+### CI / pipeline status
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+The current `.gitlab-ci.yml` `build` job builds **every** package on any tag push. Before the first real release, the rule needs to be tightened to filter on the tag's `<dist-name>` prefix so only the matching package is built and published. Tracked as a follow-up.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## For AI coding assistants
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Read [`AGENTS.md`](AGENTS.md) — the single source of truth for assistant context. `CLAUDE.md` and `.cursorrules` are symlinks to it.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Documentation
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- [`docs/design.md`](docs/design.md) — full architecture (read this before challenging any design choice)
+- [`docs/decisions/`](docs/decisions/) — ADRs (Architecture Decision Records)
+- [`AGENTS.md`](AGENTS.md) — how to onboard, how to add an operator, how to add an LLM provider
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+[MIT](LICENSE).

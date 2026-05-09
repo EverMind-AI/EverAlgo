@@ -1,0 +1,111 @@
+[project]
+name = "evercore-workspace"
+version = "0"
+description = "EverCore monorepo workspace — algorithm library for memory extraction & ranking."
+requires-python = ">=3.12"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+evercore-core         = { workspace = true }
+evercore-boundary     = { workspace = true }
+evercore-clustering   = { workspace = true }
+evercore-rank         = { workspace = true }
+evercore-parser       = { workspace = true }
+evercore-user-memory  = { workspace = true }
+evercore-agent-memory = { workspace = true }
+evercore-knowledge    = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "evercore-core",
+  "evercore-boundary",
+  "evercore-clustering",
+  "evercore-rank",
+  "evercore-parser",
+  "evercore-user-memory",
+  "evercore-agent-memory",
+  "evercore-knowledge",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "respx>=0.21",
+  "ruff>=0.6",
+  "mypy>=1.10",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+  "F", "E", "W",
+  "I", "D", "UP",
+  "B", "SIM", "C4", "C90", "PIE",
+  "RUF100", "RUF018",
+]
+ignore = [
+  "D100",
+  "D102",
+  "D104",
+  "D105",
+  "D107",
+  "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["evercore", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test functions document themselves through descriptive names; D103 / D401
+# would force boilerplate docstrings without informational value.
+"**/tests/**/*.py" = ["D103", "D401"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "packages"]
+# --import-mode=importlib is required for src-layout packages sharing the
+# `evercore.*` PEP 420 namespace, and to prevent test sub-directories (e.g.
+# `types/`) from shadowing stdlib modules under pytest's default `prepend`
+# import mode. Reference: https://docs.pytest.org/en/stable/explanation/pythonpath.html
+addopts = "-ra --import-mode=importlib"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# Required so mypy can resolve `evercore.*` across PEP 420 namespace
+# packages spread over multiple distributions. ``mypy_path`` lists every
+# distribution's ``src`` so mypy treats them as the package roots and
+# does not mistake ``evercore.types`` (a sub-namespace) for the stdlib
+# ``types`` module.
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "packages/evercore-core/src:packages/evercore-boundary/src:packages/evercore-clustering/src:packages/evercore-rank/src:packages/evercore-parser/src:packages/evercore-user-memory/src:packages/evercore-agent-memory/src:packages/evercore-knowledge/src"
+
+# Tests need not be strict-typed: pytest fixtures, parametrize tuples and
+# `dict[str, Any]` builders rarely benefit from `-> None` annotations on
+# every function. Keeping ``strict`` enabled for src/ but relaxed for tests/
+# matches pydantic-ai / dspy / sklearn convention.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_incomplete_defs = false
+
+# Pyright (used by Pylance / VSCode / Cursor) configuration lives in
+# the standalone `pyrightconfig.json` at the repo root — Pylance
+# auto-discovers it. Keeping pyright config out of pyproject.toml avoids
+# Pylance edge cases where `[tool.pyright]` is not picked up reliably.

@@ -1,0 +1,26 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "packages/evercore-core/src",
+    "packages/evercore-boundary/src",
+    "packages/evercore-clustering/src",
+    "packages/evercore-rank/src",
+    "packages/evercore-parser/src",
+    "packages/evercore-user-memory/src",
+    "packages/evercore-agent-memory/src",
+    "packages/evercore-knowledge/src"
+  ],
+  "include": [
+    "packages/*/src",
+    "packages/*/tests",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.ruff_cache",
+    "**/.mypy_cache",
+    ".venv"
+  ],
+  "pythonVersion": "3.12"
+}
