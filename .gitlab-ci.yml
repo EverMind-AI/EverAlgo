@@ -1,0 +1,59 @@
+# GitLab CI for the EverCore monorepo (sub-project 4).
+#
+# Strict mode: 4 quality gates (ruff check / ruff format --check / mypy /
+# pytest) all enforced. The 3 lint jobs run in parallel within the lint
+# stage; pytest follows in the test stage. Per-package matrix (only:
+# changes:) is deferred to a future sub-project once enough distributions
+# have releasable artifacts.
+
+stages:
+  - lint
+  - test
+
+ruff-check:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - pip install --quiet uv
+    - uv sync --all-packages --group dev
+  script:
+    - uv run ruff check .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+ruff-format:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - pip install --quiet uv
+    - uv sync --all-packages --group dev
+  script:
+    - uv run ruff format --check .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+mypy:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - pip install --quiet uv
+    - uv sync --all-packages --group dev
+  script:
+    - uv run mypy .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+pytest:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - pip install --quiet uv
+    - uv sync --all-packages --group dev
+  script:
+    - uv run pytest -v
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
