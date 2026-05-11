@@ -1,4 +1,4 @@
-# Pre-commit hooks for EverCore.
+# Pre-commit hooks for EverAlgo.
 #
 # Local enforcement of style + lint before commit. The CI pipeline
 # (.gitlab-ci.yml) re-runs the same checks as a load-bearing fallback for

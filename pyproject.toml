@@ -1,7 +1,7 @@
 [project]
-name = "evercore-workspace"
+name = "everalgo-workspace"
 version = "0"
-description = "EverCore monorepo workspace — algorithm library for memory extraction & ranking."
+description = "EverAlgo monorepo workspace — algorithm library for memory extraction & ranking."
 requires-python = ">=3.12"
 
 [tool.uv]
@@ -11,25 +11,25 @@ package = false
 members = ["packages/*"]
 
 [tool.uv.sources]
-evercore-core         = { workspace = true }
-evercore-boundary     = { workspace = true }
-evercore-clustering   = { workspace = true }
-evercore-rank         = { workspace = true }
-evercore-parser       = { workspace = true }
-evercore-user-memory  = { workspace = true }
-evercore-agent-memory = { workspace = true }
-evercore-knowledge    = { workspace = true }
+everalgo-core         = { workspace = true }
+everalgo-boundary     = { workspace = true }
+everalgo-clustering   = { workspace = true }
+everalgo-rank         = { workspace = true }
+everalgo-parser       = { workspace = true }
+everalgo-user-memory  = { workspace = true }
+everalgo-agent-memory = { workspace = true }
+everalgo-knowledge    = { workspace = true }
 
 [dependency-groups]
 dev = [
-  "evercore-core",
-  "evercore-boundary",
-  "evercore-clustering",
-  "evercore-rank",
-  "evercore-parser",
-  "evercore-user-memory",
-  "evercore-agent-memory",
-  "evercore-knowledge",
+  "everalgo-core",
+  "everalgo-boundary",
+  "everalgo-clustering",
+  "everalgo-rank",
+  "everalgo-parser",
+  "everalgo-user-memory",
+  "everalgo-agent-memory",
+  "everalgo-knowledge",
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "respx>=0.21",
@@ -63,7 +63,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["evercore", "tests"]
+known-first-party = ["everalgo", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 # Test functions document themselves through descriptive names; D103 / D401
@@ -80,7 +80,7 @@ max-complexity = 15
 asyncio_mode = "auto"
 testpaths = ["tests", "packages"]
 # --import-mode=importlib is required for src-layout packages sharing the
-# `evercore.*` PEP 420 namespace, and to prevent test sub-directories (e.g.
+# `everalgo.*` PEP 420 namespace, and to prevent test sub-directories (e.g.
 # `types/`) from shadowing stdlib modules under pytest's default `prepend`
 # import mode. Reference: https://docs.pytest.org/en/stable/explanation/pythonpath.html
 addopts = "-ra --import-mode=importlib"
@@ -88,14 +88,14 @@ addopts = "-ra --import-mode=importlib"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Required so mypy can resolve `evercore.*` across PEP 420 namespace
+# Required so mypy can resolve `everalgo.*` across PEP 420 namespace
 # packages spread over multiple distributions. ``mypy_path`` lists every
 # distribution's ``src`` so mypy treats them as the package roots and
-# does not mistake ``evercore.types`` (a sub-namespace) for the stdlib
+# does not mistake ``everalgo.types`` (a sub-namespace) for the stdlib
 # ``types`` module.
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "packages/evercore-core/src:packages/evercore-boundary/src:packages/evercore-clustering/src:packages/evercore-rank/src:packages/evercore-parser/src:packages/evercore-user-memory/src:packages/evercore-agent-memory/src:packages/evercore-knowledge/src"
+mypy_path = "packages/everalgo-core/src:packages/everalgo-boundary/src:packages/everalgo-clustering/src:packages/everalgo-rank/src:packages/everalgo-parser/src:packages/everalgo-user-memory/src:packages/everalgo-agent-memory/src:packages/everalgo-knowledge/src"
 
 # Tests need not be strict-typed: pytest fixtures, parametrize tuples and
 # `dict[str, Any]` builders rarely benefit from `-> None` annotations on

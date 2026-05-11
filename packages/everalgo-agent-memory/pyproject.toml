@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "everalgo-agent-memory"
+version = "0.1.0"
+description = "EverAlgo agent memory: AgentCase / AgentSkill extractors (re-exports boundary as AgentMemCellExtractor)."
+requires-python = ">=3.12"
+license = "MIT"
+readme = "README.md"
+authors = [{ name = "EverMind" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "everalgo-core>=0.1.0,<2.0.0",
+  "everalgo-boundary>=0.1.0,<2.0.0",
+  "everalgo-clustering>=0.1.0,<2.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/everalgo"]

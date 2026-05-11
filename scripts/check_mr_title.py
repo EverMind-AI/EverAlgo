@@ -61,7 +61,7 @@ def main(title: str) -> int:
     print("Examples:")
     print("  ✨ feat(clustering): add cluster_by_llm decision prompt")
     print("  \U0001f41b fix(boundary): correct token count for emoji-only chat")
-    print("  \U0001f4dd docs(release): bump evercore-rank to 0.2.0")
+    print("  \U0001f4dd docs(release): bump everalgo-rank to 0.2.0")
     print()
     print(f"Allowed types: {ALLOWED_TYPES.replace('|', ' | ')}")
     print("See AGENTS.md section 6 (Branching & Commits) for the convention.")

@@ -13,31 +13,31 @@ from typing import Any
 
 import pytest
 
-import evercore.llm
-from evercore.boundary.chat import ChatMemCellExtractor
-from evercore.llm.types import ChatMessage as LLMChatMessage
-from evercore.llm.types import ChatResponse
-from evercore.testing.assertions import assert_episode_shape
-from evercore.testing.fake_llm import FakeLLMClient
-from evercore.types import Message, MessageRole
-from evercore.user_memory.episode import EpisodeExtractor
+import everalgo.llm
+from everalgo.boundary.chat import ChatMemCellExtractor
+from everalgo.llm.types import ChatMessage as LLMChatMessage
+from everalgo.llm.types import ChatResponse
+from everalgo.testing.assertions import assert_episode_shape
+from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.types import Message, MessageRole
+from everalgo.user_memory.episode import EpisodeExtractor
 
 
 @pytest.fixture(autouse=True)
-def reset_evercore_llm_state() -> Iterator[None]:
-    """Reset evercore.llm._default + _active per test (sub-project 2.5 fixture).
+def reset_everalgo_llm_state() -> Iterator[None]:
+    """Reset everalgo.llm._default + _active per test (sub-project 2.5 fixture).
 
     Without this, test pollution between e2e and other test files could
     leak global state.
     """
-    saved_default = evercore.llm._default
-    token = evercore.llm._active.set(None)
+    saved_default = everalgo.llm._default
+    token = everalgo.llm._active.set(None)
     try:
-        evercore.llm._default = None
+        everalgo.llm._default = None
         yield
     finally:
-        evercore.llm._default = saved_default
-        evercore.llm._active.reset(token)
+        everalgo.llm._default = saved_default
+        everalgo.llm._active.reset(token)
 
 
 async def test_boundary_to_episode_pipeline_e2e() -> None:

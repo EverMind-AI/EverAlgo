@@ -1,10 +1,10 @@
-# EverCore Reference Implementation + CI Implementation Plan
+# EverAlgo Reference Implementation + CI Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land minimal reference implementations of `ChatMemCellExtractor` (in `evercore-boundary`) and `EpisodeExtractor` (in `evercore-user-memory`) following the framework defined by ADR 010 + ADR 011 + design.md §1.2 / §2.3, plus upgrade `.gitlab-ci.yml` to strict mode (4 quality gates).
+**Goal:** Land minimal reference implementations of `ChatMemCellExtractor` (in `everalgo-boundary`) and `EpisodeExtractor` (in `everalgo-user-memory`) following the framework defined by ADR 010 + ADR 011 + design.md §1.2 / §2.3, plus upgrade `.gitlab-ci.yml` to strict mode (4 quality gates).
 
-**Architecture:** Stateless callable classes (`ChatMemCellExtractor.adetect` / `EpisodeExtractor.aextract`) with one-line `extract = async_to_sync(aextract)` sync bridges. LLM injection via sub-project 2.5's `evercore.llm.resolve()` + per-call `llm=` argument. Prompts as Python module constants in `prompts/{en,zh}/<op>.py` (per design.md §1.4) with per-call `prompt=` override + caller monkey-patch paths. Token counting via simplified `len(text) // 4` heuristic (zero new dependencies beyond `asgiref` for sync bridging).
+**Architecture:** Stateless callable classes (`ChatMemCellExtractor.adetect` / `EpisodeExtractor.aextract`) with one-line `extract = async_to_sync(aextract)` sync bridges. LLM injection via sub-project 2.5's `everalgo.llm.resolve()` + per-call `llm=` argument. Prompts as Python module constants in `prompts/{en,zh}/<op>.py` (per design.md §1.4) with per-call `prompt=` override + caller monkey-patch paths. Token counting via simplified `len(text) // 4` heuristic (zero new dependencies beyond `asgiref` for sync bridging).
 
 **Tech Stack:** Python 3.12 / pydantic v2 / asgiref ≥3.0 (sync bridge) / pytest + pytest-asyncio (auto mode) / ruff / mypy strict / GitLab CI / **0** new runtime dependencies beyond `asgiref`.
 
@@ -14,9 +14,9 @@
 
 1. **测试函数必须 `-> None` 注解**（mypy strict 模式 `tests.*` override 不兜底）。
 2. **`tests/__init__.py` / `tests/<subpkg>/__init__.py` / `tests/integration/__init__.py` 全部不要创建**（沿子项目 1+2+3+2.5 的 `--import-mode=importlib` 决策）。
-3. **`mypy` 必须从仓库根（`/Users/admin/Documents/evermemos/evercore`）跑**，**不要**从 `packages/<X>/` 子目录跑（会触发 `import-untyped` 误报）。
+3. **`mypy` 必须从仓库根（`/Users/admin/Documents/evermemos/everalgo`）跑**，**不要**从 `packages/<X>/` 子目录跑（会触发 `import-untyped` 误报）。
 4. **使用 `uv run` 跑所有 Python 命令**（这是 uv workspace；裸 `pytest` 用错解释器）。
-5. **commit 风格 `<emoji> <type>(<scope>): <description>`** 全英文（per memory `feedback_evercore_commit_message_english.md`），scope 用 `boundary` / `user_memory` / `ci` 等。
+5. **commit 风格 `<emoji> <type>(<scope>): <description>`** 全英文（per memory `feedback_everalgo_commit_message_english.md`），scope 用 `boundary` / `user_memory` / `ci` 等。
 6. **每个 commit 落 `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`**。
 7. **测试文件名必须工作区唯一** —— 用 `test_boundary_public_api.py` / `test_user_memory_public_api.py` / `test_chat.py` / `test_episode.py` / `test_tokenize.py` / `test_boundary_to_episode_e2e.py`（per memory `feedback_test_module_name_unique.md`）。
 8. **prompt 文件命名后缀 `_EN` / `_ZH`** —— 常量用 `CHAT_BOUNDARY_DETECT_PROMPT_EN` / `CHAT_BOUNDARY_DETECT_PROMPT_ZH`（per spec §4.1）。
@@ -28,9 +28,9 @@
 ## File Structure
 
 ```
-packages/evercore-boundary/
+packages/everalgo-boundary/
 ├── pyproject.toml                                # MODIFY: T0 加 asgiref dep
-├── src/evercore/boundary/
+├── src/everalgo/boundary/
 │   ├── __init__.py                               # MODIFY: T4 re-export ChatMemCellExtractor
 │   ├── chat.py                                   # NEW: T3 ChatMemCellExtractor
 │   ├── _tokenize.py                              # NEW: T1 count_tokens
@@ -47,9 +47,9 @@ packages/evercore-boundary/
     ├── test_tokenize.py                          # NEW: T1 (3 tests)
     └── test_boundary_public_api.py               # NEW: T4 (2 tests)
 
-packages/evercore-user-memory/
-├── pyproject.toml                                # MODIFY: T5 去 evercore-clustering + 加 asgiref
-├── src/evercore/user_memory/
+packages/everalgo-user-memory/
+├── pyproject.toml                                # MODIFY: T5 去 everalgo-clustering + 加 asgiref
+├── src/everalgo/user_memory/
 │   ├── __init__.py                               # MODIFY: T7 re-export
 │   ├── episode.py                                # NEW: T6 EpisodeExtractor
 │   └── prompts/
@@ -71,24 +71,24 @@ tests/                                            # workspace-root, NO __init__.
 .gitlab-ci.yml                                    # MODIFY: T9 4 jobs strict
 ```
 
-设计依据：`docs/superpowers/specs/2026-05-08-evercore-reference-impl-design.md` §2 (File Map) 和 §3 (公开 API)。
+设计依据：`docs/superpowers/specs/2026-05-08-everalgo-reference-impl-design.md` §2 (File Map) 和 §3 (公开 API)。
 
 ---
 
 ## Task 0: 项目基建 — pyproject 改 + 目录骨架
 
 **Files:**
-- Modify: `packages/evercore-boundary/pyproject.toml`
-- Modify: `packages/evercore-user-memory/pyproject.toml`
-- Create directories: `packages/evercore-boundary/tests/boundary/`, `packages/evercore-user-memory/tests/user_memory/`, `tests/integration/`
+- Modify: `packages/everalgo-boundary/pyproject.toml`
+- Modify: `packages/everalgo-user-memory/pyproject.toml`
+- Create directories: `packages/everalgo-boundary/tests/boundary/`, `packages/everalgo-user-memory/tests/user_memory/`, `tests/integration/`
 
-- [ ] **Step 1: 修改 `packages/evercore-boundary/pyproject.toml`**
+- [ ] **Step 1: 修改 `packages/everalgo-boundary/pyproject.toml`**
 
 读取现有 `pyproject.toml`。找到 `dependencies` 块：
 
 ```toml
 dependencies = [
-  "evercore-core>=0.1.0,<2.0.0",
+  "everalgo-core>=0.1.0,<2.0.0",
 ]
 ```
 
@@ -97,19 +97,19 @@ dependencies = [
 ```toml
 dependencies = [
   "asgiref>=3.0",
-  "evercore-core>=0.1.0,<2.0.0",
+  "everalgo-core>=0.1.0,<2.0.0",
 ]
 ```
 
-- [ ] **Step 2: 修改 `packages/evercore-user-memory/pyproject.toml`**
+- [ ] **Step 2: 修改 `packages/everalgo-user-memory/pyproject.toml`**
 
 找到 `dependencies` 块：
 
 ```toml
 dependencies = [
-  "evercore-core>=0.1.0,<2.0.0",
-  "evercore-boundary>=0.1.0,<2.0.0",
-  "evercore-clustering>=0.1.0,<2.0.0",
+  "everalgo-core>=0.1.0,<2.0.0",
+  "everalgo-boundary>=0.1.0,<2.0.0",
+  "everalgo-clustering>=0.1.0,<2.0.0",
 ]
 ```
 
@@ -118,12 +118,12 @@ dependencies = [
 ```toml
 dependencies = [
   "asgiref>=3.0",
-  "evercore-boundary>=0.1.0,<2.0.0",
-  "evercore-core>=0.1.0,<2.0.0",
+  "everalgo-boundary>=0.1.0,<2.0.0",
+  "everalgo-core>=0.1.0,<2.0.0",
 ]
 ```
 
-注意：① 删除 `evercore-clustering` 依赖（最小集 EpisodeExtractor 不依赖 cluster，spec §7 决策 11）；② 添加 `asgiref>=3.0`；③ 字母顺序 `asgiref → evercore-boundary → evercore-core`。
+注意：① 删除 `everalgo-clustering` 依赖（最小集 EpisodeExtractor 不依赖 cluster，spec §7 决策 11）；② 添加 `asgiref>=3.0`；③ 字母顺序 `asgiref → everalgo-boundary → everalgo-core`。
 
 - [ ] **Step 3: 同步 workspace 依赖**
 
@@ -136,8 +136,8 @@ Expected: `Resolved N packages` + 安装 `asgiref` 到 `.venv`，无错误。
 - [ ] **Step 4: 创建测试目录骨架**
 
 ```bash
-mkdir -p packages/evercore-boundary/tests/boundary/
-mkdir -p packages/evercore-user-memory/tests/user_memory/
+mkdir -p packages/everalgo-boundary/tests/boundary/
+mkdir -p packages/everalgo-user-memory/tests/user_memory/
 mkdir -p tests/integration/
 ```
 
@@ -145,11 +145,11 @@ mkdir -p tests/integration/
 
 Verify:
 ```bash
-ls -la packages/evercore-boundary/tests/boundary/ \
-       packages/evercore-user-memory/tests/user_memory/ \
+ls -la packages/everalgo-boundary/tests/boundary/ \
+       packages/everalgo-user-memory/tests/user_memory/ \
        tests/integration/
-test ! -f packages/evercore-boundary/tests/boundary/__init__.py && \
-test ! -f packages/evercore-user-memory/tests/user_memory/__init__.py && \
+test ! -f packages/everalgo-boundary/tests/boundary/__init__.py && \
+test ! -f packages/everalgo-user-memory/tests/user_memory/__init__.py && \
 test ! -f tests/integration/__init__.py && \
 echo "OK: no __init__.py in any test directory"
 ```
@@ -167,17 +167,17 @@ Expected: `OK: <function async_to_sync at 0x...>`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-boundary/pyproject.toml \
-        packages/evercore-user-memory/pyproject.toml \
+git add packages/everalgo-boundary/pyproject.toml \
+        packages/everalgo-user-memory/pyproject.toml \
         uv.lock
 git commit -m "$(cat <<'EOF'
-🎉 chore(deps): add asgiref + drop evercore-clustering for sub-project 4
+🎉 chore(deps): add asgiref + drop everalgo-clustering for sub-project 4
 
-Add asgiref>=3.0 to evercore-boundary and evercore-user-memory for the
+Add asgiref>=3.0 to everalgo-boundary and everalgo-user-memory for the
 async-to-sync bridging pattern (ADR 010 line 220, sync extract = async_to_sync(
 aextract) one-liner used by the new ChatMemCellExtractor and EpisodeExtractor).
 
-Drop evercore-clustering from evercore-user-memory dependencies — the minimal
+Drop everalgo-clustering from everalgo-user-memory dependencies — the minimal
 sub-project 4 EpisodeExtractor does not depend on cluster_id (design.md §2.3
 line 540 + line 686). The dependency will be re-added when ProfileExtractor
 lands in a future SemVer minor bump.
@@ -191,20 +191,20 @@ EOF
 
 ---
 
-## Task 1: `evercore.boundary._tokenize.count_tokens` + 3 tests
+## Task 1: `everalgo.boundary._tokenize.count_tokens` + 3 tests
 
 **Files:**
-- Create: `packages/evercore-boundary/src/evercore/boundary/_tokenize.py`
-- Create: `packages/evercore-boundary/tests/boundary/test_tokenize.py`
+- Create: `packages/everalgo-boundary/src/everalgo/boundary/_tokenize.py`
+- Create: `packages/everalgo-boundary/tests/boundary/test_tokenize.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Write to `packages/evercore-boundary/tests/boundary/test_tokenize.py`:
+Write to `packages/everalgo-boundary/tests/boundary/test_tokenize.py`:
 
 ```python
-"""Tests for evercore.boundary._tokenize — count_tokens helper."""
+"""Tests for everalgo.boundary._tokenize — count_tokens helper."""
 
-from evercore.boundary._tokenize import count_tokens
+from everalgo.boundary._tokenize import count_tokens
 
 
 def test_count_tokens_empty_string_is_zero() -> None:
@@ -227,14 +227,14 @@ def test_count_tokens_returns_non_negative() -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-uv run pytest packages/evercore-boundary/tests/boundary/test_tokenize.py -v
+uv run pytest packages/everalgo-boundary/tests/boundary/test_tokenize.py -v
 ```
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'evercore.boundary._tokenize'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'everalgo.boundary._tokenize'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Write to `packages/evercore-boundary/src/evercore/boundary/_tokenize.py`:
+Write to `packages/everalgo-boundary/src/everalgo/boundary/_tokenize.py`:
 
 ```python
 """Token counting helper for boundary extractors.
@@ -270,7 +270,7 @@ def count_tokens(text: str) -> int:
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-uv run pytest packages/evercore-boundary/tests/boundary/test_tokenize.py -v
+uv run pytest packages/everalgo-boundary/tests/boundary/test_tokenize.py -v
 ```
 
 Expected: 3 PASS.
@@ -278,9 +278,9 @@ Expected: 3 PASS.
 - [ ] **Step 5: Run quality gates (from REPO ROOT)**
 
 ```bash
-uv run ruff check packages/evercore-boundary/
-uv run ruff format --check packages/evercore-boundary/
-uv run mypy packages/evercore-boundary/
+uv run ruff check packages/everalgo-boundary/
+uv run ruff format --check packages/everalgo-boundary/
+uv run mypy packages/everalgo-boundary/
 ```
 
 Expected: 全部 clean.
@@ -288,8 +288,8 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-boundary/src/evercore/boundary/_tokenize.py \
-        packages/evercore-boundary/tests/boundary/test_tokenize.py
+git add packages/everalgo-boundary/src/everalgo/boundary/_tokenize.py \
+        packages/everalgo-boundary/tests/boundary/test_tokenize.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(boundary): add _tokenize.count_tokens minimal heuristic
 
@@ -309,18 +309,18 @@ EOF
 
 ---
 
-## Task 2: `evercore.boundary.prompts.{en,zh}.chat` — 4 prompt files
+## Task 2: `everalgo.boundary.prompts.{en,zh}.chat` — 4 prompt files
 
 **Files:**
-- Create: `packages/evercore-boundary/src/evercore/boundary/prompts/__init__.py`
-- Create: `packages/evercore-boundary/src/evercore/boundary/prompts/en/__init__.py`
-- Create: `packages/evercore-boundary/src/evercore/boundary/prompts/en/chat.py`
-- Create: `packages/evercore-boundary/src/evercore/boundary/prompts/zh/__init__.py`
-- Create: `packages/evercore-boundary/src/evercore/boundary/prompts/zh/chat.py`
+- Create: `packages/everalgo-boundary/src/everalgo/boundary/prompts/__init__.py`
+- Create: `packages/everalgo-boundary/src/everalgo/boundary/prompts/en/__init__.py`
+- Create: `packages/everalgo-boundary/src/everalgo/boundary/prompts/en/chat.py`
+- Create: `packages/everalgo-boundary/src/everalgo/boundary/prompts/zh/__init__.py`
+- Create: `packages/everalgo-boundary/src/everalgo/boundary/prompts/zh/chat.py`
 
 - [ ] **Step 1: Create the prompts package + en + zh sub-packages**
 
-Write `packages/evercore-boundary/src/evercore/boundary/prompts/__init__.py`:
+Write `packages/everalgo-boundary/src/everalgo/boundary/prompts/__init__.py`:
 
 ```python
 """Boundary extractor prompts (en + zh).
@@ -332,13 +332,13 @@ constant at startup.
 """
 ```
 
-Write `packages/evercore-boundary/src/evercore/boundary/prompts/en/__init__.py`:
+Write `packages/everalgo-boundary/src/everalgo/boundary/prompts/en/__init__.py`:
 
 ```python
 """English boundary extractor prompts."""
 ```
 
-Write `packages/evercore-boundary/src/evercore/boundary/prompts/zh/__init__.py`:
+Write `packages/everalgo-boundary/src/everalgo/boundary/prompts/zh/__init__.py`:
 
 ```python
 """Chinese boundary extractor prompts."""
@@ -346,7 +346,7 @@ Write `packages/evercore-boundary/src/evercore/boundary/prompts/zh/__init__.py`:
 
 - [ ] **Step 2: Write `prompts/en/chat.py`**
 
-Write `packages/evercore-boundary/src/evercore/boundary/prompts/en/chat.py`:
+Write `packages/everalgo-boundary/src/everalgo/boundary/prompts/en/chat.py`:
 
 ```python
 """English prompt for ChatMemCellExtractor.adetect."""
@@ -375,7 +375,7 @@ Output format (JSON only, no prose):
 
 - [ ] **Step 3: Write `prompts/zh/chat.py`**
 
-Write `packages/evercore-boundary/src/evercore/boundary/prompts/zh/chat.py`:
+Write `packages/everalgo-boundary/src/everalgo/boundary/prompts/zh/chat.py`:
 
 ```python
 """Chinese prompt for ChatMemCellExtractor.adetect."""
@@ -404,8 +404,8 @@ CHAT_BOUNDARY_DETECT_PROMPT_ZH = """你是一个对话边界检测器。给定�
 
 ```bash
 uv run python -c "
-from evercore.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
-from evercore.boundary.prompts.zh.chat import CHAT_BOUNDARY_DETECT_PROMPT_ZH
+from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
+from everalgo.boundary.prompts.zh.chat import CHAT_BOUNDARY_DETECT_PROMPT_ZH
 print('EN length:', len(CHAT_BOUNDARY_DETECT_PROMPT_EN))
 print('ZH length:', len(CHAT_BOUNDARY_DETECT_PROMPT_ZH))
 "
@@ -417,7 +417,7 @@ Expected: prints two non-zero lengths, no ImportError.
 
 ```bash
 uv run python -c "
-from evercore.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
+from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
 rendered = CHAT_BOUNDARY_DETECT_PROMPT_EN.format(messages='[user] hi', token_count=2)
 assert '{' in rendered and '\"split_at\":' in rendered, 'JSON braces did not collapse'
 print('Format OK')
@@ -429,9 +429,9 @@ Expected: prints `Format OK`. If you see `KeyError` or `IndexError`, the `{{ }}`
 - [ ] **Step 6: Run quality gates (from REPO ROOT)**
 
 ```bash
-uv run ruff check packages/evercore-boundary/
-uv run ruff format --check packages/evercore-boundary/
-uv run mypy packages/evercore-boundary/
+uv run ruff check packages/everalgo-boundary/
+uv run ruff format --check packages/everalgo-boundary/
+uv run mypy packages/everalgo-boundary/
 ```
 
 Expected: 全部 clean.
@@ -439,7 +439,7 @@ Expected: 全部 clean.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/evercore-boundary/src/evercore/boundary/prompts/
+git add packages/everalgo-boundary/src/everalgo/boundary/prompts/
 git commit -m "$(cat <<'EOF'
 ✨ feat(boundary): add bilingual chat boundary prompts (en + zh)
 
@@ -462,27 +462,27 @@ EOF
 
 ---
 
-## Task 3: `evercore.boundary.chat.ChatMemCellExtractor` + 3 tests
+## Task 3: `everalgo.boundary.chat.ChatMemCellExtractor` + 3 tests
 
 **Files:**
-- Create: `packages/evercore-boundary/src/evercore/boundary/chat.py`
-- Create: `packages/evercore-boundary/tests/boundary/test_chat.py`
+- Create: `packages/everalgo-boundary/src/everalgo/boundary/chat.py`
+- Create: `packages/everalgo-boundary/tests/boundary/test_chat.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Write to `packages/evercore-boundary/tests/boundary/test_chat.py`:
+Write to `packages/everalgo-boundary/tests/boundary/test_chat.py`:
 
 ```python
-"""Tests for evercore.boundary.chat — ChatMemCellExtractor."""
+"""Tests for everalgo.boundary.chat — ChatMemCellExtractor."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from evercore.boundary.chat import ChatMemCellExtractor
-from evercore.llm.types import ChatMessage as LLMChatMessage, ChatResponse
-from evercore.testing.fake_llm import FakeLLMClient
-from evercore.types import Message, MessageRole
+from everalgo.boundary.chat import ChatMemCellExtractor
+from everalgo.llm.types import ChatMessage as LLMChatMessage, ChatResponse
+from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.types import Message, MessageRole
 
 
 def _user(content: str, ts: int = 1700000000000) -> Message:
@@ -551,14 +551,14 @@ async def test_adetect_per_call_prompt_overrides_default() -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-uv run pytest packages/evercore-boundary/tests/boundary/test_chat.py -v
+uv run pytest packages/everalgo-boundary/tests/boundary/test_chat.py -v
 ```
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'evercore.boundary.chat'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'everalgo.boundary.chat'`.
 
 - [ ] **Step 3: Write `chat.py` implementation**
 
-Write to `packages/evercore-boundary/src/evercore/boundary/chat.py`:
+Write to `packages/everalgo-boundary/src/everalgo/boundary/chat.py`:
 
 ```python
 """Chat-style MemCell extractor — slice a message stream by topic boundaries."""
@@ -569,12 +569,12 @@ import json
 
 from asgiref.sync import async_to_sync
 
-import evercore.llm
-from evercore.boundary._tokenize import count_tokens
-from evercore.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
-from evercore.llm.protocols import LLMClient
-from evercore.llm.types import ChatMessage as LLMChatMessage
-from evercore.types import MemCell, Message
+import everalgo.llm
+from everalgo.boundary._tokenize import count_tokens
+from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
+from everalgo.llm.protocols import LLMClient
+from everalgo.llm.types import ChatMessage as LLMChatMessage
+from everalgo.types import MemCell, Message
 
 
 class ChatMemCellExtractor:
@@ -615,7 +615,7 @@ class ChatMemCellExtractor:
             list[MemCell] — at least one cell. The minimal ref impl produces
             either 1 cell (no split) or 2 cells (one split point).
         """
-        client = evercore.llm.resolve(llm)
+        client = everalgo.llm.resolve(llm)
         rendered = (prompt or CHAT_BOUNDARY_DETECT_PROMPT_EN).format(
             messages=_format_messages_for_prompt(messages),
             token_count=count_tokens(_concat_messages(messages)),
@@ -672,7 +672,7 @@ def _make_memcell(slice_msgs: list[Message], *, suffix: str) -> MemCell:
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-uv run pytest packages/evercore-boundary/tests/boundary/test_chat.py -v
+uv run pytest packages/everalgo-boundary/tests/boundary/test_chat.py -v
 ```
 
 Expected: 3 PASS (4 tokenize + 3 chat = 6 total once we run the whole boundary tests dir).
@@ -680,9 +680,9 @@ Expected: 3 PASS (4 tokenize + 3 chat = 6 total once we run the whole boundary t
 - [ ] **Step 5: Run quality gates (from REPO ROOT)**
 
 ```bash
-uv run ruff check packages/evercore-boundary/
-uv run ruff format --check packages/evercore-boundary/
-uv run mypy packages/evercore-boundary/
+uv run ruff check packages/everalgo-boundary/
+uv run ruff format --check packages/everalgo-boundary/
+uv run mypy packages/everalgo-boundary/
 ```
 
 Expected: 全部 clean.
@@ -690,15 +690,15 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-boundary/src/evercore/boundary/chat.py \
-        packages/evercore-boundary/tests/boundary/test_chat.py
+git add packages/everalgo-boundary/src/everalgo/boundary/chat.py \
+        packages/everalgo-boundary/tests/boundary/test_chat.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(boundary): add ChatMemCellExtractor minimal reference impl
 
 ChatMemCellExtractor follows the framework defined in ADR 010 line
 205-212: stateless class + async `adetect` + one-line `detect =
 async_to_sync(adetect)` sync bridge. LLM injection via
-sub-project 2.5's evercore.llm.resolve(). Prompt via per-call
+sub-project 2.5's everalgo.llm.resolve(). Prompt via per-call
 override or default CHAT_BOUNDARY_DETECT_PROMPT_EN.
 
 Algorithm: render prompt with messages + token count, call LLM, parse
@@ -717,43 +717,43 @@ EOF
 
 ---
 
-## Task 4: `evercore.boundary.__init__` re-export + `test_boundary_public_api.py`
+## Task 4: `everalgo.boundary.__init__` re-export + `test_boundary_public_api.py`
 
 **Files:**
-- Modify: `packages/evercore-boundary/src/evercore/boundary/__init__.py`
-- Create: `packages/evercore-boundary/tests/boundary/test_boundary_public_api.py`
+- Modify: `packages/everalgo-boundary/src/everalgo/boundary/__init__.py`
+- Create: `packages/everalgo-boundary/tests/boundary/test_boundary_public_api.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Write to `packages/evercore-boundary/tests/boundary/test_boundary_public_api.py`:
+Write to `packages/everalgo-boundary/tests/boundary/test_boundary_public_api.py`:
 
 ```python
-"""Tests for evercore.boundary package-level public API."""
+"""Tests for everalgo.boundary package-level public API."""
 
-import evercore.boundary
+import everalgo.boundary
 
 
 def test_chat_memcell_extractor_exported_at_top_level() -> None:
     """ChatMemCellExtractor is accessible via attribute on the package."""
-    assert hasattr(evercore.boundary, "ChatMemCellExtractor")
+    assert hasattr(everalgo.boundary, "ChatMemCellExtractor")
 
 
 def test_dunder_all_lists_exactly_one_symbol() -> None:
     """Sub-project 4 minimal exposes exactly 1 symbol from boundary."""
-    assert evercore.boundary.__all__ == ["ChatMemCellExtractor"]
+    assert everalgo.boundary.__all__ == ["ChatMemCellExtractor"]
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-uv run pytest packages/evercore-boundary/tests/boundary/test_boundary_public_api.py -v
+uv run pytest packages/everalgo-boundary/tests/boundary/test_boundary_public_api.py -v
 ```
 
 Expected: FAIL — current `__init__.py` is the empty placeholder, no `ChatMemCellExtractor` attribute.
 
 - [ ] **Step 3: Replace `__init__.py`**
 
-Replace contents of `packages/evercore-boundary/src/evercore/boundary/__init__.py` with:
+Replace contents of `packages/everalgo-boundary/src/everalgo/boundary/__init__.py` with:
 
 ```python
 """Boundary extractors — chat (sub-project 4 minimal).
@@ -765,7 +765,7 @@ Public surface (sub-project 4 minimal):
 - ChatMemCellExtractor — slice chat messages into MemCells
 """
 
-from evercore.boundary.chat import ChatMemCellExtractor
+from everalgo.boundary.chat import ChatMemCellExtractor
 
 __all__ = ["ChatMemCellExtractor"]
 ```
@@ -773,7 +773,7 @@ __all__ = ["ChatMemCellExtractor"]
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-uv run pytest packages/evercore-boundary/tests/boundary/ -v
+uv run pytest packages/everalgo-boundary/tests/boundary/ -v
 ```
 
 Expected: 8 PASS (3 tokenize + 3 chat + 2 public_api).
@@ -781,9 +781,9 @@ Expected: 8 PASS (3 tokenize + 3 chat + 2 public_api).
 - [ ] **Step 5: Run quality gates (from REPO ROOT)**
 
 ```bash
-uv run ruff check packages/evercore-boundary/
-uv run ruff format --check packages/evercore-boundary/
-uv run mypy packages/evercore-boundary/
+uv run ruff check packages/everalgo-boundary/
+uv run ruff format --check packages/everalgo-boundary/
+uv run mypy packages/everalgo-boundary/
 ```
 
 Expected: 全部 clean.
@@ -792,27 +792,27 @@ Expected: 全部 clean.
 
 ```bash
 uv run python -c "
-from evercore.boundary import ChatMemCellExtractor
+from everalgo.boundary import ChatMemCellExtractor
 print('OK:', ChatMemCellExtractor)
 "
 ```
 
-Expected: prints `OK: <class 'evercore.boundary.chat.ChatMemCellExtractor'>`.
+Expected: prints `OK: <class 'everalgo.boundary.chat.ChatMemCellExtractor'>`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/evercore-boundary/src/evercore/boundary/__init__.py \
-        packages/evercore-boundary/tests/boundary/test_boundary_public_api.py
+git add packages/everalgo-boundary/src/everalgo/boundary/__init__.py \
+        packages/everalgo-boundary/tests/boundary/test_boundary_public_api.py
 git commit -m "$(cat <<'EOF'
-✨ feat(boundary): re-export ChatMemCellExtractor at evercore.boundary top
+✨ feat(boundary): re-export ChatMemCellExtractor at everalgo.boundary top
 
 Replace the placeholder __init__.py with the final sub-project 4
 public surface: a single ChatMemCellExtractor symbol re-exported from
-evercore.boundary.chat. Two access paths now work (per design.md §1.2
+everalgo.boundary.chat. Two access paths now work (per design.md §1.2
 line 75-78):
-- `from evercore.boundary import ChatMemCellExtractor` (EverOS contract)
-- `from evercore.boundary.chat import ChatMemCellExtractor` (algorithm
+- `from everalgo.boundary import ChatMemCellExtractor` (EverOS contract)
+- `from everalgo.boundary.chat import ChatMemCellExtractor` (algorithm
   authors iterating the boundary algorithm family)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -822,18 +822,18 @@ EOF
 
 ---
 
-## Task 5: `evercore.user_memory.prompts.{en,zh}.episode` — 4 prompt files
+## Task 5: `everalgo.user_memory.prompts.{en,zh}.episode` — 4 prompt files
 
 **Files:**
-- Create: `packages/evercore-user-memory/src/evercore/user_memory/prompts/__init__.py`
-- Create: `packages/evercore-user-memory/src/evercore/user_memory/prompts/en/__init__.py`
-- Create: `packages/evercore-user-memory/src/evercore/user_memory/prompts/en/episode.py`
-- Create: `packages/evercore-user-memory/src/evercore/user_memory/prompts/zh/__init__.py`
-- Create: `packages/evercore-user-memory/src/evercore/user_memory/prompts/zh/episode.py`
+- Create: `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/__init__.py`
+- Create: `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/en/__init__.py`
+- Create: `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/en/episode.py`
+- Create: `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/zh/__init__.py`
+- Create: `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/zh/episode.py`
 
 - [ ] **Step 1: Create prompts package structure**
 
-Write `packages/evercore-user-memory/src/evercore/user_memory/prompts/__init__.py`:
+Write `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/__init__.py`:
 
 ```python
 """User-memory extractor prompts (en + zh).
@@ -844,13 +844,13 @@ monkey-patching the constant at startup.
 """
 ```
 
-Write `packages/evercore-user-memory/src/evercore/user_memory/prompts/en/__init__.py`:
+Write `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/en/__init__.py`:
 
 ```python
 """English user-memory extractor prompts."""
 ```
 
-Write `packages/evercore-user-memory/src/evercore/user_memory/prompts/zh/__init__.py`:
+Write `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/zh/__init__.py`:
 
 ```python
 """Chinese user-memory extractor prompts."""
@@ -858,7 +858,7 @@ Write `packages/evercore-user-memory/src/evercore/user_memory/prompts/zh/__init_
 
 - [ ] **Step 2: Write `prompts/en/episode.py`**
 
-Write `packages/evercore-user-memory/src/evercore/user_memory/prompts/en/episode.py`:
+Write `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/en/episode.py`:
 
 ```python
 """English prompt for EpisodeExtractor.aextract."""
@@ -896,7 +896,7 @@ Note: parent_type and parent_id will be auto-filled by the caller; do not emit t
 
 - [ ] **Step 3: Write `prompts/zh/episode.py`**
 
-Write `packages/evercore-user-memory/src/evercore/user_memory/prompts/zh/episode.py`:
+Write `packages/everalgo-user-memory/src/everalgo/user_memory/prompts/zh/episode.py`:
 
 ```python
 """Chinese prompt for EpisodeExtractor.aextract."""
@@ -936,8 +936,8 @@ EPISODE_EXTRACT_PROMPT_ZH = """你是一名情景记忆生成专家。给定一�
 
 ```bash
 uv run python -c "
-from evercore.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
-from evercore.user_memory.prompts.zh.episode import EPISODE_EXTRACT_PROMPT_ZH
+from everalgo.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
+from everalgo.user_memory.prompts.zh.episode import EPISODE_EXTRACT_PROMPT_ZH
 print('EN length:', len(EPISODE_EXTRACT_PROMPT_EN))
 print('ZH length:', len(EPISODE_EXTRACT_PROMPT_ZH))
 "
@@ -949,7 +949,7 @@ Expected: prints two non-zero lengths, no ImportError.
 
 ```bash
 uv run python -c "
-from evercore.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
+from everalgo.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
 rendered = EPISODE_EXTRACT_PROMPT_EN.format(memcell_text='[user] hi', timestamp=1700000000000)
 assert '\"episodes\":' in rendered
 print('Format OK')
@@ -961,9 +961,9 @@ Expected: prints `Format OK`.
 - [ ] **Step 6: Run quality gates (from REPO ROOT)**
 
 ```bash
-uv run ruff check packages/evercore-user-memory/
-uv run ruff format --check packages/evercore-user-memory/
-uv run mypy packages/evercore-user-memory/
+uv run ruff check packages/everalgo-user-memory/
+uv run ruff format --check packages/everalgo-user-memory/
+uv run mypy packages/everalgo-user-memory/
 ```
 
 Expected: 全部 clean.
@@ -971,7 +971,7 @@ Expected: 全部 clean.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/evercore-user-memory/src/evercore/user_memory/prompts/
+git add packages/everalgo-user-memory/src/everalgo/user_memory/prompts/
 git commit -m "$(cat <<'EOF'
 ✨ feat(user_memory): add bilingual episode extract prompts (en + zh)
 
@@ -992,27 +992,27 @@ EOF
 
 ---
 
-## Task 6: `evercore.user_memory.episode.EpisodeExtractor` + 3 tests
+## Task 6: `everalgo.user_memory.episode.EpisodeExtractor` + 3 tests
 
 **Files:**
-- Create: `packages/evercore-user-memory/src/evercore/user_memory/episode.py`
-- Create: `packages/evercore-user-memory/tests/user_memory/test_episode.py`
+- Create: `packages/everalgo-user-memory/src/everalgo/user_memory/episode.py`
+- Create: `packages/everalgo-user-memory/tests/user_memory/test_episode.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Write to `packages/evercore-user-memory/tests/user_memory/test_episode.py`:
+Write to `packages/everalgo-user-memory/tests/user_memory/test_episode.py`:
 
 ```python
-"""Tests for evercore.user_memory.episode — EpisodeExtractor."""
+"""Tests for everalgo.user_memory.episode — EpisodeExtractor."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from evercore.llm.types import ChatMessage as LLMChatMessage, ChatResponse
-from evercore.testing.fake_llm import FakeLLMClient
-from evercore.types import MemCell, Message, MessageRole
-from evercore.user_memory.episode import EpisodeExtractor
+from everalgo.llm.types import ChatMessage as LLMChatMessage, ChatResponse
+from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.types import MemCell, Message, MessageRole
+from everalgo.user_memory.episode import EpisodeExtractor
 
 
 def _memcell() -> MemCell:
@@ -1100,14 +1100,14 @@ async def test_aextract_per_call_llm_overrides_default() -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-uv run pytest packages/evercore-user-memory/tests/user_memory/test_episode.py -v
+uv run pytest packages/everalgo-user-memory/tests/user_memory/test_episode.py -v
 ```
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'evercore.user_memory.episode'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'everalgo.user_memory.episode'`.
 
 - [ ] **Step 3: Write `episode.py` implementation**
 
-Write to `packages/evercore-user-memory/src/evercore/user_memory/episode.py`:
+Write to `packages/everalgo-user-memory/src/everalgo/user_memory/episode.py`:
 
 ```python
 """Episode extractor — derive Episode memories from a single MemCell."""
@@ -1118,11 +1118,11 @@ import json
 
 from asgiref.sync import async_to_sync
 
-import evercore.llm
-from evercore.llm.protocols import LLMClient
-from evercore.llm.types import ChatMessage as LLMChatMessage
-from evercore.types import Episode, MemCell
-from evercore.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
+import everalgo.llm
+from everalgo.llm.protocols import LLMClient
+from everalgo.llm.types import ChatMessage as LLMChatMessage
+from everalgo.types import Episode, MemCell
+from everalgo.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
 
 
 class EpisodeExtractor:
@@ -1155,7 +1155,7 @@ class EpisodeExtractor:
         Raises:
             LLMNotConfiguredError, LLMError: same as boundary.
         """
-        client = evercore.llm.resolve(llm)
+        client = everalgo.llm.resolve(llm)
         rendered = (prompt or EPISODE_EXTRACT_PROMPT_EN).format(
             memcell_text=_render_memcell_text(memcell),
             timestamp=memcell.timestamp,
@@ -1200,7 +1200,7 @@ def _build_episodes_from_llm_response(
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-uv run pytest packages/evercore-user-memory/tests/user_memory/test_episode.py -v
+uv run pytest packages/everalgo-user-memory/tests/user_memory/test_episode.py -v
 ```
 
 Expected: 3 PASS.
@@ -1208,9 +1208,9 @@ Expected: 3 PASS.
 - [ ] **Step 5: Run quality gates (from REPO ROOT)**
 
 ```bash
-uv run ruff check packages/evercore-user-memory/
-uv run ruff format --check packages/evercore-user-memory/
-uv run mypy packages/evercore-user-memory/
+uv run ruff check packages/everalgo-user-memory/
+uv run ruff format --check packages/everalgo-user-memory/
+uv run mypy packages/everalgo-user-memory/
 ```
 
 Expected: 全部 clean.
@@ -1218,15 +1218,15 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-user-memory/src/evercore/user_memory/episode.py \
-        packages/evercore-user-memory/tests/user_memory/test_episode.py
+git add packages/everalgo-user-memory/src/everalgo/user_memory/episode.py \
+        packages/everalgo-user-memory/tests/user_memory/test_episode.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(user_memory): add EpisodeExtractor minimal reference impl
 
 EpisodeExtractor follows the framework defined in ADR 010 line 205-212
 + design.md line 829: stateless class + async `aextract` + one-line
 `extract = async_to_sync(aextract)` sync bridge. LLM injection via
-sub-project 2.5's evercore.llm.resolve(). Prompt via per-call override
+sub-project 2.5's everalgo.llm.resolve(). Prompt via per-call override
 or default EPISODE_EXTRACT_PROMPT_EN.
 
 Algorithm: render prompt with memcell text + timestamp, call LLM,
@@ -1245,39 +1245,39 @@ EOF
 
 ---
 
-## Task 7: `evercore.user_memory.__init__` re-export + `test_user_memory_public_api.py`
+## Task 7: `everalgo.user_memory.__init__` re-export + `test_user_memory_public_api.py`
 
 **Files:**
-- Modify: `packages/evercore-user-memory/src/evercore/user_memory/__init__.py`
-- Create: `packages/evercore-user-memory/tests/user_memory/test_user_memory_public_api.py`
+- Modify: `packages/everalgo-user-memory/src/everalgo/user_memory/__init__.py`
+- Create: `packages/everalgo-user-memory/tests/user_memory/test_user_memory_public_api.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Write to `packages/evercore-user-memory/tests/user_memory/test_user_memory_public_api.py`:
+Write to `packages/everalgo-user-memory/tests/user_memory/test_user_memory_public_api.py`:
 
 ```python
-"""Tests for evercore.user_memory package-level public API."""
+"""Tests for everalgo.user_memory package-level public API."""
 
-import evercore.boundary
-import evercore.user_memory
+import everalgo.boundary
+import everalgo.user_memory
 
 
 def test_chat_memcell_extractor_re_exported_from_boundary() -> None:
     """user_memory.ChatMemCellExtractor IS boundary.ChatMemCellExtractor (identity)."""
     assert (
-        evercore.user_memory.ChatMemCellExtractor
-        is evercore.boundary.ChatMemCellExtractor
+        everalgo.user_memory.ChatMemCellExtractor
+        is everalgo.boundary.ChatMemCellExtractor
     )
 
 
 def test_episode_extractor_exported_at_top_level() -> None:
     """EpisodeExtractor is accessible via attribute on the package."""
-    assert hasattr(evercore.user_memory, "EpisodeExtractor")
+    assert hasattr(everalgo.user_memory, "EpisodeExtractor")
 
 
 def test_dunder_all_lists_exactly_two_symbols() -> None:
     """Sub-project 4 minimal exposes 2 symbols: re-export + EpisodeExtractor."""
-    assert sorted(evercore.user_memory.__all__) == sorted(
+    assert sorted(everalgo.user_memory.__all__) == sorted(
         ["ChatMemCellExtractor", "EpisodeExtractor"]
     )
 ```
@@ -1285,14 +1285,14 @@ def test_dunder_all_lists_exactly_two_symbols() -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-uv run pytest packages/evercore-user-memory/tests/user_memory/test_user_memory_public_api.py -v
+uv run pytest packages/everalgo-user-memory/tests/user_memory/test_user_memory_public_api.py -v
 ```
 
 Expected: FAIL — `__init__.py` is empty placeholder.
 
 - [ ] **Step 3: Replace `__init__.py`**
 
-Replace contents of `packages/evercore-user-memory/src/evercore/user_memory/__init__.py` with:
+Replace contents of `packages/everalgo-user-memory/src/everalgo/user_memory/__init__.py` with:
 
 ```python
 """User-side memory extractors — episode (sub-project 4 minimal).
@@ -1305,8 +1305,8 @@ Public surface (sub-project 4 minimal):
 - EpisodeExtractor — extract Episode from a single MemCell
 """
 
-from evercore.boundary.chat import ChatMemCellExtractor
-from evercore.user_memory.episode import EpisodeExtractor
+from everalgo.boundary.chat import ChatMemCellExtractor
+from everalgo.user_memory.episode import EpisodeExtractor
 
 __all__ = ["ChatMemCellExtractor", "EpisodeExtractor"]
 ```
@@ -1314,7 +1314,7 @@ __all__ = ["ChatMemCellExtractor", "EpisodeExtractor"]
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-uv run pytest packages/evercore-user-memory/tests/user_memory/ -v
+uv run pytest packages/everalgo-user-memory/tests/user_memory/ -v
 ```
 
 Expected: 5 PASS (3 episode + 3 public_api... wait, 3+3 should be 6; the public_api file has 3 tests so total is 6. Re-count: 3 episode + 3 public_api = 6 PASS).
@@ -1322,9 +1322,9 @@ Expected: 5 PASS (3 episode + 3 public_api... wait, 3+3 should be 6; the public_
 - [ ] **Step 5: Run quality gates (from REPO ROOT)**
 
 ```bash
-uv run ruff check packages/evercore-user-memory/
-uv run ruff format --check packages/evercore-user-memory/
-uv run mypy packages/evercore-user-memory/
+uv run ruff check packages/everalgo-user-memory/
+uv run ruff format --check packages/everalgo-user-memory/
+uv run mypy packages/everalgo-user-memory/
 ```
 
 Expected: 全部 clean.
@@ -1333,9 +1333,9 @@ Expected: 全部 clean.
 
 ```bash
 uv run python -c "
-from evercore.user_memory import ChatMemCellExtractor, EpisodeExtractor
-import evercore.boundary
-assert ChatMemCellExtractor is evercore.boundary.ChatMemCellExtractor
+from everalgo.user_memory import ChatMemCellExtractor, EpisodeExtractor
+import everalgo.boundary
+assert ChatMemCellExtractor is everalgo.boundary.ChatMemCellExtractor
 print('OK: re-export identity holds; EpisodeExtractor =', EpisodeExtractor)
 "
 ```
@@ -1345,22 +1345,22 @@ Expected: prints `OK: re-export identity holds; EpisodeExtractor = <class ...>`.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/evercore-user-memory/src/evercore/user_memory/__init__.py \
-        packages/evercore-user-memory/tests/user_memory/test_user_memory_public_api.py
+git add packages/everalgo-user-memory/src/everalgo/user_memory/__init__.py \
+        packages/everalgo-user-memory/tests/user_memory/test_user_memory_public_api.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(user_memory): re-export ChatMemCellExtractor from boundary + EpisodeExtractor
 
 Replace the placeholder __init__.py with the final sub-project 4
-public surface for evercore.user_memory:
+public surface for everalgo.user_memory:
 
-- ChatMemCellExtractor — re-exported from evercore.boundary.chat
-  (design.md line 122 contract: "evercore.user_memory.ChatMemCellExtractor"
+- ChatMemCellExtractor — re-exported from everalgo.boundary.chat
+  (design.md line 122 contract: "everalgo.user_memory.ChatMemCellExtractor"
   is the EverOS-facing path even though the implementation physically
   lives in boundary/)
 - EpisodeExtractor — extract Episode from a single MemCell
 
-The re-export uses identity equality: `evercore.user_memory.
-ChatMemCellExtractor is evercore.boundary.ChatMemCellExtractor` is True.
+The re-export uses identity equality: `everalgo.user_memory.
+ChatMemCellExtractor is everalgo.boundary.ChatMemCellExtractor` is True.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -1394,30 +1394,30 @@ from typing import Any
 
 import pytest
 
-import evercore.llm
-from evercore.boundary.chat import ChatMemCellExtractor
-from evercore.llm.types import ChatMessage as LLMChatMessage, ChatResponse
-from evercore.testing.assertions import assert_episode_shape
-from evercore.testing.fake_llm import FakeLLMClient
-from evercore.types import Message, MessageRole
-from evercore.user_memory.episode import EpisodeExtractor
+import everalgo.llm
+from everalgo.boundary.chat import ChatMemCellExtractor
+from everalgo.llm.types import ChatMessage as LLMChatMessage, ChatResponse
+from everalgo.testing.assertions import assert_episode_shape
+from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.types import Message, MessageRole
+from everalgo.user_memory.episode import EpisodeExtractor
 
 
 @pytest.fixture(autouse=True)
-def reset_evercore_llm_state() -> Iterator[None]:
-    """Reset evercore.llm._default + _active per test (sub-project 2.5 fixture).
+def reset_everalgo_llm_state() -> Iterator[None]:
+    """Reset everalgo.llm._default + _active per test (sub-project 2.5 fixture).
 
     Without this, test pollution between e2e and other test files could
     leak global state.
     """
-    saved_default = evercore.llm._default
-    token = evercore.llm._active.set(None)
+    saved_default = everalgo.llm._default
+    token = everalgo.llm._active.set(None)
     try:
-        evercore.llm._default = None
+        everalgo.llm._default = None
         yield
     finally:
-        evercore.llm._default = saved_default
-        evercore.llm._active.reset(token)
+        everalgo.llm._default = saved_default
+        everalgo.llm._active.reset(token)
 
 
 async def test_boundary_to_episode_pipeline_e2e() -> None:
@@ -1552,7 +1552,7 @@ The current file is the 57-line placeholder with 3 stages (lint / test / build),
 Replace contents of `.gitlab-ci.yml` with:
 
 ```yaml
-# GitLab CI for the EverCore monorepo (sub-project 4).
+# GitLab CI for the EverAlgo monorepo (sub-project 4).
 #
 # Strict mode: 4 quality gates (ruff check / ruff format --check / mypy /
 # pytest) all enforced. The 3 lint jobs run in parallel within the lint
@@ -1691,10 +1691,10 @@ Expected:
 - `ruff format --check .`: clean
 - `mypy .`: 0 errors
 - `pytest -v`: **all tests pass** — the workspace-cumulative test count should be approximately:
-  - Sub-project 1 (Foundation): ~28 tests in `packages/evercore-core/tests/types/`
-  - Sub-project 2 (LLM Stack): ~41 tests in `packages/evercore-core/tests/llm/`
-  - Sub-project 3 (Testing Toolkit): ~32 tests in `packages/evercore-core/tests/testing/`
-  - Sub-project 2.5 (LLM 3-layer injection): ~15 tests in `packages/evercore-core/tests/llm/test_injection.py` + 1 test in `test_errors.py`
+  - Sub-project 1 (Foundation): ~28 tests in `packages/everalgo-core/tests/types/`
+  - Sub-project 2 (LLM Stack): ~41 tests in `packages/everalgo-core/tests/llm/`
+  - Sub-project 3 (Testing Toolkit): ~32 tests in `packages/everalgo-core/tests/testing/`
+  - Sub-project 2.5 (LLM 3-layer injection): ~15 tests in `packages/everalgo-core/tests/llm/test_injection.py` + 1 test in `test_errors.py`
   - Sub-project 4 boundary: 8 tests (3 chat + 3 tokenize + 2 boundary public_api)
   - Sub-project 4 user_memory: 6 tests (3 episode + 3 user_memory public_api)
   - Sub-project 4 e2e: 1 test
@@ -1704,15 +1704,15 @@ If any gate fails, **stop and fix** — do not commit.
 
 - [ ] **Step 2: Verify the user-facing import surface**
 
-Run an end-to-end import smoke that mirrors how an EverOS or external user would consume EverCore:
+Run an end-to-end import smoke that mirrors how an EverOS or external user would consume EverAlgo:
 
 ```bash
 uv run python <<'EOF'
 # Imports an EverOS user would write (per design.md line 311-313 contract)
-from evercore.boundary import ChatMemCellExtractor
-from evercore.user_memory import EpisodeExtractor
-from evercore.user_memory import ChatMemCellExtractor as UMChat
-import evercore.boundary as boundary_mod
+from everalgo.boundary import ChatMemCellExtractor
+from everalgo.user_memory import EpisodeExtractor
+from everalgo.user_memory import ChatMemCellExtractor as UMChat
+import everalgo.boundary as boundary_mod
 
 # Identity check — re-export must point to the same class
 assert UMChat is ChatMemCellExtractor
@@ -1729,10 +1729,10 @@ assert callable(ep.aextract)
 assert callable(ep.extract)
 
 # Verify __all__ contracts
-import evercore.boundary
-import evercore.user_memory
-assert evercore.boundary.__all__ == ["ChatMemCellExtractor"]
-assert sorted(evercore.user_memory.__all__) == sorted(
+import everalgo.boundary
+import everalgo.user_memory
+assert everalgo.boundary.__all__ == ["ChatMemCellExtractor"]
+assert sorted(everalgo.user_memory.__all__) == sorted(
     ["ChatMemCellExtractor", "EpisodeExtractor"]
 )
 
@@ -1779,12 +1779,12 @@ If everything in Steps 1-3 passes, sub-project 4 is **complete**.
 
 ### 2. Placeholder scan
 
-`grep -nE "TODO|TBD|FIXME|XXX|implement later|fill in" docs/superpowers/plans/2026-05-08-evercore-reference-impl.md`
+`grep -nE "TODO|TBD|FIXME|XXX|implement later|fill in" docs/superpowers/plans/2026-05-08-everalgo-reference-impl.md`
 预期：0 hits。
 
 ### 3. Type consistency
 
-- `MemCell` / `Message` / `MessageRole` / `Episode` 类型在 Task 3 + Task 6 + Task 8 一致（均来自 `evercore.types`）
+- `MemCell` / `Message` / `MessageRole` / `Episode` 类型在 Task 3 + Task 6 + Task 8 一致（均来自 `everalgo.types`）
 - `LLMClient` / `LLMChatMessage` / `ChatResponse` / `FakeLLMClient` / `assert_episode_shape` 类型在 Task 3 + Task 6 + Task 8 一致（均来自 sub-project 1+2+3）
 - `ChatMemCellExtractor.adetect` 签名（messages, *, llm=None, prompt=None）在 Task 3 + Task 4 + Task 8 三处一致
 - `EpisodeExtractor.aextract` 签名（memcell, *, llm=None, prompt=None）在 Task 6 + Task 7 + Task 8 三处一致

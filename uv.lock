@@ -8,15 +8,15 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "evercore-agent-memory",
-    "evercore-boundary",
-    "evercore-clustering",
-    "evercore-core",
-    "evercore-knowledge",
-    "evercore-parser",
-    "evercore-rank",
-    "evercore-user-memory",
-    "evercore-workspace",
+    "everalgo-agent-memory",
+    "everalgo-boundary",
+    "everalgo-clustering",
+    "everalgo-core",
+    "everalgo-knowledge",
+    "everalgo-parser",
+    "everalgo-rank",
+    "everalgo-user-memory",
+    "everalgo-workspace",
 ]
 
 [[package]]
@@ -96,56 +96,56 @@ wheels = [
 ]
 
 [[package]]
-name = "evercore-agent-memory"
+name = "everalgo-agent-memory"
 version = "0.1.0"
-source = { editable = "packages/evercore-agent-memory" }
+source = { editable = "packages/everalgo-agent-memory" }
 dependencies = [
-    { name = "evercore-boundary" },
-    { name = "evercore-clustering" },
-    { name = "evercore-core" },
+    { name = "everalgo-boundary" },
+    { name = "everalgo-clustering" },
+    { name = "everalgo-core" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "evercore-boundary", editable = "packages/evercore-boundary" },
-    { name = "evercore-clustering", editable = "packages/evercore-clustering" },
-    { name = "evercore-core", editable = "packages/evercore-core" },
+    { name = "everalgo-boundary", editable = "packages/everalgo-boundary" },
+    { name = "everalgo-clustering", editable = "packages/everalgo-clustering" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
 ]
 
 [[package]]
-name = "evercore-boundary"
+name = "everalgo-boundary"
 version = "0.1.0"
-source = { editable = "packages/evercore-boundary" }
+source = { editable = "packages/everalgo-boundary" }
 dependencies = [
     { name = "asgiref" },
-    { name = "evercore-core" },
+    { name = "everalgo-core" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "asgiref", specifier = ">=3.0" },
-    { name = "evercore-core", editable = "packages/evercore-core" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
 ]
 
 [[package]]
-name = "evercore-clustering"
+name = "everalgo-clustering"
 version = "0.1.0"
-source = { editable = "packages/evercore-clustering" }
+source = { editable = "packages/everalgo-clustering" }
 dependencies = [
-    { name = "evercore-core" },
+    { name = "everalgo-core" },
     { name = "numpy" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "evercore-core", editable = "packages/evercore-core" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
     { name = "numpy", specifier = ">=1.26" },
 ]
 
 [[package]]
-name = "evercore-core"
+name = "everalgo-core"
 version = "0.1.0"
-source = { editable = "packages/evercore-core" }
+source = { editable = "packages/everalgo-core" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
@@ -158,74 +158,74 @@ requires-dist = [
 ]
 
 [[package]]
-name = "evercore-knowledge"
+name = "everalgo-knowledge"
 version = "0.1.0"
-source = { editable = "packages/evercore-knowledge" }
+source = { editable = "packages/everalgo-knowledge" }
 dependencies = [
-    { name = "evercore-core" },
-    { name = "evercore-parser" },
+    { name = "everalgo-core" },
+    { name = "everalgo-parser" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "evercore-core", editable = "packages/evercore-core" },
-    { name = "evercore-parser", editable = "packages/evercore-parser" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
+    { name = "everalgo-parser", editable = "packages/everalgo-parser" },
 ]
 
 [[package]]
-name = "evercore-parser"
+name = "everalgo-parser"
 version = "0.1.0"
-source = { editable = "packages/evercore-parser" }
+source = { editable = "packages/everalgo-parser" }
 dependencies = [
-    { name = "evercore-core" },
+    { name = "everalgo-core" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "evercore-core", editable = "packages/evercore-core" }]
+requires-dist = [{ name = "everalgo-core", editable = "packages/everalgo-core" }]
 
 [[package]]
-name = "evercore-rank"
+name = "everalgo-rank"
 version = "0.1.0"
-source = { editable = "packages/evercore-rank" }
+source = { editable = "packages/everalgo-rank" }
 dependencies = [
-    { name = "evercore-core" },
+    { name = "everalgo-core" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "evercore-core", editable = "packages/evercore-core" }]
+requires-dist = [{ name = "everalgo-core", editable = "packages/everalgo-core" }]
 
 [[package]]
-name = "evercore-user-memory"
+name = "everalgo-user-memory"
 version = "0.1.0"
-source = { editable = "packages/evercore-user-memory" }
+source = { editable = "packages/everalgo-user-memory" }
 dependencies = [
     { name = "asgiref" },
-    { name = "evercore-boundary" },
-    { name = "evercore-core" },
+    { name = "everalgo-boundary" },
+    { name = "everalgo-core" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "asgiref", specifier = ">=3.0" },
-    { name = "evercore-boundary", editable = "packages/evercore-boundary" },
-    { name = "evercore-core", editable = "packages/evercore-core" },
+    { name = "everalgo-boundary", editable = "packages/everalgo-boundary" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
 ]
 
 [[package]]
-name = "evercore-workspace"
+name = "everalgo-workspace"
 version = "0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
-    { name = "evercore-agent-memory" },
-    { name = "evercore-boundary" },
-    { name = "evercore-clustering" },
-    { name = "evercore-core" },
-    { name = "evercore-knowledge" },
-    { name = "evercore-parser" },
-    { name = "evercore-rank" },
-    { name = "evercore-user-memory" },
+    { name = "everalgo-agent-memory" },
+    { name = "everalgo-boundary" },
+    { name = "everalgo-clustering" },
+    { name = "everalgo-core" },
+    { name = "everalgo-knowledge" },
+    { name = "everalgo-parser" },
+    { name = "everalgo-rank" },
+    { name = "everalgo-user-memory" },
     { name = "git-cliff" },
     { name = "mypy" },
     { name = "pre-commit" },
@@ -239,14 +239,14 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "evercore-agent-memory", editable = "packages/evercore-agent-memory" },
-    { name = "evercore-boundary", editable = "packages/evercore-boundary" },
-    { name = "evercore-clustering", editable = "packages/evercore-clustering" },
-    { name = "evercore-core", editable = "packages/evercore-core" },
-    { name = "evercore-knowledge", editable = "packages/evercore-knowledge" },
-    { name = "evercore-parser", editable = "packages/evercore-parser" },
-    { name = "evercore-rank", editable = "packages/evercore-rank" },
-    { name = "evercore-user-memory", editable = "packages/evercore-user-memory" },
+    { name = "everalgo-agent-memory", editable = "packages/everalgo-agent-memory" },
+    { name = "everalgo-boundary", editable = "packages/everalgo-boundary" },
+    { name = "everalgo-clustering", editable = "packages/everalgo-clustering" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
+    { name = "everalgo-knowledge", editable = "packages/everalgo-knowledge" },
+    { name = "everalgo-parser", editable = "packages/everalgo-parser" },
+    { name = "everalgo-rank", editable = "packages/everalgo-rank" },
+    { name = "everalgo-user-memory", editable = "packages/everalgo-user-memory" },
     { name = "git-cliff", specifier = ">=2.6" },
     { name = "mypy", specifier = ">=1.10" },
     { name = "pre-commit", specifier = ">=4.0" },

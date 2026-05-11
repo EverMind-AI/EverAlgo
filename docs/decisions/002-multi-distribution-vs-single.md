@@ -6,7 +6,7 @@
 
 ## 背景
 
-EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowledge / boundary / rank / clustering 等）。**发布粒度**决定用户在 PyPI 端如何安装、如何升级、如何控制依赖。
+EverAlgo 包含多个算法子包（parser / user_memory / agent_memory / knowledge / boundary / rank / clustering 等）。**发布粒度**决定用户在 PyPI 端如何安装、如何升级、如何控制依赖。
 
 相关硬约束：
 - **H2** 用户独立升级 A 不动 B（BOSS 反复强调）
@@ -17,9 +17,9 @@ EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowle
 
 | 方案 | 描述 |
 |------|------|
-| **A. 单 distribution + extras** | `evercore` 一个 PyPI 包，重依赖（whisper / paddleocr 等）放 `[parser]` extras，用户 `pip install evercore[parser]` 选装 |
-| **B. 多 distribution + 独立版本号** | 8 个独立 PyPI 包：`evercore-core` + 7 个产品/工具包，各自独立 SemVer，用户按需 `pip install evercore-user-memory` |
-| C. 多 distribution + 整套 meta-package | B + 顶层 `evercore` meta-package 依赖整套 |
+| **A. 单 distribution + extras** | `everalgo` 一个 PyPI 包，重依赖（whisper / paddleocr 等）放 `[parser]` extras，用户 `pip install everalgo[parser]` 选装 |
+| **B. 多 distribution + 独立版本号** | 8 个独立 PyPI 包：`everalgo-core` + 7 个产品/工具包，各自独立 SemVer，用户按需 `pip install everalgo-user-memory` |
+| C. 多 distribution + 整套 meta-package | B + 顶层 `everalgo` meta-package 依赖整套 |
 
 ## 客观优劣分析
 
@@ -29,7 +29,7 @@ EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowle
 |------|------|
 | 跨子包重构成本零 | 单 dist 内任意改动一个 commit 完成 |
 | 版本一致性强 | 用户装到的所有子模块永远是同一个版本 |
-| 用户安装命令最简 | `pip install evercore` 一行搞定 |
+| 用户安装命令最简 | `pip install everalgo` 一行搞定 |
 | PyPI 维护成本最低 | 一份 `pyproject.toml`、一份 release 流程 |
 | 文档单点 | 一份 README、一份 CHANGELOG |
 
@@ -45,9 +45,9 @@ EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowle
 
 | 维度 | 说明 |
 |------|------|
-| 用户独立升级子模块 | `pip install -U evercore-user-memory` 不动其他包 |
+| 用户独立升级子模块 | `pip install -U everalgo-user-memory` 不动其他包 |
 | 子模块独立演化节奏 | 各子包独立 SemVer，breaking 改动只影响自己 + 直接下游 |
-| 用户按需安装 | 不需要 parser 时不装 evercore-parser，避免下载重依赖 |
+| 用户按需安装 | 不需要 parser 时不装 everalgo-parser，避免下载重依赖 |
 | 子模块责任归属清晰 | 各 dist 独立 issue / changelog / release tag |
 
 ### 多 distribution + 独立版本号 劣势
@@ -61,22 +61,22 @@ EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowle
 
 ### 多 distribution + meta-package 优势/劣势
 
-新增优势：用户 `pip install evercore` 一键装齐套（学习曲线低）
+新增优势：用户 `pip install everalgo` 一键装齐套（学习曲线低）
 
-新增劣势：meta 通常 pin 整套版本（`evercore==1.0` → `evercore-user-memory==X` + `evercore-core==Y` + ...），**与"独立升级"意图反向**
+新增劣势：meta 通常 pin 整套版本（`everalgo==1.0` → `everalgo-user-memory==X` + `everalgo-core==Y` + ...），**与"独立升级"意图反向**
 
-## 对 EverCore 适配度评估
+## 对 EverAlgo 适配度评估
 
-### 单 distribution 优势对 EverCore 的适配度
+### 单 distribution 优势对 EverAlgo 的适配度
 
 | 优势 | 适配度 |
 |------|--------|
 | 跨子包重构成本零 | ✅ 受益（H6 v0.x 演化阶段需要）—— **但 monorepo + 多 dist 也能达到（[ADR 001](001-multi-repo-vs-monorepo.md)）**，不是单 dist 独占 |
 | 版本一致性强 | ⚠️ 不在意（用户对子模块版本一致性无强需求） |
-| 安装命令最简 | ⚠️ 不在意（`pip install evercore-user-memory` 也能自动拉依赖）|
+| 安装命令最简 | ⚠️ 不在意（`pip install everalgo-user-memory` 也能自动拉依赖）|
 | PyPI 维护成本低 | ⚠️ 可 mitigate（monorepo + 共享 release 自动化）|
 
-### 单 distribution 劣势对 EverCore 的适配度
+### 单 distribution 劣势对 EverAlgo 的适配度
 
 | 劣势 | 适配度 |
 |------|--------|
@@ -84,7 +84,7 @@ EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowle
 | 重依赖打包复杂 | ❌ 介意（parser 重依赖但 user_memory 不需要）|
 | 子模块版本演化耦合 | ❌ 介意（H6 演化阶段不希望子模块互相绑死）|
 
-### 多 distribution 优势对 EverCore 的适配度
+### 多 distribution 优势对 EverAlgo 的适配度
 
 | 优势 | 适配度 |
 |------|--------|
@@ -93,7 +93,7 @@ EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowle
 | 按需安装 | ✅ 强需要（parser 重依赖与 user_memory 解耦）|
 | 责任归属清晰 | ✅ 受益 |
 
-### 多 distribution 劣势对 EverCore 的适配度
+### 多 distribution 劣势对 EverAlgo 的适配度
 
 | 劣势 | 适配度 |
 |------|--------|
@@ -104,7 +104,7 @@ EverCore 包含多个算法子包（parser / user_memory / agent_memory / knowle
 
 ### meta-package 评估
 
-EverCore 有"独立升级 A 不动 B"硬约束，meta 与之反向，**直接排除**。
+EverAlgo 有"独立升级 A 不动 B"硬约束，meta 与之反向，**直接排除**。
 
 ## 决策
 
@@ -121,14 +121,14 @@ EverCore 有"独立升级 A 不动 B"硬约束，meta 与之反向，**直接排
 
 | Distribution | 内容 | 依赖 |
 |--------------|------|------|
-| `evercore-core` | types / llm / prompts / config / protocols / testing | — |
-| `evercore-parser` | 多模态解析 | core |
-| `evercore-boundary` | 3 MemCellExtractor + 共享 tokenize | core |
-| `evercore-rank` | 4 Ranker + fusion | core |
-| `evercore-clustering` | centroid + llm_direct | core |
-| `evercore-user-memory` | Episode / Foresight / AtomicFact / Profile | core, boundary, clustering |
-| `evercore-agent-memory` | Case / Skill | core, boundary, clustering |
-| `evercore-knowledge` | KnowledgeExtractor | core, parser |
+| `everalgo-core` | types / llm / prompts / config / protocols / testing | — |
+| `everalgo-parser` | 多模态解析 | core |
+| `everalgo-boundary` | 3 MemCellExtractor + 共享 tokenize | core |
+| `everalgo-rank` | 4 Ranker + fusion | core |
+| `everalgo-clustering` | centroid + llm_direct | core |
+| `everalgo-user-memory` | Episode / Foresight / AtomicFact / Profile | core, boundary, clustering |
+| `everalgo-agent-memory` | Case / Skill | core, boundary, clustering |
+| `everalgo-knowledge` | KnowledgeExtractor | core, parser |
 
 详见 design.md §1.3 拆分清单。
 
@@ -148,8 +148,8 @@ EverCore 有"独立升级 A 不动 B"硬约束，meta 与之反向，**直接排
 ## 后续演化触发条件
 
 1. **某子包业务上消亡**：如废弃 knowledge → 该 dist 标 deprecated，不影响其他
-2. **新增产品形态**：如 `evercore-graph-memory`（图记忆）→ 加新 dist，不影响现有
-3. **EverCore 整体被纳入更大生态**：如 EverOS 决定把 evercore 收回单 dist 内嵌 → 重新评估（届时 H2 是否仍硬约束）
+2. **新增产品形态**：如 `everalgo-graph-memory`（图记忆）→ 加新 dist，不影响现有
+3. **EverAlgo 整体被纳入更大生态**：如 EverOS 决定把 everalgo 收回单 dist 内嵌 → 重新评估（届时 H2 是否仍硬约束）
 
 ## 相关 ADR
 

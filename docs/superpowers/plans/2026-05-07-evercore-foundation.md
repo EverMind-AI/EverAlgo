@@ -1,10 +1,10 @@
-# EverCore Foundation Implementation Plan
+# EverAlgo Foundation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 落地 EverCore 子项目 1 (Foundation) — `evercore.types.*` EPISODE 路径最小集 4 个对外符号 + `evercore.prompts.validator` 2 个函数，让算法同学能写 EpisodeExtractor 签名 + 改 prompt 早期 fail-fast。
+**Goal:** 落地 EverAlgo 子项目 1 (Foundation) — `everalgo.types.*` EPISODE 路径最小集 4 个对外符号 + `everalgo.prompts.validator` 2 个函数，让算法同学能写 EpisodeExtractor 签名 + 改 prompt 早期 fail-fast。
 
-**Architecture:** 严格按 [`docs/superpowers/specs/2026-05-07-evercore-foundation-design.md`](../specs/2026-05-07-evercore-foundation-design.md) 落地。types 用 `pydantic.BaseModel` v2 (`extra="ignore"` for Message/MemCell — opensource payload 兼容；`extra="allow"` for Episode — LLM 可能输出二级字段如 subject/summary/keywords）。validator 用标准库 `string.Formatter` + chars/4 兜底 token estimator，零外部依赖。tests 走 pydantic-ai 模式（`packages/<dist>/tests/` 内嵌 + function-based + `pytest.mark.parametrize`）。
+**Architecture:** 严格按 [`docs/superpowers/specs/2026-05-07-everalgo-foundation-design.md`](../specs/2026-05-07-everalgo-foundation-design.md) 落地。types 用 `pydantic.BaseModel` v2 (`extra="ignore"` for Message/MemCell — opensource payload 兼容；`extra="allow"` for Episode — LLM 可能输出二级字段如 subject/summary/keywords）。validator 用标准库 `string.Formatter` + chars/4 兜底 token estimator，零外部依赖。tests 走 pydantic-ai 模式（`packages/<dist>/tests/` 内嵌 + function-based + `pytest.mark.parametrize`）。
 
 **Tech Stack:** Python 3.12, pydantic ≥ 2.7, pytest ≥ 8 (asyncio_mode=auto via root pyproject.toml), uv workspace, ruff (in root pyproject), mypy (in root pyproject).
 
@@ -18,18 +18,18 @@
 
 | 文件 | 职责 |
 |---|---|
-| `packages/evercore-core/src/evercore/types/__init__.py` | re-export 4 个对外符号 + `__all__` |
-| `packages/evercore-core/src/evercore/types/memcell.py` | `MessageRole` + `Message` + `MemCell` |
-| `packages/evercore-core/src/evercore/types/memories.py` | `Episode` |
-| `packages/evercore-core/src/evercore/prompts/validator.py` | `check_placeholders` + `check_length` |
+| `packages/everalgo-core/src/everalgo/types/__init__.py` | re-export 4 个对外符号 + `__all__` |
+| `packages/everalgo-core/src/everalgo/types/memcell.py` | `MessageRole` + `Message` + `MemCell` |
+| `packages/everalgo-core/src/everalgo/types/memories.py` | `Episode` |
+| `packages/everalgo-core/src/everalgo/prompts/validator.py` | `check_placeholders` + `check_length` |
 
 修改源文件 1 个：
 
 | 文件 | 改动 |
 |---|---|
-| `packages/evercore-core/pyproject.toml` | 在 `dependencies` 加 `pydantic>=2.7` |
+| `packages/everalgo-core/pyproject.toml` | 在 `dependencies` 加 `pydantic>=2.7` |
 
-新增测试文件 8 个（`packages/evercore-core/tests/`）：
+新增测试文件 8 个（`packages/everalgo-core/tests/`）：
 
 | 文件 | 职责 |
 |---|---|
@@ -53,14 +53,14 @@
 ## Task 0: pyproject.toml 加 pydantic 依赖 + 测试目录骨架
 
 **Files:**
-- Modify: `packages/evercore-core/pyproject.toml`
-- Create: `packages/evercore-core/tests/conftest.py`
-- Create: `packages/evercore-core/tests/types/__init__.py`
-- Create: `packages/evercore-core/tests/prompts/__init__.py`
+- Modify: `packages/everalgo-core/pyproject.toml`
+- Create: `packages/everalgo-core/tests/conftest.py`
+- Create: `packages/everalgo-core/tests/types/__init__.py`
+- Create: `packages/everalgo-core/tests/prompts/__init__.py`
 
 - [ ] **Step 1: 修改 pyproject.toml 添加 pydantic 依赖**
 
-把 `packages/evercore-core/pyproject.toml` 中的 `dependencies = []` 替换为：
+把 `packages/everalgo-core/pyproject.toml` 中的 `dependencies = []` 替换为：
 
 ```toml
 dependencies = [
@@ -70,7 +70,7 @@ dependencies = [
 
 - [ ] **Step 2: 创建 tests 包骨架**
 
-创建 `packages/evercore-core/tests/conftest.py` (内容如下)：
+创建 `packages/everalgo-core/tests/conftest.py` (内容如下)：
 
 ```python
 """Package-level pytest fixtures.
@@ -81,9 +81,9 @@ fake LLM client, episode builders) introduced by sub-project 3
 """
 ```
 
-创建 `packages/evercore-core/tests/types/__init__.py` (空文件，仅作为 package marker，pytest 在 `testpaths` 下需要)。
+创建 `packages/everalgo-core/tests/types/__init__.py` (空文件，仅作为 package marker，pytest 在 `testpaths` 下需要)。
 
-创建 `packages/evercore-core/tests/prompts/__init__.py` (空文件，同理)。
+创建 `packages/everalgo-core/tests/prompts/__init__.py` (空文件，同理)。
 
 - [ ] **Step 3: 同步 workspace 依赖**
 
@@ -100,7 +100,7 @@ Expected: 输出 `2.x.x` (≥ 2.7)，无 error。
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/pyproject.toml packages/evercore-core/tests/
+git add packages/everalgo-core/pyproject.toml packages/everalgo-core/tests/
 git commit -m "🎉 chore(core): add pydantic dependency and tests scaffold"
 ```
 
@@ -109,17 +109,17 @@ git commit -m "🎉 chore(core): add pydantic dependency and tests scaffold"
 ## Task 1: MessageRole enum
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/types/memcell.py`
-- Create: `packages/evercore-core/tests/types/test_message.py`
+- Create: `packages/everalgo-core/src/everalgo/types/memcell.py`
+- Create: `packages/everalgo-core/tests/types/test_message.py`
 
 - [ ] **Step 1: Write the failing test (MessageRole enum 仅 USER/ASSISTANT)**
 
-创建 `packages/evercore-core/tests/types/test_message.py`：
+创建 `packages/everalgo-core/tests/types/test_message.py`：
 
 ```python
-"""Tests for evercore.types.memcell — MessageRole + Message."""
+"""Tests for everalgo.types.memcell — MessageRole + Message."""
 
-from evercore.types.memcell import MessageRole
+from everalgo.types.memcell import MessageRole
 
 
 def test_message_role_enum_values_are_user_and_assistant():
@@ -135,19 +135,19 @@ def test_message_role_str_inheritance():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_message.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_message.py -v`
 
-Expected: FAIL — `ModuleNotFoundError: No module named 'evercore.types.memcell'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'everalgo.types.memcell'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-创建 `packages/evercore-core/src/evercore/types/memcell.py`：
+创建 `packages/everalgo-core/src/everalgo/types/memcell.py`：
 
 ```python
 """Conversation message types — minimal field set for the EPISODE path.
 
 Reference: design.md §1.2 (boundary + extract phases) and the Foundation
-spec (docs/superpowers/specs/2026-05-07-evercore-foundation-design.md).
+spec (docs/superpowers/specs/2026-05-07-everalgo-foundation-design.md).
 """
 
 from enum import Enum
@@ -168,14 +168,14 @@ class MessageRole(str, Enum):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_message.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_message.py -v`
 
 Expected: PASS — both `test_message_role_enum_values_are_user_and_assistant` 和 `test_message_role_str_inheritance`。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/types/memcell.py packages/evercore-core/tests/types/test_message.py
+git add packages/everalgo-core/src/everalgo/types/memcell.py packages/everalgo-core/tests/types/test_message.py
 git commit -m "✨ feat(types): add MessageRole enum (USER/ASSISTANT minimal set)"
 ```
 
@@ -184,12 +184,12 @@ git commit -m "✨ feat(types): add MessageRole enum (USER/ASSISTANT minimal set
 ## Task 2: Message BaseModel
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/types/memcell.py` (extend with Message class)
-- Modify: `packages/evercore-core/tests/types/test_message.py` (extend with Message tests)
+- Modify: `packages/everalgo-core/src/everalgo/types/memcell.py` (extend with Message class)
+- Modify: `packages/everalgo-core/tests/types/test_message.py` (extend with Message tests)
 
 - [ ] **Step 1: Write the failing tests (Message)**
 
-在 `packages/evercore-core/tests/types/test_message.py` 末尾追加：
+在 `packages/everalgo-core/tests/types/test_message.py` 末尾追加：
 
 ```python
 import json
@@ -197,7 +197,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from evercore.types.memcell import Message
+from everalgo.types.memcell import Message
 
 
 def test_message_minimum_required_fields():
@@ -255,13 +255,13 @@ def test_message_json_round_trip():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_message.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_message.py -v`
 
-Expected: 6 FAIL (新加的 test_message_*) — `ImportError: cannot import name 'Message' from 'evercore.types.memcell'`. The 2 MessageRole tests still PASS.
+Expected: 6 FAIL (新加的 test_message_*) — `ImportError: cannot import name 'Message' from 'everalgo.types.memcell'`. The 2 MessageRole tests still PASS.
 
 - [ ] **Step 3: Write minimal implementation**
 
-修改 `packages/evercore-core/src/evercore/types/memcell.py`，在文件末尾追加：
+修改 `packages/everalgo-core/src/everalgo/types/memcell.py`，在文件末尾追加：
 
 ```python
 from pydantic import BaseModel, ConfigDict
@@ -286,14 +286,14 @@ class Message(BaseModel):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_message.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_message.py -v`
 
 Expected: 8 PASS (2 MessageRole + 6 Message)。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/types/memcell.py packages/evercore-core/tests/types/test_message.py
+git add packages/everalgo-core/src/everalgo/types/memcell.py packages/everalgo-core/tests/types/test_message.py
 git commit -m "✨ feat(types): add Message BaseModel (3 fields, extra=ignore)"
 ```
 
@@ -302,20 +302,20 @@ git commit -m "✨ feat(types): add Message BaseModel (3 fields, extra=ignore)"
 ## Task 3: MemCell BaseModel
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/types/memcell.py` (extend with MemCell class)
-- Create: `packages/evercore-core/tests/types/test_memcell.py`
+- Modify: `packages/everalgo-core/src/everalgo/types/memcell.py` (extend with MemCell class)
+- Create: `packages/everalgo-core/tests/types/test_memcell.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-创建 `packages/evercore-core/tests/types/test_memcell.py`：
+创建 `packages/everalgo-core/tests/types/test_memcell.py`：
 
 ```python
-"""Tests for evercore.types.memcell.MemCell."""
+"""Tests for everalgo.types.memcell.MemCell."""
 
 import pytest
 from pydantic import ValidationError
 
-from evercore.types.memcell import MemCell, Message, MessageRole
+from everalgo.types.memcell import MemCell, Message, MessageRole
 
 
 def _msg(content: str = "hi", ts: int = 1) -> Message:
@@ -387,13 +387,13 @@ def test_memcell_json_round_trip():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_memcell.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_memcell.py -v`
 
-Expected: 7 FAIL — `ImportError: cannot import name 'MemCell' from 'evercore.types.memcell'`.
+Expected: 7 FAIL — `ImportError: cannot import name 'MemCell' from 'everalgo.types.memcell'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-在 `packages/evercore-core/src/evercore/types/memcell.py` 末尾追加：
+在 `packages/everalgo-core/src/everalgo/types/memcell.py` 末尾追加：
 
 ```python
 class MemCell(BaseModel):
@@ -419,14 +419,14 @@ class MemCell(BaseModel):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/types/ -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/ -v`
 
 Expected: 15 PASS (8 message + 7 memcell)。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/types/memcell.py packages/evercore-core/tests/types/test_memcell.py
+git add packages/everalgo-core/src/everalgo/types/memcell.py packages/everalgo-core/tests/types/test_memcell.py
 git commit -m "✨ feat(types): add MemCell BaseModel (3 fields, extra=ignore)"
 ```
 
@@ -435,20 +435,20 @@ git commit -m "✨ feat(types): add MemCell BaseModel (3 fields, extra=ignore)"
 ## Task 4: Episode BaseModel
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/types/memories.py`
-- Create: `packages/evercore-core/tests/types/test_episode.py`
+- Create: `packages/everalgo-core/src/everalgo/types/memories.py`
+- Create: `packages/everalgo-core/tests/types/test_episode.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-创建 `packages/evercore-core/tests/types/test_episode.py`：
+创建 `packages/everalgo-core/tests/types/test_episode.py`：
 
 ```python
-"""Tests for evercore.types.memories.Episode."""
+"""Tests for everalgo.types.memories.Episode."""
 
 import pytest
 from pydantic import ValidationError
 
-from evercore.types.memories import Episode
+from everalgo.types.memories import Episode
 
 
 def _kwargs(**overrides: object) -> dict:
@@ -529,13 +529,13 @@ def test_episode_json_round_trip_preserves_extras():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_episode.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_episode.py -v`
 
-Expected: 7 FAIL — `ModuleNotFoundError: No module named 'evercore.types.memories'`.
+Expected: 7 FAIL — `ModuleNotFoundError: No module named 'everalgo.types.memories'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-创建 `packages/evercore-core/src/evercore/types/memories.py`：
+创建 `packages/everalgo-core/src/everalgo/types/memories.py`：
 
 ```python
 """User-side memory types — minimal set for the EPISODE path."""
@@ -571,14 +571,14 @@ class Episode(BaseModel):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_episode.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_episode.py -v`
 
 Expected: 7 PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/types/memories.py packages/evercore-core/tests/types/test_episode.py
+git add packages/everalgo-core/src/everalgo/types/memories.py packages/everalgo-core/tests/types/test_episode.py
 git commit -m "✨ feat(types): add Episode BaseModel (6 fields, extra=allow)"
 ```
 
@@ -587,75 +587,75 @@ git commit -m "✨ feat(types): add Episode BaseModel (6 fields, extra=allow)"
 ## Task 5: types/__init__.py — re-export 4 个对外符号
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/types/__init__.py`
+- Modify: `packages/everalgo-core/src/everalgo/types/__init__.py`
 
 - [ ] **Step 1: Write the failing test**
 
-在 `packages/evercore-core/tests/types/test_message.py` **顶部** import 改为通过 `evercore.types`，覆盖之前对 `evercore.types.memcell` 的直接 import。具体修改：
+在 `packages/everalgo-core/tests/types/test_message.py` **顶部** import 改为通过 `everalgo.types`，覆盖之前对 `everalgo.types.memcell` 的直接 import。具体修改：
 
-把文件开头的 `from evercore.types.memcell import MessageRole` 改为：
+把文件开头的 `from everalgo.types.memcell import MessageRole` 改为：
 
 ```python
-"""Tests for evercore.types.memcell — MessageRole + Message."""
+"""Tests for everalgo.types.memcell — MessageRole + Message."""
 
 import json
 
 import pytest
 from pydantic import ValidationError
 
-from evercore.types import Message, MessageRole
+from everalgo.types import Message, MessageRole
 ```
 
-(删除原来的 `from evercore.types.memcell import MessageRole` 和 `from evercore.types.memcell import Message`，统一从 `evercore.types` 顶层 import。)
+(删除原来的 `from everalgo.types.memcell import MessageRole` 和 `from everalgo.types.memcell import Message`，统一从 `everalgo.types` 顶层 import。)
 
 同样修改 `tests/types/test_memcell.py`：
 
 ```python
-"""Tests for evercore.types.memcell.MemCell."""
+"""Tests for everalgo.types.memcell.MemCell."""
 
 import pytest
 from pydantic import ValidationError
 
-from evercore.types import MemCell, Message, MessageRole
+from everalgo.types import MemCell, Message, MessageRole
 ```
 
-(原 `from evercore.types.memcell import MemCell, Message, MessageRole` 改为顶层。)
+(原 `from everalgo.types.memcell import MemCell, Message, MessageRole` 改为顶层。)
 
 同样修改 `tests/types/test_episode.py`：
 
 ```python
-"""Tests for evercore.types.memories.Episode."""
+"""Tests for everalgo.types.memories.Episode."""
 
 import pytest
 from pydantic import ValidationError
 
-from evercore.types import Episode
+from everalgo.types import Episode
 ```
 
-(原 `from evercore.types.memories import Episode` 改为顶层。)
+(原 `from everalgo.types.memories import Episode` 改为顶层。)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/types/ -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/ -v`
 
-Expected: All FAIL with `ImportError: cannot import name 'Message' from 'evercore.types'` (or类似 `MessageRole / MemCell / Episode`).
+Expected: All FAIL with `ImportError: cannot import name 'Message' from 'everalgo.types'` (or类似 `MessageRole / MemCell / Episode`).
 
-> 当前 `evercore/types/__init__.py` 内容是 `__all__: list[str] = []` 的 placeholder，所以顶层 import 拿不到 4 个符号。
+> 当前 `everalgo/types/__init__.py` 内容是 `__all__: list[str] = []` 的 placeholder，所以顶层 import 拿不到 4 个符号。
 
 - [ ] **Step 3: Write minimal implementation**
 
-替换 `packages/evercore-core/src/evercore/types/__init__.py` 的全部内容为：
+替换 `packages/everalgo-core/src/everalgo/types/__init__.py` 的全部内容为：
 
 ```python
-"""Public data contracts for EverCore — minimal EPISODE-path subset.
+"""Public data contracts for EverAlgo — minimal EPISODE-path subset.
 
 Sub-project 1 deliverable. Adding more memory types (AtomicFact,
 Foresight, Profile, AgentCase, AgentSkill, ClusterState, ...) later
 is a SemVer minor bump for users that import from this module.
 """
 
-from evercore.types.memcell import MemCell, Message, MessageRole
-from evercore.types.memories import Episode
+from everalgo.types.memcell import MemCell, Message, MessageRole
+from everalgo.types.memories import Episode
 
 __all__ = [
     "Episode",
@@ -667,21 +667,21 @@ __all__ = [
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/types/ -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/ -v`
 
 Expected: 22 PASS (8 message + 7 memcell + 7 episode)。
 
 - [ ] **Step 5: Verify `__all__` exports the right names**
 
-Run: `uv run python -c "from evercore.types import __all__, Message, MessageRole, MemCell, Episode; print(sorted(__all__))"`
+Run: `uv run python -c "from everalgo.types import __all__, Message, MessageRole, MemCell, Episode; print(sorted(__all__))"`
 
 Expected: 输出 `['Episode', 'MemCell', 'Message', 'MessageRole']`，无 ImportError。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/types/__init__.py packages/evercore-core/tests/types/test_message.py packages/evercore-core/tests/types/test_memcell.py packages/evercore-core/tests/types/test_episode.py
-git commit -m "✨ feat(types): re-export 4 public symbols at evercore.types top level"
+git add packages/everalgo-core/src/everalgo/types/__init__.py packages/everalgo-core/tests/types/test_message.py packages/everalgo-core/tests/types/test_memcell.py packages/everalgo-core/tests/types/test_episode.py
+git commit -m "✨ feat(types): re-export 4 public symbols at everalgo.types top level"
 ```
 
 ---
@@ -689,23 +689,23 @@ git commit -m "✨ feat(types): re-export 4 public symbols at evercore.types top
 ## Task 6: Cross-type JSON round-trip parametrized test
 
 **Files:**
-- Create: `packages/evercore-core/tests/types/test_round_trip.py`
+- Create: `packages/everalgo-core/tests/types/test_round_trip.py`
 
 - [ ] **Step 1: Write the test**
 
-创建 `packages/evercore-core/tests/types/test_round_trip.py`：
+创建 `packages/everalgo-core/tests/types/test_round_trip.py`：
 
 ```python
 """Cross-type JSON round-trip parametrized check.
 
-Ensures every public type from ``evercore.types`` survives
+Ensures every public type from ``everalgo.types`` survives
 ``model_dump_json`` -> ``model_validate_json`` cleanly, including
 the ``extra='allow'`` path for Episode.
 """
 
 import pytest
 
-from evercore.types import Episode, MemCell, Message, MessageRole
+from everalgo.types import Episode, MemCell, Message, MessageRole
 
 
 @pytest.mark.parametrize(
@@ -755,7 +755,7 @@ def test_model_dump_json_then_validate_json_round_trips(obj):
 
 - [ ] **Step 2: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/types/test_round_trip.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/types/test_round_trip.py -v`
 
 Expected: 6 PASS (parametrized cases)。
 
@@ -764,7 +764,7 @@ Expected: 6 PASS (parametrized cases)。
 - [ ] **Step 3: Commit**
 
 ```bash
-git add packages/evercore-core/tests/types/test_round_trip.py
+git add packages/everalgo-core/tests/types/test_round_trip.py
 git commit -m "✅ test(types): add cross-type JSON round-trip parametrized check"
 ```
 
@@ -773,19 +773,19 @@ git commit -m "✅ test(types): add cross-type JSON round-trip parametrized chec
 ## Task 7: check_placeholders
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/prompts/validator.py`
-- Create: `packages/evercore-core/tests/prompts/test_validator.py`
+- Create: `packages/everalgo-core/src/everalgo/prompts/validator.py`
+- Create: `packages/everalgo-core/tests/prompts/test_validator.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-创建 `packages/evercore-core/tests/prompts/test_validator.py`：
+创建 `packages/everalgo-core/tests/prompts/test_validator.py`：
 
 ```python
-"""Tests for evercore.prompts.validator."""
+"""Tests for everalgo.prompts.validator."""
 
 import pytest
 
-from evercore.prompts.validator import check_placeholders
+from everalgo.prompts.validator import check_placeholders
 
 
 def test_check_placeholders_pass_when_all_required_present():
@@ -829,13 +829,13 @@ def test_check_placeholders_extras_listed_when_missing_raised():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/prompts/test_validator.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/prompts/test_validator.py -v`
 
-Expected: 8 FAIL — `ModuleNotFoundError: No module named 'evercore.prompts.validator'`.
+Expected: 8 FAIL — `ModuleNotFoundError: No module named 'everalgo.prompts.validator'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-创建 `packages/evercore-core/src/evercore/prompts/validator.py`：
+创建 `packages/everalgo-core/src/everalgo/prompts/validator.py`：
 
 ```python
 """Prompt validators — fail-fast checks for prompt templates.
@@ -888,14 +888,14 @@ def check_placeholders(prompt: str, *, required: Iterable[str]) -> None:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/prompts/test_validator.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/prompts/test_validator.py -v`
 
 Expected: 8 PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/prompts/validator.py packages/evercore-core/tests/prompts/test_validator.py
+git add packages/everalgo-core/src/everalgo/prompts/validator.py packages/everalgo-core/tests/prompts/test_validator.py
 git commit -m "✨ feat(prompts): add check_placeholders validator"
 ```
 
@@ -904,15 +904,15 @@ git commit -m "✨ feat(prompts): add check_placeholders validator"
 ## Task 8: check_length
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/prompts/validator.py` (extend)
-- Modify: `packages/evercore-core/tests/prompts/test_validator.py` (extend)
+- Modify: `packages/everalgo-core/src/everalgo/prompts/validator.py` (extend)
+- Modify: `packages/everalgo-core/tests/prompts/test_validator.py` (extend)
 
 - [ ] **Step 1: Write the failing tests**
 
-在 `packages/evercore-core/tests/prompts/test_validator.py` 末尾追加：
+在 `packages/everalgo-core/tests/prompts/test_validator.py` 末尾追加：
 
 ```python
-from evercore.prompts.validator import check_length
+from everalgo.prompts.validator import check_length
 
 
 def test_check_length_pass_with_default_estimator_under_limit():
@@ -952,13 +952,13 @@ def test_check_length_default_estimator_is_safe_overcount_for_cjk():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/prompts/test_validator.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/prompts/test_validator.py -v`
 
 Expected: 5 新 FAIL (`check_length` 5 testcases) — `ImportError: cannot import name 'check_length'`. The 8 check_placeholders tests still PASS.
 
 - [ ] **Step 3: Write minimal implementation**
 
-在 `packages/evercore-core/src/evercore/prompts/validator.py` 末尾追加：
+在 `packages/everalgo-core/src/everalgo/prompts/validator.py` 末尾追加：
 
 ```python
 from collections.abc import Callable
@@ -1005,14 +1005,14 @@ def check_length(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/prompts/test_validator.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/prompts/test_validator.py -v`
 
 Expected: 13 PASS (8 check_placeholders + 5 check_length)。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/prompts/validator.py packages/evercore-core/tests/prompts/test_validator.py
+git add packages/everalgo-core/src/everalgo/prompts/validator.py packages/everalgo-core/tests/prompts/test_validator.py
 git commit -m "✨ feat(prompts): add check_length validator with safe default estimator"
 ```
 
@@ -1064,33 +1064,33 @@ Expected: 无 error；输出含 `Resolved` / `Built` 全 8 个 distribution。
 
 - [ ] **Step 2: 顶层 import smoke test**
 
-Run: `uv run python -c "from evercore.types import MemCell, Message, MessageRole, Episode; from evercore.prompts.validator import check_placeholders, check_length; print('OK')"`
+Run: `uv run python -c "from everalgo.types import MemCell, Message, MessageRole, Episode; from everalgo.prompts.validator import check_placeholders, check_length; print('OK')"`
 
 Expected: 输出 `OK`。
 
 - [ ] **Step 3: 跑全部 tests**
 
-Run: `uv run pytest packages/evercore-core/tests/ -v`
+Run: `uv run pytest packages/everalgo-core/tests/ -v`
 
 Expected: 41 PASS (10 message + 7 memcell + 7 episode + 6 round_trip + 8 check_placeholders + 5 check_length — 大致；具体数随测试细节可能 ±2)。0 FAIL, 0 ERROR。
 
 - [ ] **Step 4: 跑 ruff check**
 
-Run: `uv run ruff check packages/evercore-core/`
+Run: `uv run ruff check packages/everalgo-core/`
 
 Expected: `All checks passed!` (0 issue)。
 
 - [ ] **Step 5: 跑 ruff format check**
 
-Run: `uv run ruff format --check packages/evercore-core/`
+Run: `uv run ruff format --check packages/everalgo-core/`
 
 Expected: `X files already formatted` 或类似无 diff 输出。
 
-> 若有 diff，执行 `uv run ruff format packages/evercore-core/` 然后 amend 上一个 commit 或新增 `🎨 style` commit。
+> 若有 diff，执行 `uv run ruff format packages/everalgo-core/` 然后 amend 上一个 commit 或新增 `🎨 style` commit。
 
 - [ ] **Step 6: 跑 mypy**
 
-Run: `uv run mypy packages/evercore-core/`
+Run: `uv run mypy packages/everalgo-core/`
 
 Expected: `Success: no issues found in N source files` (N ≥ 4)。
 
@@ -1100,7 +1100,7 @@ Expected: `Success: no issues found in N source files` (N ≥ 4)。
 
 Run: `git status -sb`
 
-Expected: 工作区干净（除了 `?? docs/reference/` 等之前 BOSS 自己未 commit 的内容）；不应该有 `?? packages/evercore-core/.ruff_cache/` / `?? packages/evercore-core/.mypy_cache/` / `??packages/evercore-core/__pycache__/` —— 这些应已被 root `.gitignore` 忽略。若其中任何一个被 untracked，是 .gitignore 缺漏，加规则到 `.gitignore` 后 commit。
+Expected: 工作区干净（除了 `?? docs/reference/` 等之前 BOSS 自己未 commit 的内容）；不应该有 `?? packages/everalgo-core/.ruff_cache/` / `?? packages/everalgo-core/.mypy_cache/` / `??packages/everalgo-core/__pycache__/` —— 这些应已被 root `.gitignore` 忽略。若其中任何一个被 untracked，是 .gitignore 缺漏，加规则到 `.gitignore` 后 commit。
 
 - [ ] **Step 8: Commit acceptance log（可选）**
 
