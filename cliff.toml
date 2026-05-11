@@ -1,0 +1,84 @@
+# git-cliff configuration for the EverCore monorepo.
+#
+# Generates per-distribution CHANGELOG fragments from Conventional Commits
+# on `main`. The repo uses Gitmoji + Conventional Commits (see AGENTS.md §6:
+# `<emoji> <type>(<scope>): <desc>`), so a commit_preprocessor strips the
+# leading emoji BEFORE commit_parsers run — otherwise `^feat` would never
+# match because the emoji prefix anchors first.
+#
+# Per-distribution invocation (run before each release tag):
+#   git cliff \
+#     --tag evercore-<name>/v<X.Y.Z> \
+#     --include-path 'packages/evercore-<name>/**' \
+#     --prepend packages/evercore-<name>/CHANGELOG.md
+#
+# References:
+# - https://git-cliff.org/docs/configuration
+# - https://www.conventionalcommits.org/
+# - HF transformers / accelerate (two-tier root + per-package CHANGELOG)
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this distribution are documented here. The format is
+based on Keep a Changelog (https://keepachangelog.com/en/1.1.0/), and this
+project adheres to Semantic Versioning (https://semver.org/spec/v2.0.0.html).
+
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+filter_commits = true
+protect_breaking_commits = true
+sort_commits = "oldest"
+tag_pattern = "evercore-[a-z-]+/v[0-9]+\\.[0-9]+\\.[0-9]+"
+
+# Strip leading Gitmoji glyph (one or more emoji codepoints + whitespace)
+# BEFORE commit_parsers run. Required because EverCore commit format is
+# `<emoji> <type>(<scope>): <desc>` (AGENTS.md §6) — without this preprocessor,
+# `^feat` etc. would never anchor.
+commit_preprocessors = [
+  { pattern = '^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s+', replace = "" },
+]
+
+# Breaking-change parsers MUST come first. git-cliff stops at the first
+# matching parser, so if `^feat` / `^fix` ran before this, a commit like
+# `fix(boundary)!: drop legacy emoji handler` would be grouped under "Fixed"
+# instead of "Breaking", silently demoting a breaking change.
+#
+# The regex is deliberately strict: `<type>(<scope>)?!:` — Conventional
+# Commits requires `!` immediately after the type+scope, before the colon.
+# A looser `^.*!` would misclassify any subject that happens to contain `!`
+# in the description (e.g. `fix: handle ! marker correctly`).
+commit_parsers = [
+  { message = '^(feat|fix|perf|refactor|revert|build|chore|ci|docs|style|test)(\([^)]+\))?!:', group = "Breaking", breaking = true },
+  { body    = "BREAKING CHANGE",       group = "Breaking", breaking = true },
+  { message = "^feat",                 group = "Added" },
+  { message = "^fix",                  group = "Fixed" },
+  { message = "^perf",                 group = "Performance" },
+  { message = "^refactor",             group = "Changed" },
+  { message = "^revert",               group = "Reverted" },
+  { message = "^chore",                skip = true },
+  { message = "^ci",                   skip = true },
+  { message = "^build",                skip = true },
+  { message = "^style",                skip = true },
+  { message = "^test",                 skip = true },
+  { message = "^docs",                 skip = true },
+]

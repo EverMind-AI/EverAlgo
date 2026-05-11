@@ -46,6 +46,24 @@ mypy:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
 
+# MR title lint: GitLab is configured (Settings -> Merge Requests -> Squash
+# commit template = %{title}) so the MR title lands verbatim as the squash
+# commit on `main`. This job rejects titles that do not follow the
+# Gitmoji + Conventional Commits format defined in AGENTS.md section 6, so
+# git-cliff can parse and group release notes from main's commit history.
+#
+# Implementation uses Python regex (Unicode codepoint classes) instead of
+# `grep -E` because POSIX ERE does not honour `\xNN` byte escapes; GNU grep
+# treats them as the literal four characters `\`, `x`, `N`, `N`, so the
+# emoji-detection prefix always failed in CI. Source: scripts/check_mr_title.py.
+mr-title-lint:
+  stage: lint
+  image: python:3.12-alpine
+  script:
+    - python3 scripts/check_mr_title.py "$CI_MERGE_REQUEST_TITLE"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
 pytest:
   stage: test
   image: python:3.12-slim
