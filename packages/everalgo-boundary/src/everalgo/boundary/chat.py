@@ -11,6 +11,7 @@ from everalgo.boundary._tokenize import count_tokens
 from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
 from everalgo.llm.protocols import LLMClient
 from everalgo.llm.types import ChatMessage as LLMChatMessage
+from everalgo.prompts import render_prompt
 from everalgo.types import MemCell, Message
 
 
@@ -53,7 +54,9 @@ class ChatMemCellExtractor:
             either 1 cell (no split) or 2 cells (one split point).
         """
         client = everalgo.llm.resolve(llm)
-        rendered = (prompt or CHAT_BOUNDARY_DETECT_PROMPT_EN).format(
+        rendered = render_prompt(
+            CHAT_BOUNDARY_DETECT_PROMPT_EN,
+            prompt,
             messages=_format_messages_for_prompt(messages),
             token_count=count_tokens(_concat_messages(messages)),
         )

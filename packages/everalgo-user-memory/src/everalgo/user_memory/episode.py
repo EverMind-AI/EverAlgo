@@ -9,6 +9,7 @@ from asgiref.sync import async_to_sync
 import everalgo.llm
 from everalgo.llm.protocols import LLMClient
 from everalgo.llm.types import ChatMessage as LLMChatMessage
+from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
 from everalgo.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
 
@@ -46,7 +47,9 @@ class EpisodeExtractor:
             LLMNotConfiguredError, LLMError: same as boundary.
         """
         client = everalgo.llm.resolve(llm)
-        rendered = (prompt or EPISODE_EXTRACT_PROMPT_EN).format(
+        rendered = render_prompt(
+            EPISODE_EXTRACT_PROMPT_EN,
+            prompt,
             memcell_text=_render_memcell_text(memcell),
             timestamp=memcell.timestamp,
         )
