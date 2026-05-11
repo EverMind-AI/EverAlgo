@@ -1,8 +1,4 @@
-"""Structural assertions for memory types.
-
-See ``docs/superpowers/specs/2026-05-08-everalgo-testing-toolkit-design.md``
-§3.2 for the design rationale.
-"""
+"""Structural assertions for memory types."""
 
 from __future__ import annotations
 

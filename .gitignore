@@ -51,3 +51,6 @@ htmlcov/
 
 # Project local artifacts (per BOSS rule: 本地产物放被改造子项目的 local/ 下)
 local/
+
+# Claude Code session-local state (scheduled tasks, agent caches, locks)
+.claude/

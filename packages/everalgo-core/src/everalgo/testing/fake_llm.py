@@ -1,8 +1,4 @@
-"""In-memory LLMClient double for unit tests.
-
-See ``docs/superpowers/specs/2026-05-08-everalgo-testing-toolkit-design.md``
-for the design rationale (4 industry references in §7).
-"""
+"""In-memory LLMClient double for unit tests."""
 
 from __future__ import annotations
 
@@ -48,9 +44,6 @@ class FakeLLMClient:
        exhaustion raises ``RuntimeError``.
     2. **Callable handler** — ``handler=callable`` invoked per call;
        sync or async return both accepted.
-
-    See ``docs/superpowers/specs/2026-05-08-everalgo-testing-toolkit-design.md``
-    §3.1 for full design rationale.
     """
 
     def __init__(
