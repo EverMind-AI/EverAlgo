@@ -1,7 +1,6 @@
 """Conversation message types — minimal field set for the EPISODE path.
 
-Reference: design.md §1.2 (boundary + extract phases) and the Foundation
-spec (docs/superpowers/specs/2026-05-07-everalgo-foundation-design.md).
+Reference: design.md §1.2 (boundary + extract phases).
 """
 
 from enum import StrEnum
