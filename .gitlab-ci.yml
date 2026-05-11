@@ -1,4 +1,4 @@
-# GitLab CI for the EverCore monorepo (sub-project 4).
+# GitLab CI for the EverAlgo monorepo (sub-project 4).
 #
 # Strict mode: 4 quality gates (ruff check / ruff format --check / mypy /
 # pytest) all enforced. The 3 lint jobs run in parallel within the lint

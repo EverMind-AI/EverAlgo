@@ -1,4 +1,4 @@
-# git-cliff configuration for the EverCore monorepo.
+# git-cliff configuration for the EverAlgo monorepo.
 #
 # Generates per-distribution CHANGELOG fragments from Conventional Commits
 # on `main`. The repo uses Gitmoji + Conventional Commits (see AGENTS.md §6:
@@ -8,9 +8,9 @@
 #
 # Per-distribution invocation (run before each release tag):
 #   git cliff \
-#     --tag evercore-<name>/v<X.Y.Z> \
-#     --include-path 'packages/evercore-<name>/**' \
-#     --prepend packages/evercore-<name>/CHANGELOG.md
+#     --tag everalgo-<name>/v<X.Y.Z> \
+#     --include-path 'packages/everalgo-<name>/**' \
+#     --prepend packages/everalgo-<name>/CHANGELOG.md
 #
 # References:
 # - https://git-cliff.org/docs/configuration
@@ -48,10 +48,10 @@ filter_unconventional = true
 filter_commits = true
 protect_breaking_commits = true
 sort_commits = "oldest"
-tag_pattern = "evercore-[a-z-]+/v[0-9]+\\.[0-9]+\\.[0-9]+"
+tag_pattern = "everalgo-[a-z-]+/v[0-9]+\\.[0-9]+\\.[0-9]+"
 
 # Strip leading Gitmoji glyph (one or more emoji codepoints + whitespace)
-# BEFORE commit_parsers run. Required because EverCore commit format is
+# BEFORE commit_parsers run. Required because EverAlgo commit format is
 # `<emoji> <type>(<scope>): <desc>` (AGENTS.md §6) — without this preprocessor,
 # `^feat` etc. would never anchor.
 commit_preprocessors = [

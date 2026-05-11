@@ -6,21 +6,21 @@
 
 ## 背景
 
-EverCore 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)）+ PEP 420 共享 namespace（[ADR 003](003-namespace-package-pep420.md)）。**命名规范**决定 distribution 名、import 路径、物理目录名之间的映射规则。
+EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)）+ PEP 420 共享 namespace（[ADR 003](003-namespace-package-pep420.md)）。**命名规范**决定 distribution 名、import 路径、物理目录名之间的映射规则。
 
 相关硬约束：
-- **H1** EverOS 文档契约 `evercore.user_memory.ChatMemCellExtractor`
-- **H7** 可识别系列前缀（PyPI 上 grep 出 EverCore 套件）
+- **H1** EverOS 文档契约 `everalgo.user_memory.ChatMemCellExtractor`
+- **H7** 可识别系列前缀（PyPI 上 grep 出 EverAlgo 套件）
 - PEP 8 命名规范（lowercase 模块 + PascalCase 类）
 
 ## 候选方案
 
 | 方案 | 描述 | 代表 |
 |------|------|------|
-| **A. llama-index 风** | distribution dash（`evercore-user-memory`）+ import dot 共享 namespace（`evercore.user_memory`）+ 物理 underscore（`evercore/user_memory/`）+ class PascalCase | LlamaIndex |
+| **A. llama-index 风** | distribution dash（`everalgo-user-memory`）+ import dot 共享 namespace（`everalgo.user_memory`）+ 物理 underscore（`everalgo/user_memory/`）+ class PascalCase | LlamaIndex |
 | B. langchain 风（A 风格独立顶层）| distribution dash（`langchain-core`）+ import 独立顶层 underscore（`import langchain_core`）+ class PascalCase | LangChain |
 | C. HuggingFace 风（独立词无前缀）| distribution dash 或 underscore，无系列前缀（`transformers` / `huggingface-hub`）+ import 独立顶层 | HuggingFace 全家桶 |
-| D. PascalCase namespace（Java/.NET 风）| `evercore.UserMemory.ChatMemCellExtractor` —— EverOS 文档原文写法（PEP 8 违例）| 无主流 Python 实证 |
+| D. PascalCase namespace（Java/.NET 风）| `everalgo.UserMemory.ChatMemCellExtractor` —— EverOS 文档原文写法（PEP 8 违例）| 无主流 Python 实证 |
 
 ## 客观优劣分析
 
@@ -28,18 +28,18 @@ EverCore 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 
 | 维度 | 说明 |
 |------|------|
-| 系列归属感强 | 所有包都在 `evercore.*` 顶层，import 表整洁 |
+| 系列归属感强 | 所有包都在 `everalgo.*` 顶层，import 表整洁 |
 | dist 名 ↔ import 路径映射规则一致 | dash → dot 简单转换 |
 | 兼容现有 PEP 420 namespace（[ADR 003](003-namespace-package-pep420.md)）| 共享顶层 |
-| **与 EverOS 文档契约 `evercore.user_memory.*` 完全兼容** | 1:1 映射 |
-| 系列前缀 `evercore-` 在 PyPI 可识别 | grep `evercore-` 列出全部套件 |
+| **与 EverOS 文档契约 `everalgo.user_memory.*` 完全兼容** | 1:1 映射 |
+| 系列前缀 `everalgo-` 在 PyPI 可识别 | grep `everalgo-` 列出全部套件 |
 | PEP 8 合规 | 模块 lowercase + 类 PascalCase |
 
 ### A. llama-index 风 劣势
 
 | 维度 | 说明 |
 |------|------|
-| 多词模块名稍长 | `evercore.user_memory` vs `evercore.um`（缩写）|
+| 多词模块名稍长 | `everalgo.user_memory` vs `everalgo.um`（缩写）|
 | 用户需理解 dash → dot 映射 | 一次性学习成本 |
 
 ### B. langchain 风 优势
@@ -56,8 +56,8 @@ EverCore 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 
 | 维度 | 说明 |
 |------|------|
-| **与 EverOS 文档契约不兼容** | 强制 `evercore_user_memory.X` 平面命名 |
-| 无 `evercore.*` 系列归属感 | import 表中 `evercore_user_memory` / `evercore_boundary` 散落 |
+| **与 EverOS 文档契约不兼容** | 强制 `everalgo_user_memory.X` 平面命名 |
+| 无 `everalgo.*` 系列归属感 | import 表中 `everalgo_user_memory` / `everalgo_boundary` 散落 |
 | 多包共存 import 噪音 | 每个 dist 一个独立顶层名 |
 
 ### C. HuggingFace 风 优势/劣势
@@ -66,7 +66,7 @@ EverCore 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 
 新劣势：
 - 无系列前缀 → PyPI 上 `core` / `parser` / `boundary` / `rank` 等通用词冲突已被占用
-- 无系列归属（用户散落 PyPI 后无法识别 EverCore 套件）
+- 无系列归属（用户散落 PyPI 后无法识别 EverAlgo 套件）
 - 与 EverOS 契约不兼容
 
 ### D. PascalCase namespace 优势/劣势
@@ -76,11 +76,11 @@ EverCore 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 劣势：
 - **PEP 8 违例**——模块名应 lowercase，PascalCase 是类名规范
 - 无主流 Python 实证（Java/.NET 风格）
-- 命名歧义：`evercore.UserMemory` 看起来像类不像模块
+- 命名歧义：`everalgo.UserMemory` 看起来像类不像模块
 
-## 对 EverCore 适配度评估
+## 对 EverAlgo 适配度评估
 
-### A 优势对 EverCore 的适配度
+### A 优势对 EverAlgo 的适配度
 
 | 优势 | 适配度 |
 |------|--------|
@@ -88,10 +88,10 @@ EverCore 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 | dash → dot 映射规则一致 | ✅ 受益 |
 | 兼容 PEP 420 namespace | ✅ **强需要**（[ADR 003](003-namespace-package-pep420.md) 决议） |
 | 与 EverOS 文档契约兼容 | ✅ **强需要**（H1）|
-| PyPI 上 grep `evercore-` 可识别 | ✅ 强需要（H7）|
+| PyPI 上 grep `everalgo-` 可识别 | ✅ 强需要（H7）|
 | PEP 8 合规 | ✅ 强需要（社区惯例）|
 
-### A 劣势对 EverCore 的适配度
+### A 劣势对 EverAlgo 的适配度
 
 | 劣势 | 适配度 |
 |------|--------|
@@ -114,11 +114,11 @@ D：PEP 8 违例 + 无 Python 主流实证——**EverOS 文档原文这样写�
 
 | 维度 | 规范 | 例 |
 |------|------|------|
-| Distribution（PyPI）| 全 dash | `evercore-user-memory` |
-| import 路径（dot 分隔）| 共享 `evercore.*` namespace | `evercore.user_memory` |
-| 物理目录 | underscore | `evercore/user_memory/` |
-| 顶层 `evercore/` | **PEP 420 隐式命名空间**，无 `__init__.py` | — |
-| 子包 `evercore/<name>/` | regular package，需 `__init__.py`（承载 re-export） | — |
+| Distribution（PyPI）| 全 dash | `everalgo-user-memory` |
+| import 路径（dot 分隔）| 共享 `everalgo.*` namespace | `everalgo.user_memory` |
+| 物理目录 | underscore | `everalgo/user_memory/` |
+| 顶层 `everalgo/` | **PEP 420 隐式命名空间**，无 `__init__.py` | — |
+| 子包 `everalgo/<name>/` | regular package，需 `__init__.py`（承载 re-export） | — |
 | 多词模块名 | underscore 分词（PEP 8 推荐） | `user_memory` / `agent_memory` / 不是 `usermemory` |
 | 类名 | CapWords / PascalCase | `ChatMemCellExtractor` |
 
@@ -128,15 +128,15 @@ EverOS 设计文档原文使用的 PascalCase namespace 是 PEP 8 违例（Java/
 
 | 原文（EverOS 文档）| 矫正后 |
 |------|--------|
-| `evercore.UserMemory.ConvMemCellExtractor` | `evercore.user_memory.ChatMemCellExtractor` |
-| `evercore.AgentMemory.AgentCaseExtractor` | `evercore.agent_memory.AgentCaseExtractor` |
-| `evercore.Parser` | `evercore.parser` |
-| `evercore.Knowledge.KnowledgeExtractor` | `evercore.knowledge.KnowledgeExtractor` |
-| `evercore.Rank.EpisodicRanker` | `evercore.rank.EpisodicRanker` |
+| `everalgo.UserMemory.ConvMemCellExtractor` | `everalgo.user_memory.ChatMemCellExtractor` |
+| `everalgo.AgentMemory.AgentCaseExtractor` | `everalgo.agent_memory.AgentCaseExtractor` |
+| `everalgo.Parser` | `everalgo.parser` |
+| `everalgo.Knowledge.KnowledgeExtractor` | `everalgo.knowledge.KnowledgeExtractor` |
+| `everalgo.Rank.EpisodicRanker` | `everalgo.rank.EpisodicRanker` |
 
 矫正涵盖两层：① PEP 8 lowercase namespace（`UserMemory` → `user_memory` 等）；② `Conv` 缩写歧义消除（`Conv` → `Chat`，避免与 PyTorch `nn.Conv2d` 等 Convolution 占用冲突；与 OpenAI / Anthropic / LlamaIndex / HuggingFace / DSPy 业界 5/6 主流命名对齐）。
 
-EverOS 文档作者侧（zhanglibin）需同步修订；memsys_opensource 现状代码（`ConvMemCellExtractor` / `RawDataType.CONVERSATION` / `CONV_BATCH_BOUNDARY_DETECTION_PROMPT` / `conv_memcell_extractor.py`）落地 EverCore 时一并重命名。
+EverOS 文档作者侧（zhanglibin）需同步修订；memsys_opensource 现状代码（`ConvMemCellExtractor` / `RawDataType.CONVERSATION` / `CONV_BATCH_BOUNDARY_DETECTION_PROMPT` / `conv_memcell_extractor.py`）落地 EverAlgo 时一并重命名。
 
 ## 行业实证印证
 
@@ -160,7 +160,7 @@ llama-index 风（A）的精确实证：
 - 顶层 `llama_index/` 无 `__init__.py`（implicit namespace package）
 - 各子包 `llama_index/core/` 含 `__init__.py`（regular package，承载 re-export）
 
-EverCore 完全套用此模式。
+EverAlgo 完全套用此模式。
 
 ## 后续演化触发条件
 

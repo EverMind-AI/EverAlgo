@@ -2,14 +2,14 @@
   "venvPath": ".",
   "venv": ".venv",
   "extraPaths": [
-    "packages/evercore-core/src",
-    "packages/evercore-boundary/src",
-    "packages/evercore-clustering/src",
-    "packages/evercore-rank/src",
-    "packages/evercore-parser/src",
-    "packages/evercore-user-memory/src",
-    "packages/evercore-agent-memory/src",
-    "packages/evercore-knowledge/src"
+    "packages/everalgo-core/src",
+    "packages/everalgo-boundary/src",
+    "packages/everalgo-clustering/src",
+    "packages/everalgo-rank/src",
+    "packages/everalgo-parser/src",
+    "packages/everalgo-user-memory/src",
+    "packages/everalgo-agent-memory/src",
+    "packages/everalgo-knowledge/src"
   ],
   "include": [
     "packages/*/src",

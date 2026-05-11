@@ -1,10 +1,10 @@
-# EverCore LLM Stack Implementation Plan
+# EverAlgo LLM Stack Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 落地 EverCore 子项目 2 (LLM Stack) — `evercore.llm.*` chat-style 抽象层最小集（7 个对外符号）+ openai_compat 单家 provider，让 EpisodeExtractor 可以 `await client.chat(messages)` 调 LLM 并拿到结构化 `ChatResponse`。
+**Goal:** 落地 EverAlgo 子项目 2 (LLM Stack) — `everalgo.llm.*` chat-style 抽象层最小集（7 个对外符号）+ openai_compat 单家 provider，让 EpisodeExtractor 可以 `await client.chat(messages)` 调 LLM 并拿到结构化 `ChatResponse`。
 
-**Architecture:** 严格按 [`docs/superpowers/specs/2026-05-08-evercore-llm-stack-design.md`](../specs/2026-05-08-evercore-llm-stack-design.md) 落地。`LLMClient` 是 `@runtime_checkable Protocol`，`async def chat()` 单 method。`ChatMessage / ChatResponse / Usage` 是 pydantic v2 `BaseModel`。`LLMConfig.api_key` 用 `SecretStr` 屏蔽日志。`LLMError` 单基类 + SDK 错误 `__cause__` 链。`build_client` 函数式工厂，lazy import OpenAICompatClient 保 cold-start 友好。`OpenAICompatClient` 薄 wrap `openai.AsyncOpenAI`，把 ChatMessage/dict 互转 + finish_reason 折叠到 3 值 Literal + Usage 包成结构化对象。
+**Architecture:** 严格按 [`docs/superpowers/specs/2026-05-08-everalgo-llm-stack-design.md`](../specs/2026-05-08-everalgo-llm-stack-design.md) 落地。`LLMClient` 是 `@runtime_checkable Protocol`，`async def chat()` 单 method。`ChatMessage / ChatResponse / Usage` 是 pydantic v2 `BaseModel`。`LLMConfig.api_key` 用 `SecretStr` 屏蔽日志。`LLMError` 单基类 + SDK 错误 `__cause__` 链。`build_client` 函数式工厂，lazy import OpenAICompatClient 保 cold-start 友好。`OpenAICompatClient` 薄 wrap `openai.AsyncOpenAI`，把 ChatMessage/dict 互转 + finish_reason 折叠到 3 值 Literal + Usage 包成结构化对象。
 
 **Tech Stack:** Python 3.12, pydantic ≥ 2.7 (BaseModel + SecretStr + Field), openai ≥ 1.0 (AsyncOpenAI), pytest + respx (HTTP mock), uv workspace, ruff / mypy / pyright (子项目 1 已配置 strict 模式)。
 
@@ -25,19 +25,19 @@
 
 | 文件 | 职责 |
 |---|---|
-| `packages/evercore-core/src/evercore/llm/__init__.py` | re-export 7 symbols + `__all__` |
-| `packages/evercore-core/src/evercore/llm/protocols.py` | `LLMClient` Protocol |
-| `packages/evercore-core/src/evercore/llm/types.py` | `ChatMessage` / `ChatResponse` / `Usage` |
-| `packages/evercore-core/src/evercore/llm/config.py` | `LLMConfig` (含 `SecretStr api_key`) |
-| `packages/evercore-core/src/evercore/llm/errors.py` | `LLMError` |
-| `packages/evercore-core/src/evercore/llm/factory.py` | `build_client` (lazy import OpenAICompatClient) |
-| `packages/evercore-core/src/evercore/llm/providers/openai_compat.py` | `OpenAICompatClient` |
+| `packages/everalgo-core/src/everalgo/llm/__init__.py` | re-export 7 symbols + `__all__` |
+| `packages/everalgo-core/src/everalgo/llm/protocols.py` | `LLMClient` Protocol |
+| `packages/everalgo-core/src/everalgo/llm/types.py` | `ChatMessage` / `ChatResponse` / `Usage` |
+| `packages/everalgo-core/src/everalgo/llm/config.py` | `LLMConfig` (含 `SecretStr api_key`) |
+| `packages/everalgo-core/src/everalgo/llm/errors.py` | `LLMError` |
+| `packages/everalgo-core/src/everalgo/llm/factory.py` | `build_client` (lazy import OpenAICompatClient) |
+| `packages/everalgo-core/src/everalgo/llm/providers/openai_compat.py` | `OpenAICompatClient` |
 
 修改源文件 1 个：
 
 | 文件 | 改动 |
 |---|---|
-| `packages/evercore-core/pyproject.toml` | 在 `dependencies` 加 `openai>=1.0` |
+| `packages/everalgo-core/pyproject.toml` | 在 `dependencies` 加 `openai>=1.0` |
 
 新增测试文件 6 个：
 
@@ -57,11 +57,11 @@
 ## Task 0: pyproject.toml 加 openai 依赖 + tests/llm 目录骨架
 
 **Files:**
-- Modify: `packages/evercore-core/pyproject.toml`
+- Modify: `packages/everalgo-core/pyproject.toml`
 
 - [ ] **Step 1: 修改 pyproject.toml 添加 openai 依赖**
 
-把 `packages/evercore-core/pyproject.toml` 的 `dependencies` 字段从
+把 `packages/everalgo-core/pyproject.toml` 的 `dependencies` 字段从
 
 ```toml
 dependencies = [
@@ -95,7 +95,7 @@ Expected: 输出 `1.x.x`（≥ 1.0），无 error。
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/evercore-core/pyproject.toml uv.lock
+git add packages/everalgo-core/pyproject.toml uv.lock
 git commit -m "🎉 chore(core): add openai dependency for LLM Stack subproject"
 ```
 
@@ -104,22 +104,22 @@ git commit -m "🎉 chore(core): add openai dependency for LLM Stack subproject"
 ## Task 1: ChatMessage type
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/llm/types.py`
-- Create: `packages/evercore-core/tests/llm/test_types.py`
+- Create: `packages/everalgo-core/src/everalgo/llm/types.py`
+- Create: `packages/everalgo-core/tests/llm/test_types.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `packages/evercore-core/tests/llm/test_types.py`:
+Create `packages/everalgo-core/tests/llm/test_types.py`:
 
 ```python
-"""Tests for evercore.llm.types — ChatMessage / Usage / ChatResponse."""
+"""Tests for everalgo.llm.types — ChatMessage / Usage / ChatResponse."""
 
 import json
 
 import pytest
 from pydantic import ValidationError
 
-from evercore.llm.types import ChatMessage
+from everalgo.llm.types import ChatMessage
 
 
 def test_chat_message_minimum_required_fields() -> None:
@@ -170,13 +170,13 @@ def test_chat_message_json_round_trip() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_types.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_types.py -v`
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'evercore.llm.types'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'everalgo.llm.types'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/evercore-core/src/evercore/llm/types.py`:
+Create `packages/everalgo-core/src/everalgo/llm/types.py`:
 
 ```python
 """LLM wire types — chat-style messages, response, token usage.
@@ -208,17 +208,17 @@ class ChatMessage(BaseModel):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_types.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_types.py -v`
 
 Expected: 6 PASS。
 
 - [ ] **Step 5: Run quality gates**
 
 ```
-uv run ruff check packages/evercore-core/
-uv run ruff format --check packages/evercore-core/
-uv run mypy packages/evercore-core/
-uv run pyright packages/evercore-core/
+uv run ruff check packages/everalgo-core/
+uv run ruff format --check packages/everalgo-core/
+uv run mypy packages/everalgo-core/
+uv run pyright packages/everalgo-core/
 ```
 
 Expected: all green (no new errors compared to sub-project 1 baseline).
@@ -226,7 +226,7 @@ Expected: all green (no new errors compared to sub-project 1 baseline).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/types.py packages/evercore-core/tests/llm/test_types.py
+git add packages/everalgo-core/src/everalgo/llm/types.py packages/everalgo-core/tests/llm/test_types.py
 git commit -m "✨ feat(llm): add ChatMessage type (Literal role, extra=ignore)"
 ```
 
@@ -235,13 +235,13 @@ git commit -m "✨ feat(llm): add ChatMessage type (Literal role, extra=ignore)"
 ## Task 2: Usage type
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/llm/types.py` (extend with Usage class)
-- Modify: `packages/evercore-core/tests/llm/test_types.py` (extend with Usage tests)
+- Modify: `packages/everalgo-core/src/everalgo/llm/types.py` (extend with Usage class)
+- Modify: `packages/everalgo-core/tests/llm/test_types.py` (extend with Usage tests)
 
 - [ ] **Step 1: Append failing tests to test_types.py**
 
 ```python
-from evercore.llm.types import Usage
+from everalgo.llm.types import Usage
 
 
 def test_usage_default_fields_are_none() -> None:
@@ -268,7 +268,7 @@ def test_usage_partial_values_allowed() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_types.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_types.py -v`
 
 Expected: 3 new FAIL — `ImportError: cannot import name 'Usage'`. The 6 ChatMessage tests still PASS.
 
@@ -289,14 +289,14 @@ class Usage(BaseModel):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_types.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_types.py -v`
 
 Expected: 9 PASS (6 ChatMessage + 3 Usage)。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/types.py packages/evercore-core/tests/llm/test_types.py
+git add packages/everalgo-core/src/everalgo/llm/types.py packages/everalgo-core/tests/llm/test_types.py
 git commit -m "✨ feat(llm): add Usage type (Optional int fields for missing-vs-zero)"
 ```
 
@@ -305,13 +305,13 @@ git commit -m "✨ feat(llm): add Usage type (Optional int fields for missing-vs
 ## Task 3: ChatResponse type
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/llm/types.py` (extend with ChatResponse)
-- Modify: `packages/evercore-core/tests/llm/test_types.py` (extend with ChatResponse tests)
+- Modify: `packages/everalgo-core/src/everalgo/llm/types.py` (extend with ChatResponse)
+- Modify: `packages/everalgo-core/tests/llm/test_types.py` (extend with ChatResponse tests)
 
 - [ ] **Step 1: Append failing tests**
 
 ```python
-from evercore.llm.types import ChatResponse
+from everalgo.llm.types import ChatResponse
 
 
 def test_chat_response_minimum_required_fields() -> None:
@@ -370,7 +370,7 @@ def test_chat_response_json_round_trip_with_nested_usage() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_types.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_types.py -v`
 
 Expected: 7 new FAIL — `ImportError: cannot import name 'ChatResponse'`. The 9 existing tests still PASS.
 
@@ -398,14 +398,14 @@ class ChatResponse(BaseModel):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_types.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_types.py -v`
 
 Expected: 16 PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/types.py packages/evercore-core/tests/llm/test_types.py
+git add packages/everalgo-core/src/everalgo/llm/types.py packages/everalgo-core/tests/llm/test_types.py
 git commit -m "✨ feat(llm): add ChatResponse type (3-value finish_reason Literal)"
 ```
 
@@ -414,20 +414,20 @@ git commit -m "✨ feat(llm): add ChatResponse type (3-value finish_reason Liter
 ## Task 4: LLMConfig with SecretStr api_key
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/llm/config.py`
-- Create: `packages/evercore-core/tests/llm/test_config.py`
+- Create: `packages/everalgo-core/src/everalgo/llm/config.py`
+- Create: `packages/everalgo-core/tests/llm/test_config.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `packages/evercore-core/tests/llm/test_config.py`:
+Create `packages/everalgo-core/tests/llm/test_config.py`:
 
 ```python
-"""Tests for evercore.llm.config.LLMConfig."""
+"""Tests for everalgo.llm.config.LLMConfig."""
 
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from evercore.llm.config import LLMConfig
+from everalgo.llm.config import LLMConfig
 
 
 def test_llm_config_minimum_required_fields() -> None:
@@ -492,13 +492,13 @@ def test_llm_config_extra_dict_field_default_is_empty() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_config.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_config.py -v`
 
-Expected: 9 FAIL — `ModuleNotFoundError: No module named 'evercore.llm.config'`.
+Expected: 9 FAIL — `ModuleNotFoundError: No module named 'everalgo.llm.config'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/evercore-core/src/evercore/llm/config.py`:
+Create `packages/everalgo-core/src/everalgo/llm/config.py`:
 
 ```python
 """LLM client configuration."""
@@ -535,14 +535,14 @@ class LLMConfig(BaseModel):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_config.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_config.py -v`
 
 Expected: 9 PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/config.py packages/evercore-core/tests/llm/test_config.py
+git add packages/everalgo-core/src/everalgo/llm/config.py packages/everalgo-core/tests/llm/test_config.py
 git commit -m "✨ feat(llm): add LLMConfig with SecretStr api_key"
 ```
 
@@ -551,19 +551,19 @@ git commit -m "✨ feat(llm): add LLMConfig with SecretStr api_key"
 ## Task 5: LLMError single base class
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/llm/errors.py`
-- Create: `packages/evercore-core/tests/llm/test_errors.py`
+- Create: `packages/everalgo-core/src/everalgo/llm/errors.py`
+- Create: `packages/everalgo-core/tests/llm/test_errors.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `packages/evercore-core/tests/llm/test_errors.py`:
+Create `packages/everalgo-core/tests/llm/test_errors.py`:
 
 ```python
-"""Tests for evercore.llm.errors.LLMError."""
+"""Tests for everalgo.llm.errors.LLMError."""
 
 import pytest
 
-from evercore.llm.errors import LLMError
+from everalgo.llm.errors import LLMError
 
 
 def test_llm_error_is_exception_subclass() -> None:
@@ -594,13 +594,13 @@ def test_llm_error_chains_cause_via_pep_3134() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_errors.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_errors.py -v`
 
-Expected: 3 FAIL — `ModuleNotFoundError: No module named 'evercore.llm.errors'`.
+Expected: 3 FAIL — `ModuleNotFoundError: No module named 'everalgo.llm.errors'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/evercore-core/src/evercore/llm/errors.py`:
+Create `packages/everalgo-core/src/everalgo/llm/errors.py`:
 
 ```python
 """LLM-layer error types — minimal single-base set."""
@@ -625,14 +625,14 @@ class LLMError(Exception):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_errors.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_errors.py -v`
 
 Expected: 3 PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/errors.py packages/evercore-core/tests/llm/test_errors.py
+git add packages/everalgo-core/src/everalgo/llm/errors.py packages/everalgo-core/tests/llm/test_errors.py
 git commit -m "✨ feat(llm): add LLMError single-base class"
 ```
 
@@ -641,20 +641,20 @@ git commit -m "✨ feat(llm): add LLMError single-base class"
 ## Task 6: LLMClient Protocol
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/llm/protocols.py`
-- Create: `packages/evercore-core/tests/llm/test_protocols.py`
+- Create: `packages/everalgo-core/src/everalgo/llm/protocols.py`
+- Create: `packages/everalgo-core/tests/llm/test_protocols.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `packages/evercore-core/tests/llm/test_protocols.py`:
+Create `packages/everalgo-core/tests/llm/test_protocols.py`:
 
 ```python
-"""Tests for evercore.llm.protocols.LLMClient — structural conformance."""
+"""Tests for everalgo.llm.protocols.LLMClient — structural conformance."""
 
 from typing import Any
 
-from evercore.llm.protocols import LLMClient
-from evercore.llm.types import ChatMessage, ChatResponse
+from everalgo.llm.protocols import LLMClient
+from everalgo.llm.types import ChatMessage, ChatResponse
 
 
 class _ConformingClient:
@@ -699,13 +699,13 @@ def test_protocol_is_runtime_checkable() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_protocols.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_protocols.py -v`
 
-Expected: 3 FAIL — `ModuleNotFoundError: No module named 'evercore.llm.protocols'`.
+Expected: 3 FAIL — `ModuleNotFoundError: No module named 'everalgo.llm.protocols'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/evercore-core/src/evercore/llm/protocols.py`:
+Create `packages/everalgo-core/src/everalgo/llm/protocols.py`:
 
 ```python
 """LLM client Protocol — the structural contract every provider satisfies."""
@@ -713,7 +713,7 @@ Create `packages/evercore-core/src/evercore/llm/protocols.py`:
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from evercore.llm.types import ChatMessage, ChatResponse
+from everalgo.llm.types import ChatMessage, ChatResponse
 
 
 @runtime_checkable
@@ -759,14 +759,14 @@ class LLMClient(Protocol):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_protocols.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_protocols.py -v`
 
 Expected: 3 PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/protocols.py packages/evercore-core/tests/llm/test_protocols.py
+git add packages/everalgo-core/src/everalgo/llm/protocols.py packages/everalgo-core/tests/llm/test_protocols.py
 git commit -m "✨ feat(llm): add LLMClient @runtime_checkable Protocol"
 ```
 
@@ -775,16 +775,16 @@ git commit -m "✨ feat(llm): add LLMClient @runtime_checkable Protocol"
 ## Task 7: OpenAICompatClient (provider implementation)
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/llm/providers/__init__.py`
-- Create: `packages/evercore-core/src/evercore/llm/providers/openai_compat.py`
-- Create: `packages/evercore-core/tests/llm/providers/test_openai_compat.py`
+- Create: `packages/everalgo-core/src/everalgo/llm/providers/__init__.py`
+- Create: `packages/everalgo-core/src/everalgo/llm/providers/openai_compat.py`
+- Create: `packages/everalgo-core/tests/llm/providers/test_openai_compat.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `packages/evercore-core/tests/llm/providers/test_openai_compat.py`:
+Create `packages/everalgo-core/tests/llm/providers/test_openai_compat.py`:
 
 ```python
-"""Tests for evercore.llm.providers.openai_compat.OpenAICompatClient."""
+"""Tests for everalgo.llm.providers.openai_compat.OpenAICompatClient."""
 
 import json
 
@@ -792,10 +792,10 @@ import httpx
 import pytest
 import respx
 
-from evercore.llm.config import LLMConfig
-from evercore.llm.errors import LLMError
-from evercore.llm.providers.openai_compat import OpenAICompatClient
-from evercore.llm.types import ChatMessage, ChatResponse
+from everalgo.llm.config import LLMConfig
+from everalgo.llm.errors import LLMError
+from everalgo.llm.providers.openai_compat import OpenAICompatClient
+from everalgo.llm.types import ChatMessage, ChatResponse
 
 
 def _build_config(**overrides: object) -> LLMConfig:
@@ -930,17 +930,17 @@ async def test_openai_compat_client_normalises_unknown_finish_reason(
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/providers/test_openai_compat.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/providers/test_openai_compat.py -v`
 
-Expected: 5 FAIL — `ModuleNotFoundError: No module named 'evercore.llm.providers.openai_compat'`.
+Expected: 5 FAIL — `ModuleNotFoundError: No module named 'everalgo.llm.providers.openai_compat'`.
 
 - [ ] **Step 3: Create empty providers package marker**
 
-Create `packages/evercore-core/src/evercore/llm/providers/__init__.py` (empty file).
+Create `packages/everalgo-core/src/everalgo/llm/providers/__init__.py` (empty file).
 
 - [ ] **Step 4: Write minimal implementation**
 
-Create `packages/evercore-core/src/evercore/llm/providers/openai_compat.py`:
+Create `packages/everalgo-core/src/everalgo/llm/providers/openai_compat.py`:
 
 ```python
 """OpenAI-compatible provider — wraps openai.AsyncOpenAI."""
@@ -950,15 +950,15 @@ from typing import Any
 
 import openai
 
-from evercore.llm.config import LLMConfig
-from evercore.llm.errors import LLMError
-from evercore.llm.types import ChatMessage, ChatResponse, Usage
+from everalgo.llm.config import LLMConfig
+from everalgo.llm.errors import LLMError
+from everalgo.llm.types import ChatMessage, ChatResponse, Usage
 
 
 class OpenAICompatClient:
     """Thin async wrapper over ``openai.AsyncOpenAI``.
 
-    Single-purpose: convert between EverCore's ``ChatMessage`` / ``ChatResponse``
+    Single-purpose: convert between EverAlgo's ``ChatMessage`` / ``ChatResponse``
     types and the openai SDK's native dict / object shapes. No retry layer,
     no rate-limit logic, no multi-key rotation — those are caller / deployment
     concerns (matching opensource ``OpenAIProvider`` simplicity, not
@@ -1026,7 +1026,7 @@ class OpenAICompatClient:
 
 
 def _normalise_finish_reason(value: str | None) -> str | None:
-    """Collapse provider finish reasons to EverCore's 3-value Literal subset.
+    """Collapse provider finish reasons to EverAlgo's 3-value Literal subset.
 
     EPISODE path treats ``tool_calls`` / ``function_call`` as out-of-scope
     (no tools wired); when a provider unexpectedly emits one the response is
@@ -1039,17 +1039,17 @@ def _normalise_finish_reason(value: str | None) -> str | None:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/providers/test_openai_compat.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/providers/test_openai_compat.py -v`
 
 Expected: 5 PASS。
 
 - [ ] **Step 6: Run all quality gates**
 
 ```
-uv run ruff check packages/evercore-core/
-uv run ruff format --check packages/evercore-core/
-uv run mypy packages/evercore-core/
-uv run pyright packages/evercore-core/
+uv run ruff check packages/everalgo-core/
+uv run ruff format --check packages/everalgo-core/
+uv run mypy packages/everalgo-core/
+uv run pyright packages/everalgo-core/
 ```
 
 Expected: all green.
@@ -1057,7 +1057,7 @@ Expected: all green.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/providers/__init__.py packages/evercore-core/src/evercore/llm/providers/openai_compat.py packages/evercore-core/tests/llm/providers/test_openai_compat.py
+git add packages/everalgo-core/src/everalgo/llm/providers/__init__.py packages/everalgo-core/src/everalgo/llm/providers/openai_compat.py packages/everalgo-core/tests/llm/providers/test_openai_compat.py
 git commit -m "✨ feat(llm): add OpenAICompatClient (thin wrap over openai.AsyncOpenAI)"
 ```
 
@@ -1066,22 +1066,22 @@ git commit -m "✨ feat(llm): add OpenAICompatClient (thin wrap over openai.Asyn
 ## Task 8: build_client factory + lazy import test
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/llm/factory.py`
-- Create: `packages/evercore-core/tests/llm/test_factory.py`
+- Create: `packages/everalgo-core/src/everalgo/llm/factory.py`
+- Create: `packages/everalgo-core/tests/llm/test_factory.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `packages/evercore-core/tests/llm/test_factory.py`:
+Create `packages/everalgo-core/tests/llm/test_factory.py`:
 
 ```python
-"""Tests for evercore.llm.factory.build_client."""
+"""Tests for everalgo.llm.factory.build_client."""
 
 import importlib
 import sys
 
-from evercore.llm.config import LLMConfig
-from evercore.llm.factory import build_client
-from evercore.llm.protocols import LLMClient
+from everalgo.llm.config import LLMConfig
+from everalgo.llm.factory import build_client
+from everalgo.llm.protocols import LLMClient
 
 
 def _config() -> LLMConfig:
@@ -1097,94 +1097,94 @@ def test_build_client_returns_llm_client_instance() -> None:
 
 def test_build_client_returns_openai_compat_client() -> None:
     """Without a provider field on LLMConfig the only target is openai_compat."""
-    from evercore.llm.providers.openai_compat import OpenAICompatClient
+    from everalgo.llm.providers.openai_compat import OpenAICompatClient
 
     client = build_client(_config())
     assert isinstance(client, OpenAICompatClient)
 
 
 def test_factory_module_does_not_import_provider_eagerly() -> None:
-    """``import evercore.llm.factory`` must not pull openai_compat into sys.modules.
+    """``import everalgo.llm.factory`` must not pull openai_compat into sys.modules.
 
     The lazy import inside ``build_client`` is load-bearing for cold-start
     cost; this test is a regression guard against a maintainer "fixing" it
     by hoisting the import to the top of the module.
     """
-    # Force a clean reload of evercore.llm.factory.
-    sys.modules.pop("evercore.llm.factory", None)
-    sys.modules.pop("evercore.llm.providers.openai_compat", None)
+    # Force a clean reload of everalgo.llm.factory.
+    sys.modules.pop("everalgo.llm.factory", None)
+    sys.modules.pop("everalgo.llm.providers.openai_compat", None)
 
-    importlib.import_module("evercore.llm.factory")
+    importlib.import_module("everalgo.llm.factory")
 
-    assert "evercore.llm.factory" in sys.modules
-    assert "evercore.llm.providers.openai_compat" not in sys.modules, (
-        "evercore.llm.factory must not import openai_compat at import time"
+    assert "everalgo.llm.factory" in sys.modules
+    assert "everalgo.llm.providers.openai_compat" not in sys.modules, (
+        "everalgo.llm.factory must not import openai_compat at import time"
     )
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_factory.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_factory.py -v`
 
-Expected: 3 FAIL — `ModuleNotFoundError: No module named 'evercore.llm.factory'`.
+Expected: 3 FAIL — `ModuleNotFoundError: No module named 'everalgo.llm.factory'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/evercore-core/src/evercore/llm/factory.py`:
+Create `packages/everalgo-core/src/everalgo/llm/factory.py`:
 
 ```python
 """Factory for building an LLM client from configuration."""
 
-from evercore.llm.config import LLMConfig
-from evercore.llm.protocols import LLMClient
+from everalgo.llm.config import LLMConfig
+from everalgo.llm.protocols import LLMClient
 
 
 def build_client(config: LLMConfig) -> LLMClient:
     """Build an OpenAI-compatible LLM client from ``config``.
 
     Implementation note: ``OpenAICompatClient`` is imported lazily inside the
-    function body so that ``evercore.llm.factory`` itself does not pull the
-    ``openai`` SDK at import time. This keeps ``import evercore.llm`` cheap
+    function body so that ``everalgo.llm.factory`` itself does not pull the
+    ``openai`` SDK at import time. This keeps ``import everalgo.llm`` cheap
     for callers that only need the Protocol / Config / Error types and never
     call ``build_client``. Maintainers — please do **not** "optimise" this
     into a top-level import; the laziness is load-bearing.
     """
-    from evercore.llm.providers.openai_compat import OpenAICompatClient
+    from everalgo.llm.providers.openai_compat import OpenAICompatClient
 
     return OpenAICompatClient(config)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_factory.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_factory.py -v`
 
 Expected: 3 PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/factory.py packages/evercore-core/tests/llm/test_factory.py
+git add packages/everalgo-core/src/everalgo/llm/factory.py packages/everalgo-core/tests/llm/test_factory.py
 git commit -m "✨ feat(llm): add build_client factory with lazy provider import"
 ```
 
 ---
 
-## Task 9: evercore.llm.__init__.py — re-export 7 public symbols
+## Task 9: everalgo.llm.__init__.py — re-export 7 public symbols
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/llm/__init__.py` (replace placeholder)
-- Create: `packages/evercore-core/tests/llm/test_public_api.py`
+- Modify: `packages/everalgo-core/src/everalgo/llm/__init__.py` (replace placeholder)
+- Create: `packages/everalgo-core/tests/llm/test_public_api.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/evercore-core/tests/llm/test_public_api.py`:
+Create `packages/everalgo-core/tests/llm/test_public_api.py`:
 
 ```python
-"""Tests for the evercore.llm public API surface."""
+"""Tests for the everalgo.llm public API surface."""
 
 
 def test_top_level_exports_are_seven_named_symbols() -> None:
-    from evercore.llm import __all__
+    from everalgo.llm import __all__
 
     assert sorted(__all__) == sorted(
         [
@@ -1200,7 +1200,7 @@ def test_top_level_exports_are_seven_named_symbols() -> None:
 
 
 def test_top_level_imports_resolve() -> None:
-    from evercore.llm import (
+    from everalgo.llm import (
         ChatMessage,
         ChatResponse,
         LLMClient,
@@ -1221,13 +1221,13 @@ def test_top_level_imports_resolve() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_public_api.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_public_api.py -v`
 
-Expected: 2 FAIL — `ImportError: cannot import name 'LLMClient' from 'evercore.llm'` (or similar), because `__init__.py` is still the placeholder `__all__: list[str] = []`.
+Expected: 2 FAIL — `ImportError: cannot import name 'LLMClient' from 'everalgo.llm'` (or similar), because `__init__.py` is still the placeholder `__all__: list[str] = []`.
 
 - [ ] **Step 3: Replace `__init__.py`**
 
-Replace ALL content of `packages/evercore-core/src/evercore/llm/__init__.py` with:
+Replace ALL content of `packages/everalgo-core/src/everalgo/llm/__init__.py` with:
 
 ```python
 """LLM facade — chat-style abstraction over OpenAI-compatible providers.
@@ -1240,11 +1240,11 @@ Public surface (7 symbols, alphabetical-by-category):
 - factory:   build_client
 """
 
-from evercore.llm.config import LLMConfig
-from evercore.llm.errors import LLMError
-from evercore.llm.factory import build_client
-from evercore.llm.protocols import LLMClient
-from evercore.llm.types import ChatMessage, ChatResponse, Usage
+from everalgo.llm.config import LLMConfig
+from everalgo.llm.errors import LLMError
+from everalgo.llm.factory import build_client
+from everalgo.llm.protocols import LLMClient
+from everalgo.llm.types import ChatMessage, ChatResponse, Usage
 
 __all__ = [
     "LLMClient",
@@ -1259,21 +1259,21 @@ __all__ = [
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest packages/evercore-core/tests/llm/test_public_api.py -v`
+Run: `uv run pytest packages/everalgo-core/tests/llm/test_public_api.py -v`
 
 Expected: 2 PASS。
 
 - [ ] **Step 5: Verify smoke-import command from spec**
 
-Run: `uv run python -c "from evercore.llm import LLMClient, LLMConfig, LLMError, ChatMessage, ChatResponse, Usage, build_client; print('OK')"`
+Run: `uv run python -c "from everalgo.llm import LLMClient, LLMConfig, LLMError, ChatMessage, ChatResponse, Usage, build_client; print('OK')"`
 
 Expected: `OK`。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/llm/__init__.py packages/evercore-core/tests/llm/test_public_api.py
-git commit -m "✨ feat(llm): re-export 7 public symbols at evercore.llm top level"
+git add packages/everalgo-core/src/everalgo/llm/__init__.py packages/everalgo-core/tests/llm/test_public_api.py
+git commit -m "✨ feat(llm): re-export 7 public symbols at everalgo.llm top level"
 ```
 
 ---
@@ -1290,37 +1290,37 @@ Expected: 无 error；含 openai 与其传递依赖。
 
 - [ ] **Step 2: 顶层 import smoke**
 
-Run: `uv run python -c "from evercore.llm import LLMClient, LLMConfig, LLMError, ChatMessage, ChatResponse, Usage, build_client; print('OK')"`
+Run: `uv run python -c "from everalgo.llm import LLMClient, LLMConfig, LLMError, ChatMessage, ChatResponse, Usage, build_client; print('OK')"`
 
 Expected: `OK`。
 
-- [ ] **Step 3: 跑全 evercore-core 测试**
+- [ ] **Step 3: 跑全 everalgo-core 测试**
 
-Run: `uv run pytest packages/evercore-core/tests/ -v`
+Run: `uv run pytest packages/everalgo-core/tests/ -v`
 
 Expected: 全绿，总数 ≈ 41 (sub-project 1) + 38 (sub-project 2: 16 types + 9 config + 3 errors + 3 protocols + 5 openai_compat + 3 factory + 2 public_api - 3 reused base counts) ≈ ~75 tests pass。具体数随 fixture 行为可能 ±2，**0 FAIL / 0 ERROR 是硬约束**。
 
 - [ ] **Step 4: ruff check**
 
-Run: `uv run ruff check packages/evercore-core/`
+Run: `uv run ruff check packages/everalgo-core/`
 
 Expected: `All checks passed!`。
 
 - [ ] **Step 5: ruff format check**
 
-Run: `uv run ruff format --check packages/evercore-core/`
+Run: `uv run ruff format --check packages/everalgo-core/`
 
-Expected: 无 diff。若有 diff，跑 `uv run ruff format packages/evercore-core/` 然后新增 `🎨 style` commit。
+Expected: 无 diff。若有 diff，跑 `uv run ruff format packages/everalgo-core/` 然后新增 `🎨 style` commit。
 
 - [ ] **Step 6: mypy strict**
 
-Run: `uv run mypy packages/evercore-core/`
+Run: `uv run mypy packages/everalgo-core/`
 
 Expected: `Success: no issues found in N source files`。若有 strict-mode 报错，按子项目 1 的 `# type: ignore` 模式针对性处理 + commit `🔧 fix(types)`。
 
 - [ ] **Step 7: pyright**
 
-Run: `uv run pyright packages/evercore-core/`
+Run: `uv run pyright packages/everalgo-core/`
 
 Expected: `0 errors`。
 
@@ -1336,7 +1336,7 @@ Run:
 
 ```bash
 uv run python -c "
-from evercore.llm import LLMConfig
+from everalgo.llm import LLMConfig
 cfg = LLMConfig(model='gpt-4o-mini', api_key='sk-real-secret', base_url='https://api.openai.com/v1')
 print('repr:', repr(cfg))
 print('dump_json:', cfg.model_dump_json())
@@ -1356,7 +1356,7 @@ Run:
 ```bash
 uv run python -c "
 import asyncio
-from evercore.llm import build_client, LLMConfig, ChatMessage
+from everalgo.llm import build_client, LLMConfig, ChatMessage
 
 async def main():
     cfg = LLMConfig(

@@ -6,12 +6,12 @@
 
 ## 背景
 
-EverCore 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉及网络 I/O（LLM 调用 / 外部解析服务）。这些算子的同步/异步接口形态决定用户使用方式。
+EverAlgo 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉及网络 I/O（LLM 调用 / 外部解析服务）。这些算子的同步/异步接口形态决定用户使用方式。
 
 相关硬约束：
 - **H3** 算法同学迭代速度（Jupyter Notebook / 简单脚本场景偏 sync）
 - **EverOS 集成场景**：FastAPI / Hertz 异步服务（强需要 async）
-- **算法库 vs SDK 阵营**：EverCore 是算法库（[ADR 008](008-re-export-vs-client-facade.md)），不持跨调用状态
+- **算法库 vs SDK 阵营**：EverAlgo 是算法库（[ADR 008](008-re-export-vs-client-facade.md)），不持跨调用状态
 
 ## 候选方案
 
@@ -40,7 +40,7 @@ EverCore 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉
 |------|------|
 | 维护双倍代码 | 每个算子两份签名，**但**有标准实现技巧降本（基类派生 / `asgiref.sync` 等）|
 | API 表面 +1 倍 | docstring / type stub / mypy 配置都翻倍 |
-| 命名约定需团队统一 | 是 `aextract` / `extract_async` / `AsyncEverCoreClient` 风格之一，需确定 |
+| 命名约定需团队统一 | 是 `aextract` / `extract_async` / `AsyncEverAlgoClient` 风格之一，需确定 |
 
 ### B. async-only 优势
 
@@ -75,9 +75,9 @@ EverCore 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉
 - 实施复杂度高，调试痛苦
 - mypy / IDE 推断不友好
 
-## 对 EverCore 适配度评估
+## 对 EverAlgo 适配度评估
 
-### A 优势对 EverCore 的适配度
+### A 优势对 EverAlgo 的适配度
 
 | 优势 | 适配度 |
 |------|--------|
@@ -87,7 +87,7 @@ EverCore 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉
 | 性能最优 | ✅ 受益 |
 | 用户心智成本低 | ✅ **强需要**（H3 算法同学迭代速度）|
 
-### A 劣势对 EverCore 的适配度
+### A 劣势对 EverAlgo 的适配度
 
 | 劣势 | 适配度 |
 |------|--------|
@@ -95,7 +95,7 @@ EverCore 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉
 | API 表面 +1 倍 | ⚠️ 不在意（docstring 重复可机器生成） |
 | 命名约定需统一 | ⚠️ 可 mitigate（约定 `a` 前缀，与 litellm / llama-index / langchain 一致）|
 
-### B 劣势对 EverCore 的适配度
+### B 劣势对 EverAlgo 的适配度
 
 | 劣势 | 适配度 |
 |------|--------|
@@ -124,7 +124,7 @@ D：非主流 + 实施复杂 → 排除（除非未来生态主流转向）
 
 ### 决定性约束：主用户 EverOS = FastAPI 异步服务
 
-EverCore 的**主用户是 EverOS**——基于 FastAPI 开发的记忆服务，handler 全部 `async def`。这意味着：
+EverAlgo 的**主用户是 EverOS**——基于 FastAPI 开发的记忆服务，handler 全部 `async def`。这意味着：
 
 - **async 接口是主战场**——EverOS 100% 走 async 调用，sync 调用阻塞 event loop 会拖累整个 FastAPI 实例
 - **async 接口必须 native async**——不能 thread pool wrap（详见下文性能分析）
@@ -144,7 +144,7 @@ EverCore 的**主用户是 EverOS**——基于 FastAPI 开发的记忆服务，
 | **redis-py** | 双类 | `redis.Redis` + `redis.asyncio.Redis` 独立模块 |
 | **SQLAlchemy 2.0** | 单实现 | **greenlet-based async over sync**（独特方案）|
 
-**两条命名路线**：双类（持状态客户端）vs 双方法（无状态算子）。EverCore 是算法库（[ADR 008](008-re-export-vs-client-facade.md)），归**双方法**路线。
+**两条命名路线**：双类（持状态客户端）vs 双方法（无状态算子）。EverAlgo 是算法库（[ADR 008](008-re-export-vs-client-facade.md)），归**双方法**路线。
 
 ### 实施细节 3 选 1 评估
 
@@ -167,7 +167,7 @@ EverOS FastAPI 场景（100 QPS / LLM 1 秒延迟）：
 
 调大 thread pool（如 1000）虽可扩并发，但每 thread 内核栈 8MB+ → 1000 thread 占 8GB；context switch overhead 累加显著。**native async 单 thread 跑数千 await 是工业界标准**。
 
-**B3 不适配 EverCore 主用户 FastAPI** → 排除。
+**B3 不适配 EverAlgo 主用户 FastAPI** → 排除。
 
 ### B1 vs B2：覆盖范围 vs 维护成本权衡
 
@@ -191,22 +191,22 @@ EverOS FastAPI 场景（100 QPS / LLM 1 秒延迟）：
 
 文档须明示约定：
 
-> `evercore.<X>.extract(...)` sync 接口仅限**非 event loop 环境**调用（CLI 脚本 / 单元测试）。
-> Jupyter / FastAPI / 任何 `async def` 上下文用 `evercore.<X>.aextract(...)` 配合 `await`。
+> `everalgo.<X>.extract(...)` sync 接口仅限**非 event loop 环境**调用（CLI 脚本 / 单元测试）。
+> Jupyter / FastAPI / 任何 `async def` 上下文用 `everalgo.<X>.aextract(...)` 配合 `await`。
 
 与 litellm `acompletion()` / dspy 等同样的约定。
 
 ### 实施样例
 
 ```python
-# evercore-user-memory: evercore/user_memory/episode.py
+# everalgo-user-memory: everalgo/user_memory/episode.py
 from asgiref.sync import async_to_sync
 
 class EpisodeExtractor:
     async def aextract(self, memcell: MemCell) -> list[Episode]:
         """async 主实现（单一真实代码）"""
-        prompt = await evercore.prompts.arender("episode", memcell=memcell)
-        response = await evercore.llm.acomplete(prompt, scene="episode")
+        prompt = await everalgo.prompts.arender("episode", memcell=memcell)
+        response = await everalgo.llm.acomplete(prompt, scene="episode")
         return _parse_episodes(response)
 
     extract = async_to_sync(aextract)  # 自动派生 sync 桥接
@@ -216,7 +216,7 @@ class EpisodeExtractor:
 或基类抽象（多算子统一）：
 
 ```python
-# evercore-core: evercore/_dual_interface.py
+# everalgo-core: everalgo/_dual_interface.py
 from asgiref.sync import async_to_sync
 
 class DualInterface:
@@ -239,7 +239,7 @@ class EpisodeExtractor(DualInterface):
 
 若以下任一发生，重新评估：
 
-1. **Jupyter 在 EverCore 用户群占比超 30%**（且不能强制要求用 `await`）→ B1 让 Jupyter 也能 sync 调
+1. **Jupyter 在 EverAlgo 用户群占比超 30%**（且不能强制要求用 `await`）→ B1 让 Jupyter 也能 sync 调
 2. **某算子 sync / async 业务逻辑路径有显著差异**（如 sync 走批 sync HTTP / async 走流式）→ 该算子改 B1
 3. **asgiref 出现兼容性问题** → 切回 B1
 
@@ -274,7 +274,7 @@ class EpisodeExtractor(DualInterface):
 
 **唯一反例 langchain 的特殊原因**：LCEL chain 要求所有 Runnable 节点统一 `invoke / ainvoke` 接口——一个 chain 由 `prompt | llm | parser` 组成，整 chain 用统一 `await chain.ainvoke(...)` 调用。若纯计算节点不提供 ainvoke，整 chain 就不能 async 链式调用。代价是 langchain 纯计算节点的 `ainvoke` 默认通过 `run_in_executor` 派生（B3 模式 thread pool overhead）—— langchain 接受性能代价换 chain 接口统一。
 
-**EverCore 非 chain 框架，无 langchain 那种统一性需求**：算子被 EverOS 直接单调用（`await ranker.arank(...)` + 后处理一次 `rank.fusion.rrf(...)`），纯计算算子是辅助函数在 async 上下文直接 sync 调用，不嵌入 async chain。按非 chain 框架的 8 家主流惯例（numpy/pandas/.../OpenAI SDK/httpx）选 sync only。
+**EverAlgo 非 chain 框架，无 langchain 那种统一性需求**：算子被 EverOS 直接单调用（`await ranker.arank(...)` + 后处理一次 `rank.fusion.rrf(...)`），纯计算算子是辅助函数在 async 上下文直接 sync 调用，不嵌入 async chain。按非 chain 框架的 8 家主流惯例（numpy/pandas/.../OpenAI SDK/httpx）选 sync only。
 
 **社区共识精确表述**：
 - **asyncio 为 I/O-bound 设计**，CPU-bound 写 `def` 不写 `async def`
@@ -291,17 +291,17 @@ class EpisodeExtractor(DualInterface):
 | **10-100ms**（如批量 100 项 cosine、小型聚类）| ⚠️ 边缘 | 高 QPS 场景累计阻塞需关注 |
 | **> 100ms**（如大批量 1000+ 向量相似度、大模型 inference、复杂聚类）| ❌ 不安全 | 阻塞 event loop 导致并发请求排队，需 `run_in_executor` / `ProcessPoolExecutor` 隔离 |
 
-EverCore 当前纯计算算子（`fusion.rrf` / `_tokenize` / 单 `cosine`）都在 ≤ 10ms 量级，sync 直接调用安全。
+EverAlgo 当前纯计算算子（`fusion.rrf` / `_tokenize` / 单 `cosine`）都在 ≤ 10ms 量级，sync 直接调用安全。
 
 **未来若新增重计算算子**（batch 1000+ 向量 cosine、大规模聚类等）：保持 sync `def` API 形态不变，由 caller（EverOS）决定是否 `await loop.run_in_executor(executor, op, ...)` 包装隔离。**不推荐**把重计算改写为 `async def` 内部写 sync 阻塞——这是 anti-pattern，违反 Python 官方 asyncio-dev 警告。
 
 ## 行业实证印证
 
-WebFetch 2026-04-23 核验 9 个明星项目（见上表「实施模式实证」）。**100% 都提供双接口，无反例**。EverCore 在双方法路线 + B2 实施细节，与现代 Python AI 库主流惯例一致。
+WebFetch 2026-04-23 核验 9 个明星项目（见上表「实施模式实证」）。**100% 都提供双接口，无反例**。EverAlgo 在双方法路线 + B2 实施细节，与现代 Python AI 库主流惯例一致。
 
 特别关键的两条桥接库实证：
 - **`asgiref.async_to_sync` 源码** github.com/django/asgiref `sync.py`：`"You cannot use AsyncToSync in the same thread as an async event loop"` — 明确不允许 event loop 内调用，本 ADR 据此定 sync 接口边界
-- **langchain Runnable** github.com/langchain-ai/langchain `libs/core/.../runnables/base.py`：默认 `ainvoke` 调 `run_in_executor` 包装 sync `invoke` —— 是 B3 模式实证，但不适配 EverCore FastAPI 主战场
+- **langchain Runnable** github.com/langchain-ai/langchain `libs/core/.../runnables/base.py`：默认 `ainvoke` 调 `run_in_executor` 包装 sync `invoke` —— 是 B3 模式实证，但不适配 EverAlgo FastAPI 主战场
 
 ## 后续演化触发条件
 
@@ -311,5 +311,5 @@ WebFetch 2026-04-23 核验 9 个明星项目（见上表「实施模式实证」
 
 ## 相关 ADR
 
-- [ADR 008 re-export 式 facade](008-re-export-vs-client-facade.md) — 算法库 vs SDK 二分；EverCore 是算法库故不用 Client 类，但仍提供 sync/async 双接口
+- [ADR 008 re-export 式 facade](008-re-export-vs-client-facade.md) — 算法库 vs SDK 二分；EverAlgo 是算法库故不用 Client 类，但仍提供 sync/async 双接口
 - [ADR 004 LLM providers 内嵌](004-providers-nested-in-llm.md) — 各 provider 也是双接口，与 litellm `completion()/acompletion()` 模式对齐

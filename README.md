@@ -1,38 +1,38 @@
-# EverCore
+# EverAlgo
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
-EverCore is the **algorithm library** behind EverMind's memory system — stateless, dependency-free of any storage, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in EverOS.
+EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, dependency-free of any storage, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in EverOS.
 
-## Why split EverCore from EverOS?
+## Why split EverAlgo from EverOS?
 
-- **Algorithm engineers iterate fast.** EverCore is "the algorithm team's home base" — every change to extraction strategies, prompts, fusion math, ranker weights happens here without going through service-layer ceremony.
+- **Algorithm engineers iterate fast.** EverAlgo is "the algorithm team's home base" — every change to extraction strategies, prompts, fusion math, ranker weights happens here without going through service-layer ceremony.
 - **Pure functions, easy to reason about.** No DB, no filesystem, no business state. All operators are plain in-memory transforms with explicit input / output types.
-- **One codebase serves both the open-source and the commercial cloud builds.** The same `evercore.*` packages are consumed by both editions.
+- **One codebase serves both the open-source and the commercial cloud builds.** The same `everalgo.*` packages are consumed by both editions.
 
 The full architecture rationale lives in [`docs/design.md`](docs/design.md).
 
 ## Repository layout
 
-This repo is a **monorepo** of 8 publishable distributions sharing the `evercore.*` namespace via [PEP 420](https://peps.python.org/pep-0420/), managed with [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/):
+This repo is a **monorepo** of 8 publishable distributions sharing the `everalgo.*` namespace via [PEP 420](https://peps.python.org/pep-0420/), managed with [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/):
 
 | Distribution | What it provides |
 |---|---|
-| [`evercore-core`](packages/evercore-core/) | Types, LLM client + providers, prompt validators, testing helpers |
-| [`evercore-boundary`](packages/evercore-boundary/) | MemCell extractors (`Chat` / `Workspace` / `Agent`) + tokenize / split |
-| [`evercore-clustering`](packages/evercore-clustering/) | `cluster_by_geometry` / `cluster_by_llm` over `ClusterState` |
-| [`evercore-rank`](packages/evercore-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank |
-| [`evercore-parser`](packages/evercore-parser/) | Multimodal raw-file → `ParsedContent` |
-| [`evercore-user-memory`](packages/evercore-user-memory/) | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
-| [`evercore-agent-memory`](packages/evercore-agent-memory/) | `AgentCase` / `AgentSkill` extractors |
-| [`evercore-knowledge`](packages/evercore-knowledge/) | `KnowledgeMemory` extractors |
+| [`everalgo-core`](packages/everalgo-core/) | Types, LLM client + providers, prompt validators, testing helpers |
+| [`everalgo-boundary`](packages/everalgo-boundary/) | MemCell extractors (`Chat` / `Workspace` / `Agent`) + tokenize / split |
+| [`everalgo-clustering`](packages/everalgo-clustering/) | `cluster_by_geometry` / `cluster_by_llm` over `ClusterState` |
+| [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank |
+| [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` |
+| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
+| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentCase` / `AgentSkill` extractors |
+| [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeMemory` extractors |
 
 ## Quick start
 
 ```bash
-git clone git@gitlab.com:npc-work/aic/ai/evercore.git
-cd evercore
+git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
+cd everalgo
 
 uv sync --all-packages          # editable-install all 8 packages into a shared venv
 uv run pre-commit install       # register the git hook (ruff + standard sanitisers)
@@ -45,18 +45,18 @@ uv run pytest                   # run the workspace-wide test suite
 Install only what you need on the consumer side:
 
 ```bash
-pip install evercore-user-memory      # auto-pulls evercore-core + boundary + clustering
-pip install evercore-rank             # auto-pulls evercore-core
-pip install evercore-knowledge        # auto-pulls evercore-core + parser
+pip install everalgo-user-memory      # auto-pulls everalgo-core + boundary + clustering
+pip install everalgo-rank             # auto-pulls everalgo-core
+pip install everalgo-knowledge        # auto-pulls everalgo-core + parser
 ```
 
 ## Releasing
 
-Every distribution is released **independently**: each `packages/evercore-*/pyproject.toml` carries its own `version = "..."` and follows its own SemVer cadence. There is no umbrella version — bumping `evercore-rank` does not require bumping anything else. (Rationale: see [`docs/design.md`](docs/design.md) §1.3 "Why no meta package".)
+Every distribution is released **independently**: each `packages/everalgo-*/pyproject.toml` carries its own `version = "..."` and follows its own SemVer cadence. There is no umbrella version — bumping `everalgo-rank` does not require bumping anything else. (Rationale: see [`docs/design.md`](docs/design.md) §1.3 "Why no meta package".)
 
 The repo uses a **two-tier CHANGELOG** (HuggingFace transformers / accelerate pattern):
 - [`CHANGELOG.md`](CHANGELOG.md) at the root — current-version overview table.
-- `packages/evercore-<dist>/CHANGELOG.md` per distribution — full history; ships inside the wheel.
+- `packages/everalgo-<dist>/CHANGELOG.md` per distribution — full history; ships inside the wheel.
 
 Per-distribution changelogs are generated by [git-cliff](https://git-cliff.org/) from Conventional Commit messages on `main` (see [`cliff.toml`](cliff.toml) for the parser config; see [`AGENTS.md`](AGENTS.md) §6 for the commit-message contract). Manual review + polish is expected before tagging.
 
@@ -66,36 +66,36 @@ Prerequisites:
 - You have push access to the repo (most maintainers do); `main` is GitLab-protected so the only way to land a version bump is via MR with squash-merge.
 - `uv run git-cliff --version` resolves (installed via the `dev` group in the workspace `pyproject.toml`).
 
-Steps for releasing `evercore-clustering v0.2.0`:
+Steps for releasing `everalgo-clustering v0.2.0`:
 
-1. **Bump the version.** Open an MR that edits `packages/evercore-clustering/pyproject.toml`:
+1. **Bump the version.** Open an MR that edits `packages/everalgo-clustering/pyproject.toml`:
    ```toml
    version = "0.2.0"
    ```
-   MR title: `📝 docs(clustering): bump evercore-clustering to v0.2.0`. Merge to `main` via squash.
+   MR title: `📝 docs(clustering): bump everalgo-clustering to v0.2.0`. Merge to `main` via squash.
 
 2. **Pull `main`, then generate the changelog fragment.**
    ```bash
    git checkout main && git pull
    uv run git-cliff \
-     --tag evercore-clustering/v0.2.0 \
-     --include-path 'packages/evercore-clustering/**' \
+     --tag everalgo-clustering/v0.2.0 \
+     --include-path 'packages/everalgo-clustering/**' \
      --unreleased \
-     --prepend packages/evercore-clustering/CHANGELOG.md
+     --prepend packages/everalgo-clustering/CHANGELOG.md
    ```
-   This prepends a new `## [0.2.0] - <today>` section above `[Unreleased]` in the dist's CHANGELOG, populated from squash commits touching `packages/evercore-clustering/**` since the previous `evercore-clustering/v*` tag.
+   This prepends a new `## [0.2.0] - <today>` section above `[Unreleased]` in the dist's CHANGELOG, populated from squash commits touching `packages/everalgo-clustering/**` since the previous `everalgo-clustering/v*` tag.
 
-3. **Review and polish.** Open `packages/evercore-clustering/CHANGELOG.md`. Edit the auto-generated section for clarity — git-cliff gives you a draft, not a final. Re-order items by importance, tighten wording, add Breaking-Changes call-outs in plain English when needed.
+3. **Review and polish.** Open `packages/everalgo-clustering/CHANGELOG.md`. Edit the auto-generated section for clarity — git-cliff gives you a draft, not a final. Re-order items by importance, tighten wording, add Breaking-Changes call-outs in plain English when needed.
 
-4. **Update the root CHANGELOG overview.** Bump the `evercore-clustering` row in `CHANGELOG.md` (root) to the new version + today's date.
+4. **Update the root CHANGELOG overview.** Bump the `everalgo-clustering` row in `CHANGELOG.md` (root) to the new version + today's date.
 
 5. **Commit + tag + push.**
    ```bash
-   git add packages/evercore-clustering/CHANGELOG.md CHANGELOG.md
+   git add packages/everalgo-clustering/CHANGELOG.md CHANGELOG.md
    git commit -m "📝 docs(clustering): release notes for v0.2.0"
    git push origin main
-   git tag evercore-clustering/v0.2.0
-   git push origin evercore-clustering/v0.2.0
+   git tag everalgo-clustering/v0.2.0
+   git push origin everalgo-clustering/v0.2.0
    ```
 
 6. **CI publishes to PyPI.** The `.gitlab-ci.yml` build/publish stage (tracked separately — see "CI / pipeline status" below) builds the matching wheel + sdist and uploads to PyPI using `UV_PUBLISH_TOKEN`.
@@ -105,20 +105,20 @@ Steps for releasing `evercore-clustering v0.2.0`:
 Format: `<dist-name>/v<semver>`. The slash separator keeps per-distribution tags unambiguous from any future repository-wide tag, and matches the `tag_pattern` regex in `cliff.toml`:
 
 ```text
-evercore-core/v0.1.0
-evercore-rank/v0.2.0
-evercore-user-memory/v0.1.3
+everalgo-core/v0.1.0
+everalgo-rank/v0.2.0
+everalgo-user-memory/v0.1.3
 ```
 
 ### Local dry-run (no upload)
 
 ```bash
 # 1. Preview the changelog diff without writing to the file:
-uv run git-cliff --tag evercore-clustering/v0.2.0 \
-  --include-path 'packages/evercore-clustering/**' --unreleased
+uv run git-cliff --tag everalgo-clustering/v0.2.0 \
+  --include-path 'packages/everalgo-clustering/**' --unreleased
 
 # 2. Build the wheel + sdist:
-cd packages/evercore-clustering
+cd packages/everalgo-clustering
 uv build                                 # writes dist/*.whl + *.tar.gz
 
 # 3. Validate the build without uploading:
@@ -136,7 +136,7 @@ Before pushing a release tag:
 - [ ] `uv run ruff check . && uv run ruff format --check .` pass.
 - [ ] The bumped `version` honours SemVer relative to the previous tag (no breaking change in a minor / patch).
 - [ ] Downstream packages' `>=X.Y,<2.0` ranges still allow the new version.
-- [ ] The `packages/evercore-<dist>/CHANGELOG.md` section for the new version has been **reviewed and edited** — git-cliff drafts, you ship.
+- [ ] The `packages/everalgo-<dist>/CHANGELOG.md` section for the new version has been **reviewed and edited** — git-cliff drafts, you ship.
 - [ ] The root `CHANGELOG.md` table row for this distribution has been updated.
 
 ### CI / pipeline status

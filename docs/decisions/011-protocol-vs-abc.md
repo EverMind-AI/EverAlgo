@@ -6,7 +6,7 @@
 
 ## 背景
 
-EverCore 需要为以下接口定义类型契约：
+EverAlgo 需要为以下接口定义类型契约：
 - `LLMClient`（调用 LLM provider）
 - `Embedder`（向量嵌入）
 - `Reranker`（重排序）
@@ -55,7 +55,7 @@ Python 提供两种主流接口约定方式：
 | 实现类不需显式继承 | [PEP 544](https://peps.python.org/pep-0544/) 原文 "_not necessary_ to subclass explicitly" |
 | 第三方已有类自动兼容 | duck typing 的类型化版本 |
 | IDE / mypy 静态检查 | [Python typing 官方文档](https://docs.python.org/3/library/typing.html#typing.Protocol) "structural subtyping (static duck-typing)"  |
-| 实现类零 `import` 依赖 | 实现方写实现时不必 `import` EverCore 接口模块 |
+| 实现类零 `import` 依赖 | 实现方写实现时不必 `import` EverAlgo 接口模块 |
 | 符合 PEP 544 现代趋势 | Python 3.8+ 标准 |
 
 ### B. Protocol 劣势
@@ -72,9 +72,9 @@ Python 提供两种主流接口约定方式：
 
 新劣势：维护两套规范 + team 学习成本 + 边界判断分歧（"持多少状态算持状态"）
 
-## 对 EverCore 适配度评估
+## 对 EverAlgo 适配度评估
 
-### B（Protocol）优势对 EverCore 适配度
+### B（Protocol）优势对 EverAlgo 适配度
 
 | 优势 | 适配度 |
 |------|--------|
@@ -84,15 +84,15 @@ Python 提供两种主流接口约定方式：
 | 实现类零 `import` 依赖 | ✅ **强需要**（H3） |
 | 符合 PEP 544 现代趋势 | ✅ 受益 |
 
-### B 劣势对 EverCore 适配度
+### B 劣势对 EverAlgo 适配度
 
 | 劣势 | 适配度 |
 |------|--------|
 | 不能持有共用方法 | ⚠️ **不在意**（H4 算子无状态，无共用 lifecycle 方法）|
-| `isinstance` 需 `@runtime_checkable` | ⚠️ 不在意（EverCore 不依赖 `isinstance` 运行时检查）|
+| `isinstance` 需 `@runtime_checkable` | ⚠️ 不在意（EverAlgo 不依赖 `isinstance` 运行时检查）|
 | "我该实现什么" 心智模型弱 | ⚠️ 可 mitigate（docstring + 类型注解 + mypy strict 配置）|
 
-### A（ABC）优势对 EverCore 适配度
+### A（ABC）优势对 EverAlgo 适配度
 
 | 优势 | 适配度 |
 |------|--------|
@@ -101,16 +101,16 @@ Python 提供两种主流接口约定方式：
 | 共用方法（mixin）| ⚠️ **用不上**（H4 无状态）|
 | IDE 重构友好 | ⚠️ 受益（但 Protocol IDE 也支持）|
 
-### A 劣势对 EverCore 适配度
+### A 劣势对 EverAlgo 适配度
 
 | 劣势 | 适配度 |
 |------|--------|
-| 实现类必须显式继承 | ❌ **强烈介意**（H3 算法同学写 LLMClient 实现得 `import` EverCore，迭代心智成本高）|
+| 实现类必须显式继承 | ❌ **强烈介意**（H3 算法同学写 LLMClient 实现得 `import` EverAlgo，迭代心智成本高）|
 | 第三方已有类不能 retroactively 兼容 | ❌ 介意（用户已有 OpenAI wrapper 必须改继承）|
 
 ### C（混用）评估
 
-EverCore 算子全部归 H4 无状态阵营，**无任何持状态 lifecycle 接口需要 ABC**。混用引入双轨复杂度但 EverCore 无 ABC 适用场景 → 排除。
+EverAlgo 算子全部归 H4 无状态阵营，**无任何持状态 lifecycle 接口需要 ABC**。混用引入双轨复杂度但 EverAlgo 无 ABC 适用场景 → 排除。
 
 ## 决策
 
@@ -118,16 +118,16 @@ EverCore 算子全部归 H4 无状态阵营，**无任何持状态 lifecycle 接
 
 逐条统计：
 - B 强需要优势 3 条 + 受益 2 条；劣势全部不在意 / 可 mitigate
-- A 优势 EverCore 用不上 / 可 mitigate；劣势强烈介意 1 条 + 介意 1 条
+- A 优势 EverAlgo 用不上 / 可 mitigate；劣势强烈介意 1 条 + 介意 1 条
 
 ## 实施细节
 
 ```python
-# evercore/llm/_types.py
+# everalgo/llm/_types.py
 from typing import Protocol, runtime_checkable
-from evercore.llm.types import CompletionRequest, CompletionResponse
+from everalgo.llm.types import CompletionRequest, CompletionResponse
 
-@runtime_checkable  # 仅供 EverCore 内部 sanity check（如配置层验证）；用户不依赖
+@runtime_checkable  # 仅供 EverAlgo 内部 sanity check（如配置层验证）；用户不依赖
 class LLMClient(Protocol):
     """LLM 调用接口契约。实现类不需显式继承，结构匹配即兼容。"""
 
@@ -153,7 +153,7 @@ configure(MyOpenAIWrapper())  # ✅ structural match，无需继承
 
 ## 行业实证印证
 
-### EverCore 同定位（"有外部调用能力的算法库"）实证
+### EverAlgo 同定位（"有外部调用能力的算法库"）实证
 
 | 项目 | 接口 | 用法 |
 |------|------|------|
@@ -182,18 +182,18 @@ LangChain 选 ABC 的合理性：
 - `BaseLLM` 提供 lifecycle hooks（`on_llm_start` / `on_llm_end`）+ mixin 共用方法
 - chain 编排需要 `isinstance` 区分 LLM / ChatModel / Retriever 类型
 
-EverCore 与 LangChain 的关键不同：
+EverAlgo 与 LangChain 的关键不同：
 - 算子**无状态**（H4）→ 无 lifecycle / mixin 需求
 - 算子被 EverOS 单调用，**不组装 chain** → 不需类型分发
 - 算子通过 module 级 facade 直接 `import`（[ADR 008](008-re-export-vs-client-facade.md)）→ 不需"我必须继承谁"约束
 
-→ LangChain 选 ABC 与 chain 框架定位匹配；EverCore 非 chain 框架场景 → Protocol 与 DSPy / LlamaIndex 插件接口同推理路径。
+→ LangChain 选 ABC 与 chain 框架定位匹配；EverAlgo 非 chain 框架场景 → Protocol 与 DSPy / LlamaIndex 插件接口同推理路径。
 
 ### 不引用 SDK 阵营
 
-OpenAI Python SDK / Anthropic SDK / Google genai 虽然大量用 Protocol（`SSEBytesDecoder` / `CursorPageItem` / `HeadersLikeProtocol` 等），但其定位是**纯网络代理**（无算法成分），Protocol 用法源于 stainless 自动生成器对 typing 便利的偏好，与 EverCore 算法库接口约定动机不同。
+OpenAI Python SDK / Anthropic SDK / Google genai 虽然大量用 Protocol（`SSEBytesDecoder` / `CursorPageItem` / `HeadersLikeProtocol` 等），但其定位是**纯网络代理**（无算法成分），Protocol 用法源于 stainless 自动生成器对 typing 便利的偏好，与 EverAlgo 算法库接口约定动机不同。
 
-**SDK 阵营不作 EverCore 同行先例引用** —— 避免"OpenAI SDK 这么做所以我们也这么做"的 cargo cult 推理。
+**SDK 阵营不作 EverAlgo 同行先例引用** —— 避免"OpenAI SDK 这么做所以我们也这么做"的 cargo cult 推理。
 
 ## 后续演化触发条件
 

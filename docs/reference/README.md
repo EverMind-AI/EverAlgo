@@ -1,6 +1,6 @@
 # 📐 API Reference（占位）
 
-EverCore 对外接口定义的归属位置。**当前未填充**——理由见下方"写作时机"。
+EverAlgo 对外接口定义的归属位置。**当前未填充**——理由见下方"写作时机"。
 
 ## 应包含的 4 类内容
 
@@ -9,7 +9,7 @@ EverCore 对外接口定义的归属位置。**当前未填充**——理由见�
 | `data-contracts.md` | 核心 schema 字段表：`MemCell / Episode / Foresight / AtomicFact / Profile / AgentCase / AgentSkill / RankInput / RankOutput / ParsedContent / KnowledgeMemory`（每字段：类型、必填、语义、约束、示例值） | **手写**（工程算法两侧对齐表）|
 | `api/`（目录） | 每个算子的精确函数签名 + 参数说明 + 返回值 + raises（`Extractor.aextract` / `Ranker.arank` / `cluster_by_*` / `LLMClient.chat` 等）| **自动生成**（mkdocstrings 或 Sphinx autodoc 抽 docstring + type hints）|
 | `exceptions.md` | `LLMError` 7 子类语义 + 错误码 + caller 处置建议 | **手写**（稳定信息）|
-| `configuration.md` | `LLMConfig` 字段 + `EVERCORE_LLM_*` env 映射规则 | **手写** |
+| `configuration.md` | `LLMConfig` 字段 + `EVERALGO_LLM_*` env 映射规则 | **手写** |
 
 ## 写作纪律
 

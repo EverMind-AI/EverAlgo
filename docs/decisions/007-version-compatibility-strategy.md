@@ -6,11 +6,11 @@
 
 ## 背景
 
-[ADR 002](002-multi-distribution-vs-single.md) 决定多 distribution 后，多个下游 dist 都依赖 `evercore-core`。当不同下游对 core 的版本约束不一致时，可能触发 **diamond dependency**（依赖地狱）：
+[ADR 002](002-multi-distribution-vs-single.md) 决定多 distribution 后，多个下游 dist 都依赖 `everalgo-core`。当不同下游对 core 的版本约束不一致时，可能触发 **diamond dependency**（依赖地狱）：
 
 ```
-evercore-user-memory 0.5 要 evercore-core>=0.1,<0.2
-evercore-agent-memory 0.6 要 evercore-core>=0.2,<0.3
+everalgo-user-memory 0.5 要 everalgo-core>=0.1,<0.2
+everalgo-agent-memory 0.6 要 everalgo-core>=0.2,<0.3
 → pip install 两者 → 解析失败
 ```
 
@@ -33,10 +33,10 @@ evercore-agent-memory 0.6 要 evercore-core>=0.2,<0.3
 
 | 方案 | 描述 |
 |------|------|
-| **A. 紧约束**（v0.5 草案误入） | 下游每个 dist 在 `pyproject.toml` 写 `evercore-core>=0.1,<0.2`（每个 minor 段独立锁定）|
-| **B. 宽松约束 + 严守 SemVer + 不强制同步**（HuggingFace 模式）| 下游写 `evercore-core>=0.1.0,<2.0.0`（跨整 major 段）；core 严守 SemVer 兑现兼容承诺；各 dist 独立 release 不强制同步 |
+| **A. 紧约束**（v0.5 草案误入） | 下游每个 dist 在 `pyproject.toml` 写 `everalgo-core>=0.1,<0.2`（每个 minor 段独立锁定）|
+| **B. 宽松约束 + 严守 SemVer + 不强制同步**（HuggingFace 模式）| 下游写 `everalgo-core>=0.1.0,<2.0.0`（跨整 major 段）；core 严守 SemVer 兑现兼容承诺；各 dist 独立 release 不强制同步 |
 | C. monorepo 强制同步 release（langchain 风部分实现）| 每次 core bump 时所有 dist 同步发新版 + 同步约束 |
-| D. core 不演化 / 长期 frozen | 避免 breaking 但 EverCore v0.x 演化阶段不可行 |
+| D. core 不演化 / 长期 frozen | 避免 breaking 但 EverAlgo v0.x 演化阶段不可行 |
 
 ## 客观优劣分析
 
@@ -69,7 +69,7 @@ evercore-agent-memory 0.6 要 evercore-core>=0.2,<0.3
 | 维度 | 说明 |
 |------|------|
 | **依赖 core 守 SemVer 承诺** | core 一旦在 minor / patch 不小心 breaking，下游全栈出问题 |
-| 0.x 阶段心智负担 | SemVer 0.x 视作不稳定，但 EverCore 仍要"实际尽量保持兼容"，是隐式承诺 |
+| 0.x 阶段心智负担 | SemVer 0.x 视作不稳定，但 EverAlgo 仍要"实际尽量保持兼容"，是隐式承诺 |
 | upper bound 选择有点 arbitrary | 写 `<2.0` 还是 `<3.0` 还是无 upper，需团队约定 |
 
 ### C. monorepo 强制同步 release 优势/劣势
@@ -84,9 +84,9 @@ evercore-agent-memory 0.6 要 evercore-core>=0.2,<0.3
 
 劣势：违反 H6 v0.x 演化阶段（类型契约 / Protocol 仍在快速变）
 
-## 对 EverCore 适配度评估
+## 对 EverAlgo 适配度评估
 
-### A 劣势对 EverCore 的适配度
+### A 劣势对 EverAlgo 的适配度
 
 | 劣势 | 适配度 |
 |------|--------|
@@ -94,7 +94,7 @@ evercore-agent-memory 0.6 要 evercore-core>=0.2,<0.3
 | 每次 core bump 全栈跟更新 | ❌ 强烈介意（H2 反向） |
 | 与 H2 矛盾 | ❌ **致命** |
 
-### B 优势对 EverCore 的适配度
+### B 优势对 EverAlgo 的适配度
 
 | 优势 | 适配度 |
 |------|--------|
@@ -103,7 +103,7 @@ evercore-agent-memory 0.6 要 evercore-core>=0.2,<0.3
 | 与主流模式对齐 | ✅ 受益 |
 | 用户使用透明 | ✅ 强需要（用户认知零负担）|
 
-### B 劣势对 EverCore 的适配度
+### B 劣势对 EverAlgo 的适配度
 
 | 劣势 | 适配度 |
 |------|--------|
@@ -124,24 +124,24 @@ D：违反 H6 → 排除
 ### 4 条具体策略
 
 1. **核心兄弟包之间不互相依赖**——产品性 4 包（user_memory / agent_memory / knowledge / parser）**互相不在 `install_requires`**（仿 HuggingFace transformers / datasets / accelerate 互不在 install_requires 互依赖）
-2. **下游对 core 用宽松约束**：`evercore-core>=X.Y,<2.0`（仿 transformers 对 hub）或 `>=X.Y`（仿 accelerate 对 hub）
-3. **`evercore-core` 严守 SemVer**：minor + patch 必须向后兼容；breaking 集中 major bump（0.x 阶段尽量兼容、breaking 集中偶数 minor）
+2. **下游对 core 用宽松约束**：`everalgo-core>=X.Y,<2.0`（仿 transformers 对 hub）或 `>=X.Y`（仿 accelerate 对 hub）
+3. **`everalgo-core` 严守 SemVer**：minor + patch 必须向后兼容；breaking 集中 major bump（0.x 阶段尽量兼容、breaking 集中偶数 minor）
 4. **不强制同步 release**：每个 distribution 独立演进
 
 ### 约束写法约定
 
 ```toml
-# evercore-user-memory pyproject.toml
+# everalgo-user-memory pyproject.toml
 dependencies = [
-  "evercore-core>=0.1.0,<2.0.0",        # 跨整 major 段
-  "evercore-boundary>=0.1.0,<2.0.0",
-  "evercore-clustering>=0.1.0,<2.0.0",
+  "everalgo-core>=0.1.0,<2.0.0",        # 跨整 major 段
+  "everalgo-boundary>=0.1.0,<2.0.0",
+  "everalgo-clustering>=0.1.0,<2.0.0",
 ]
 ```
 
 ### 用户侧 lockfile 兜底
 
-用 `uv lock` / `poetry lock` 锁一组兼容版本到 `uv.lock`；升级时局部 `uv lock --upgrade-package evercore-user-memory`。
+用 `uv lock` / `poetry lock` 锁一组兼容版本到 `uv.lock`；升级时局部 `uv lock --upgrade-package everalgo-user-memory`。
 
 ## 行业实证印证
 
@@ -156,11 +156,11 @@ HuggingFace 全家桶版本约束实证（WebFetch 2026-04-23 核验 4 个 setup
 
 HuggingFace 千万级用户量级实证此模式有效——4 包独立演化、跨大量版本组合无 diamond 冲突。
 
-EverCore 套用此模式：`evercore-core` 担当 EverCore 中的 `huggingface_hub` 角色（共同 base），产品性兄弟包不互依赖。
+EverAlgo 套用此模式：`everalgo-core` 担当 EverAlgo 中的 `huggingface_hub` 角色（共同 base），产品性兄弟包不互依赖。
 
 ## 后续演化触发条件
 
-1. **EverCore 1.0.0 发布**：进入稳定期后约束写法不变（仍 `<2.0`），但实质风险降低（minor/patch 严格兼容）
+1. **EverAlgo 1.0.0 发布**：进入稳定期后约束写法不变（仍 `<2.0`），但实质风险降低（minor/patch 严格兼容）
 2. **某次 core breaking 影响多个下游**：触发版本兼容性测试机制（CI 跑跨 core 版本的下游兼容矩阵）
 3. **用户报告 diamond 实际发生**：检查是否某下游 over-pinned；调整约束写法
 

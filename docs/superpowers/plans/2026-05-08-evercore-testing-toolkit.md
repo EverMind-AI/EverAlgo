@@ -1,8 +1,8 @@
-# EverCore Testing Toolkit Implementation Plan
+# EverAlgo Testing Toolkit Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 `evercore-core` 内交付 `evercore.testing` 子包，含 `FakeLLMClient`（含 `CallRecord`）和 `assert_episode_shape` 三个公开符号，让算法同学单测时能不打真 LLM、对 EPISODE 输出做结构断言。
+**Goal:** 在 `everalgo-core` 内交付 `everalgo.testing` 子包，含 `FakeLLMClient`（含 `CallRecord`）和 `assert_episode_shape` 三个公开符号，让算法同学单测时能不打真 LLM、对 EPISODE 输出做结构断言。
 
 **Architecture:** 两个独立 helper 模块（`fake_llm.py` + `assertions.py`），无内部状态共享，无依赖耦合。`FakeLLMClient` 双模二选一（scripted list XOR callable handler），handler 兼容 sync / async；`assert_episode_shape` 在 pydantic 类型层之上加 4 项业务不变量，返回 `Episode` 实例支持链式断言。
 
@@ -15,8 +15,8 @@
 1. **测试函数必须 `-> None` 注解**（mypy strict 模式不会让 `tests.*` override 兜底；显式标注最稳）。
 2. **`tests/testing/` 不要 `__init__.py`**（沿子项目 1+2 的 `--import-mode=importlib` 决策）。
 3. **复用 `tests/conftest.py` 现有占位文件**（不新增 fixture；spec §7.1 的 4 个明星项目证据已 cite）。
-4. **`evercore.llm.types.ChatMessage`、`ChatResponse`、`evercore.llm.protocols.LLMClient` 已在子项目 2 落地**（`packages/evercore-core/src/evercore/llm/`），本 plan 只 import 不修改。
-5. **`evercore.types.Episode` 已在子项目 1 落地**（`packages/evercore-core/src/evercore/types/memories.py`），本 plan 只 import 不修改。
+4. **`everalgo.llm.types.ChatMessage`、`ChatResponse`、`everalgo.llm.protocols.LLMClient` 已在子项目 2 落地**（`packages/everalgo-core/src/everalgo/llm/`），本 plan 只 import 不修改。
+5. **`everalgo.types.Episode` 已在子项目 1 落地**（`packages/everalgo-core/src/everalgo/types/memories.py`），本 plan 只 import 不修改。
 6. **零新增依赖** — 不动 `pyproject.toml`。
 7. **commit 风格 `<emoji> <type>(<scope>): <description>`**，scope 用 `testing`，参考子项目 1+2 commit 历史。
 8. **每个 commit 落 `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`**（不再写）。
@@ -26,8 +26,8 @@
 ## File Structure
 
 ```
-packages/evercore-core/
-├── src/evercore/testing/
+packages/everalgo-core/
+├── src/everalgo/testing/
 │   ├── __init__.py        # Task 7: re-export 3 公开符号
 │   ├── assertions.py      # Task 6: assert_episode_shape
 │   └── fake_llm.py        # Task 1+2+3+4+5: CallRecord + FakeLLMClient
@@ -36,21 +36,21 @@ packages/evercore-core/
     └── test_fake_llm.py   # Task 1+2+3+4+5
 ```
 
-设计依据：见 `docs/superpowers/specs/2026-05-08-evercore-testing-toolkit-design.md` §2 (File Map) 和 §3 (公开 API)。
+设计依据：见 `docs/superpowers/specs/2026-05-08-everalgo-testing-toolkit-design.md` §2 (File Map) 和 §3 (公开 API)。
 
 ---
 
 ## Task 0: tests/testing/ 目录占位 + 现有 testing/__init__.py 不动
 
 **Files:**
-- Create: `packages/evercore-core/tests/testing/` 目录（无 `__init__.py`）
-- Verify: `packages/evercore-core/src/evercore/testing/__init__.py` 占位已存在（子项目 0 留下）
+- Create: `packages/everalgo-core/tests/testing/` 目录（无 `__init__.py`）
+- Verify: `packages/everalgo-core/src/everalgo/testing/__init__.py` 占位已存在（子项目 0 留下）
 
-- [ ] **Step 1: 验证现有 `evercore.testing` 包占位**
+- [ ] **Step 1: 验证现有 `everalgo.testing` 包占位**
 
 Run:
 ```bash
-ls -la packages/evercore-core/src/evercore/testing/
+ls -la packages/everalgo-core/src/everalgo/testing/
 ```
 
 Expected: 看到 `__init__.py`（内容是子项目 0 留下的占位 docstring + `__all__: list[str] = []`）。
@@ -61,15 +61,15 @@ Expected: 看到 `__init__.py`（内容是子项目 0 留下的占位 docstring 
 
 Run:
 ```bash
-mkdir -p packages/evercore-core/tests/testing/
+mkdir -p packages/everalgo-core/tests/testing/
 ```
 
 **Do NOT create `__init__.py` in `tests/testing/`** — 沿用 `--import-mode=importlib` 约定，与现有 `tests/llm/`、`tests/types/` 一致。
 
 Verify:
 ```bash
-ls -la packages/evercore-core/tests/testing/
-test ! -f packages/evercore-core/tests/testing/__init__.py && echo "OK: no __init__.py"
+ls -la packages/everalgo-core/tests/testing/
+test ! -f packages/everalgo-core/tests/testing/__init__.py && echo "OK: no __init__.py"
 ```
 
 - [ ] **Step 3: 不 commit（空目录无文件）** — Task 1 第一次落 test 文件时一并 commit。
@@ -79,18 +79,18 @@ test ! -f packages/evercore-core/tests/testing/__init__.py && echo "OK: no __ini
 ## Task 1: `CallRecord` pydantic 类（公开符号 1/3）
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/testing/fake_llm.py`
-- Test: `packages/evercore-core/tests/testing/test_fake_llm.py`
+- Create: `packages/everalgo-core/src/everalgo/testing/fake_llm.py`
+- Test: `packages/everalgo-core/tests/testing/test_fake_llm.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Write to `packages/evercore-core/tests/testing/test_fake_llm.py`:
+Write to `packages/everalgo-core/tests/testing/test_fake_llm.py`:
 
 ```python
-"""Tests for evercore.testing.fake_llm — CallRecord."""
+"""Tests for everalgo.testing.fake_llm — CallRecord."""
 
-from evercore.llm.types import ChatMessage
-from evercore.testing.fake_llm import CallRecord
+from everalgo.llm.types import ChatMessage
+from everalgo.testing.fake_llm import CallRecord
 
 
 def test_call_record_minimum_fields() -> None:
@@ -133,19 +133,19 @@ def test_call_record_extra_field_default_factory_is_independent() -> None:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'evercore.testing.fake_llm'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'everalgo.testing.fake_llm'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Write to `packages/evercore-core/src/evercore/testing/fake_llm.py`:
+Write to `packages/everalgo-core/src/everalgo/testing/fake_llm.py`:
 
 ```python
 """In-memory LLMClient double for unit tests.
 
-See ``docs/superpowers/specs/2026-05-08-evercore-testing-toolkit-design.md``
+See ``docs/superpowers/specs/2026-05-08-everalgo-testing-toolkit-design.md``
 for the design rationale (4 industry references in §7).
 """
 
@@ -156,7 +156,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from evercore.llm.types import ChatMessage
+from everalgo.llm.types import ChatMessage
 
 
 class CallRecord(BaseModel):
@@ -181,7 +181,7 @@ class CallRecord(BaseModel):
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 3 PASS.
@@ -190,9 +190,9 @@ Expected: 3 PASS.
 
 Run:
 ```bash
-uv run ruff check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run ruff format --check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run mypy packages/evercore-core/src/evercore/testing/
+uv run ruff check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run ruff format --check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run mypy packages/everalgo-core/src/everalgo/testing/
 ```
 
 Expected: 全部 clean。
@@ -200,8 +200,8 @@ Expected: 全部 clean。
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/testing/fake_llm.py \
-        packages/evercore-core/tests/testing/test_fake_llm.py
+git add packages/everalgo-core/src/everalgo/testing/fake_llm.py \
+        packages/everalgo-core/tests/testing/test_fake_llm.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(testing): add CallRecord type for fake LLM client
 
@@ -217,12 +217,12 @@ EOF
 ## Task 2: `FakeLLMClient` 构造器 + 互斥校验（不实现 `chat`）
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/testing/fake_llm.py` (append `FakeLLMClient` class)
-- Modify: `packages/evercore-core/tests/testing/test_fake_llm.py` (append constructor tests)
+- Modify: `packages/everalgo-core/src/everalgo/testing/fake_llm.py` (append `FakeLLMClient` class)
+- Modify: `packages/everalgo-core/tests/testing/test_fake_llm.py` (append constructor tests)
 
 - [ ] **Step 1: Append failing tests**
 
-Append to `packages/evercore-core/tests/testing/test_fake_llm.py`:
+Append to `packages/everalgo-core/tests/testing/test_fake_llm.py`:
 
 ```python
 
@@ -231,8 +231,8 @@ Append to `packages/evercore-core/tests/testing/test_fake_llm.py`:
 
 import pytest
 
-from evercore.llm.types import ChatResponse
-from evercore.testing.fake_llm import FakeLLMClient
+from everalgo.llm.types import ChatResponse
+from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_fake_llm_client_constructed_with_responses_only() -> None:
@@ -281,14 +281,14 @@ def test_fake_llm_client_responses_invalid_element_type_raises() -> None:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 5 new tests FAIL with `ImportError: cannot import name 'FakeLLMClient'`. Existing 3 CallRecord tests still PASS.
 
 - [ ] **Step 3: Append minimal implementation**
 
-Append to `packages/evercore-core/src/evercore/testing/fake_llm.py`:
+Append to `packages/everalgo-core/src/everalgo/testing/fake_llm.py`:
 
 ```python
 
@@ -297,7 +297,7 @@ Append to `packages/evercore-core/src/evercore/testing/fake_llm.py`:
 
 from collections.abc import Awaitable, Callable
 
-from evercore.llm.types import ChatResponse
+from everalgo.llm.types import ChatResponse
 
 _HandlerReturn = ChatResponse | Awaitable[ChatResponse]
 _Handler = Callable[..., _HandlerReturn]
@@ -313,7 +313,7 @@ class FakeLLMClient:
     2. **Callable handler** — ``handler=callable`` invoked per call;
        sync or async return both accepted.
 
-    See ``docs/superpowers/specs/2026-05-08-evercore-testing-toolkit-design.md``
+    See ``docs/superpowers/specs/2026-05-08-everalgo-testing-toolkit-design.md``
     §3.1 for full design rationale.
     """
 
@@ -366,7 +366,7 @@ def _coerce_response(value: str | ChatResponse) -> ChatResponse:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 8 PASS (3 CallRecord + 5 new constructor).
@@ -375,9 +375,9 @@ Expected: 8 PASS (3 CallRecord + 5 new constructor).
 
 Run:
 ```bash
-uv run ruff check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run ruff format --check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run mypy packages/evercore-core/src/evercore/testing/
+uv run ruff check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run ruff format --check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run mypy packages/everalgo-core/src/everalgo/testing/
 ```
 
 Expected: 全部 clean.
@@ -385,8 +385,8 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/testing/fake_llm.py \
-        packages/evercore-core/tests/testing/test_fake_llm.py
+git add packages/everalgo-core/src/everalgo/testing/fake_llm.py \
+        packages/everalgo-core/tests/testing/test_fake_llm.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(testing): add FakeLLMClient constructor with mutual exclusion
 
@@ -402,12 +402,12 @@ EOF
 ## Task 3: `FakeLLMClient.chat` — scripted-list 模式
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/testing/fake_llm.py` (add `chat` method, list-mode branch only)
-- Modify: `packages/evercore-core/tests/testing/test_fake_llm.py` (append scripted-list behavior tests)
+- Modify: `packages/everalgo-core/src/everalgo/testing/fake_llm.py` (add `chat` method, list-mode branch only)
+- Modify: `packages/everalgo-core/tests/testing/test_fake_llm.py` (append scripted-list behavior tests)
 
 - [ ] **Step 1: Append failing tests**
 
-Append to `packages/evercore-core/tests/testing/test_fake_llm.py`:
+Append to `packages/everalgo-core/tests/testing/test_fake_llm.py`:
 
 ```python
 
@@ -430,7 +430,7 @@ async def test_chat_str_element_wrapped_to_default_chat_response() -> None:
 
 async def test_chat_chat_response_element_passed_through_unchanged() -> None:
     """ChatResponse instance returned as-is, preserving usage/finish_reason."""
-    from evercore.llm.types import Usage
+    from everalgo.llm.types import Usage
 
     canned = ChatResponse(
         content="canned",
@@ -468,14 +468,14 @@ async def test_chat_exhausted_script_raises_runtime_error() -> None:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 4 new tests FAIL with `AttributeError: 'FakeLLMClient' object has no attribute 'chat'` (or similar). Previous 8 still PASS.
 
 - [ ] **Step 3: Add `chat` to FakeLLMClient (list-mode branch only)**
 
-Modify `packages/evercore-core/src/evercore/testing/fake_llm.py` — locate the `FakeLLMClient` class (defined in Task 2) and append the `chat` method **before** the closing of the class:
+Modify `packages/everalgo-core/src/everalgo/testing/fake_llm.py` — locate the `FakeLLMClient` class (defined in Task 2) and append the `chat` method **before** the closing of the class:
 
 ```python
     async def chat(
@@ -520,7 +520,7 @@ Note: `# pragma: no cover` on the `NotImplementedError` line lets coverage skip 
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 12 PASS (8 prior + 4 new scripted-list).
@@ -529,9 +529,9 @@ Expected: 12 PASS (8 prior + 4 new scripted-list).
 
 Run:
 ```bash
-uv run ruff check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run ruff format --check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run mypy packages/evercore-core/src/evercore/testing/
+uv run ruff check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run ruff format --check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run mypy packages/everalgo-core/src/everalgo/testing/
 ```
 
 Expected: 全部 clean.
@@ -539,8 +539,8 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/testing/fake_llm.py \
-        packages/evercore-core/tests/testing/test_fake_llm.py
+git add packages/everalgo-core/src/everalgo/testing/fake_llm.py \
+        packages/everalgo-core/tests/testing/test_fake_llm.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(testing): add FakeLLMClient.chat scripted-list mode
 
@@ -556,12 +556,12 @@ EOF
 ## Task 4: `FakeLLMClient.chat` — callable handler 模式
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/testing/fake_llm.py` (replace handler-branch placeholder + add `_invoke_handler` helper)
-- Modify: `packages/evercore-core/tests/testing/test_fake_llm.py` (append handler-mode tests)
+- Modify: `packages/everalgo-core/src/everalgo/testing/fake_llm.py` (replace handler-branch placeholder + add `_invoke_handler` helper)
+- Modify: `packages/everalgo-core/tests/testing/test_fake_llm.py` (append handler-mode tests)
 
 - [ ] **Step 1: Append failing tests**
 
-Append to `packages/evercore-core/tests/testing/test_fake_llm.py`:
+Append to `packages/everalgo-core/tests/testing/test_fake_llm.py`:
 
 ```python
 
@@ -647,14 +647,14 @@ async def test_chat_handler_wrong_return_type_raises() -> None:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 4 new tests FAIL with `NotImplementedError: handler mode lands in Task 4`. Previous 12 still PASS.
 
 - [ ] **Step 3: Replace handler placeholder + add `_invoke_handler` helper**
 
-In `packages/evercore-core/src/evercore/testing/fake_llm.py`:
+In `packages/everalgo-core/src/everalgo/testing/fake_llm.py`:
 
 3a. **Add `inspect` import** at the top of the file (alphabetically before `from collections.abc`):
 
@@ -712,7 +712,7 @@ async def _invoke_handler(
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 16 PASS (12 prior + 4 new handler).
@@ -721,9 +721,9 @@ Expected: 16 PASS (12 prior + 4 new handler).
 
 Run:
 ```bash
-uv run ruff check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run ruff format --check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run mypy packages/evercore-core/src/evercore/testing/
+uv run ruff check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run ruff format --check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run mypy packages/everalgo-core/src/everalgo/testing/
 ```
 
 Expected: 全部 clean.
@@ -731,8 +731,8 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/testing/fake_llm.py \
-        packages/evercore-core/tests/testing/test_fake_llm.py
+git add packages/everalgo-core/src/everalgo/testing/fake_llm.py \
+        packages/everalgo-core/tests/testing/test_fake_llm.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(testing): add FakeLLMClient.chat callable handler mode
 
@@ -749,20 +749,20 @@ EOF
 ## Task 5: `FakeLLMClient.calls` 录制 + Protocol conformance
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/testing/fake_llm.py` (add `calls` property)
-- Modify: `packages/evercore-core/tests/testing/test_fake_llm.py` (append recording + Protocol tests)
+- Modify: `packages/everalgo-core/src/everalgo/testing/fake_llm.py` (add `calls` property)
+- Modify: `packages/everalgo-core/tests/testing/test_fake_llm.py` (append recording + Protocol tests)
 
 - [ ] **Step 1: Append failing tests**
 
-Append to `packages/evercore-core/tests/testing/test_fake_llm.py`:
+Append to `packages/everalgo-core/tests/testing/test_fake_llm.py`:
 
 ```python
 
 
 # ---- FakeLLMClient call recording + Protocol (Task 5) ---------------------
 
-from evercore.llm.protocols import LLMClient
-from evercore.testing.fake_llm import CallRecord
+from everalgo.llm.protocols import LLMClient
+from everalgo.testing.fake_llm import CallRecord
 
 
 async def test_call_count_increments_per_invocation() -> None:
@@ -820,7 +820,7 @@ def test_fake_llm_client_satisfies_LLMClient_protocol() -> None:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 4 new tests FAIL — `calls` property does not exist yet (`AttributeError`). Previous 16 still PASS.
@@ -844,7 +844,7 @@ Add the property right below the existing `call_count` property in `FakeLLMClien
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_fake_llm.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_fake_llm.py -v
 ```
 
 Expected: 20 PASS.
@@ -853,9 +853,9 @@ Expected: 20 PASS.
 
 Run:
 ```bash
-uv run ruff check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run ruff format --check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run mypy packages/evercore-core/src/evercore/testing/
+uv run ruff check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run ruff format --check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run mypy packages/everalgo-core/src/everalgo/testing/
 ```
 
 Expected: 全部 clean.
@@ -863,8 +863,8 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/testing/fake_llm.py \
-        packages/evercore-core/tests/testing/test_fake_llm.py
+git add packages/everalgo-core/src/everalgo/testing/fake_llm.py \
+        packages/everalgo-core/tests/testing/test_fake_llm.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(testing): expose FakeLLMClient.calls + Protocol conformance
 
@@ -880,23 +880,23 @@ EOF
 ## Task 6: `assert_episode_shape`（公开符号 3/3）
 
 **Files:**
-- Create: `packages/evercore-core/src/evercore/testing/assertions.py`
-- Test: `packages/evercore-core/tests/testing/test_assertions.py`
+- Create: `packages/everalgo-core/src/everalgo/testing/assertions.py`
+- Test: `packages/everalgo-core/tests/testing/test_assertions.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Write to `packages/evercore-core/tests/testing/test_assertions.py`:
+Write to `packages/everalgo-core/tests/testing/test_assertions.py`:
 
 ```python
-"""Tests for evercore.testing.assertions — assert_episode_shape."""
+"""Tests for everalgo.testing.assertions — assert_episode_shape."""
 
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from evercore.testing.assertions import assert_episode_shape
-from evercore.types import Episode
+from everalgo.testing.assertions import assert_episode_shape
+from everalgo.types import Episode
 
 # ---- happy path ----------------------------------------------------------
 
@@ -986,19 +986,19 @@ def test_empty_parent_id_raises_assertion_error() -> None:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_assertions.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_assertions.py -v
 ```
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'evercore.testing.assertions'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'everalgo.testing.assertions'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Write to `packages/evercore-core/src/evercore/testing/assertions.py`:
+Write to `packages/everalgo-core/src/everalgo/testing/assertions.py`:
 
 ```python
 """Structural assertions for memory types.
 
-See ``docs/superpowers/specs/2026-05-08-evercore-testing-toolkit-design.md``
+See ``docs/superpowers/specs/2026-05-08-everalgo-testing-toolkit-design.md``
 §3.2 for the design rationale.
 """
 
@@ -1006,7 +1006,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from evercore.types import Episode
+from everalgo.types import Episode
 
 
 def assert_episode_shape(value: dict[str, Any] | Episode) -> Episode:
@@ -1064,7 +1064,7 @@ def assert_episode_shape(value: dict[str, Any] | Episode) -> Episode:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_assertions.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_assertions.py -v
 ```
 
 Expected: 9 PASS.
@@ -1073,9 +1073,9 @@ Expected: 9 PASS.
 
 Run:
 ```bash
-uv run ruff check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run ruff format --check packages/evercore-core/src/evercore/testing/ packages/evercore-core/tests/testing/
-uv run mypy packages/evercore-core/src/evercore/testing/
+uv run ruff check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run ruff format --check packages/everalgo-core/src/everalgo/testing/ packages/everalgo-core/tests/testing/
+uv run mypy packages/everalgo-core/src/everalgo/testing/
 ```
 
 Expected: 全部 clean.
@@ -1083,8 +1083,8 @@ Expected: 全部 clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/testing/assertions.py \
-        packages/evercore-core/tests/testing/test_assertions.py
+git add packages/everalgo-core/src/everalgo/testing/assertions.py \
+        packages/everalgo-core/tests/testing/test_assertions.py
 git commit -m "$(cat <<'EOF'
 ✨ feat(testing): add assert_episode_shape with 4 business invariants
 
@@ -1099,36 +1099,36 @@ EOF
 
 ---
 
-## Task 7: `evercore.testing` 包导出 + 子项目验收
+## Task 7: `everalgo.testing` 包导出 + 子项目验收
 
 **Files:**
-- Modify: `packages/evercore-core/src/evercore/testing/__init__.py` (replace placeholder)
-- Test: `packages/evercore-core/tests/testing/test_public_api.py` (new)
+- Modify: `packages/everalgo-core/src/everalgo/testing/__init__.py` (replace placeholder)
+- Test: `packages/everalgo-core/tests/testing/test_public_api.py` (new)
 
 - [ ] **Step 1: Write the failing tests**
 
-Write to `packages/evercore-core/tests/testing/test_public_api.py`:
+Write to `packages/everalgo-core/tests/testing/test_public_api.py`:
 
 ```python
-"""Tests for evercore.testing package-level public API.
+"""Tests for everalgo.testing package-level public API.
 
 Verifies the 3 documented public symbols (per AGENTS.md §7 step 6 and §9
 plus spec §3) are exported at the top-level package.
 """
 
-import evercore.testing
+import everalgo.testing
 
 
 def test_public_symbols_exposed_at_top_level() -> None:
     """3 public symbols accessible via attribute access on the package."""
-    assert hasattr(evercore.testing, "FakeLLMClient")
-    assert hasattr(evercore.testing, "CallRecord")
-    assert hasattr(evercore.testing, "assert_episode_shape")
+    assert hasattr(everalgo.testing, "FakeLLMClient")
+    assert hasattr(everalgo.testing, "CallRecord")
+    assert hasattr(everalgo.testing, "assert_episode_shape")
 
 
 def test_dunder_all_lists_exactly_3_symbols() -> None:
     """__all__ enumerates the public surface — exactly 3 entries."""
-    assert sorted(evercore.testing.__all__) == sorted([
+    assert sorted(everalgo.testing.__all__) == sorted([
         "CallRecord",
         "FakeLLMClient",
         "assert_episode_shape",
@@ -1137,7 +1137,7 @@ def test_dunder_all_lists_exactly_3_symbols() -> None:
 
 def test_top_level_import_works() -> None:
     """Star-friendly import from the package root."""
-    from evercore.testing import (
+    from everalgo.testing import (
         CallRecord,
         FakeLLMClient,
         assert_episode_shape,
@@ -1154,21 +1154,21 @@ def test_top_level_import_works() -> None:
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/test_public_api.py -v
+uv run pytest packages/everalgo-core/tests/testing/test_public_api.py -v
 ```
 
-Expected: 3 FAIL — `evercore.testing` currently exports `__all__: list[str] = []` (子项目 0 placeholder).
+Expected: 3 FAIL — `everalgo.testing` currently exports `__all__: list[str] = []` (子项目 0 placeholder).
 
 - [ ] **Step 3: Replace `__init__.py`**
 
-Replace the contents of `packages/evercore-core/src/evercore/testing/__init__.py` with:
+Replace the contents of `packages/everalgo-core/src/everalgo/testing/__init__.py` with:
 
 ```python
-"""Public testing helpers for EverCore — assertions + fake_llm.
+"""Public testing helpers for EverAlgo — assertions + fake_llm.
 
 Mirrors ``numpy.testing`` / ``torch.testing`` (see ADR 005,
 ``docs/decisions/005-testing-as-public-subpackage.md``): testing helpers
-live inside ``evercore-core`` rather than as a separate distribution.
+live inside ``everalgo-core`` rather than as a separate distribution.
 
 Public symbols (per AGENTS.md §7 step 6 + §9 + spec §3):
 
@@ -1177,8 +1177,8 @@ Public symbols (per AGENTS.md §7 step 6 + §9 + spec §3):
 - ``assert_episode_shape`` — Episode structural assertion helper
 """
 
-from evercore.testing.assertions import assert_episode_shape
-from evercore.testing.fake_llm import CallRecord, FakeLLMClient
+from everalgo.testing.assertions import assert_episode_shape
+from everalgo.testing.fake_llm import CallRecord, FakeLLMClient
 
 __all__ = [
     "CallRecord",
@@ -1191,7 +1191,7 @@ __all__ = [
 
 Run:
 ```bash
-uv run pytest packages/evercore-core/tests/testing/ -v
+uv run pytest packages/everalgo-core/tests/testing/ -v
 ```
 
 Expected: 23 PASS total (3 CallRecord + 5 FakeLLMClient construct + 4 scripted-list + 4 handler + 4 recording/Protocol + 9 assert + 3 public_api = 32 ... wait let me re-count).
@@ -1208,17 +1208,17 @@ Actual test counts:
 Run all 4 quality gates as one batch:
 
 ```bash
-uv run ruff check packages/evercore-core/
-uv run ruff format --check packages/evercore-core/
-uv run mypy packages/evercore-core/
-uv run pytest packages/evercore-core/ -v
+uv run ruff check packages/everalgo-core/
+uv run ruff format --check packages/everalgo-core/
+uv run mypy packages/everalgo-core/
+uv run pytest packages/everalgo-core/ -v
 ```
 
 Expected:
 - ruff check: clean
 - ruff format check: clean
-- mypy: 0 errors in src/evercore/testing/
-- pytest: **whole evercore-core suite passes** (子项目 1+2 累计 ~50+ tests + 子项目 3 新增 32 = ~82+ tests)
+- mypy: 0 errors in src/everalgo/testing/
+- pytest: **whole everalgo-core suite passes** (子项目 1+2 累计 ~50+ tests + 子项目 3 新增 32 = ~82+ tests)
 
 If any of these fail, **stop and fix** — do not commit.
 
@@ -1227,7 +1227,7 @@ If any of these fail, **stop and fix** — do not commit.
 Run a quick sanity import to verify §7 step 6 + §9 contracts hold:
 
 ```bash
-uv run python -c "from evercore.testing import FakeLLMClient, CallRecord, assert_episode_shape; print('AGENTS.md contract OK:', FakeLLMClient, CallRecord, assert_episode_shape)"
+uv run python -c "from everalgo.testing import FakeLLMClient, CallRecord, assert_episode_shape; print('AGENTS.md contract OK:', FakeLLMClient, CallRecord, assert_episode_shape)"
 ```
 
 Expected output: prints all 3 symbols' class/function repr without ImportError.
@@ -1235,10 +1235,10 @@ Expected output: prints all 3 symbols' class/function repr without ImportError.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/evercore-core/src/evercore/testing/__init__.py \
-        packages/evercore-core/tests/testing/test_public_api.py
+git add packages/everalgo-core/src/everalgo/testing/__init__.py \
+        packages/everalgo-core/tests/testing/test_public_api.py
 git commit -m "$(cat <<'EOF'
-✨ feat(testing): re-export 3 public symbols at evercore.testing top level
+✨ feat(testing): re-export 3 public symbols at everalgo.testing top level
 
 Replace the sub-project 0 placeholder __init__.py with the final
 re-export block exposing FakeLLMClient, CallRecord, and
@@ -1272,7 +1272,7 @@ EOF
 
 ### 2. Placeholder scan
 
-`grep -nE "TODO|TBD|FIXME|XXX|implement later|fill in" docs/superpowers/plans/2026-05-08-evercore-testing-toolkit.md`
+`grep -nE "TODO|TBD|FIXME|XXX|implement later|fill in" docs/superpowers/plans/2026-05-08-everalgo-testing-toolkit.md`
 预期：0 hits。
 
 ### 3. Type consistency
