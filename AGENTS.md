@@ -94,17 +94,54 @@ uv sync --package evercore-clustering
 uv run pytest packages/evercore-clustering/tests/   # once per-package tests exist
 ```
 
+### Pre-commit hook (required)
+
+The repo ships a `.pre-commit-config.yaml` that runs `ruff check --fix` + `ruff format` + a set of standard sanitisers (trailing whitespace, EOF newline, merge-conflict markers, large files, line endings, YAML / TOML syntax) on every commit. This matches the workflow used by sklearn, pydantic, dspy, langchain, pandas, numpy.
+
+**Install + verify after every clone** (this is per-clone state, NOT stored in the repo — every new clone / new dev machine starts with hooks disabled):
+
+```bash
+uv sync --all-packages --group dev   # pulls pre-commit into the workspace venv
+uv run pre-commit install            # creates .git/hooks/pre-commit
+ls -la .git/hooks/pre-commit         # MUST exist and be executable
+```
+
+If the third command shows `No such file or directory`, the `install` step silently failed and **every `git commit` will silently bypass lint**. Fix before doing any work.
+
+#### Common pitfall: `--all-files` ≠ hook installed
+
+`uv run pre-commit run --all-files` is a **manual** invocation. It validates that the hook configuration is healthy but says **nothing** about whether `git commit` will actually trigger it. The hook only fires automatically when `.git/hooks/pre-commit` exists and is executable.
+
+This trap is real: running `--all-files` and seeing "9/9 Passed" can mask a missing hook for an entire sprint, while every `git commit` quietly bypasses lint and surfaces only when CI rejects a violation that the hook would have caught locally. Always `ls .git/hooks/pre-commit` after `install` to verify.
+
+#### Common usage
+
+Run against the whole tree before opening an MR (catches anything you might have committed before the hook was installed):
+
+```bash
+uv run pre-commit run --all-files
+```
+
+Update pinned hook versions periodically:
+
+```bash
+uv run pre-commit autoupdate
+```
+
+#### What's deliberately NOT in pre-commit
+
+- **`mypy`** — strict mypy over the 8-package PEP 420 workspace takes several seconds per run and would make commit feel sluggish; it is enforced by CI instead (pydantic / sklearn do the same).
+- **`pytest`** — same reason. CI is the gate.
+
 ### Editor integration (recommended)
 
-The repo ships no pre-commit hook by design. We rely on **editor-side ruff integration** for fast feedback while you type, and on **CI enforcement** (`.gitlab-ci.yml`) as the load-bearing gate. This matches the workflow used by pytorch and pydantic-ai.
-
-Install once per editor:
+Pre-commit fires at commit time. For per-keystroke feedback, install the ruff editor plugin too:
 
 - **VSCode / Cursor**: install the [Ruff extension](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff). Enable format-on-save so the editor runs `ruff check --fix` and `ruff format` automatically.
 - **PyCharm / IntelliJ**: install the [Ruff plugin](https://plugins.jetbrains.com/plugin/20574-ruff).
 - **Vim / Neovim**: configure ruff through your LSP setup (e.g. `ruff-lsp` or built-in LSP via `nvim-lspconfig`).
 
-The CI pipeline re-runs `ruff check .` and `ruff format --check .` on every MR. Editor coverage is convenience, not enforcement: a contributor without the plugin will still be blocked by CI before merge.
+The CI pipeline (`.gitlab-ci.yml`) re-runs `ruff check .` + `ruff format --check .` + `mypy .` on every MR as the load-bearing fallback. Pre-commit and editor coverage are about *latency of feedback*; CI is the gate.
 
 ---
 
@@ -146,9 +183,9 @@ The full rationale lives in `docs/design.md` §1.4 and ADR 010 / 011. Hard rules
 
 **Branching: trunk-based** (see DSPy / scikit-learn / instructor / pydantic — the four reference Python algorithm libraries all do this; no GitFlow).
 
-- `main` is the only long-lived branch.
+- `main` is the only long-lived branch. It is **GitLab-protected** (Settings → Repository → Protected branches): direct push is denied for everyone; the only path to land changes on `main` is via Merge Request.
 - Feature work happens on short-lived branches: `feat/<topic>`, `fix/<bug>`, `docs/<topic>`, `refactor/<topic>`. Open an MR → squash-merge into `main`.
-- Release = tag on `main` using SemVer per distribution: `evercore-clustering@v0.2.0`. Each distribution has its own version cadence (HuggingFace pattern; see `docs/design.md` §1.3).
+- Release = tag on `main` using SemVer per distribution: `evercore-clustering/v0.2.0`. Each distribution has its own version cadence (HuggingFace pattern; see `docs/design.md` §1.3 and `README.md` "Cutting a release").
 - Maintenance branches (`0.1.X-fixes`) are introduced **only when** a published version needs back-ports; not by default.
 
 **Commit messages: Gitmoji + Conventional Commits.** Format: `<emoji> <type>(<scope>): <description>`.
@@ -162,6 +199,12 @@ The full rationale lives in `docs/design.md` §1.4 and ADR 010 / 011. Hard rules
 ```
 
 Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+**MR title is load-bearing.** GitLab is configured (Settings → Merge Requests → Squash commit template = `%{title}`) so the MR title lands verbatim as the squash commit on `main`. The `mr-title-lint` CI job rejects MR titles that do not match the format above, because the release-notes generator (`git cliff`, see `cliff.toml` + `README.md` "Cutting a release") parses these messages to assemble per-distribution CHANGELOGs.
+
+**Scope = distribution name without the `evercore-` prefix.** Use `clustering` / `rank` / `core` / `boundary` / `parser` / `user-memory` / `agent-memory` / `knowledge`. For cross-cutting changes (CI, monorepo tooling, root docs), use `ci` / `release` / `repo` / `design` / `docs` as the scope or omit the scope entirely.
+
+**Squashing matters for per-distribution filtering.** `git cliff --include-path 'packages/evercore-<name>/**'` filters commits by changed paths. Squash merges keep one commit = one MR = one scoped Conventional-Commit message, which is the unit git-cliff groups by.
 
 ---
 
