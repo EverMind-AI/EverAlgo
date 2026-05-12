@@ -18,5 +18,13 @@ for the full workflow.
   into MemCells by topic boundary.
 - `WorkspaceMemCellExtractor`, `AgentMemCellExtractor` stubs.
 - Shared `_tokenize` helper and English / Chinese boundary prompts.
+- `_tokenize.force_split(text, *, max_tokens) -> list[str]` — token-bounded
+  chunking for caller-side prompt fitting.
+
+### Changed
+
+- `_tokenize.count_tokens(text: str) -> int` now uses OpenAI's
+  `o200k_base` encoding via `tiktoken` instead of the previous char/4
+  heuristic. Signature unchanged.
 
 <!-- git-cliff-unreleased-end -->

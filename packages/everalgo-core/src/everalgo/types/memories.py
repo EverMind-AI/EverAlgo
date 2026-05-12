@@ -1,6 +1,6 @@
 """User-side memory types — minimal set for the EPISODE path."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class Episode(BaseModel):
@@ -27,30 +27,57 @@ class Episode(BaseModel):
 
 
 class Foresight(BaseModel):
-    """User-side foresight memory — anticipated future event / commitment.
+    """User-side foresight memory — anticipated future event or commitment.
 
-    Stub — schema fields TBD (T1).
+    Mirrors :class:`Episode` shape: a structured trace anchored to a source MemCell. The minimal field set is
+    ``id`` / ``owner_id`` / ``foresight`` / ``evidence`` / ``timestamp`` / ``parent_type`` / ``parent_id``;
+    secondary fields (subject / start_time / end_time / duration_days / confidence / ...) are intentionally
+    omitted and remain accessible via ``extra="allow"`` if the LLM emits them.
     """
 
-    id: str = Field(default="", description="TBD (T1 review)")
-    text: str = Field(default="", description="TBD (T1 review)")
+    id: str
+    owner_id: str
+    foresight: str
+    evidence: str
+    timestamp: int  # Unix epoch milliseconds
+    parent_type: str = "memcell"
+    parent_id: str
+
+    model_config = ConfigDict(extra="allow")
 
 
 class AtomicFact(BaseModel):
-    """User-side atomic fact memory — single verifiable fact.
+    """User-side atomic fact memory — a single verifiable assertion lifted from a conversation.
 
-    Stub — schema fields TBD (T1).
+    Mirrors :class:`Episode` shape: each fact is anchored to a source MemCell. The minimal field set is
+    ``id`` / ``owner_id`` / ``fact`` / ``timestamp`` / ``parent_type`` / ``parent_id``; secondary fields
+    (confidence / sources / topic / ...) are intentionally omitted and remain accessible via
+    ``extra="allow"`` if the LLM emits them.
     """
 
-    id: str = Field(default="", description="TBD (T1 review)")
-    text: str = Field(default="", description="TBD (T1 review)")
+    id: str
+    owner_id: str
+    fact: str
+    timestamp: int  # Unix epoch milliseconds
+    parent_type: str = "memcell"
+    parent_id: str
+
+    model_config = ConfigDict(extra="allow")
 
 
 class Profile(BaseModel):
-    """User-side profile memory — incrementally edited user profile.
+    """User-side profile memory — long-term user traits derived from a cluster of conversations.
 
-    Stub — schema fields TBD (T1).
+    Unlike :class:`Episode` / :class:`Foresight` / :class:`AtomicFact`, ``Profile`` is a **user-level
+    aggregate**, not anchored to a single source MemCell — no ``parent_id`` / ``parent_type``. The minimal
+    field set is ``id`` / ``owner_id`` / ``summary`` / ``timestamp``; any structured trait fields
+    (interests / habits / preferences / hard_skills / ...) the LLM emits land in the model via
+    ``extra="allow"`` and are accessible without a schema bump.
     """
 
-    id: str = Field(default="", description="TBD (T1 review)")
-    summary: str = Field(default="", description="TBD (T1 review)")
+    id: str
+    owner_id: str
+    summary: str
+    timestamp: int  # Unix epoch milliseconds
+
+    model_config = ConfigDict(extra="allow")

@@ -30,14 +30,16 @@ def test_dunder_all_lists_six_symbols() -> None:
     )
 
 
-def test_three_stub_extractors_instantiable() -> None:
-    """3 stub Extractors can be instantiated without args."""
+def test_user_memory_extractors_instantiable() -> None:
+    """All 4 user-memory Extractors can be instantiated without args (stateless)."""
     from everalgo.user_memory import (
         AtomicFactExtractor,
+        EpisodeExtractor,
         ForesightExtractor,
         ProfileExtractor,
     )
 
     assert AtomicFactExtractor().__class__.__name__ == "AtomicFactExtractor"
+    assert EpisodeExtractor().__class__.__name__ == "EpisodeExtractor"
     assert ForesightExtractor().__class__.__name__ == "ForesightExtractor"
     assert ProfileExtractor().__class__.__name__ == "ProfileExtractor"

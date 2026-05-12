@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
   "asgiref>=3.0",
   "everalgo-core>=0.1.0,<2.0.0",
+  "tiktoken>=0.7",
 ]
 
 [tool.hatch.build.targets.wheel]
