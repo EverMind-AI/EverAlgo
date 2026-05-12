@@ -12,9 +12,11 @@ Public surface, grouped by role:
 from __future__ import annotations
 
 import contextvars
+import logging
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from everalgo.llm._filters import SensitiveHeadersFilter
 from everalgo.llm.config import LLMConfig
 from everalgo.llm.errors import LLMError, LLMNotConfiguredError
 from everalgo.llm.factory import build_client
@@ -23,6 +25,13 @@ from everalgo.llm.types import ChatMessage, ChatResponse, Usage
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+# Library logging setup (ADR-013). NullHandler suppresses "No handlers" noise
+# under Python's library-logging contract; SensitiveHeadersFilter redacts
+# authorization-style values from `record.args` mappings, default-on.
+_logger = logging.getLogger(__name__)
+_logger.addHandler(logging.NullHandler())
+_logger.addFilter(SensitiveHeadersFilter())
 
 __all__ = [
     "ChatMessage",

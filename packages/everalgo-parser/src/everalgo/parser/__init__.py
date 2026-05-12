@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from everalgo.parser import audio, document, image, url, video
@@ -18,6 +19,9 @@ __all__ = [
     "url",
     "video",
 ]
+
+# Library logging setup (ADR-013): NullHandler on each subpackage logger.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
 async def aparse(raw_file: RawFile) -> ParsedContent:

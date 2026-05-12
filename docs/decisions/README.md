@@ -20,6 +20,7 @@
 | [010](010-sync-async-dual-interface.md) | I/O 算子接口 | ✅ Accepted | sync + async 双接口（`a*` 前缀），明星 AI 库 100% 模式 |
 | [011](011-protocol-vs-abc.md) | 接口约定 | ✅ Accepted | Protocol structural over ABC（无状态 → DSPy/LlamaIndex 插件接口同模式）|
 | [012](012-llm-stack-architecture.md) | LLM 抽象层架构 | ✅ Accepted | 各家原生 SDK + Protocol + 双层路由（Scene 出 EverAlgo / Provider 在 EverAlgo） + LLMError 7 子类混合多重继承 + 算法层不加 retry |
+| [013](013-logging-conventions.md) | 日志规范 | ✅ Accepted | 混合（I/O logging + 用户行为 warnings + 算法 exception）+ 每子包挂 NullHandler + `everalgo.llm` 默认装 SensitiveHeadersFilter + ruff G/LOG/TRY 规则强制 |
 
 ## ADR 写作模板
 

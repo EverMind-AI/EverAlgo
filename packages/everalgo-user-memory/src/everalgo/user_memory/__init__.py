@@ -1,5 +1,7 @@
 """User-side memory extractors — 4 Extractors + boundary re-exports."""
 
+import logging
+
 from everalgo.boundary.chat import ChatMemCellExtractor
 from everalgo.boundary.workspace import WorkspaceMemCellExtractor
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
@@ -15,3 +17,6 @@ __all__ = [
     "ProfileExtractor",
     "WorkspaceMemCellExtractor",
 ]
+
+# Library logging setup (ADR-013): NullHandler on each subpackage logger.
+logging.getLogger(__name__).addHandler(logging.NullHandler())

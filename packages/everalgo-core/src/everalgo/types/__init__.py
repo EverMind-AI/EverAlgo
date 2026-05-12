@@ -4,6 +4,8 @@ Sub-project 1 deliverable. Adding more memory types (AtomicFact, Foresight, Prof
 ClusterState, ...) later is a SemVer minor bump for users that import from this module.
 """
 
+import logging
+
 from everalgo.types.agent import AgentCase, AgentSkill
 from everalgo.types.knowledge import KnowledgeMemory
 from everalgo.types.memcell import MemCell, Message, MessageRole
@@ -29,3 +31,6 @@ __all__ = [
     "RawData",
     "RawFile",
 ]
+
+# Library logging setup (ADR-013): NullHandler on each subpackage logger.
+logging.getLogger(__name__).addHandler(logging.NullHandler())

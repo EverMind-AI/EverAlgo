@@ -6,6 +6,8 @@ Public surface:
 - AgentMemCellExtractor — agent trace stub
 """
 
+import logging
+
 from everalgo.boundary.agent import AgentMemCellExtractor
 from everalgo.boundary.chat import ChatMemCellExtractor
 from everalgo.boundary.workspace import WorkspaceMemCellExtractor
@@ -15,3 +17,6 @@ __all__ = [
     "ChatMemCellExtractor",
     "WorkspaceMemCellExtractor",
 ]
+
+# Library logging setup (ADR-013): NullHandler on each subpackage logger.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
