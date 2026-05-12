@@ -1,7 +1,7 @@
 """Tests for everalgo.testing package-level public API.
 
-Verifies the 3 documented public symbols (per AGENTS.md §7 step 6 and §9
-plus spec §3) are exported at the top-level package.
+Verifies the 3 documented public symbols (per AGENTS.md §7 step 6 and §9 plus spec §3) are exported at the
+top-level package.
 """
 
 import everalgo.testing

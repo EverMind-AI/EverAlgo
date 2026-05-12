@@ -1,28 +1,31 @@
 """Tests for everalgo.llm 3-layer injection (configure / use / current / resolve).
 
-Each test gets isolated _default + _active state via the autouse fixture
-(directly mutating module-private variables — see spec §6.4 for the
-rationale: BOSS rejected exposing reset_default() public API; tests use
+Each test gets isolated _default + _active state via the autouse fixture (directly mutating module-private
+variables — see spec §6.4 for the rationale: BOSS rejected exposing reset_default() public API; tests use
 monkeypatch-style isolation instead).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 
 import everalgo.llm
-from everalgo.llm.protocols import LLMClient
 from everalgo.testing.fake_llm import FakeLLMClient
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from everalgo.llm.protocols import LLMClient
 
 
 @pytest.fixture(autouse=True)
 def reset_everalgo_llm_state() -> Iterator[None]:
     """Reset _default + _active before each test; restore after.
 
-    _default is a plain module variable — save/restore directly.
-    _active is a ContextVar — use set/reset token semantics.
+    _default is a plain module variable — save/restore directly. _active is a ContextVar — use set/reset
+    token semantics.
     """
     saved_default = everalgo.llm._default
     token = everalgo.llm._active.set(None)

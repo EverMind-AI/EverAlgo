@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
-EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, dependency-free of any storage, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in EverOS.
+EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, dependency-free of any storage, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in evermem.
 
-## Why split EverAlgo from EverOS?
+## Why split EverAlgo from evermem?
 
 - **Algorithm engineers iterate fast.** EverAlgo is "the algorithm team's home base" — every change to extraction strategies, prompts, fusion math, ranker weights happens here without going through service-layer ceremony.
 - **Pure functions, easy to reason about.** No DB, no filesystem, no business state. All operators are plain in-memory transforms with explicit input / output types.
@@ -134,6 +134,7 @@ Before pushing a release tag:
 
 - [ ] `uv run pytest` is green on `main`.
 - [ ] `uv run ruff check . && uv run ruff format --check .` pass.
+- [ ] `uv run mypy . && uv run pyright` pass.
 - [ ] The bumped `version` honours SemVer relative to the previous tag (no breaking change in a minor / patch).
 - [ ] Downstream packages' `>=X.Y,<2.0` ranges still allow the new version.
 - [ ] The `packages/everalgo-<dist>/CHANGELOG.md` section for the new version has been **reviewed and edited** — git-cliff drafts, you ship.
@@ -141,7 +142,7 @@ Before pushing a release tag:
 
 ### CI / pipeline status
 
-The current `.gitlab-ci.yml` runs 4 quality gates on every MR + on `main`: `ruff-check`, `ruff-format`, `mypy`, `pytest`. Plus `mr-title-lint` on MR pipelines only, enforcing the Gitmoji + Conventional-Commit MR-title format (because GitLab is configured to use MR titles verbatim as squash commit messages — see `AGENTS.md` §6).
+The current `.gitlab-ci.yml` runs 5 quality gates on every MR + on `main`: `ruff-check`, `ruff-format`, `mypy`, `pyright`, `pytest` (with junit + cobertura artifacts, total + diff coverage both gated at 90%).
 
 The build + publish stage (`uv build` + `uv publish` triggered on `<dist>/v<semver>` tag push, filtered to publish only the matching distribution) is tracked as a follow-up before the first real release.
 

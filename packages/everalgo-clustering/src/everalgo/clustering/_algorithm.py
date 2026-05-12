@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import numpy as np
+from typing import TYPE_CHECKING
 
-from everalgo.clustering._state import (
-    ClusterConfig,
-    ClusterId,
-    ClusterState,
-)
-from everalgo.llm.protocols import LLMClient
+if TYPE_CHECKING:
+    import numpy as np
+
+    from everalgo.clustering._state import (
+        ClusterConfig,
+        ClusterId,
+        ClusterState,
+    )
+    from everalgo.llm.protocols import LLMClient
 
 __all__ = ["cluster_by_geometry", "cluster_by_llm"]
 

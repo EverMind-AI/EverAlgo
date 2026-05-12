@@ -1,15 +1,13 @@
 """End-to-end pipeline test: messages → boundary → episode.
 
-Verifies the full boundary→episode data flow with a FakeLLMClient handler
-that returns distinct JSON per call (boundary call returns split decision,
-episode call returns episode JSON). This is the sub-project 4 reference
-implementation acceptance test.
+Verifies the full boundary→episode data flow with a FakeLLMClient handler that returns distinct JSON per
+call (boundary call returns split decision, episode call returns episode JSON). This is the sub-project 4
+reference implementation acceptance test.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -22,13 +20,15 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Message, MessageRole
 from everalgo.user_memory.episode import EpisodeExtractor
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 @pytest.fixture(autouse=True)
 def reset_everalgo_llm_state() -> Iterator[None]:
     """Reset everalgo.llm._default + _active per test (sub-project 2.5 fixture).
 
-    Without this, test pollution between e2e and other test files could
-    leak global state.
+    Without this, test pollution between e2e and other test files could leak global state.
     """
     saved_default = everalgo.llm._default
     token = everalgo.llm._active.set(None)

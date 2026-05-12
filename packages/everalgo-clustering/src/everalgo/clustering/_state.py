@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
+import numpy as np  # noqa: TC002  # pydantic resolves field annotations at runtime
 from pydantic import BaseModel, ConfigDict, Field
 
 ClusterId = str
@@ -13,8 +13,7 @@ ClusterId = str
 class ClusterState(BaseModel):
     """Online incremental K-means accumulated state (centroid / count / last_ts).
 
-    Frozen value object — assign() returns new instance, never mutates.
-    Stub — assign() body TBD.
+    Frozen value object — assign() returns new instance, never mutates. Stub — assign() body TBD.
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)

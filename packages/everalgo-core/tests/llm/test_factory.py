@@ -28,9 +28,8 @@ def test_build_client_returns_openai_compat_client() -> None:
 def test_factory_module_does_not_import_provider_eagerly() -> None:
     """``import everalgo.llm.factory`` must not pull openai_compat into sys.modules.
 
-    The lazy import inside ``build_client`` is load-bearing for cold-start
-    cost; this test is a regression guard against a maintainer "fixing" it
-    by hoisting the import to the top of the module.
+    The lazy import inside ``build_client`` is load-bearing for cold-start cost; this test is a regression
+    guard against a maintainer "fixing" it by hoisting the import to the top of the module.
     """
     # Force a clean reload of everalgo.llm.factory.
     sys.modules.pop("everalgo.llm.factory", None)

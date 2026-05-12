@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 class RankInput(BaseModel):
     """Recall-stage input passed to Ranker.
 
-    Stub — schema fields TBD (T1). Will include: sparse/dense candidates,
-    pre-fetched cross-memory linkage (e.g. Episode → AtomicFact).
+    Stub — schema fields TBD (T1). Will include: sparse/dense candidates, pre-fetched cross-memory linkage
+    (e.g. Episode → AtomicFact).
     """
 
     memory_type: str = Field(default="", description="episodic / case / skill / profile")

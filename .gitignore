@@ -25,6 +25,8 @@ venv/
 .cache
 .coverage
 .coverage.*
+coverage.xml
+report.xml
 htmlcov/
 .tox/
 .nox/

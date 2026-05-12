@@ -9,7 +9,7 @@
 EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)）+ PEP 420 共享 namespace（[ADR 003](003-namespace-package-pep420.md)）。**命名规范**决定 distribution 名、import 路径、物理目录名之间的映射规则。
 
 相关硬约束：
-- **H1** EverOS 文档契约 `everalgo.user_memory.ChatMemCellExtractor`
+- **H1** evermem 文档契约 `everalgo.user_memory.ChatMemCellExtractor`
 - **H7** 可识别系列前缀（PyPI 上 grep 出 EverAlgo 套件）
 - PEP 8 命名规范（lowercase 模块 + PascalCase 类）
 
@@ -20,7 +20,7 @@ EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 | **A. llama-index 风** | distribution dash（`everalgo-user-memory`）+ import dot 共享 namespace（`everalgo.user_memory`）+ 物理 underscore（`everalgo/user_memory/`）+ class PascalCase | LlamaIndex |
 | B. langchain 风（A 风格独立顶层）| distribution dash（`langchain-core`）+ import 独立顶层 underscore（`import langchain_core`）+ class PascalCase | LangChain |
 | C. HuggingFace 风（独立词无前缀）| distribution dash 或 underscore，无系列前缀（`transformers` / `huggingface-hub`）+ import 独立顶层 | HuggingFace 全家桶 |
-| D. PascalCase namespace（Java/.NET 风）| `everalgo.UserMemory.ChatMemCellExtractor` —— EverOS 文档原文写法（PEP 8 违例）| 无主流 Python 实证 |
+| D. PascalCase namespace（Java/.NET 风）| `everalgo.UserMemory.ChatMemCellExtractor` —— evermem 文档原文写法（PEP 8 违例）| 无主流 Python 实证 |
 
 ## 客观优劣分析
 
@@ -31,7 +31,7 @@ EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 | 系列归属感强 | 所有包都在 `everalgo.*` 顶层，import 表整洁 |
 | dist 名 ↔ import 路径映射规则一致 | dash → dot 简单转换 |
 | 兼容现有 PEP 420 namespace（[ADR 003](003-namespace-package-pep420.md)）| 共享顶层 |
-| **与 EverOS 文档契约 `everalgo.user_memory.*` 完全兼容** | 1:1 映射 |
+| **与 evermem 文档契约 `everalgo.user_memory.*` 完全兼容** | 1:1 映射 |
 | 系列前缀 `everalgo-` 在 PyPI 可识别 | grep `everalgo-` 列出全部套件 |
 | PEP 8 合规 | 模块 lowercase + 类 PascalCase |
 
@@ -56,7 +56,7 @@ EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 
 | 维度 | 说明 |
 |------|------|
-| **与 EverOS 文档契约不兼容** | 强制 `everalgo_user_memory.X` 平面命名 |
+| **与 evermem 文档契约不兼容** | 强制 `everalgo_user_memory.X` 平面命名 |
 | 无 `everalgo.*` 系列归属感 | import 表中 `everalgo_user_memory` / `everalgo_boundary` 散落 |
 | 多包共存 import 噪音 | 每个 dist 一个独立顶层名 |
 
@@ -67,7 +67,7 @@ EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 新劣势：
 - 无系列前缀 → PyPI 上 `core` / `parser` / `boundary` / `rank` 等通用词冲突已被占用
 - 无系列归属（用户散落 PyPI 后无法识别 EverAlgo 套件）
-- 与 EverOS 契约不兼容
+- 与 evermem 契约不兼容
 
 ### D. PascalCase namespace 优势/劣势
 
@@ -87,7 +87,7 @@ EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 | 系列归属感强 | ✅ **强需要**（H7） |
 | dash → dot 映射规则一致 | ✅ 受益 |
 | 兼容 PEP 420 namespace | ✅ **强需要**（[ADR 003](003-namespace-package-pep420.md) 决议） |
-| 与 EverOS 文档契约兼容 | ✅ **强需要**（H1）|
+| 与 evermem 文档契约兼容 | ✅ **强需要**（H1）|
 | PyPI 上 grep `everalgo-` 可识别 | ✅ 强需要（H7）|
 | PEP 8 合规 | ✅ 强需要（社区惯例）|
 
@@ -100,11 +100,11 @@ EverAlgo 拆为多 distribution（[ADR 002](002-multi-distribution-vs-single.md)
 
 ### B / C / D 评估
 
-B：与 H1 EverOS 契约**不兼容**——直接排除
+B：与 H1 evermem 契约**不兼容**——直接排除
 
 C：违反 H7 可识别系列前缀 + 与 H1 不兼容——直接排除
 
-D：PEP 8 违例 + 无 Python 主流实证——**EverOS 文档原文这样写但属违例，本文档矫正**
+D：PEP 8 违例 + 无 Python 主流实证——**evermem 文档原文这样写但属违例，本文档矫正**
 
 ## 决策
 
@@ -122,11 +122,11 @@ D：PEP 8 违例 + 无 Python 主流实证——**EverOS 文档原文这样写�
 | 多词模块名 | underscore 分词（PEP 8 推荐） | `user_memory` / `agent_memory` / 不是 `usermemory` |
 | 类名 | CapWords / PascalCase | `ChatMemCellExtractor` |
 
-### EverOS 文档矫正
+### evermem 文档矫正
 
-EverOS 设计文档原文使用的 PascalCase namespace 是 PEP 8 违例（Java/.NET 风格），本文档统一矫正：
+evermem 设计文档原文使用的 PascalCase namespace 是 PEP 8 违例（Java/.NET 风格），本文档统一矫正：
 
-| 原文（EverOS 文档）| 矫正后 |
+| 原文（evermem 文档）| 矫正后 |
 |------|--------|
 | `everalgo.UserMemory.ConvMemCellExtractor` | `everalgo.user_memory.ChatMemCellExtractor` |
 | `everalgo.AgentMemory.AgentCaseExtractor` | `everalgo.agent_memory.AgentCaseExtractor` |
@@ -136,7 +136,7 @@ EverOS 设计文档原文使用的 PascalCase namespace 是 PEP 8 违例（Java/
 
 矫正涵盖两层：① PEP 8 lowercase namespace（`UserMemory` → `user_memory` 等）；② `Conv` 缩写歧义消除（`Conv` → `Chat`，避免与 PyTorch `nn.Conv2d` 等 Convolution 占用冲突；与 OpenAI / Anthropic / LlamaIndex / HuggingFace / DSPy 业界 5/6 主流命名对齐）。
 
-EverOS 文档作者侧（zhanglibin）需同步修订；memsys_opensource 现状代码（`ConvMemCellExtractor` / `RawDataType.CONVERSATION` / `CONV_BATCH_BOUNDARY_DETECTION_PROMPT` / `conv_memcell_extractor.py`）落地 EverAlgo 时一并重命名。
+evermem 文档作者侧（zhanglibin）需同步修订；memsys_opensource 现状代码（`ConvMemCellExtractor` / `RawDataType.CONVERSATION` / `CONV_BATCH_BOUNDARY_DETECTION_PROMPT` / `conv_memcell_extractor.py`）落地 EverAlgo 时一并重命名。
 
 ## 行业实证印证
 
@@ -164,8 +164,8 @@ EverAlgo 完全套用此模式。
 
 ## 后续演化触发条件
 
-1. **EverOS 文档修订**：zhanglibin 把 EverOS 文档矫正为 PEP 8 lowercase 后，本 ADR 矫正表删除（仅保留命名规范本身）
-2. **PEP 420 命名空间出现重大不兼容问题**：转 langchain 风 A 风格独立顶层（同时改 EverOS 契约）—— 触发 [ADR 003](003-namespace-package-pep420.md) 重新评估
+1. **evermem 文档修订**：zhanglibin 把 evermem 文档矫正为 PEP 8 lowercase 后，本 ADR 矫正表删除（仅保留命名规范本身）
+2. **PEP 420 命名空间出现重大不兼容问题**：转 langchain 风 A 风格独立顶层（同时改 evermem 契约）—— 触发 [ADR 003](003-namespace-package-pep420.md) 重新评估
 3. **某子包名与第三方包冲突**：调整子包命名（不影响 ADR 整体规则）
 
 ## 相关 ADR

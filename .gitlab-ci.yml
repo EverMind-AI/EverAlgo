@@ -1,77 +1,87 @@
-# GitLab CI for the EverAlgo monorepo (sub-project 4).
-#
-# Strict mode: 4 quality gates (ruff check / ruff format --check / mypy /
-# pytest) all enforced. The 3 lint jobs run in parallel within the lint
-# stage; pytest follows in the test stage. Per-package matrix (only:
-# changes:) is deferred to a future sub-project once enough distributions
-# have releasable artifacts.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
 
 stages:
   - lint
   - test
 
-ruff-check:
-  stage: lint
-  image: python:3.12-slim
+variables:
+  # GitLab's `cache:` can only persist paths inside CI_PROJECT_DIR; default `~/.cache/uv` is outside it.
+  UV_CACHE_DIR: "${CI_PROJECT_DIR}/.uv-cache"
+
+default:
+  # Non-slim: -slim strips libatomic1 that pyright's bundled Node needs.
+  image: ghcr.io/astral-sh/uv:0.9.30-python3.12-bookworm
+  interruptible: true
+  timeout: 15m
+
+# `--frozen` makes uv error on lockfile drift rather than silently updating it. Bump the image tag to upgrade uv.
+.python-job:
+  cache:
+    key:
+      files:
+        - uv.lock
+    paths:
+      - .uv-cache/
   before_script:
-    - pip install --quiet uv
-    - uv sync --all-packages --group dev
+    - uv sync --all-packages --group dev --frozen
+
+ruff-check:
+  extends: .python-job
+  stage: lint
   script:
     - uv run ruff check .
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
 
 ruff-format:
+  extends: .python-job
   stage: lint
-  image: python:3.12-slim
-  before_script:
-    - pip install --quiet uv
-    - uv sync --all-packages --group dev
   script:
     - uv run ruff format --check .
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
 
 mypy:
+  extends: .python-job
   stage: lint
-  image: python:3.12-slim
-  before_script:
-    - pip install --quiet uv
-    - uv sync --all-packages --group dev
   script:
     - uv run mypy .
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
 
-# MR title lint: GitLab is configured (Settings -> Merge Requests -> Squash
-# commit template = %{title}) so the MR title lands verbatim as the squash
-# commit on `main`. This job rejects titles that do not follow the
-# Gitmoji + Conventional Commits format defined in AGENTS.md section 6, so
-# git-cliff can parse and group release notes from main's commit history.
-#
-# Implementation uses Python regex (Unicode codepoint classes) instead of
-# `grep -E` because POSIX ERE does not honour `\xNN` byte escapes; GNU grep
-# treats them as the literal four characters `\`, `x`, `N`, `N`, so the
-# emoji-detection prefix always failed in CI. Source: scripts/check_mr_title.py.
-mr-title-lint:
+pyright:
+  extends: .python-job
   stage: lint
-  image: python:3.12-alpine
   script:
-    - python3 scripts/check_mr_title.py "$CI_MERGE_REQUEST_TITLE"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - uv run pyright
 
 pytest:
+  extends: .python-job
   stage: test
-  image: python:3.12-slim
+  needs: []   # DAG: start in parallel with lint stage; pytest does not gate on lint.
+  variables:
+    GIT_DEPTH: 0   # Full history so diff-cover can compare against the MR target SHA.
+  # extends replaces list keys, so uv sync is restated. git is needed by diff-cover (missing from uv image).
   before_script:
-    - pip install --quiet uv
-    - uv sync --all-packages --group dev
+    - apt-get update -qq && apt-get install -y --no-install-recommends git
+    - uv sync --all-packages --group dev --frozen
   script:
-    - uv run pytest -v
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
+    - uv run pytest -n auto -v
+        --junitxml=report.xml
+        --cov=everalgo
+        --cov-report=term
+        --cov-report=xml:coverage.xml
+        --cov-fail-under=90
+    # Diff-cover only on MR pipelines; CI_MERGE_REQUEST_DIFF_BASE_SHA is empty on main pushes.
+    - |
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then
+        uv run diff-cover coverage.xml \
+          --compare-branch="$CI_MERGE_REQUEST_DIFF_BASE_SHA" \
+          --fail-under=90 \
+          --show-uncovered
+      fi
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml

@@ -1,8 +1,7 @@
 """Public data contracts for EverAlgo — minimal EPISODE-path subset.
 
-Sub-project 1 deliverable. Adding more memory types (AtomicFact,
-Foresight, Profile, AgentCase, AgentSkill, ClusterState, ...) later
-is a SemVer minor bump for users that import from this module.
+Sub-project 1 deliverable. Adding more memory types (AtomicFact, Foresight, Profile, AgentCase, AgentSkill,
+ClusterState, ...) later is a SemVer minor bump for users that import from this module.
 """
 
 from everalgo.types.agent import AgentCase, AgentSkill

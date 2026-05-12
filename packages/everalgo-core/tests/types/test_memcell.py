@@ -47,7 +47,7 @@ def test_memcell_empty_messages_allowed() -> None:
 
 
 def test_memcell_extra_fields_silently_ignored() -> None:
-    """Opensource MemCell carries source_type / sender_ids / user_id_list / group_id / participants — drop them all."""
+    """Opensource MemCell carries source_type / sender_ids / user_id_list / group_id / participants — drop all."""
     cell = MemCell.model_validate(
         {
             "id": "m1",

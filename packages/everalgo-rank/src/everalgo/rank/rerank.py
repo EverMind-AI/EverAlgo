@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from everalgo.llm.protocols import LLMClient
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from everalgo.llm.protocols import LLMClient
 
 __all__ = ["arerank", "rerank"]
 

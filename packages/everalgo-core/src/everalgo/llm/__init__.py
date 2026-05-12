@@ -1,18 +1,19 @@
 """LLM facade — chat-style abstraction over OpenAI-compatible providers.
 
-Public surface (7 symbols, alphabetical-by-category):
+Public surface, grouped by role:
 
-- protocol:  LLMClient
-- data:      ChatMessage, ChatResponse, Usage, LLMConfig
-- error:     LLMError
-- factory:   build_client
+- protocol:    LLMClient
+- data:        ChatMessage, ChatResponse, Usage, LLMConfig
+- errors:      LLMError, LLMNotConfiguredError
+- factory:     build_client
+- 3-layer DI:  configure, use, current, resolve
 """
 
 from __future__ import annotations
 
 import contextvars
-from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 from everalgo.llm.config import LLMConfig
 from everalgo.llm.errors import LLMError, LLMNotConfiguredError
@@ -20,17 +21,18 @@ from everalgo.llm.factory import build_client
 from everalgo.llm.protocols import LLMClient
 from everalgo.llm.types import ChatMessage, ChatResponse, Usage
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 __all__ = [
-    # sub-project 2 (LLM Stack — 7)
-    "LLMClient",
     "ChatMessage",
     "ChatResponse",
-    "Usage",
+    "LLMClient",
     "LLMConfig",
     "LLMError",
-    "build_client",
-    # sub-project 2.5 (3-layer injection — 5)
     "LLMNotConfiguredError",
+    "Usage",
+    "build_client",
     "configure",
     "current",
     "resolve",
@@ -68,9 +70,10 @@ def configure(llm: LLMClient) -> None:
     operator (operators accept ``llm: LLMClient | None = None``); for multi-
     client switching, use the ``use(client)`` scoped contextmanager.
 
-    Args:
-        llm: An ``LLMClient`` instance. Required (no default value, ``None``
-            not accepted by static type checking).
+    Parameters
+    ----------
+    llm : LLMClient
+        An ``LLMClient`` instance. Required (no default value, ``None`` not accepted by static type checking).
     """
     global _default
     _default = llm
@@ -80,12 +83,10 @@ def configure(llm: LLMClient) -> None:
 def use(client: LLMClient) -> Iterator[None]:
     """Temporarily override the active LLM within a sync ``with`` block.
 
-    Sync ``@contextmanager`` (NOT ``@asynccontextmanager``) is the correct
-    form here: the underlying ``ContextVar.set / reset`` operations are sync,
-    and Python's asyncio.Task auto-propagates ContextVar state across
-    ``await`` boundaries. Hence ``with use(client):`` works correctly inside
-    ``async def`` functions, FastAPI endpoints, and Jupyter cells alike — no
-    ``async with`` needed.
+    Sync ``@contextmanager`` (NOT ``@asynccontextmanager``) is the correct form here: the underlying
+    ``ContextVar.set / reset`` operations are sync, and Python's asyncio.Task auto-propagates ContextVar state
+    across ``await`` boundaries. Hence ``with use(client):`` works correctly inside ``async def`` functions,
+    FastAPI endpoints, and Jupyter cells alike — no ``async with`` needed.
 
     Mirrors DSPy ``dspy.settings.context(lm=...)`` (sync ``@contextmanager``
     in ``dspy/dsp/utils/settings.py:216``) and pydantic-ai ``agent.override
@@ -94,13 +95,15 @@ def use(client: LLMClient) -> Iterator[None]:
     Nested ``use()`` calls naturally stack (the inner block's reset token
     restores the outer block's value, not the global default).
 
-    Args:
-        client: The ``LLMClient`` to bind for the duration of the ``with``
-            block.
+    Parameters
+    ----------
+    client : LLMClient
+        The ``LLMClient`` to bind for the duration of the ``with`` block.
 
-    Yields:
-        Control to the ``with`` block body. ``current()`` and ``resolve()``
-        within the block return ``client``.
+    Yields
+    ------
+    None
+        Control passes to the ``with`` block body. ``current()`` and ``resolve()`` within the block return ``client``.
     """
     token = _active.set(client)
     try:
@@ -116,11 +119,12 @@ def current() -> LLMClient | None:
     1. ``_active.get()`` — scoped contextvar (set by ``use(...)``)
     2. ``_default`` — process-wide default (set by ``configure(...)``)
 
-    Returns ``None`` if neither has been set. This is a legitimate return
-    value (NOT an error) — callers needing fail-fast on missing config use
-    ``resolve()`` instead.
+    Returns ``None`` if neither has been set. This is a legitimate return value (NOT an error) — callers
+    needing fail-fast on missing config use ``resolve()`` instead.
 
-    Returns:
+    Returns
+    -------
+    LLMClient or None
         The active ``LLMClient`` or ``None``.
     """
     return _active.get() or _default
@@ -138,18 +142,23 @@ def resolve(per_call: LLMClient | None = None) -> LLMClient:
     2. ``_active.get()`` (scoped contextvar)
     3. ``_default`` (global)
 
-    Args:
-        per_call: Per-call override passed by the operator's caller.
-            Typical signature: ``async def aextract(memcell, *, llm=None)``,
-            then internally ``client = everalgo.llm.resolve(llm)``.
+    Parameters
+    ----------
+    per_call : LLMClient or None, optional
+        Per-call override passed by the operator's caller.
+        Typical signature: ``async def aextract(memcell, *, llm=None)``,
+        then internally ``client = everalgo.llm.resolve(llm)``.
 
-    Returns:
+    Returns
+    -------
+    LLMClient
         The resolved ``LLMClient``.
 
-    Raises:
-        LLMNotConfiguredError: If all 3 layers are ``None`` (developer forgot
-            to inject). Message names the 3 fix paths (configure / use /
-            per-call).
+    Raises
+    ------
+    LLMNotConfiguredError
+        If all 3 layers are ``None`` (developer forgot to inject).
+        Message names the 3 fix paths (configure / use / per-call).
     """
     if per_call is not None:
         return per_call

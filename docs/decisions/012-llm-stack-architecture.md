@@ -121,12 +121,12 @@ B 派 4/4 ABC 真实驱动：concrete mixin（LangChain ~40+ / LlamaIndex ~32 / 
 
 ### 路由分层
 
-业界主流 LLM 库 4/4 横跨 3 阵营都**不做 scene 路由**（DSPy `dspy.settings.lm` + LlamaIndex `Settings.llm` 算法库阵营 / LangChain `prompt | model | parser` chain 框架阵营 / AutoGen `client → agent` agent 框架阵营）——scene 是业务编排概念（"哪个步骤用哪个模型"），与算法本身无关。3 阵营都不做 → 反向印证 scene 路由不属任何阵营 LLM 库的职责。**Scene 路由剥离出 EverAlgo，归 EverOS**。
+业界主流 LLM 库 4/4 横跨 3 阵营都**不做 scene 路由**（DSPy `dspy.settings.lm` + LlamaIndex `Settings.llm` 算法库阵营 / LangChain `prompt | model | parser` chain 框架阵营 / AutoGen `client → agent` agent 框架阵营）——scene 是业务编排概念（"哪个步骤用哪个模型"），与算法本身无关。3 阵营都不做 → 反向印证 scene 路由不属任何阵营 LLM 库的职责。**Scene 路由剥离出 EverAlgo，归 evermem**。
 
 Provider 路由（`config.provider` → SDK 适配实现）是实现层职责，紧耦合算法库 SDK 适配代码，**保留 EverAlgo 内部**。Letta `LLMClient.create` `match-case` 同款。
 
 → **双层分离**：
-- Scene 路由（业务层）→ EverOS `SceneRouter`
+- Scene 路由（业务层）→ evermem `SceneRouter`
 - Provider 路由（实现层）→ EverAlgo `everalgo/llm/routing.py: build_client(config)`
 
 ### 错误层级
@@ -165,7 +165,7 @@ C 派（mem0 / CrewAI 平铺 1-2 个）覆盖不全。
 
 ### D3：双层路由分离
 
-- **Scene 路由（业务层）剥离出 EverAlgo，归 EverOS**：业界主流 LLM 库 4/4 横跨 3 阵营（算法库 / chain 框架 / agent 框架）都不做 scene 路由
+- **Scene 路由（业务层）剥离出 EverAlgo，归 evermem**：业界主流 LLM 库 4/4 横跨 3 阵营（算法库 / chain 框架 / agent 框架）都不做 scene 路由
 - **Provider 路由（实现层）保留 EverAlgo**：`build_client(config)` `match-case` 分发，Letta 同款
 
 ### D4：错误层级 LLMError + 7 子类 + 混合多重继承
@@ -319,10 +319,10 @@ def build_client(config: LLMConfig) -> LLMClient:
 
 1. **某 provider 增加（如 Google Gemini / Mistral / 自部署 vLLM 特殊化）**：在 `providers/` 加新文件 + `routing.py: match-case` 加 case
 2. **OpenAI / Anthropic SDK 弃用 / 大版本不兼容**：评估迁移成本，可能切回 LiteLLM
-3. **LiteLLM 安全状况显著改善 + EverOS 不再用 EnterprisePipelineRouter**：可重新评估 P3 LiteLLM 路线
+3. **LiteLLM 安全状况显著改善 + evermem 不再用 EnterprisePipelineRouter**：可重新评估 P3 LiteLLM 路线
 4. **EverAlgo 算法层需要内置 telemetry / cache / callback**：用 decorator / contextmanager 装饰具体实现，**不改 Protocol 为 ABC**
 5. **新 provider 错误类型不在 7 子类覆盖范围**（如配额超出 `LLMQuotaExceededError`）：扩展子类
-6. **Scene 路由是否真不在 EverAlgo**：若 EverOS 团队反馈 contextmanager wrap 5+ 场景代码冗长难维护，可重新评估"算子签名加可选 `llm` 参数"路径
+6. **Scene 路由是否真不在 EverAlgo**：若 evermem 团队反馈 contextmanager wrap 5+ 场景代码冗长难维护，可重新评估"算子签名加可选 `llm` 参数"路径
 
 ## memsys_opensource 现状代码迁移清单
 
@@ -332,7 +332,7 @@ def build_client(config: LLMConfig) -> LLMClient:
 | `ApiKeyRotator` multi-key 轮换 | **开源版不做**（不属于开源版需求，部署方有需要时可自行实现 LLMClient 装饰器叠加）|
 | `_MAX_RETRIES = 5` | 删除（依赖 SDK 默认 2 次）|
 | `FallbackLLMProvider`（库内 decorator）| **开源版不做**（跨 Provider fallback 不属于开源版需求，部署方有需要时可自行实现 LLMClient 装饰器叠加）|
-| `LLMScene` enum + `_get_provider_for_scene` | 移到 EverOS 端 `SceneRouter` |
+| `LLMScene` enum + `_get_provider_for_scene` | 移到 evermem 端 `SceneRouter` |
 | `LLMProvider` Protocol（旧版）| `everalgo.llm.client.LLMClient` Protocol（method 重命名 `generate` → `chat`）|
 | OpenAI compat 协议直发 HTTP | `openai.AsyncOpenAI(base_url=..., api_key=...)` 享受 SDK 默认 2 次重试 |
 | `model` whitelist env 校验 | 保留为 EverAlgo 业务定制（`providers/openai_compat.py` 内）|

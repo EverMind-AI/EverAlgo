@@ -121,7 +121,7 @@ async def test_openai_compat_client_normalises_unknown_finish_reason(
 ) -> None:
     """If the provider emits a finish_reason outside the 3-value Literal, normalise to None."""
     payload = dict(chat_completion_payload)
-    choices = list(cast(list[dict[str, object]], payload["choices"]))
+    choices = list(cast("list[dict[str, object]]", payload["choices"]))
     choices[0] = {**choices[0], "finish_reason": "tool_calls"}
     payload["choices"] = choices
 

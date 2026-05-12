@@ -184,7 +184,7 @@ LangChain 选 ABC 的合理性：
 
 EverAlgo 与 LangChain 的关键不同：
 - 算子**无状态**（H4）→ 无 lifecycle / mixin 需求
-- 算子被 EverOS 单调用，**不组装 chain** → 不需类型分发
+- 算子被 evermem 单调用，**不组装 chain** → 不需类型分发
 - 算子通过 module 级 facade 直接 `import`（[ADR 008](008-re-export-vs-client-facade.md)）→ 不需"我必须继承谁"约束
 
 → LangChain 选 ABC 与 chain 框架定位匹配；EverAlgo 非 chain 框架场景 → Protocol 与 DSPy / LlamaIndex 插件接口同推理路径。

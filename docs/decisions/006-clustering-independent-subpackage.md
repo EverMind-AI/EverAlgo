@@ -58,7 +58,7 @@ EverAlgo 涉及聚类的链路（基于 memsys_opensource 现状代码核证，2
 
 | 维度 | 说明 |
 |------|------|
-| 不暴露顶层 | EverOS 调用拓扑无聚类实体，不暴露顶层 fits "外部契约最小"原则 |
+| 不暴露顶层 | evermem 调用拓扑无聚类实体，不暴露顶层 fits "外部契约最小"原则 |
 | 实现完全隐藏 | user_memory / agent_memory 各自管自己的聚类，无跨包暴露 |
 
 ### B. extractor 内部私有模块 劣势

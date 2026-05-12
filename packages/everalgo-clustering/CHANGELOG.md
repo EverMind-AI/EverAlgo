@@ -12,12 +12,10 @@ for the full workflow.
 <!-- git-cliff-unreleased-start -->
 ## [Unreleased]
 
-<!-- git-cliff-unreleased-end -->
-
-## [0.1.0] - 2026-05-11
-
 ### Added
 
-- Initial release: stub skeleton exposing `ClusterState`, `ClusterConfig`,
-  `Candidate`, `cluster_by_geometry`, `cluster_by_llm`. Public-API surface
-  is frozen; implementation bodies pending.
+- Stub skeleton exposing `ClusterState`, `ClusterConfig`, `Candidate`,
+  `cluster_by_geometry`, `cluster_by_llm`. Public-API surface is frozen;
+  implementation bodies pending.
+
+<!-- git-cliff-unreleased-end -->

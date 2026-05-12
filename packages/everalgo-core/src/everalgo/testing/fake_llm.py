@@ -14,9 +14,8 @@ from everalgo.llm.types import ChatMessage, ChatResponse
 class CallRecord(BaseModel):
     """Single recorded ``FakeLLMClient.chat`` invocation.
 
-    Exposed publicly so tests can assert on captured arguments via
-    ``client.calls[0].messages == [...]`` with full IDE type-checking
-    (mirroring ``unittest.mock.call`` being a public symbol).
+    Exposed publicly so tests can assert on captured arguments via ``client.calls[0].messages == [...]`` with
+    full IDE type-checking (mirroring ``unittest.mock.call`` being a public symbol).
     """
 
     messages: list[ChatMessage]
@@ -70,8 +69,7 @@ class FakeLLMClient:
     def calls(self) -> list[CallRecord]:
         """All recorded ``chat`` invocations, in call order.
 
-        Returns a defensive copy so callers can mutate the result without
-        affecting internal state.
+        Returns a defensive copy so callers can mutate the result without affecting internal state.
         """
         return list(self._calls)
 

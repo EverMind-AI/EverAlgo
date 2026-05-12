@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
 import everalgo.llm
-from everalgo.llm.protocols import LLMClient
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
 from everalgo.user_memory.prompts.en.episode import EPISODE_EXTRACT_PROMPT_EN
 
+if TYPE_CHECKING:
+    from everalgo.llm.protocols import LLMClient
+
 
 class EpisodeExtractor:
     """Extract Episode memories from a single MemCell.
 
-    Stateless callable class — no ``__init__``, no instance state.
-    Per design.md line 687 / line 697: this is the unconditional
-    EPISODE-path operator (runs for any MemCell).
+    Stateless callable class — no ``__init__``, no instance state. Per design.md line 687 / line 697: this is
+    the unconditional EPISODE-path operator (runs for any MemCell).
 
     Customize per call via ``llm=`` and ``prompt=`` arguments.
     """
@@ -33,18 +35,26 @@ class EpisodeExtractor:
     ) -> list[Episode]:
         """Async main implementation: ask LLM to extract Episodes.
 
-        Args:
-            memcell: Source MemCell (boundary output).
-            llm: Per-call LLM override (sub-project 2.5 fallback chain).
-            prompt: Per-call prompt override; defaults to
-                ``EPISODE_EXTRACT_PROMPT_EN``.
+        Parameters
+        ----------
+        memcell : MemCell
+            Source MemCell (boundary output).
+        llm : LLMClient or None, optional
+            Per-call LLM override (sub-project 2.5 fallback chain).
+        prompt : str or None, optional
+            Per-call prompt override; defaults to ``EPISODE_EXTRACT_PROMPT_EN``.
 
-        Returns:
-            list[Episode] — typically 1 Episode per MemCell, but the LLM
-            may emit multiple if it detects sub-events.
+        Returns
+        -------
+        list[Episode]
+            Typically 1 Episode per MemCell, but the LLM may emit multiple if it detects sub-events.
 
-        Raises:
-            LLMNotConfiguredError, LLMError: same as boundary.
+        Raises
+        ------
+        LLMNotConfiguredError
+            Same as boundary — no LLM resolvable through the 3-layer chain.
+        LLMError
+            Same as boundary — any provider-side failure.
         """
         client = everalgo.llm.resolve(llm)
         rendered = render_prompt(
@@ -74,8 +84,8 @@ def _render_memcell_text(memcell: MemCell) -> str:
 def _build_episodes_from_llm_response(raw: str, memcell: MemCell) -> list[Episode]:
     """Parse LLM JSON and build Episode list.
 
-    parent_id and parent_type are auto-filled from the source memcell
-    (LLM is instructed not to emit them; see prompts/en/episode.py).
+    parent_id and parent_type are auto-filled from the source memcell (LLM is instructed not to emit them;
+    see prompts/en/episode.py).
     """
     parsed = json.loads(raw)
     episodes: list[Episode] = []

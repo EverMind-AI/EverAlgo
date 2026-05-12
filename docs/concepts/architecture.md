@@ -7,13 +7,13 @@
 
 ---
 
-## 1. 鸟瞰：EverOS 依赖 EverAlgo
+## 1. 鸟瞰：evermem 依赖 EverAlgo
 
-**EverOS 是 AI 记忆管理系统**，对外提供完整产品能力（API、持久化、编排、记忆生命周期管理）。**EverAlgo 是算法库**，被 EverOS 依赖来实现 Extract / Rank 算法 IP。两者是"产品 ↔ 依赖库"关系：
+**evermem 是 AI 记忆管理系统**，对外提供完整产品能力（API、持久化、编排、记忆生命周期管理）。**EverAlgo 是算法库**，被 evermem 依赖来实现 Extract / Rank 算法 IP。两者是"产品 ↔ 依赖库"关系：
 
 ```
 ┌──────────────────────────────────────────────┐
-│  EverOS（AI 记忆管理系统）                   │
+│  evermem（AI 记忆管理系统）                   │
 │  API 网关 / 持久化 / 编排 / 锁 / scene 路由   │
 └────────────────┬─────────────────────────────┘
                  │ 依赖（in-memory 数据结构调用）
@@ -24,9 +24,9 @@
 └──────────────────────────────────────────────┘
 ```
 
-**EverOS** —— 记忆管理系统本身。负责 API 网关、DB 持久化、调用编排、并发与锁、scene 路由（哪个算法步骤用哪个模型）、分布式协调、记忆生命周期管理。可以是开源版用户的本地 Python 应用，也可以是商业版云平台的 Go 主体 + Python 算法微服务。
+**evermem** —— 记忆管理系统本身。负责 API 网关、DB 持久化、调用编排、并发与锁、scene 路由（哪个算法步骤用哪个模型）、分布式协调、记忆生命周期管理。可以是开源版用户的本地 Python 应用，也可以是商业版云平台的 Go 主体 + Python 算法微服务。
 
-**EverAlgo** —— EverOS 依赖的算法库。**无状态、不碰 DB、不读写文件系统、不持有业务编排概念**。输入输出全部是 in-memory 数据结构，类比 EverOS 之于 EverAlgo 就像 FastAPI 应用之于 numpy / sklearn——产品负责一切，库只负责算法。
+**EverAlgo** —— evermem 依赖的算法库。**无状态、不碰 DB、不读写文件系统、不持有业务编排概念**。输入输出全部是 in-memory 数据结构，类比 evermem 之于 EverAlgo 就像 FastAPI 应用之于 numpy / sklearn——产品负责一切，库只负责算法。
 
 边界用一句话讲清：
 
@@ -49,7 +49,7 @@ EverAlgo 与 sklearn / pytorch / DSPy 同阵营，**不是** LangChain / LlamaIn
 
 EverAlgo **提供**：算法 IP（Extract + Rank 双主轴的算子）、LLM 调用门面、Provider 路由、prompt validator、testing 辅助。
 
-EverAlgo **不提供**：API 网关、持久化、并发编排、retry / fallback、多 key 轮转、多租户、配额、observability。这些归工程载体（EverOS）。
+EverAlgo **不提供**：API 网关、持久化、并发编排、retry / fallback、多 key 轮转、多租户、配额、observability。这些归工程载体（evermem）。
 
 > 阵营判断的详细论证见 [ADR 008](../decisions/008-re-export-vs-client-facade.md)。
 
@@ -66,7 +66,7 @@ EverAlgo 的算法职责分两条主轴，对外契约对称（**无状态、不
 
 Extract 主轴典型链路是两段——上游 `*MemCellExtractor.adetect(messages | agent_trace | jira_ticket | ...)` 把原始输入切成 `list[MemCell]`；下游各 `*Extractor.aextract(memcell)` 在 MemCell 级别做派生记忆抽取。`MemCell` 是上下游的桥接结构，不同业务源（聊天 / Agent 轨迹 / Workspace 数据）走各自的 boundary 算子产出统一形态的 MemCell。
 
-**Rank 不读任何存储**。所有跨记忆关联（如 `Episode → AtomicFact`）由 EverOS 在 Recall 阶段一并预取传入；Ranker 在内存里做 hierarchy 展开，无任何 DB 调用。
+**Rank 不读任何存储**。所有跨记忆关联（如 `Episode → AtomicFact`）由 evermem 在 Recall 阶段一并预取传入；Ranker 在内存里做 hierarchy 展开，无任何 DB 调用。
 
 ```python
 import asyncio
@@ -77,7 +77,7 @@ memcells = await user_memory.ChatMemCellExtractor().adetect(messages, llm=...)
 for memcell in memcells:
     episodes = await user_memory.EpisodeExtractor().aextract(memcell, llm=...)
 
-# Rank 主轴：检索链路（rank_input 由 EverOS 备好，含召回候选 + 预取关联）
+# Rank 主轴：检索链路（rank_input 由 evermem 备好，含召回候选 + 预取关联）
 ranked = await rank.episodic.arank(rank_input)
 ```
 
@@ -115,7 +115,7 @@ ranked = await rank.episodic.arank(rank_input)
 
 **两条 import 路径同时有效**——按你的角色选：
 
-- **EverOS 工程同学**（按业务路径调用，对齐契约）：`from everalgo.user_memory import ChatMemCellExtractor`
+- **evermem 工程同学**（按业务路径调用，对齐契约）：`from everalgo.user_memory import ChatMemCellExtractor`
 - **算法同学**（按算法物理路径迭代 boundary 共享底层）：`from everalgo.boundary.chat import ChatMemCellExtractor`
 
 两条路径指向**同一个类**。物理路径与外部契约通过 `__init__.py` re-export 解耦。
@@ -212,8 +212,8 @@ EverAlgo 算子用 **3 层 LLM 注入**（DSPy 同款），优先级 **per-call 
 
 | 层 | 用法 | 优先级 | 典型场景 |
 |----|------|--------|---------|
-| **per-call** | `aextract(..., llm=client)` 直接传参 | 最高 | EverOS 单调用按 scene 注入（**生产主路径**）|
-| **scoped** | `async with everalgo.llm.use(client):` | 次高 | EverOS pipeline 段批量同 client |
+| **per-call** | `aextract(..., llm=client)` 直接传参 | 最高 | evermem 单调用按 scene 注入（**生产主路径**）|
+| **scoped** | `async with everalgo.llm.use(client):` | 次高 | evermem pipeline 段批量同 client |
 | **default** | 启动期 `everalgo.configure(llm=...)` | 兜底 | dev / 测试 / Jupyter |
 
 ```python
@@ -221,7 +221,7 @@ import everalgo
 from everalgo.llm import LLMConfig
 from everalgo import user_memory, rank
 
-# (1) 启动期 default：dev / 测试必备；生产 EverOS 可以不调
+# (1) 启动期 default：dev / 测试必备；生产 evermem 可以不调
 everalgo.configure(llm=LLMConfig(
     provider="openai_compat",
     base_url="https://openrouter.ai/api/v1",
@@ -239,7 +239,7 @@ async with everalgo.llm.use(scene_router.get("rerank")):
     ranked_cases = await rank.case.arank(rank_input)
 ```
 
-**EverAlgo 无 scene 概念**——"哪个算法步骤用哪个模型"是业务决策，由 EverOS 持有 `SceneRouter`，3 层注入按场景选用。EverAlgo 算子签名只接 `llm: LLMClient | None = None`，内部用 `everalgo.llm.resolve(llm)` 一行解析三层 fallback。
+**EverAlgo 无 scene 概念**——"哪个算法步骤用哪个模型"是业务决策，由 evermem 持有 `SceneRouter`，3 层注入按场景选用。EverAlgo 算子签名只接 `llm: LLMClient | None = None`，内部用 `everalgo.llm.resolve(llm)` 一行解析三层 fallback。
 
 > "为什么 scene 路由不在 EverAlgo" + "为什么 3 层注入" → [ADR 012](../decisions/012-llm-stack-architecture.md)
 
@@ -252,7 +252,7 @@ EverAlgo 是无状态算法库。任何"累积状态"都遵循同一函数式模
 | 谁 | 职责 |
 |---|------|
 | **EverAlgo** | 定义"state 是什么"（值对象类型 + 字段 + 序列化）+ "state 怎么演化"（值对象方法返回新实例）|
-| **caller**（EverOS 编排器）| "state 何时载入 / 存哪里 / 谁加锁"——持久化、并发控制、事务回滚 |
+| **caller**（evermem 编排器）| "state 何时载入 / 存哪里 / 谁加锁"——持久化、并发控制、事务回滚 |
 
 以 `ClusterState` 为例：
 

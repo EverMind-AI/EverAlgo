@@ -12,12 +12,10 @@ for the full workflow.
 <!-- git-cliff-unreleased-start -->
 ## [Unreleased]
 
-<!-- git-cliff-unreleased-end -->
-
-## [0.1.0] - 2026-05-11
-
 ### Added
 
-- Initial release: 5 modality submodules (`image` / `audio` / `document` /
-  `video` / `url`) with top-level `parse` / `aparse` mime dispatch. All
-  stubs — implementation bodies pending.
+- 5 modality submodules (`image` / `audio` / `document` / `video` /
+  `url`) with top-level `parse` / `aparse` mime dispatch. All stubs —
+  implementation bodies pending.
+
+<!-- git-cliff-unreleased-end -->

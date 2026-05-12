@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from everalgo.types import ParsedContent, RawFile
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from everalgo.types import ParsedContent, RawFile
 
 __all__ = ["aparse", "parse"]
 

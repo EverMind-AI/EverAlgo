@@ -6,17 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field
 class Episode(BaseModel):
     """User-side episodic memory — a structured 'what happened' trace.
 
-    Cross-link: agent paths also produce Episode (mem_memorize.py:870-885
-    in opensource at release/20260403, plus design.md §2.4 line 697:
-    "episode 永远跑"). ``owner_id`` always points to the user, even when
-    the source MemCell is an agent conversation; the agent is a
-    participant, not the owner.
+    Cross-link: agent paths also produce Episode (mem_memorize.py:870-885 in opensource at release/20260403,
+    plus design.md §2.4 line 697: "episode 永远跑"). ``owner_id`` always points to the user, even when the
+    source MemCell is an agent conversation; the agent is a participant, not the owner.
 
-    Secondary fields (subject / summary / keywords / location / start_time
-    / end_time / sender_ids / original_data) are intentionally omitted from
-    the minimal type. ``extra="allow"`` keeps any LLM-emitted secondary
-    fields accessible on the model instance until a future minor bump
-    promotes them to first-class fields.
+    Secondary fields (subject / summary / keywords / location / start_time / end_time / sender_ids /
+    original_data) are intentionally omitted from the minimal type. ``extra="allow"`` keeps any LLM-emitted
+    secondary fields accessible on the model instance until a future minor bump promotes them to first-class
+    fields.
     """
 
     id: str

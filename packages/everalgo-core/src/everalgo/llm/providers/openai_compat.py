@@ -13,11 +13,10 @@ from everalgo.llm.types import ChatMessage, ChatResponse, Usage
 class OpenAICompatClient:
     """Thin async wrapper over ``openai.AsyncOpenAI``.
 
-    Single-purpose: convert between EverAlgo's ``ChatMessage`` / ``ChatResponse``
-    types and the openai SDK's native dict / object shapes. No retry layer,
-    no rate-limit logic, no multi-key rotation — those are caller / deployment
-    concerns (matching opensource ``OpenAIProvider`` simplicity, not
-    Letta-grade orchestration).
+    Single-purpose: convert between EverAlgo's ``ChatMessage`` / ``ChatResponse`` types and the openai SDK's
+    native dict / object shapes. No retry layer, no rate-limit logic, no multi-key rotation — those are
+    caller / deployment concerns (matching opensource ``OpenAIProvider`` simplicity, not Letta-grade
+    orchestration).
     """
 
     def __init__(self, config: LLMConfig) -> None:
@@ -38,7 +37,7 @@ class OpenAICompatClient:
         response_format: Mapping[str, Any] | None = None,
         **extra: Any,
     ) -> ChatResponse:
-        """Implementation of LLMClient.chat — see protocols.py for contract."""
+        """Implement ``LLMClient.chat`` — see protocols.py for contract."""
         request_kwargs: dict[str, Any] = {
             "model": model or self._config.model,
             "messages": [m.model_dump() for m in messages],
@@ -81,9 +80,9 @@ def _normalise_finish_reason(
 ) -> Literal["stop", "length", "content_filter"] | None:
     """Collapse provider finish reasons to EverAlgo's 3-value Literal subset.
 
-    EPISODE path treats ``tool_calls`` / ``function_call`` as out-of-scope
-    (no tools wired); when a provider unexpectedly emits one the response is
-    classified as ``None``. Logging the unknown value is left to providers.
+    EPISODE path treats ``tool_calls`` / ``function_call`` as out-of-scope (no tools wired); when a provider
+    unexpectedly emits one the response is classified as ``None``. Logging the unknown value is left to
+    providers.
     """
     if value in ("stop", "length", "content_filter"):
         return value  # type: ignore[return-value]

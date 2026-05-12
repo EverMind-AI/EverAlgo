@@ -149,7 +149,7 @@ EverAlgo 有"独立升级 A 不动 B"硬约束，meta 与之反向，**直接排
 
 1. **某子包业务上消亡**：如废弃 knowledge → 该 dist 标 deprecated，不影响其他
 2. **新增产品形态**：如 `everalgo-graph-memory`（图记忆）→ 加新 dist，不影响现有
-3. **EverAlgo 整体被纳入更大生态**：如 EverOS 决定把 everalgo 收回单 dist 内嵌 → 重新评估（届时 H2 是否仍硬约束）
+3. **EverAlgo 整体被纳入更大生态**：如 evermem 决定把 everalgo 收回单 dist 内嵌 → 重新评估（届时 H2 是否仍硬约束）
 
 ## 相关 ADR
 

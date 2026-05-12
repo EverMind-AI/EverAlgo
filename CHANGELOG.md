@@ -9,18 +9,21 @@ a root file with a current-version overview table, pointing at per-distribution
 changelogs. Each distribution follows its own SemVer cadence — there is no
 umbrella version (see [`docs/design.md`](docs/design.md) §1.3 "Why no meta package").
 
-## Current published versions
+## Versions in `main`
 
-| Distribution | Version | Released | Changelog |
-|---|---|---|---|
-| `everalgo-core` | 0.1.0 | 2026-05-11 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.1.0 | 2026-05-11 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
-| `everalgo-clustering` | 0.1.0 | 2026-05-11 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.1.0 | 2026-05-11 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-parser` | 0.1.0 | 2026-05-11 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.1.0 | 2026-05-11 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.1.0 | 2026-05-11 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.1.0 | 2026-05-11 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+No distribution has been published to PyPI yet. The table below tracks the
+in-development version declared in each `packages/everalgo-*/pyproject.toml`.
+
+| Distribution | Version | Changelog |
+|---|---|---|
+| `everalgo-core` | 0.1.0 (unreleased) | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.1.0 (unreleased) | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-clustering` | 0.1.0 (unreleased) | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
+| `everalgo-rank` | 0.1.0 (unreleased) | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-parser` | 0.1.0 (unreleased) | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.1.0 (unreleased) | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.1.0 (unreleased) | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.1.0 (unreleased) | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
 
 ## How releases work
 

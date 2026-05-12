@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["weighted_score", "multi_field_weighting"]
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+__all__ = ["multi_field_weighting", "weighted_score"]
 
 
 def weighted_score(items: Sequence[Any], *, fields: dict[str, float]) -> list[Any]:

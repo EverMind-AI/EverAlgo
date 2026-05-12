@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from everalgo.llm.protocols import LLMClient
-from everalgo.types import KnowledgeMemory, ParsedContent
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from everalgo.llm.protocols import LLMClient
+    from everalgo.types import KnowledgeMemory, ParsedContent
 
 
 class KnowledgeExtractor:
