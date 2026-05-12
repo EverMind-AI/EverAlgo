@@ -16,6 +16,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+  "asgiref>=3.0",
   "everalgo-core>=0.1.0,<2.0.0",
 ]
 
