@@ -69,7 +69,23 @@ def test_parsed_and_knowledge_importable() -> None:
 
 
 def test_rank_io_importable() -> None:
-    from everalgo.types import RankInput, RankOutput
+    from everalgo.types import (
+        Candidate,
+        FactCandidate,
+        RankInput,
+        RankOutput,
+        ScoredItem,
+    )
 
-    assert RankInput().memory_type == ""
+    rank_input = RankInput(query="hello", memory_type="episodic")
+    assert rank_input.query == "hello"
+    assert rank_input.memory_type == "episodic"
+    assert rank_input.sparse_candidates == []
+    assert rank_input.dense_candidates == []
+    assert rank_input.episode_to_facts == {}
+    assert rank_input.top_k == 10
+
     assert RankOutput().items == []
+    assert Candidate(id="c1", score=0.5).source == "other"
+    assert FactCandidate(id="f1", parent_episode_id="ep1", score=0.42).score == 0.42
+    assert ScoredItem(id="x", score=0.9, item_type="episode").metadata == {}

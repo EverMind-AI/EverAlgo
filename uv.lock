@@ -393,11 +393,15 @@ name = "everalgo-rank"
 version = "0.1.0"
 source = { editable = "packages/everalgo-rank" }
 dependencies = [
+    { name = "asgiref" },
     { name = "everalgo-core" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "everalgo-core", editable = "packages/everalgo-core" }]
+requires-dist = [
+    { name = "asgiref", specifier = ">=3.0" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
+]
 
 [[package]]
 name = "everalgo-user-memory"
