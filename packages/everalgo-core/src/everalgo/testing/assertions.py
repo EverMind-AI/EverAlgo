@@ -10,9 +10,8 @@ from everalgo.types import Episode
 def assert_episode_shape(value: dict[str, Any] | Episode) -> Episode:
     """Assert ``value`` satisfies ``Episode`` minimal business invariants.
 
-    Combines pydantic type-level validation with 4 business invariants that
-    pydantic alone does not catch (LLM may emit empty strings, zero
-    timestamps, wrong ``parent_type``, etc.).
+    Combines pydantic type-level validation with 4 business invariants that pydantic alone does not catch
+    (LLM may emit empty strings, zero timestamps, wrong ``parent_type``, etc.).
 
     Layered checks (in order):
 
@@ -27,20 +26,23 @@ def assert_episode_shape(value: dict[str, Any] | Episode) -> Episode:
        c. ``parent_type == "memcell"`` (EPISODE path only consumes MemCell).
        d. ``parent_id`` is a non-empty string (data lineage anchor).
 
-    Args:
-        value: ``dict`` (parsed via ``Episode.model_validate``) or already-
-            parsed ``Episode``.
+    Parameters
+    ----------
+    value : dict[str, Any] or Episode
+        ``dict`` (parsed via ``Episode.model_validate``) or already-parsed ``Episode``.
 
-    Returns:
-        The validated ``Episode`` instance, so callers can chain further
-        assertions (e.g. ``ep = assert_episode_shape(d); assert "x" in
-        ep.episode``).
+    Returns
+    -------
+    Episode
+        The validated ``Episode`` instance, so callers can chain further assertions (e.g.
+        ``ep = assert_episode_shape(d); assert "x" in ep.episode``).
 
-    Raises:
-        AssertionError: If any business invariant fails. The message names
-            the failed invariant.
-        pydantic.ValidationError: If type-level validation fails. Re-raised
-            unmodified so the caller sees the original pydantic message.
+    Raises
+    ------
+    AssertionError
+        If any business invariant fails. The message names the failed invariant.
+    pydantic.ValidationError
+        If type-level validation fails. Re-raised unmodified so the caller sees the original pydantic message.
     """
     episode = value if isinstance(value, Episode) else Episode.model_validate(value)
     assert episode.episode, "Episode.episode is empty"

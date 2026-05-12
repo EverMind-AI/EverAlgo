@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from everalgo.llm.protocols import LLMClient
-from everalgo.types import AgentCase, MemCell
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from everalgo.llm.protocols import LLMClient
+    from everalgo.types import AgentCase, MemCell
 
 
 class AgentCaseExtractor:

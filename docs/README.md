@@ -1,6 +1,6 @@
 # 📚 EverAlgo 文档
 
-EverAlgo 是 **EverOS（AI 记忆管理系统）** 依赖的算法库，无状态，提供 Extract / Rank 双主轴算法 IP；EverOS 负责所有工程载体职责（API / 持久化 / 编排 / scene 路由 / 记忆生命周期）。文档按读者目标分区。
+EverAlgo 是 **evermem（AI 记忆管理系统）** 依赖的算法库，无状态，提供 Extract / Rank 双主轴算法 IP；evermem 负责所有工程载体职责（API / 持久化 / 编排 / scene 路由 / 记忆生命周期）。文档按读者目标分区。
 
 ## 🗺️ 读者地图
 
@@ -18,7 +18,7 @@ EverAlgo 是 **EverOS（AI 记忆管理系统）** 依赖的算法库，无状�
 
 → 决策溯源在 [`decisions/`](decisions/) 12 篇 ADR
 
-### 我是 EverOS 工程同学，要调用 EverAlgo
+### 我是 evermem 工程同学，要调用 EverAlgo
 
 → `getting-started/01-installation.md`（待补）+ `02-first-extraction.md`（待补）
 

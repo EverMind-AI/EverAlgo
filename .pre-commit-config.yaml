@@ -1,26 +1,5 @@
-# Pre-commit hooks for EverAlgo.
-#
-# Local enforcement of style + lint before commit. The CI pipeline
-# (.gitlab-ci.yml) re-runs the same checks as a load-bearing fallback for
-# contributors who skip pre-commit or bypass with --no-verify.
-#
-# Install once after cloning:
-#   uv run pre-commit install
-#
-# Run against all files manually:
-#   uv run pre-commit run --all-files
-#
-# Update pinned versions periodically:
-#   uv run pre-commit autoupdate
-#
-# References:
-# - https://pre-commit.com
-# - Industrial precedent: sklearn, pydantic, dspy, langchain, pandas, numpy.
-#
-# Note on mypy: deliberately NOT run as a pre-commit hook. Strict mypy over
-# the whole workspace (8 packages, PEP 420 namespace) takes several seconds
-# and would make commit feel sluggish; it is enforced by CI instead. Matches
-# pydantic / sklearn convention.
+# Mypy is deliberately NOT a pre-commit hook — strict mypy over the 8-package PEP 420 workspace takes several
+# seconds and makes commit feel sluggish. Enforced by CI instead. Setup / usage live in AGENTS.md §3.
 
 default_language_version:
   python: python3.12

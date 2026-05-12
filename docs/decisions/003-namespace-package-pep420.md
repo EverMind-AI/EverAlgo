@@ -9,7 +9,7 @@
 [ADR 002](002-multi-distribution-vs-single.md) 决定多 distribution 后，每个 PyPI 包对应一个 import 路径。**namespace 模式**决定多 dist 之间的 import 路径如何组织。
 
 相关硬约束：
-- **H1** EverOS 文档契约 `everalgo.user_memory.ChatMemCellExtractor`（要求共享 `everalgo.*` 顶层）
+- **H1** evermem 文档契约 `everalgo.user_memory.ChatMemCellExtractor`（要求共享 `everalgo.*` 顶层）
 - **H7** 可识别系列前缀
 
 ## 候选方案
@@ -37,7 +37,7 @@
 |------|------|
 | 无系列归属感 | `import langchain_core` / `import langchain_openai` 散落在 import 表，用户难以一眼看出"这是 LangChain 套件" |
 | 多包共存时 import 噪音大 | 用户写 `from langchain_core import X; from langchain_openai import Y` 多前缀 |
-| 不能与 EverOS 契约 `everalgo.user_memory.X` 兼容 | 强制 `everalgo_user_memory.X` 平面命名 |
+| 不能与 evermem 契约 `everalgo.user_memory.X` 兼容 | 强制 `everalgo_user_memory.X` 平面命名 |
 
 ### B. PEP 420 共享 namespace 优势
 
@@ -45,7 +45,7 @@
 |------|------|
 | 系列归属感强 | `from everalgo.user_memory import X` / `from everalgo.boundary import Y` 都在 `everalgo.*` 下，用户一眼看到套件 |
 | import 表整洁 | 多个子包共享顶层，import 体验接近单 dist |
-| **与契约 `everalgo.user_memory.*` 完全兼容** | EverOS 文档契约直接 1:1 实现 |
+| **与契约 `everalgo.user_memory.*` 完全兼容** | evermem 文档契约直接 1:1 实现 |
 | 用户视角无割裂 | 不论装 1 个还是 8 个 dist，import 路径都在 `everalgo.*` 下 |
 
 ### B. PEP 420 共享 namespace 劣势
@@ -75,7 +75,7 @@
 |------|--------|
 | 无系列归属感 | ❌ **强烈介意**（H7 可识别系列前缀；散落的 `everalgo_user_memory` / `everalgo_boundary` 失去套件感）|
 | 多包共存 import 噪音 | ❌ 介意（算法同学日常多个 everalgo-* 包共存）|
-| **与契约 `everalgo.user_memory.*` 不兼容** | ❌ **致命**——直接违反 H1 EverOS 文档契约 |
+| **与契约 `everalgo.user_memory.*` 不兼容** | ❌ **致命**——直接违反 H1 evermem 文档契约 |
 
 ### B 风格优势对 EverAlgo 的适配度
 
@@ -100,7 +100,7 @@
 **选 PEP 420 共享 namespace（B 风格）**。
 
 逐条统计：
-- A 致命劣势 1 条（违反 H1 EverOS 契约），强烈介意劣势 1 条（违反 H7）
+- A 致命劣势 1 条（违反 H1 evermem 契约），强烈介意劣势 1 条（违反 H7）
 - A 优势 EverAlgo **全部用不上 / 不在意**
 - B 强需要优势 4 条
 - B 劣势全部不在意 / 可 mitigate
@@ -143,12 +143,12 @@ PEP 420 共享 namespace 在主流多 dist 项目里的实证：
 - LangChain：`langchain-core` → `import langchain_core`（独立顶层）
 - HuggingFace：`huggingface_hub` / `transformers` 各自顶层
 
-LangChain 的 A 风格选择不适合 EverAlgo，**核心原因是 EverOS 文档契约 `everalgo.user_memory.*` 已确定**——LangChain 没有这种外部契约约束。
+LangChain 的 A 风格选择不适合 EverAlgo，**核心原因是 evermem 文档契约 `everalgo.user_memory.*` 已确定**——LangChain 没有这种外部契约约束。
 
 ## 后续演化触发条件
 
-1. **PEP 420 在生态中遇到不可调和问题**（如关键工具链放弃支持）→ 切回 A 风格 + 修订 EverOS 文档契约
-2. **EverOS 文档契约改写**：如 zhanglibin 决定把 `everalgo.user_memory.X` 全改为 `everalgo_user_memory.X` → 切回 A 风格
+1. **PEP 420 在生态中遇到不可调和问题**（如关键工具链放弃支持）→ 切回 A 风格 + 修订 evermem 文档契约
+2. **evermem 文档契约改写**：如 zhanglibin 决定把 `everalgo.user_memory.X` 全改为 `everalgo_user_memory.X` → 切回 A 风格
 3. **第三方贡献者大量加入**：A 风格独立 namespace 对外贡献门槛更低（fork 单仓单顶层）；当前内部项目此场景不存在
 
 ## 相关 ADR

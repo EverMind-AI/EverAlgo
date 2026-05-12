@@ -20,9 +20,8 @@ def test_uses_override_when_prompt_is_provided() -> None:
 def test_empty_string_prompt_falls_back_to_default() -> None:
     """An empty string is falsy in Python, so it should fall back to ``default``.
 
-    This matches ``(prompt or default)`` semantics and matters because some
-    callers may pass ``prompt=""`` to mean "no override"; we preserve that
-    behaviour rather than rendering an empty template silently.
+    This matches ``(prompt or default)`` semantics and matters because some callers may pass ``prompt=""`` to
+    mean "no override"; we preserve that behaviour rather than rendering an empty template silently.
     """
     result = render_prompt("Hello, {name}!", "", name="world")
     assert result == "Hello, world!"

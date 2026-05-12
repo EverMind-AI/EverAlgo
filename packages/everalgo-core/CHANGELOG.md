@@ -12,17 +12,15 @@ for the full workflow.
 <!-- git-cliff-unreleased-start -->
 ## [Unreleased]
 
-<!-- git-cliff-unreleased-end -->
-
-## [0.1.0] - 2026-05-11
-
 ### Added
 
-- Initial release: types module (MemCell, Message, MessageRole, Episode,
-  Foresight, AtomicFact, Profile, AgentCase, AgentSkill, RawData, RawFile,
-  ParsedContent, KnowledgeMemory, RankInput, RankOutput), LLM facade
-  (LLMClient, ChatMessage, ChatResponse, Usage, LLMConfig, LLMError,
-  build_client) with 3-layer injection (configure / use / current /
-  resolve), OpenAI-compatible providers, prompt-validator infrastructure,
-  testing helpers (FakeLLMClient, CallRecord, assert_episode_shape).
-  Foundation distribution.
+- Types module (MemCell, Message, MessageRole, Episode, Foresight,
+  AtomicFact, Profile, AgentCase, AgentSkill, RawData, RawFile,
+  ParsedContent, KnowledgeMemory, RankInput, RankOutput).
+- LLM facade (LLMClient, ChatMessage, ChatResponse, Usage, LLMConfig,
+  LLMError, build_client) with 3-layer injection (configure / use /
+  current / resolve) and OpenAI-compatible providers.
+- Prompt-validator infrastructure and `render_prompt` helper.
+- Testing helpers: FakeLLMClient, CallRecord, assert_episode_shape.
+
+<!-- git-cliff-unreleased-end -->

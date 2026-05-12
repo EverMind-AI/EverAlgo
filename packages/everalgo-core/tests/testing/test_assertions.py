@@ -61,7 +61,7 @@ def test_empty_episode_string_raises_assertion_error() -> None:
     """Episode.episode must be non-empty."""
     bad = _valid_episode_dict()
     bad["episode"] = ""
-    with pytest.raises(AssertionError, match="Episode.episode is empty"):
+    with pytest.raises(AssertionError, match=r"Episode\.episode is empty"):
         assert_episode_shape(bad)
 
 
@@ -93,5 +93,5 @@ def test_empty_parent_id_raises_assertion_error() -> None:
     """Episode.parent_id must be non-empty."""
     bad = _valid_episode_dict()
     bad["parent_id"] = ""
-    with pytest.raises(AssertionError, match="Episode.parent_id is empty"):
+    with pytest.raises(AssertionError, match=r"Episode\.parent_id is empty"):
         assert_episode_shape(bad)

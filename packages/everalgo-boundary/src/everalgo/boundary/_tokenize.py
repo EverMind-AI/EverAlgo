@@ -19,10 +19,14 @@ def count_tokens(text: str) -> int:
     tokenization. Accuracy is sufficient for "is this MemCell larger than
     the LLM context window?" decisions but NOT for billing / quota.
 
-    Args:
-        text: Input string. Empty string returns 0.
+    Parameters
+    ----------
+    text : str
+        Input string. Empty string returns 0.
 
-    Returns:
+    Returns
+    -------
+    int
         Estimated token count (always >= 0).
     """
     return len(text) // _CHARS_PER_TOKEN_HEURISTIC

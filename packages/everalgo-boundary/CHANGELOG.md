@@ -12,12 +12,11 @@ for the full workflow.
 <!-- git-cliff-unreleased-start -->
 ## [Unreleased]
 
-<!-- git-cliff-unreleased-end -->
-
-## [0.1.0] - 2026-05-11
-
 ### Added
 
-- Initial release: ChatMemCellExtractor (full implementation),
-  WorkspaceMemCellExtractor + AgentMemCellExtractor stubs. Slices
-  structured units into MemCells.
+- `ChatMemCellExtractor` (full implementation): slices a message stream
+  into MemCells by topic boundary.
+- `WorkspaceMemCellExtractor`, `AgentMemCellExtractor` stubs.
+- Shared `_tokenize` helper and English / Chinese boundary prompts.
+
+<!-- git-cliff-unreleased-end -->

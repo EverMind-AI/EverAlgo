@@ -17,8 +17,7 @@ def test_llm_error_with_message() -> None:
 def test_llm_error_chains_cause_via_pep_3134() -> None:
     """The provider layer should attach SDK-native exception via ``raise X from y``.
 
-    Callers can then inspect ``e.__cause__`` to reach the original SDK
-    exception class.
+    Callers can then inspect ``e.__cause__`` to reach the original SDK exception class.
     """
     sdk_native = ValueError("upstream failure")
 

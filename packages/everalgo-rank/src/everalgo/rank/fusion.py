@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["rrf", "lr", "cosine_to_lr_score", "score_propagation"]
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+__all__ = ["cosine_to_lr_score", "lr", "rrf", "score_propagation"]
 
 
 def rrf(*sources: Sequence[Any], k: int = 60) -> list[Any]:

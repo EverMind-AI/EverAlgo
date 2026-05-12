@@ -248,7 +248,7 @@ async def test_calls_property_returns_defensive_copy() -> None:
     assert len(client.calls) == 1
 
 
-def test_fake_llm_client_satisfies_LLMClient_protocol() -> None:
+def test_fake_llm_client_satisfies_llm_client_protocol() -> None:
     """Isinstance check works thanks to @runtime_checkable on LLMClient."""
     client = FakeLLMClient(responses=["a"])
     assert isinstance(client, LLMClient)

@@ -11,10 +11,9 @@ from pydantic import BaseModel, ConfigDict
 class MessageRole(StrEnum):
     """Conversation role taxonomy.
 
-    The EPISODE path consumes user/assistant messages only. ``tool`` and
-    ``system`` roles are intentionally omitted from the minimal type set
-    and may be added later via a SemVer minor bump (extending an enum
-    with new members is a backward-compatible change).
+    The EPISODE path consumes user/assistant messages only. ``tool`` and ``system`` roles are intentionally
+    omitted from the minimal type set and may be added later via a SemVer minor bump (extending an enum with
+    new members is a backward-compatible change).
     """
 
     USER = "user"
@@ -24,11 +23,9 @@ class MessageRole(StrEnum):
 class Message(BaseModel):
     """Single conversation message.
 
-    Minimal field set for the EPISODE path: ``role`` + ``content`` +
-    ``timestamp``. Other fields (sender_id, tool_calls, ...) are out of
-    scope for sub-project 1; ``extra="ignore"`` silently drops them so
-    that opensource payloads (which carry sender_id / message_id /
-    tool_calls / ...) round-trip cleanly.
+    Minimal field set for the EPISODE path: ``role`` + ``content`` + ``timestamp``. Other fields (sender_id,
+    tool_calls, ...) are out of scope for sub-project 1; ``extra="ignore"`` silently drops them so that
+    opensource payloads (which carry sender_id / message_id / tool_calls / ...) round-trip cleanly.
     """
 
     role: MessageRole
@@ -47,9 +44,8 @@ class MemCell(BaseModel):
     (source_type / sender_ids / start_idx / token_count / boundary_reason)
     is added later when the boundary subpackage lands.
 
-    ``extra="ignore"`` keeps opensource MemCell payloads (which carry
-    source_type / user_id_list / group_id / participants) deserialisable
-    without errors.
+    ``extra="ignore"`` keeps opensource MemCell payloads (which carry source_type / user_id_list / group_id /
+    participants) deserialisable without errors.
     """
 
     id: str

@@ -6,7 +6,7 @@
 
 ## 背景
 
-EverAlgo 子包按算法职责物理组织（`boundary/` / `clustering/` 等），EverOS 文档契约要求 `everalgo.user_memory.ChatMemCellExtractor` 这种调用路径。物理位置和契约路径**解耦**意味着需要一个 facade 机制把契约路径映射到实现路径。
+EverAlgo 子包按算法职责物理组织（`boundary/` / `clustering/` 等），evermem 文档契约要求 `everalgo.user_memory.ChatMemCellExtractor` 这种调用路径。物理位置和契约路径**解耦**意味着需要一个 facade 机制把契约路径映射到实现路径。
 
 Python 提供两种 facade 实现路径：
 - **re-export 式**：`__init__.py` 里 `from <impl> import <Class>`，把实现对象绑定到外部契约 namespace
@@ -15,7 +15,7 @@ Python 提供两种 facade 实现路径：
 **facade 实现模式**决定 EverAlgo 选哪种。
 
 相关硬约束：
-- **H1** EverOS 文档契约 `everalgo.user_memory.*`
+- **H1** evermem 文档契约 `everalgo.user_memory.*`
 - **H4** 无状态接口（library 不持业务状态）
 
 ## 候选方案
@@ -131,7 +131,7 @@ __all__ = [  # 必须显式声明，避免 mypy implicit re-export 警告
 ```
 
 两条访问路径同时有效：
-- **EverOS 及外部用户路径**：`from everalgo.user_memory import ChatMemCellExtractor`
+- **evermem 及外部用户路径**：`from everalgo.user_memory import ChatMemCellExtractor`
 - **算法同学物理路径**：`from everalgo.boundary.chat import ChatMemCellExtractor`
 
 两条路径指向**同一个类对象**（`A is B` 为 True），re-export 只是 namespace 绑定，无运行时开销。

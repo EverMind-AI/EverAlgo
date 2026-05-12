@@ -3,33 +3,34 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
 import everalgo.llm
 from everalgo.boundary._tokenize import count_tokens
 from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
-from everalgo.llm.protocols import LLMClient
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import MemCell, Message
+
+if TYPE_CHECKING:
+    from everalgo.llm.protocols import LLMClient
 
 
 class ChatMemCellExtractor:
     """Detect MemCell boundaries in a chat-style message stream.
 
-    Stateless: no ``__init__``, no instance state. Thread/async safe —
-    instances are interchangeable. Customize per call via ``llm=`` and
-    ``prompt=`` arguments.
+    Stateless: no ``__init__``, no instance state. Thread/async safe — instances are interchangeable.
+    Customize per call via ``llm=`` and ``prompt=`` arguments.
 
     Algorithm (minimal reference impl):
         1. Render LLM prompt with the message stream + token budget hint.
         2. Call LLM, parse JSON ``{"split_at": int | null}``.
         3. Build one or two MemCells from the split.
 
-    For production-grade boundary detection (multi-split / token-aware
-    force_split / boundary_reason classification), replace the prompt
-    via ``prompt=`` argument or monkey-patch the module constant.
+    For production-grade boundary detection (multi-split / token-aware force_split / boundary_reason
+    classification), replace the prompt via ``prompt=`` argument or monkey-patch the module constant.
     """
 
     async def adetect(
@@ -41,17 +42,21 @@ class ChatMemCellExtractor:
     ) -> list[MemCell]:
         """Async main implementation: ask LLM for boundary split point.
 
-        Args:
-            messages: Ordered chat messages (user/assistant turns).
-            llm: Per-call LLM override. Falls back through scoped
-                (``use(...)``) and default (``configure(...)``); raises
-                ``LLMNotConfiguredError`` if all None.
-            prompt: Per-call prompt override. Defaults to
-                ``CHAT_BOUNDARY_DETECT_PROMPT_EN``.
+        Parameters
+        ----------
+        messages : list[Message]
+            Ordered chat messages (user/assistant turns).
+        llm : LLMClient or None, optional
+            Per-call LLM override. Falls back through scoped (``use(...)``) and default
+            (``configure(...)``); raises ``LLMNotConfiguredError`` if all None.
+        prompt : str or None, optional
+            Per-call prompt override. Defaults to ``CHAT_BOUNDARY_DETECT_PROMPT_EN``.
 
-        Returns:
-            list[MemCell] — at least one cell. The minimal ref impl produces
-            either 1 cell (no split) or 2 cells (one split point).
+        Returns
+        -------
+        list[MemCell]
+            At least one cell. The minimal ref impl produces either 1 cell (no split) or 2 cells
+            (one split point).
         """
         client = everalgo.llm.resolve(llm)
         rendered = render_prompt(

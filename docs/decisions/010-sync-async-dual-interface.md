@@ -10,7 +10,7 @@ EverAlgo 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉
 
 相关硬约束：
 - **H3** 算法同学迭代速度（Jupyter Notebook / 简单脚本场景偏 sync）
-- **EverOS 集成场景**：FastAPI / Hertz 异步服务（强需要 async）
+- **evermem 集成场景**：FastAPI / Hertz 异步服务（强需要 async）
 - **算法库 vs SDK 阵营**：EverAlgo 是算法库（[ADR 008](008-re-export-vs-client-facade.md)），不持跨调用状态
 
 ## 候选方案
@@ -62,7 +62,7 @@ EverAlgo 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉
 新优势：实现最简
 
 新劣势：
-- **EverOS FastAPI 场景下 sync 算子阻塞事件循环**（致命）
+- **evermem FastAPI 场景下 sync 算子阻塞事件循环**（致命）
 - async 用户要用 `run_in_executor` / thread pool 包装，性能低
 - 明星 AI 库无此实证
 
@@ -81,7 +81,7 @@ EverAlgo 的 I/O-bound 算子（各 Extractor / Ranker / boundary / Parser）涉
 
 | 优势 | 适配度 |
 |------|--------|
-| 覆盖两类用户场景 | ✅ **强需要**（EverOS 异步 + 算法同学 sync 都要服务）|
+| 覆盖两类用户场景 | ✅ **强需要**（evermem 异步 + 算法同学 sync 都要服务）|
 | 与明星 AI 库 100% 一致 | ✅ 强需要（cargo cult 反向：与所有用户已熟悉的模式一致，零学习成本）|
 | async 实现可桥接 sync | ✅ 受益（降低维护成本）|
 | 性能最优 | ✅ 受益 |
@@ -122,11 +122,11 @@ D：非主流 + 实施复杂 → 排除（除非未来生态主流转向）
 
 `a` 前缀风格与 litellm / llama-index / langchain 100% 一致；instructor 的 `Async<X>` 类风格不采（需要算法同学记忆 `Instructor` 和 `AsyncInstructor` 两个类，多一层心智）。
 
-### 决定性约束：主用户 EverOS = FastAPI 异步服务
+### 决定性约束：主用户 evermem = FastAPI 异步服务
 
-EverAlgo 的**主用户是 EverOS**——基于 FastAPI 开发的记忆服务，handler 全部 `async def`。这意味着：
+EverAlgo 的**主用户是 evermem**——基于 FastAPI 开发的记忆服务，handler 全部 `async def`。这意味着：
 
-- **async 接口是主战场**——EverOS 100% 走 async 调用，sync 调用阻塞 event loop 会拖累整个 FastAPI 实例
+- **async 接口是主战场**——evermem 100% 走 async 调用，sync 调用阻塞 event loop 会拖累整个 FastAPI 实例
 - **async 接口必须 native async**——不能 thread pool wrap（详见下文性能分析）
 - **sync 接口的实际用户**：CLI 同步脚本 / 单元测试 / 算法同学命令行实验等次要场景
 
@@ -158,7 +158,7 @@ EverAlgo 的**主用户是 EverOS**——基于 FastAPI 开发的记忆服务，
 
 ### B3 性能瓶颈分析（FastAPI 主战场）
 
-EverOS FastAPI 场景（100 QPS / LLM 1 秒延迟）：
+evermem FastAPI 场景（100 QPS / LLM 1 秒延迟）：
 
 | 实施 | event loop 行为 | 吞吐 |
 |------|---------------|------|
@@ -173,7 +173,7 @@ EverOS FastAPI 场景（100 QPS / LLM 1 秒延迟）：
 
 | 场景 | B1 手写两份 | B2 async-first + asgiref |
 |------|-----------|------------------------|
-| EverOS FastAPI handler（async）| ✅ native | ✅ native |
+| evermem FastAPI handler（async）| ✅ native | ✅ native |
 | Jupyter Notebook 算法同学 sync 调 | ✅ 直接调 sync 方法 | ❌ raise（必须用 `await aextract(...)`）|
 | Jupyter Notebook 算法同学 async 调 | ✅ `await aextract` | ✅ `await aextract` |
 | CLI 同步脚本 | ✅ | ✅ |
@@ -184,7 +184,7 @@ EverOS FastAPI 场景（100 QPS / LLM 1 秒延迟）：
 
 **理由**（基于主用户约束）：
 
-1. **EverOS（主用户）100% 走 async** → B2 完全满足
+1. **evermem（主用户）100% 走 async** → B2 完全满足
 2. sync 接口次要——CLI 脚本 + 单元测试不在 event loop 内，asgiref 桥接正常
 3. Jupyter 算法同学用 `await aextract(...)` 顶层 await（litellm / dspy 实证 + 现代 Python 生态约定）
 4. **单实现降低维护成本**——v0.x 演化阶段类型契约 / Protocol 频繁变化，单实现修一处即可
@@ -274,7 +274,7 @@ class EpisodeExtractor(DualInterface):
 
 **唯一反例 langchain 的特殊原因**：LCEL chain 要求所有 Runnable 节点统一 `invoke / ainvoke` 接口——一个 chain 由 `prompt | llm | parser` 组成，整 chain 用统一 `await chain.ainvoke(...)` 调用。若纯计算节点不提供 ainvoke，整 chain 就不能 async 链式调用。代价是 langchain 纯计算节点的 `ainvoke` 默认通过 `run_in_executor` 派生（B3 模式 thread pool overhead）—— langchain 接受性能代价换 chain 接口统一。
 
-**EverAlgo 非 chain 框架，无 langchain 那种统一性需求**：算子被 EverOS 直接单调用（`await ranker.arank(...)` + 后处理一次 `rank.fusion.rrf(...)`），纯计算算子是辅助函数在 async 上下文直接 sync 调用，不嵌入 async chain。按非 chain 框架的 8 家主流惯例（numpy/pandas/.../OpenAI SDK/httpx）选 sync only。
+**EverAlgo 非 chain 框架，无 langchain 那种统一性需求**：算子被 evermem 直接单调用（`await ranker.arank(...)` + 后处理一次 `rank.fusion.rrf(...)`），纯计算算子是辅助函数在 async 上下文直接 sync 调用，不嵌入 async chain。按非 chain 框架的 8 家主流惯例（numpy/pandas/.../OpenAI SDK/httpx）选 sync only。
 
 **社区共识精确表述**：
 - **asyncio 为 I/O-bound 设计**，CPU-bound 写 `def` 不写 `async def`
@@ -293,7 +293,7 @@ class EpisodeExtractor(DualInterface):
 
 EverAlgo 当前纯计算算子（`fusion.rrf` / `_tokenize` / 单 `cosine`）都在 ≤ 10ms 量级，sync 直接调用安全。
 
-**未来若新增重计算算子**（batch 1000+ 向量 cosine、大规模聚类等）：保持 sync `def` API 形态不变，由 caller（EverOS）决定是否 `await loop.run_in_executor(executor, op, ...)` 包装隔离。**不推荐**把重计算改写为 `async def` 内部写 sync 阻塞——这是 anti-pattern，违反 Python 官方 asyncio-dev 警告。
+**未来若新增重计算算子**（batch 1000+ 向量 cosine、大规模聚类等）：保持 sync `def` API 形态不变，由 caller（evermem）决定是否 `await loop.run_in_executor(executor, op, ...)` 包装隔离。**不推荐**把重计算改写为 `async def` 内部写 sync 阻塞——这是 anti-pattern，违反 Python 官方 asyncio-dev 警告。
 
 ## 行业实证印证
 

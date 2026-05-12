@@ -12,13 +12,11 @@ for the full workflow.
 <!-- git-cliff-unreleased-start -->
 ## [Unreleased]
 
-<!-- git-cliff-unreleased-end -->
-
-## [0.1.0] - 2026-05-11
-
 ### Added
 
-- Initial release: EpisodeExtractor (minimal reference implementation),
-  ForesightExtractor / AtomicFactExtractor / ProfileExtractor stubs,
-  ChatMemCellExtractor + WorkspaceMemCellExtractor re-exports from
+- `EpisodeExtractor` (minimal reference implementation).
+- `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor` stubs.
+- `ChatMemCellExtractor`, `WorkspaceMemCellExtractor` re-exports from
   boundary.
+
+<!-- git-cliff-unreleased-end -->

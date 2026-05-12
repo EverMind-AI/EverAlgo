@@ -11,14 +11,14 @@ package = false
 members = ["packages/*"]
 
 [tool.uv.sources]
-everalgo-core         = { workspace = true }
-everalgo-boundary     = { workspace = true }
-everalgo-clustering   = { workspace = true }
-everalgo-rank         = { workspace = true }
-everalgo-parser       = { workspace = true }
-everalgo-user-memory  = { workspace = true }
+everalgo-core = { workspace = true }
+everalgo-boundary = { workspace = true }
+everalgo-clustering = { workspace = true }
+everalgo-rank = { workspace = true }
+everalgo-parser = { workspace = true }
+everalgo-user-memory = { workspace = true }
 everalgo-agent-memory = { workspace = true }
-everalgo-knowledge    = { workspace = true }
+everalgo-knowledge = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -37,11 +37,14 @@ dev = [
   "mypy>=1.10",
   "pre-commit>=4.0",
   "git-cliff>=2.6",
+  "pytest-cov>=7.1.0",
+  "pytest-xdist>=3.8.0",
+  "diff-cover>=10.2.0",
+  "pyright==1.1.409",
 ]
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -51,11 +54,12 @@ select = [
   "F", "E", "W",
   "I", "D", "UP",
   "B", "SIM", "C4", "C90", "PIE",
-  "RUF100", "RUF018",
+  "N", "TC", "PERF",
+  "A", "FBT",
+  "RUF",
 ]
 ignore = [
   "D100",
-  "D102",
   "D104",
   "D105",
   "D107",
@@ -66,48 +70,56 @@ ignore = [
 known-first-party = ["everalgo", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
-# Test functions document themselves through descriptive names; D103 / D401
-# would force boilerplate docstrings without informational value.
 "**/tests/**/*.py" = ["D103", "D401"]
+# Chinese prompts deliberately use full-width punctuation (，。：；) as natural-language LLM input,
+# not the identifier-like context where RUF001's homoglyph protection applies.
+"**/prompts/zh/**/*.py" = ["RUF001"]
 
 [tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ruff.lint.mccabe]
-max-complexity = 15
+convention = "numpy"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests", "packages"]
-# --import-mode=importlib is required for src-layout packages sharing the
-# `everalgo.*` PEP 420 namespace, and to prevent test sub-directories (e.g.
-# `types/`) from shadowing stdlib modules under pytest's default `prepend`
-# import mode. Reference: https://docs.pytest.org/en/stable/explanation/pythonpath.html
+# `importlib` import-mode is required for PEP 420 namespace packages and prevents
+# test subdirectories like `types/` from shadowing stdlib modules.
+# https://docs.pytest.org/en/stable/explanation/pythonpath.html
 addopts = "-ra --import-mode=importlib"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+include = ["packages/*/src", "packages/*/tests", "tests"]
+# pyright's equivalent of mypy's `mypy_path` — required for PEP 420 namespace resolution across the 8 dists.
+extraPaths = [
+  "packages/everalgo-core/src",
+  "packages/everalgo-boundary/src",
+  "packages/everalgo-clustering/src",
+  "packages/everalgo-rank/src",
+  "packages/everalgo-parser/src",
+  "packages/everalgo-user-memory/src",
+  "packages/everalgo-agent-memory/src",
+  "packages/everalgo-knowledge/src",
+]
+reportImplicitOverride = true
+reportOverlappingOverload = false
+reportImportCycles = false
+reportPrivateUsage = false
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Required so mypy can resolve `everalgo.*` across PEP 420 namespace
-# packages spread over multiple distributions. ``mypy_path`` lists every
-# distribution's ``src`` so mypy treats them as the package roots and
-# does not mistake ``everalgo.types`` (a sub-namespace) for the stdlib
-# ``types`` module.
 namespace_packages = true
 explicit_package_bases = true
+# Pyright runs over the same tree, so some `# type: ignore` lines are pyright-only and look unused to mypy.
+warn_unused_ignores = false
+# Required for PEP 420 namespace resolution; also disambiguates `everalgo.types` from stdlib `types`.
 mypy_path = "packages/everalgo-core/src:packages/everalgo-boundary/src:packages/everalgo-clustering/src:packages/everalgo-rank/src:packages/everalgo-parser/src:packages/everalgo-user-memory/src:packages/everalgo-agent-memory/src:packages/everalgo-knowledge/src"
 
-# Tests need not be strict-typed: pytest fixtures, parametrize tuples and
-# `dict[str, Any]` builders rarely benefit from `-> None` annotations on
-# every function. Keeping ``strict`` enabled for src/ but relaxed for tests/
-# matches pydantic-ai / dspy / sklearn convention.
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 disallow_untyped_defs = false
 disallow_untyped_calls = false
 disallow_incomplete_defs = false
-
-# Pyright (used by Pylance / VSCode / Cursor) configuration lives in
-# the standalone `pyrightconfig.json` at the repo root — Pylance
-# auto-discovers it. Keeping pyright config out of pyproject.toml avoids
-# Pylance edge cases where `[tool.pyright]` is not picked up reliably.

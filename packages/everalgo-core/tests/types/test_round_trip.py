@@ -1,8 +1,7 @@
 """Cross-type JSON round-trip parametrized check.
 
-Ensures every public type from ``everalgo.types`` survives
-``model_dump_json`` -> ``model_validate_json`` cleanly, including
-the ``extra='allow'`` path for Episode.
+Ensures every public type from ``everalgo.types`` survives ``model_dump_json`` -> ``model_validate_json``
+cleanly, including the ``extra='allow'`` path for Episode.
 """
 
 from typing import Any

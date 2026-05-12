@@ -6,7 +6,7 @@
 
 ## 背景
 
-EverAlgo 是算法库，下游消费方（EverOS 集成测、算法同学单测、第三方）都需要写测试调用 EverAlgo。**testing 暴露形态**决定 EverAlgo 给下游写测试提供哪些辅助、如何打包发布。
+EverAlgo 是算法库，下游消费方（evermem 集成测、算法同学单测、第三方）都需要写测试调用 EverAlgo。**testing 暴露形态**决定 EverAlgo 给下游写测试提供哪些辅助、如何打包发布。
 
 相关硬约束：
 - **H3** 算法同学迭代速度（写单测要顺手）
@@ -71,7 +71,7 @@ EverAlgo 是算法库，下游消费方（EverOS 集成测、算法同学单测�
 
 | 优势 | 适配度 |
 |------|--------|
-| 下游单测低门槛 | ✅ **强需要**（H3 算法同学迭代速度；EverOS 集成测也受益）|
+| 下游单测低门槛 | ✅ **强需要**（H3 算法同学迭代速度；evermem 集成测也受益）|
 | 与主流算法库模式对位 | ✅ 受益（行业一致性，新人无学习成本）|
 | 与 core 同节奏演化 | ✅ 受益（演化阶段同步更新）|
 | 安装零成本 | ✅ 受益 |
@@ -138,7 +138,7 @@ EverAlgo 选 A + 拒绝 fixtures，与 numpy / pandas / pytorch 路线一致。
 
 ## 后续演化触发条件
 
-1. **下游反馈需要预设样本**（EverOS 集成测想直接拿 sample_memcell 跑）→ 独立 `everalgo.examples` 子包，参照 sklearn.datasets，**不**回头加到 testing
+1. **下游反馈需要预设样本**（evermem 集成测想直接拿 sample_memcell 跑）→ 独立 `everalgo.examples` 子包，参照 sklearn.datasets，**不**回头加到 testing
 2. **fake_llm 复杂度膨胀**（多 provider mock / streaming mock / batch mock）→ 拆 `everalgo.testing.fake_llm/` 子目录而非单文件
 3. **第三方写 everalgo extension 时需要更复杂测试基础设施**（如 langchain-tests `standard-tests` 那种）→ 重新评估 C 独立 dist 方案
 

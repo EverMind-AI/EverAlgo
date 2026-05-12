@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from everalgo.parser import audio, document, image, url, video
-from everalgo.types import ParsedContent, RawFile
+
+if TYPE_CHECKING:
+    from everalgo.types import ParsedContent, RawFile
 
 __all__ = [
-    "audio",
     "aparse",
+    "audio",
     "document",
     "image",
     "parse",

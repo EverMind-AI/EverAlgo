@@ -14,7 +14,7 @@ If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboar
 - **Two axes.** Every operator belongs to one of two axes whose contracts are symmetric (stateless, in-memory I/O):
   - **Extract** — write path. Input: structured units (e.g. `MemCell`). Output: structured memories (`Episode` / `Profile` / `Case` / `Skill` / …).
   - **Rank** — read path. Input: multi-route recall candidates plus pre-fetched cross-memory linkage. Output: a ranked memory list. Ranker performs **no storage I/O**; cross-memory linkage (e.g. `Episode → AtomicFact`) must be pre-fetched by the caller and passed in.
-- **Orchestration is upstream.** When to call, in what order, with what concurrency, persistence to the markdown filesystem — all owned by **EverOS**. EverAlgo does not care whether the caller is open-source or cloud commercial; both paths share this code.
+- **Orchestration is upstream.** When to call, in what order, with what concurrency, persistence to the markdown filesystem — all owned by **evermem**. EverAlgo does not care whether the caller is open-source or cloud commercial; both paths share this code.
 
 For the rationale and deeper background, read `docs/design.md` §1.1.
 
@@ -32,8 +32,9 @@ everalgo/                              # monorepo, uv virtual workspace
 ├── .gitignore  .gitlab-ci.yml
 ├── docs/
 │   ├── design.md                      # ⚠️ READ THIS — full architecture
-│   ├── decisions/                     # ADRs (ADR-001…010) — read before challenging design
-│   └── superpowers/plans/             # implementation plans for in-flight work
+│   ├── decisions/                     # ADRs (ADR-001…012) — read before challenging design
+│   ├── concepts/                      # high-level architecture notes
+│   └── reference/                     # API reference (per-distribution)
 ├── packages/
 │   ├── everalgo-core/                 # types, llm (+ providers), prompts, testing
 │   ├── everalgo-boundary/             # MemCell extractors + tokenize / split
@@ -130,7 +131,7 @@ uv run pre-commit autoupdate
 
 #### What's deliberately NOT in pre-commit
 
-- **`mypy`** — strict mypy over the 8-package PEP 420 workspace takes several seconds per run and would make commit feel sluggish; it is enforced by CI instead (pydantic / sklearn do the same).
+- **`mypy` / `pyright`** — strict type-checks over the 8-package PEP 420 workspace each take several seconds per run and would make commit feel sluggish; enforced by CI instead (pydantic / sklearn / openai-python / anthropic-sdk-python do the same).
 - **`pytest`** — same reason. CI is the gate.
 
 ### Editor integration (recommended)
@@ -141,7 +142,7 @@ Pre-commit fires at commit time. For per-keystroke feedback, install the ruff ed
 - **PyCharm / IntelliJ**: install the [Ruff plugin](https://plugins.jetbrains.com/plugin/20574-ruff).
 - **Vim / Neovim**: configure ruff through your LSP setup (e.g. `ruff-lsp` or built-in LSP via `nvim-lspconfig`).
 
-The CI pipeline (`.gitlab-ci.yml`) re-runs `ruff check .` + `ruff format --check .` + `mypy .` on every MR as the load-bearing fallback. Pre-commit and editor coverage are about *latency of feedback*; CI is the gate.
+The CI pipeline (`.gitlab-ci.yml`) re-runs `ruff check .` + `ruff format --check .` + `mypy .` + `pyright` on every MR as the load-bearing fallback. Both type-checkers run because they catch slightly different things — same dual-checker setup used by `openai-python` and `anthropic-sdk-python`. Pre-commit and editor coverage are about *latency of feedback*; CI is the gate.
 
 ---
 
@@ -154,7 +155,8 @@ The CI pipeline (`.gitlab-ci.yml`) re-runs `ruff check .` + `ruff format --check
 | Run a specific test | `uv run pytest path/to/test.py::test_name -v` |
 | Lint | `uv run ruff check .` |
 | Format | `uv run ruff format .` |
-| Type-check | `uv run mypy .` |
+| Type-check (mypy) | `uv run mypy .` |
+| Type-check (pyright) | `uv run pyright` |
 | Build a single distribution | `cd packages/everalgo-core && uv build` |
 | Add a runtime dep to one package | `uv add --package everalgo-clustering numpy` |
 | Add a dev tool to the workspace | `uv add --group dev pytest-asyncio` |
@@ -174,8 +176,9 @@ The full rationale lives in `docs/design.md` §1.4 and ADR 010 / 011. Hard rules
 - **`Protocol` for typing, not `ABC`.** EverAlgo operators are stateless; implementations do not need to subclass anything. See ADR 011.
 - **No dependency injection in algorithm code.** Module-level functions + global config + monkeypatch in tests. Algorithm authors should be one keystroke away from running their code; do not impose framework ceremony.
 - **Sync bridge for I/O operators: write `extract = async_to_sync(aextract)` one-liner per ADR 010 line 199-214; do not introduce a `DualInterface` mixin.** This keeps type inference predictable, avoids metaclass magic, and matches the pattern shown in the ADR. The `async_to_sync` helper comes from `asgiref.sync`.
-- **Lint configuration.** Workspace-wide ruff is configured in the root `pyproject.toml` (`line-length = 120`, `target-version = "py312"`, rule set derived from the pytorch + pydantic-ai intersection). Google-style docstrings.
-- **English only in code, config, and commit messages.** All Python code, comments, identifiers, `pyproject.toml` comments, CI files, and commit messages must be English. The same rule that `memsys_opensource` enforces with a pre-commit hook applies here. Design discussion artifacts under `docs/` (`design.md`, `decisions/`, `technical_design.md`, `superpowers/plans/`) may stay Chinese — they reflect the working language of the design discussion, not the codebase.
+- **Lint configuration.** Workspace-wide ruff is configured in the root `pyproject.toml` (`line-length = 120`, target version inferred from `requires-python = ">=3.12"`, rule set derived from the pytorch + pydantic-ai intersection). NumPy-style docstrings — the convention used by numpy / scipy / scikit-learn / pandas, the industry standard for scientific Python algorithm libraries.
+- **Use the full `line-length = 120` budget when hand-wrapping.** For Python comments / docstrings and TOML/YAML comments, fill each line to roughly 100–115 characters before wrapping — do not pre-wrap at 70 / 79 / 80 / 88 / 100 out of habit. `E501` is in the ignore list, and ruff never flags lines that are *too short*, so this is a writer's discipline rather than a lint check. A 3-line comment that collapses cleanly into 2 lines at 120 should be 2 lines. Exceptions: bullet lists, code blocks, NumPy docstring `name : type` field signatures (one per line on purpose), and any line where a natural break aids comprehension. Markdown files in this repo deliberately use the **one-paragraph-per-line** (no hard-wrap) style — the same convention Prettier emits by default and GitHub renders cleanly — so `.md` prose is exempt from the 100–115 rule entirely; rely on editor soft-wrap.
+- **English only in code, config, and commit messages.** All Python code, comments, identifiers, `pyproject.toml` comments, CI files, and commit messages must be English. The same rule that `evermem` enforces with a pre-commit hook applies here. Design discussion artifacts under `docs/` (`design.md`, `decisions/`, `concepts/`) may stay Chinese — they reflect the working language of the design discussion, not the codebase.
 
 ---
 
@@ -200,7 +203,7 @@ The full rationale lives in `docs/design.md` §1.4 and ADR 010 / 011. Hard rules
 
 Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
 
-**MR title is load-bearing.** GitLab is configured (Settings → Merge Requests → Squash commit template = `%{title}`) so the MR title lands verbatim as the squash commit on `main`. The `mr-title-lint` CI job rejects MR titles that do not match the format above, because the release-notes generator (`git cliff`, see `cliff.toml` + `README.md` "Cutting a release") parses these messages to assemble per-distribution CHANGELOGs.
+**MR title is load-bearing.** GitLab is configured (Settings → Merge Requests → Squash commit template = `%{title}`) so the MR title lands verbatim as the squash commit on `main`. MR titles must match the format above, because the release-notes generator (`git cliff`, see `cliff.toml` + `README.md` "Cutting a release") parses these messages to assemble per-distribution CHANGELOGs.
 
 **Scope = distribution name without the `everalgo-` prefix.** Use `clustering` / `rank` / `core` / `boundary` / `parser` / `user-memory` / `agent-memory` / `knowledge`. For cross-cutting changes (CI, monorepo tooling, root docs), use `ci` / `release` / `repo` / `design` / `docs` as the scope or omit the scope entirely.
 
@@ -218,7 +221,7 @@ Follow this checklist when introducing a new extractor / ranker / clusterer:
 4. **Re-export the public surface.** If the operator is part of the public API of its facade subpackage, add it to `<subpkg>/__init__.py`'s re-export block and `__all__`. See `docs/design.md` §1.3 for the re-export pattern.
 5. **Wire dependencies.** If the new code requires a new third-party library, add it via `uv add --package everalgo-<dist> <library>`, which updates the right `pyproject.toml`.
 6. **Write tests.** Use `everalgo.testing.fake_llm` to avoid real API calls; use `everalgo.testing.assertions` for structural memory checks.
-7. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`).
+7. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`).
 8. **Document architectural decisions.** If the operator embodies a non-trivial design choice (new public Protocol, new distribution boundary, breaking a convention), add an ADR under `docs/decisions/` numbered after the latest.
 
 ---
@@ -252,7 +255,7 @@ Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (pe
 |---|---|
 | Architecture (definitive) | [`docs/design.md`](docs/design.md) |
 | Architecture decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |
-| Source of `EverOS` contract | Confluence — see `docs/design.md` header for links |
+| Source of `evermem` contract | Confluence — see `docs/design.md` header for links |
 | uv workspace concepts | https://docs.astral.sh/uv/concepts/projects/workspaces/ |
 | PEP 420 namespace packages | https://peps.python.org/pep-0420/ |
 | PEP 8 (style) / 257 (docstrings) / 484 (type hints) | https://peps.python.org/ |
