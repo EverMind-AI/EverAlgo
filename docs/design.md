@@ -404,7 +404,7 @@ dev = ["pytest", "pytest-asyncio", "respx", "mypy", "ruff"]
   - **Python 官方 / FastAPI / NumPy 文档共识**：asyncio 为 I/O-bound 设计，CPU-bound 写 `def` 不写 `async def`
   - **9 项目实证一致**：numpy / pandas / sklearn / pytorch / scipy / litellm / llama-index / OpenAI SDK / httpx 100% 不为纯计算提供 async（唯一反例 **langchain LCEL** 为 chain 接口统一 `invoke / ainvoke` 接受 thread pool 性能代价；EverAlgo 非 chain 框架场景不同）
   - 轻量纯计算（毫秒级）在 async 上下文直接 sync 调用安全；**若未来某算子计算时长超 ~100ms**（如大批量向量相似度），caller 用 `run_in_executor` / `ProcessPoolExecutor` 包装隔离（保持算子 API sync `def` 不变）。详见 §2.3 + [ADR 010](decisions/010-sync-async-dual-interface.md)
-- **Prompt 是 Python 字符串模块**（如 `prompts/en/cluster_decision.py` 内 `CLUSTER_DECISION_PROMPT = "..."`），**不外置 `.md` / `.yaml` / `.toml`**；与算法库阵营 DSPy / LlamaIndex / instructor / mem0 / memsys_opensource 现状 5/5 一致；多语言通过子模块组织（`prompts/en/` + `prompts/zh/`）；改 prompt = 改 `.py` 字符串。**端到端框架阵营**（LangChain / CrewAI / Semantic Kernel）外置 YAML / Jinja2 不适配 EverAlgo 算法库定位
+- **Prompt 是 Python 字符串模块**（如 `prompts/en/cluster_decision.py` 内 `CLUSTER_DECISION_PROMPT = "..."`），**不外置 `.md` / `.yaml` / `.toml`**；与算法库阵营 DSPy / LlamaIndex / instructor / mem0 / evermem 现状 5/5 一致；多语言通过子模块组织（`prompts/en/` + `prompts/zh/`）；改 prompt = 改 `.py` 字符串。**端到端框架阵营**（LangChain / CrewAI / Semantic Kernel）外置 YAML / Jinja2 不适配 EverAlgo 算法库定位
 - **evermem 自定义 prompt** 两条路径（KISS，无额外 framework）：
   - **算子 per-call `prompt=` 参数**（细粒度主路径）：`cluster_by_llm(..., prompt=my_prompt)` 单次注入；适合少量定制 / A/B 测试。已在 §2.4 算子签名预留
   - **caller monkey-patch 模块常量**（粗粒度全局）：`from everalgo.clustering.prompts.en import cluster_decision; cluster_decision.CLUSTER_DECISION_PROMPT = "..."` 启动期一次性覆盖；适合项目级全局替换。LlamaIndex `update_prompts` / HuggingFace `tokenizer.chat_template = "..."` 同款
@@ -760,7 +760,7 @@ async with caller.lock(f"trigger_clustering:{agent_id}"):
 
 #### 与现状代码的关键差异
 
-| 现状（`memsys_opensource/src/memory_layer/cluster_manager/manager.py`）| 新设计 | 删除原因 |
+| 现状（`evermem/src/memory_layer/cluster_manager/manager.py`）| 新设计 | 删除原因 |
 |---|---|---|
 | 单入口 `cluster_memcell(memcell, state, has_case)`（manager.py:263-289）| 双公开函数 | `has_case` 由包分层表达 |
 | 算子内 `_get_embedding`（manager.py:307）调 module-global vectorize_service | caller 算 vector 传入 | EverAlgo 不算 embed |
@@ -947,13 +947,13 @@ class MyFallbackClient:                            # 实现 LLMClient Protocol �
 
 
 > ✅ **设计自检**
-> - **Why scene 路由不在 EverAlgo**：scene（episode / profile / boundary / rerank 等）是业务编排概念——"哪个算法步骤用哪个模型"是部署 / 业务 / 成本决策，**与算法本身无关**。**业界主流 LLM 库 4/4 不做 scene 路由（横跨 3 阵营无差别）**：算法库阵营 DSPy `dspy.settings.lm` + `dspy.context(lm=...)` / LlamaIndex `Settings.llm` + chain 框架阵营 LangChain（`prompt | model | parser` 组合时传 model）+ agent 框架阵营 AutoGen（用户构造 client 传 agent）。"算法库 / chain 框架 / agent 框架" 跨 3 阵营都不做 → 反向印证 scene 路由不属任何阵营 LLM 库的职责，归业务编排层。memsys_opensource 现状的 `LLMScene` enum 是把 evermem 业务逻辑掺进了算法库，重构 EverAlgo 时剥离到 evermem 端 SceneRouter
+> - **Why scene 路由不在 EverAlgo**：scene（episode / profile / boundary / rerank 等）是业务编排概念——"哪个算法步骤用哪个模型"是部署 / 业务 / 成本决策，**与算法本身无关**。**业界主流 LLM 库 4/4 不做 scene 路由（横跨 3 阵营无差别）**：算法库阵营 DSPy `dspy.settings.lm` + `dspy.context(lm=...)` / LlamaIndex `Settings.llm` + chain 框架阵营 LangChain（`prompt | model | parser` 组合时传 model）+ agent 框架阵营 AutoGen（用户构造 client 传 agent）。"算法库 / chain 框架 / agent 框架" 跨 3 阵营都不做 → 反向印证 scene 路由不属任何阵营 LLM 库的职责，归业务编排层。evermem 现状的 `LLMScene` enum 是把业务逻辑掺进了算法库，重构 EverAlgo 时剥离到 evermem 端 SceneRouter
 > - **Why 3 层注入（per-call > scoped > default）**：DSPy `dspy.settings.configure` + `dspy.context` + `predictor(..., lm=...)` 同款 3 层模式实证——per-call 给 evermem 单调用 scene 注入（主路径）/ scoped 给 evermem pipeline 段批量切换（减少重复传参）/ default 给 dev / 测试 / Jupyter / 简单脚本兜底（生产 evermem 可不调 configure）。优先级 per-call > scoped > default 无歧义。EverAlgo 算子方法签名补可选 `llm: LLMClient | None = None` 参数 + 内部用 `everalgo.llm.resolve(llm)` 单行封装 3 层 fallback + 未注入抛 `LLMNotConfiguredError`（算法库内一处定义，所有算子共用，避免每个算子重复 7 行 boilerplate）
 > - **Why Provider 路由仍在 EverAlgo**：Provider 路由（`LLMConfig.provider` → SDK 适配）是**实现层**职责（SDK 适配代码紧耦合算法库），与 Scene 路由的**业务层**职责不同；Letta `LLMClient.create` `match-case` 同款实现
 > - **Why 算法层不加重试**：业界 OpenAI / Anthropic SDK 内置 `DEFAULT_MAX_RETRIES = 2`（hardcoded `_constants.py`，覆盖 connection / 408 / 409 / 429 / 5xx）已成熟兜底；DSPy 3 / LlamaIndex 3-10 / instructor 1 在 SDK 之上叠加 retry 是早期 SDK 不可靠的历史包袱，现代叠加只放大延迟，EverAlgo 取 LangChain Core 路线（核心不重试 + 依赖 provider SDK）
 > - **行业依据**：DSPy `dspy.settings.lm` + `dspy.context` 全局 + scoped 模式；Letta `LLMClient.create` `match-case` 实现 Provider 路由；LangChain Core `BaseChatModel` 不内置 retry / `ChatOpenAI` 透传 `max_retries` 给 OpenAI SDK 的分层哲学
 >
-> **完整决策与 6 轮调研事实见 [ADR 012 LLM 抽象层架构](decisions/012-llm-stack-architecture.md)**（含 P1/P2/P3 三派 13 项目矩阵 + LiteLLM 工业级真实定位 + B 派 ABC 4 真实驱动 + 5 派 LLMError 错误层级分布 + 4/4 主流 LLM 库横跨 3 阵营不做 scene 路由实证 + memsys_opensource 现状代码迁移清单）
+> **完整决策与 6 轮调研事实见 [ADR 012 LLM 抽象层架构](decisions/012-llm-stack-architecture.md)**（含 P1/P2/P3 三派 13 项目矩阵 + LiteLLM 工业级真实定位 + B 派 ABC 4 真实驱动 + 5 派 LLMError 错误层级分布 + 4/4 主流 LLM 库横跨 3 阵营不做 scene 路由实证 + evermem 现状代码迁移清单）
 
 ---
 
