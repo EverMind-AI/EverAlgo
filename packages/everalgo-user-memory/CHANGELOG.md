@@ -15,8 +15,26 @@ for the full workflow.
 ### Added
 
 - `EpisodeExtractor` (minimal reference implementation).
-- `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor` stubs.
+- `ForesightExtractor` — full implementation following the
+  `EpisodeExtractor` reference pattern (single MemCell → `list[Foresight]`
+  with auto-filled `parent_id`).
+- `AtomicFactExtractor` — full implementation (single MemCell →
+  `list[AtomicFact]`).
+- `ProfileExtractor` — single-shot LLM snapshot from `(current MemCell,
+  prior cluster_episodes)` → single `Profile`. Multi-stage profile
+  (part1 / part2 / evidence_completion / merger) deferred to a future
+  minor bump (see `local/plans/boundary-user-memory-execution-plan.md` §1.1).
+- English + Chinese prompts under `prompts/{en,zh}/{episode,foresight,atomic_fact,profile}.py`
+  (Chinese variants are machine-translated; review welcome).
+- `assert_foresight_shape`, `assert_atomic_fact_shape`,
+  `assert_profile_shape` testing helpers in `everalgo.testing`.
 - `ChatMemCellExtractor`, `WorkspaceMemCellExtractor` re-exports from
   boundary.
+
+### Changed
+
+- `Episode` / `Foresight` / `AtomicFact` / `Profile` schemas now ship
+  minimal required fields plus `ConfigDict(extra="allow")` — additional
+  LLM-emitted keys are preserved without a schema bump.
 
 <!-- git-cliff-unreleased-end -->
