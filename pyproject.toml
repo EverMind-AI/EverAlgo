@@ -56,6 +56,7 @@ select = [
   "B", "SIM", "C4", "C90", "PIE",
   "N", "TC", "PERF",
   "A", "FBT",
+  "G", "LOG", "TRY",
   "RUF",
 ]
 ignore = [
@@ -64,6 +65,7 @@ ignore = [
   "D105",
   "D107",
   "E501",
+  "TRY003",  # numpy-style detailed exception messages — see ADR-013
 ]
 
 [tool.ruff.lint.isort]

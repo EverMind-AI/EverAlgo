@@ -11,6 +11,8 @@ Public symbols (per AGENTS.md §7 step 6 + §9 + spec §3):
 - ``assert_episode_shape`` — Episode structural assertion helper
 """
 
+import logging
+
 from everalgo.testing.assertions import assert_episode_shape
 from everalgo.testing.fake_llm import CallRecord, FakeLLMClient
 
@@ -19,3 +21,6 @@ __all__ = [
     "FakeLLMClient",
     "assert_episode_shape",
 ]
+
+# Library logging setup (ADR-013): NullHandler on each subpackage logger.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
