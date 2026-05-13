@@ -10,8 +10,18 @@ def test_three_memcell_extractors_exported() -> None:
     assert hasattr(everalgo.boundary, "AgentMemCellExtractor")
 
 
-def test_dunder_all_lists_three_extractors() -> None:
-    """__all__ exposes exactly 3 extractor symbols."""
+def test_detection_output_exported() -> None:
+    """``DetectionOutput`` is exposed at top level as the return type of ChatMemCellExtractor.adetect."""
+    assert hasattr(everalgo.boundary, "DetectionOutput")
+
+
+def test_dunder_all_lists_full_surface() -> None:
+    """__all__ exposes 3 extractors + DetectionOutput."""
     assert sorted(everalgo.boundary.__all__) == sorted(
-        ["ChatMemCellExtractor", "WorkspaceMemCellExtractor", "AgentMemCellExtractor"]
+        [
+            "AgentMemCellExtractor",
+            "ChatMemCellExtractor",
+            "DetectionOutput",
+            "WorkspaceMemCellExtractor",
+        ]
     )

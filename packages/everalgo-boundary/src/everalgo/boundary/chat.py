@@ -2,35 +2,52 @@
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from asgiref.sync import async_to_sync
 
-import everalgo.llm
-from everalgo.boundary._tokenize import count_tokens
-from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
-from everalgo.types import MemCell, Message
-
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+    from everalgo.types import MemCell, Message
+
+
+class DetectionOutput(NamedTuple):
+    """Result of chat boundary detection.
+
+    Subclasses ``tuple``, so both forms are supported and interchangeable:
+
+    - Positional unpacking: ``cells, tail = await extractor.adetect(msgs)``
+    - Named access: ``out.cells`` / ``out.tail``
+    - Index access: ``out[0]`` / ``out[1]``
+
+    ``tail`` is the trailing segment the LLM did not confidently close. The
+    caller is expected to persist it and prepend it to fresh messages on the
+    next ``adetect`` call. When ``is_final=True`` is passed, ``tail`` is
+    guaranteed to be ``[]``.
+    """
+
+    cells: list[MemCell]
+    tail: list[Message]
 
 
 class ChatMemCellExtractor:
     """Detect MemCell boundaries in a chat-style message stream.
 
-    Stateless: no ``__init__``, no instance state. Thread/async safe — instances are interchangeable.
-    Customize per call via ``llm=`` and ``prompt=`` arguments.
+    Stateless callable class — no ``__init__``, no instance state. Thread / async safe; instances are
+    interchangeable. Customize per call via ``llm=`` / ``prompt=`` / ``is_final=`` / ``hard_token_limit=`` /
+    ``hard_msg_limit=`` arguments.
 
-    Algorithm (minimal reference impl):
-        1. Render LLM prompt with the message stream + token budget hint.
-        2. Call LLM, parse JSON ``{"split_at": int | null}``.
-        3. Build one or two MemCells from the split.
+    Pipeline phases (real implementation TBD):
 
-    For production-grade boundary detection (multi-split / token-aware force_split / boundary_reason
-    classification), replace the prompt via ``prompt=`` argument or monkey-patch the module constant.
+    1. **Input validation** — empty ``messages`` short-circuits to empty output.
+    2. **Default resolution** — ``llm`` / ``prompt`` resolved from the registry when not supplied.
+    3. **Force-split loop** — repeatedly slice off the head when the running token total exceeds
+       ``hard_token_limit`` or the message count exceeds ``hard_msg_limit``; runs *before* the LLM call
+       to keep prompts inside the model context window.
+    4. **LLM batch detection** — one LLM call returns all topic boundaries for the residual stream;
+       retried up to 5 times on JSON parse / schema failure, then raises ``RuntimeError``.
+    5. **Boundary slicing + is_final reduction** — slice the residual stream by the returned boundaries;
+       if ``is_final=True`` the unclosed trailing segment is absorbed into the last MemCell.
     """
 
     async def adetect(
@@ -39,72 +56,45 @@ class ChatMemCellExtractor:
         *,
         llm: LLMClient | None = None,
         prompt: str | None = None,
-    ) -> list[MemCell]:
-        """Async main implementation: ask LLM for boundary split point.
+        is_final: bool = False,
+        hard_token_limit: int = 65536,
+        hard_msg_limit: int = 500,
+    ) -> DetectionOutput:
+        """Async main implementation: slice a chat message stream into MemCells.
 
         Parameters
         ----------
         messages : list[Message]
-            Ordered chat messages (user/assistant turns).
+            Ordered chat messages (user / assistant turns).
         llm : LLMClient or None, optional
             Per-call LLM override. Falls back through scoped (``use(...)``) and default
             (``configure(...)``); raises ``LLMNotConfiguredError`` if all None.
         prompt : str or None, optional
-            Per-call prompt override. Defaults to ``CHAT_BOUNDARY_DETECT_PROMPT_EN``.
+            Per-call batch boundary prompt override. Defaults to ``CHAT_BOUNDARY_DETECT_PROMPT_EN``.
+            Must contain a ``{messages}`` placeholder.
+        is_final : bool, optional
+            ``True`` forces the trailing segment into the last MemCell (``tail`` guaranteed ``[]``).
+            ``False`` returns the unclosed trailing segment as ``tail`` for the caller to persist.
+        hard_token_limit : int, optional
+            Force-split threshold by token count. Default ``65536``.
+        hard_msg_limit : int, optional
+            Force-split threshold by message count. Default ``500``.
 
         Returns
         -------
-        list[MemCell]
-            At least one cell. The minimal ref impl produces either 1 cell (no split) or 2 cells
-            (one split point).
+        DetectionOutput
+            ``(cells, tail)`` named tuple. ``is_final=True`` guarantees ``tail == []``.
+
+        Raises
+        ------
+        LLMNotConfiguredError
+            No LLM resolvable through the 3-layer chain.
+        RuntimeError
+            All 5 retries exhausted on JSON parse / schema failure.
+        LLMError
+            Any provider-side failure not absorbed by retry.
         """
-        client = everalgo.llm.resolve(llm)
-        rendered = render_prompt(
-            CHAT_BOUNDARY_DETECT_PROMPT_EN,
-            prompt,
-            messages=_format_messages_for_prompt(messages),
-            token_count=count_tokens(_concat_messages(messages)),
-        )
-        response = await client.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
-        )
-        return _build_memcells_from_llm_response(response.content, messages)
+        raise NotImplementedError("stub")
 
     detect = async_to_sync(adetect)
     """Sync bridge — only callable from non-event-loop contexts."""
-
-
-# Module-level helper functions — stateless utilities (per AGENTS.md §5).
-
-
-def _concat_messages(messages: list[Message]) -> str:
-    """Concatenate messages into a single prompt-friendly string."""
-    return "\n".join(f"[{m.role.value}] {m.content}" for m in messages)
-
-
-def _format_messages_for_prompt(messages: list[Message]) -> str:
-    """Format messages with index prefix (LLM uses index for split_at)."""
-    return "\n".join(f"{i}. [{m.role.value}] {m.content}" for i, m in enumerate(messages))
-
-
-def _build_memcells_from_llm_response(raw: str, messages: list[Message]) -> list[MemCell]:
-    """Parse LLM JSON ``{"split_at": int | null}`` and build MemCell list."""
-    parsed = json.loads(raw)
-    split_at = parsed.get("split_at")
-    if split_at is None:
-        return [_make_memcell(messages, suffix="0")]
-    return [
-        _make_memcell(messages[:split_at], suffix="0"),
-        _make_memcell(messages[split_at:], suffix="1"),
-    ]
-
-
-def _make_memcell(slice_msgs: list[Message], *, suffix: str) -> MemCell:
-    """Build a MemCell with deterministic id derived from timestamp + suffix."""
-    timestamp = slice_msgs[-1].timestamp if slice_msgs else 0
-    return MemCell(
-        id=f"mc_{timestamp}_{suffix}",
-        messages=slice_msgs,
-        timestamp=timestamp,
-    )

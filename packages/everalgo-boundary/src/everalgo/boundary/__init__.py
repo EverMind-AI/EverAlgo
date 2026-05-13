@@ -1,20 +1,22 @@
 """Boundary extractors — chat / workspace / agent.
 
 Public surface:
-- ChatMemCellExtractor — slice chat messages into MemCells (real impl)
+- ChatMemCellExtractor — slice chat messages into MemCells (interface defined; impl stub)
 - WorkspaceMemCellExtractor — Jira / Email / Confluence stub
 - AgentMemCellExtractor — agent trace stub
+- DetectionOutput — ``(cells, tail)`` NamedTuple returned by ChatMemCellExtractor.adetect
 """
 
 import logging
 
 from everalgo.boundary.agent import AgentMemCellExtractor
-from everalgo.boundary.chat import ChatMemCellExtractor
+from everalgo.boundary.chat import ChatMemCellExtractor, DetectionOutput
 from everalgo.boundary.workspace import WorkspaceMemCellExtractor
 
 __all__ = [
     "AgentMemCellExtractor",
     "ChatMemCellExtractor",
+    "DetectionOutput",
     "WorkspaceMemCellExtractor",
 ]
 

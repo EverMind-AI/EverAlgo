@@ -30,8 +30,8 @@ async def main() -> None:
         Message(role=MessageRole.USER, content="Schedule a 3pm sync with Alice; I'll follow up Friday.", timestamp=1700000000000),
         Message(role=MessageRole.ASSISTANT, content="Done. Invite sent.", timestamp=1700000001000),
     ]
-    memcells = await ChatMemCellExtractor().adetect(msgs)
-    mc = memcells[0]
+    cells, _tail = await ChatMemCellExtractor().adetect(msgs, is_final=True)
+    mc = cells[0]
 
     episodes = await EpisodeExtractor().aextract(mc)         # list[Episode]
     foresights = await ForesightExtractor().aextract(mc)     # list[Foresight]
