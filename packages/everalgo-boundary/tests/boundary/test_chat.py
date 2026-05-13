@@ -13,32 +13,25 @@ def _user(content: str, ts: int = 1700000000000) -> Message:
 
 
 def test_detection_output_supports_positional_unpacking() -> None:
-    """``cells, tail_start = output`` works because DetectionOutput subclasses ``tuple``."""
-    out = DetectionOutput(cells=[], tail_start=2)
-    cells, tail_start = out
+    """``cells, tail = output`` works because DetectionOutput subclasses ``tuple``."""
+    out = DetectionOutput(cells=[], tail=[_user("hi")])
+    cells, tail = out
     assert cells == []
-    assert tail_start == 2
+    assert tail == [_user("hi")]
 
 
 def test_detection_output_supports_named_access() -> None:
-    """``output.cells`` / ``output.tail_start`` work via NamedTuple field names."""
-    out = DetectionOutput(cells=[], tail_start=2)
+    """``output.cells`` / ``output.tail`` work via NamedTuple field names."""
+    out = DetectionOutput(cells=[], tail=[_user("hi")])
     assert out.cells == []
-    assert out.tail_start == 2
+    assert out.tail == [_user("hi")]
 
 
 def test_detection_output_supports_index_access() -> None:
     """``output[0]`` / ``output[1]`` work via tuple indexing."""
-    out = DetectionOutput(cells=[MemCell(id="mc_1", messages=[], timestamp=0)], tail_start=0)
+    out = DetectionOutput(cells=[MemCell(id="mc_1", messages=[], timestamp=0)], tail=[])
     assert out[0][0].id == "mc_1"
-    assert out[1] == 0
-
-
-def test_detection_output_tail_start_slices_original_input() -> None:
-    """Caller obtains the trailing segment via ``messages[tail_start:]`` against the original input."""
-    msgs = [_user("a"), _user("b"), _user("c")]
-    out = DetectionOutput(cells=[MemCell(id="mc_1", messages=msgs[:2], timestamp=0)], tail_start=2)
-    assert msgs[out.tail_start :] == [_user("c")]
+    assert out[1] == []
 
 
 async def test_adetect_is_stub_raising_not_implemented() -> None:
