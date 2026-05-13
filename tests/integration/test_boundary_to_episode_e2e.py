@@ -92,7 +92,7 @@ async def test_boundary_to_episode_pipeline_e2e() -> None:
         return ChatResponse(content=content, model="fake")
 
     fake = FakeLLMClient(handler=handler)
-    memcells, _tail = await ChatMemCellExtractor().adetect(_two_msg_dialogue(), llm=fake, is_final=True)
+    memcells, _tail_start = await ChatMemCellExtractor().adetect(_two_msg_dialogue(), llm=fake, is_final=True)
     assert len(memcells) == 1
     mc = memcells[0]
 
@@ -126,7 +126,7 @@ async def test_boundary_to_foresight_pipeline_e2e() -> None:
         return ChatResponse(content=content, model="fake")
 
     fake = FakeLLMClient(handler=handler)
-    memcells, _tail = await ChatMemCellExtractor().adetect(_two_msg_dialogue(), llm=fake, is_final=True)
+    memcells, _tail_start = await ChatMemCellExtractor().adetect(_two_msg_dialogue(), llm=fake, is_final=True)
     assert len(memcells) == 1
     mc = memcells[0]
 
@@ -164,7 +164,7 @@ async def test_boundary_to_atomic_fact_pipeline_e2e() -> None:
         return ChatResponse(content=content, model="fake")
 
     fake = FakeLLMClient(handler=handler)
-    memcells, _tail = await ChatMemCellExtractor().adetect(_two_msg_dialogue(), llm=fake, is_final=True)
+    memcells, _tail_start = await ChatMemCellExtractor().adetect(_two_msg_dialogue(), llm=fake, is_final=True)
     assert len(memcells) == 1
     mc = memcells[0]
 
