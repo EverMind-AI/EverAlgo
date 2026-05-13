@@ -1,4 +1,4 @@
-"""Unit tests for ``everalgo.rank.fusion.expand`` (high-level MRAG entry).
+"""Unit tests for ``everalgo.rank.fusion.expand``.
 
 The fine-grained heap-convergence tests target the private
 ``fusion._expand_heap`` because they need to construct ``fused_results`` and

@@ -1,21 +1,37 @@
-"""Fusion algorithms — RRF / LR / cosine→LR / propagation / hierarchical expand."""
+"""Fusion algorithms — RRF / LR / cosine→LR / propagation / hierarchical expand / agentic LLM-guided rank."""
 
 from __future__ import annotations
 
+import asyncio
 import heapq
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, ConfigDict
+
+import everalgo.llm
+from everalgo.llm.types import ChatMessage
 from everalgo.rank import weight as _weight
+from everalgo.rank.prompts.en.agentic import (
+    AGENTIC_MULTI_QUERY_PROMPT_EN,
+    AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN,
+)
 from everalgo.types import Candidate, FactCandidate
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
+    from everalgo.llm.protocols import LLMClient
     from everalgo.rank import RankConfig
     from everalgo.rank.weight import LRCoefs
 
 __all__ = [
+    "DEFAULT_AGENTIC_CONFIG",
+    "AgenticConfig",
+    "RerankFn",
+    "RetrieveFn",
+    "aagentic_rank",
     "cosine_to_lr_score",
     "expand",
     "lr",
@@ -428,3 +444,277 @@ def _expand_heap(  # noqa: C901  (heap convergence loop ported 1:1 from enterpri
     }
 
     return episodes_out, facts_out, metadata
+
+
+class AgenticConfig(BaseModel):
+    """Tunable knobs for ``aagentic_rank`` — ported 1:1 from opensource ``AgenticConfig``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # Round 1
+    round1_top_n: int = 20
+    round1_rerank_top_n: int = 10
+
+    # LLM judgment
+    llm_temperature_sufficiency: float = 0.0
+    llm_temperature_multi_query: float = 0.4
+    llm_max_tokens_sufficiency: int = 500
+    llm_max_tokens_multi_query: int = 300
+
+    # Round 2
+    enable_multi_query: bool = True
+    num_queries: int = 3
+    round2_per_query_top_n: int = 50
+
+    # Final merge / rerank
+    combined_total: int = 40
+
+    # Sufficiency-check formatting
+    sufficiency_max_docs: int = 10
+
+
+DEFAULT_AGENTIC_CONFIG = AgenticConfig()
+
+
+type RetrieveFn = Callable[[str, int], Awaitable[Sequence[Candidate]]]
+"""``retrieve(query, top_n) -> Sequence[Candidate]`` — Round-2 recall callback."""
+
+
+type RerankFn = Callable[[str, Sequence[Candidate], int], Awaitable[Sequence[Candidate]]]
+"""``rerank(query, candidates, top_n) -> Sequence[Candidate]`` — cross-encoder rerank callback."""
+
+
+async def aagentic_rank(
+    query: str,
+    sparse: Sequence[Candidate],
+    dense: Sequence[Candidate],
+    *,
+    rerank: RerankFn,
+    retrieve: RetrieveFn | None = None,
+    top_k: int,
+    llm: LLMClient | None = None,
+    sufficiency_prompt: str = AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN,
+    multi_query_prompt: str = AGENTIC_MULTI_QUERY_PROMPT_EN,
+    config: AgenticConfig = DEFAULT_AGENTIC_CONFIG,
+) -> list[Candidate]:
+    """LLM-guided multi-round agentic retrieval — opensource ``retrieve_mem_agentic`` ported.
+
+    Parameters
+    ----------
+    query
+        Original user query.
+    sparse
+        BM25 / keyword recall results for ``query`` (Round 1 input).
+    dense
+        Vector recall results for ``query`` (Round 1 input).
+    rerank
+        Cross-encoder rerank callback (required for Round 1 + final).
+    retrieve
+        Round-2 recall callback for newly generated queries; ``None`` skips Round 2.
+    top_k
+        Final result count; ``-1`` for unlimited (returns up to ``combined_total``).
+    llm
+        Per-call LLM override; ``None`` falls through ``everalgo.llm.resolve``.
+    sufficiency_prompt
+        Override for sufficiency-check prompt. Must contain ``{query}`` / ``{retrieved_docs}``.
+    multi_query_prompt
+        Override for multi-query-generation prompt. Must contain ``{original_query}`` /
+        ``{retrieved_docs}`` / ``{missing_info}``.
+    config
+        ``AgenticConfig`` knobs (round sizes, num_queries, …).
+    """
+    is_unlimited = top_k == -1
+    cfg = config
+
+    try:
+        # ========== Round 1: concat + dedup ==========
+        seen_round1: set[str] = set()
+        round1: list[Candidate] = []
+        for c in list(sparse) + list(dense):
+            if c.id and c.id not in seen_round1:
+                seen_round1.add(c.id)
+                round1.append(c)
+        logger.info("agentic round 1: %d candidates (sparse+dense merged)", len(round1))
+        if not round1:
+            return []
+
+        # ========== Round 1 rerank ==========
+        rerank_n = cfg.round1_rerank_top_n if is_unlimited else max(cfg.round1_rerank_top_n, top_k)
+        reranked = list(await rerank(query, round1, rerank_n))
+        topn_for_llm = reranked[: cfg.round1_rerank_top_n]
+
+        # ========== LLM sufficiency check ==========
+        is_sufficient, _, missing_info = await _acheck_sufficiency(
+            query=query,
+            candidates=topn_for_llm,
+            llm=llm,
+            prompt=sufficiency_prompt,
+            max_docs=cfg.round1_rerank_top_n,
+            max_tokens=cfg.llm_max_tokens_sufficiency,
+            temperature=cfg.llm_temperature_sufficiency,
+        )
+        logger.info("agentic sufficiency: %s", is_sufficient)
+
+        if is_sufficient or retrieve is None or not cfg.enable_multi_query:
+            return reranked if is_unlimited else reranked[:top_k]
+
+        # ========== Round 2: multi-query generation ==========
+        refined_queries, _ = await _agen_multi_queries(
+            original_query=query,
+            candidates=topn_for_llm,
+            missing_info=missing_info,
+            llm=llm,
+            prompt=multi_query_prompt,
+            max_docs=cfg.round1_rerank_top_n,
+            num_queries=cfg.num_queries,
+            max_tokens=cfg.llm_max_tokens_multi_query,
+            temperature=cfg.llm_temperature_multi_query,
+        )
+        logger.info("agentic generated %d follow-up queries", len(refined_queries))
+
+        # ========== Round 2: parallel hybrid search per query ==========
+        round2_results = await asyncio.gather(
+            *[retrieve(q, cfg.round2_per_query_top_n) for q in refined_queries],
+            return_exceptions=True,
+        )
+        all_round2: list[Candidate] = [c for r in round2_results if not isinstance(r, BaseException) for c in r]
+
+        # ========== Dedup + merge ==========
+        round2_unique = [c for c in all_round2 if c.id and c.id not in seen_round1]
+        budget = max(cfg.combined_total - len(round1), 0)
+        combined = round1 + round2_unique[:budget]
+        logger.info("agentic combined: %d candidates", len(combined))
+
+        # ========== Final rerank ==========
+        final_rerank_n = cfg.combined_total if is_unlimited else max(cfg.combined_total, top_k)
+        final = list(await rerank(query, combined, final_rerank_n))
+
+        return final if is_unlimited else final[:top_k]
+
+    except Exception:
+        logger.exception("aagentic_rank failed")
+        return []
+
+
+def _format_candidates_for_llm(candidates: Sequence[Candidate], max_docs: int) -> str:
+    """Render candidates as a numbered text block — ported from opensource ``format_documents_for_llm``."""
+    if not candidates:
+        return "No retrieval results"
+
+    lines: list[str] = []
+    for i, cand in enumerate(candidates[:max_docs], start=1):
+        meta = cand.metadata
+        timestamp = meta.get("timestamp", "N/A")
+        content = meta.get("episode") or meta.get("summary") or meta.get("subject") or "N/A"
+        lines.append(f"[Memory {i}]\nTime: {timestamp}\nContent: {content}\nRelevance score: {cand.score:.4f}\n")
+    return "\n".join(lines)
+
+
+def _parse_json_response(response: str) -> dict[str, Any]:
+    """Extract a JSON object from LLM output (may have leading/trailing prose)."""
+    start = response.find("{")
+    end = response.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError("No JSON object found in response")
+    payload = json.loads(response[start:end])
+    if not isinstance(payload, dict):
+        raise TypeError("Top-level JSON is not an object")
+    return payload
+
+
+def _parse_sufficiency_response(response: str) -> tuple[bool, str, list[str]]:
+    """Parse sufficiency-check JSON; on failure return ``(True, "<error>", [])``."""
+    try:
+        payload = _parse_json_response(response)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("sufficiency parse failed: %s", exc)
+        return True, f"Parse error: {exc}", []
+    if "is_sufficient" not in payload:
+        logger.warning("sufficiency payload missing 'is_sufficient' field")
+        return True, "Parse error: missing 'is_sufficient'", []
+    is_sufficient = bool(payload["is_sufficient"])
+    reasoning = payload.get("reasoning", "No reasoning provided")
+    missing = payload.get("missing_information", [])
+    if not isinstance(missing, list):
+        missing = []
+    return is_sufficient, reasoning, missing
+
+
+def _parse_multi_query_response(response: str, original_query: str) -> tuple[list[str], str]:
+    """Return ``(queries, reasoning)``; falls back to ``[original_query]`` on any failure."""
+    try:
+        payload = _parse_json_response(response)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("multi-query parse failed: %s", exc)
+        return [original_query], f"Parse error: {exc}"
+    queries = payload.get("queries")
+    if not isinstance(queries, list):
+        logger.warning("multi-query payload missing or invalid 'queries' field")
+        return [original_query], "Parse error: missing 'queries'"
+    reasoning = payload.get("reasoning", "No reasoning provided")
+    original_norm = original_query.lower().strip()
+    valid = [
+        q.strip() for q in queries if isinstance(q, str) and 5 <= len(q) <= 300 and q.lower().strip() != original_norm
+    ]
+    if not valid:
+        return [original_query], "Fallback: used original query"
+    return valid[:3], reasoning
+
+
+async def _acheck_sufficiency(
+    *,
+    query: str,
+    candidates: Sequence[Candidate],
+    llm: LLMClient | None,
+    prompt: str,
+    max_docs: int,
+    max_tokens: int,
+    temperature: float,
+) -> tuple[bool, str, list[str]]:
+    """LLM call: are these candidates enough to answer the query? Returns opensource-compatible tuple."""
+    client = everalgo.llm.resolve(llm)
+    rendered = prompt.format(query=query, retrieved_docs=_format_candidates_for_llm(candidates, max_docs))
+    try:
+        response = await client.chat(
+            messages=[ChatMessage(role="user", content=rendered)],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+    except Exception as exc:
+        logger.exception("sufficiency LLM call failed")
+        return True, f"LLM error: {exc}", []
+    return _parse_sufficiency_response(response.content)
+
+
+async def _agen_multi_queries(
+    *,
+    original_query: str,
+    candidates: Sequence[Candidate],
+    missing_info: list[str],
+    llm: LLMClient | None,
+    prompt: str,
+    max_docs: int,
+    num_queries: int,
+    max_tokens: int,
+    temperature: float,
+) -> tuple[list[str], str]:
+    """LLM call: produce ``num_queries`` complementary queries focused on ``missing_info``."""
+    _ = num_queries
+    client = everalgo.llm.resolve(llm)
+    rendered = prompt.format(
+        original_query=original_query,
+        retrieved_docs=_format_candidates_for_llm(candidates, max_docs),
+        missing_info=", ".join(missing_info) if missing_info else "N/A",
+    )
+    try:
+        response = await client.chat(
+            messages=[ChatMessage(role="user", content=rendered)],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+    except Exception as exc:
+        logger.exception("multi-query LLM call failed")
+        return [original_query], f"LLM error: {exc}"
+    return _parse_multi_query_response(response.content, original_query)

@@ -12,10 +12,12 @@ from pydantic import BaseModel, ConfigDict
 
 import everalgo.llm
 from everalgo.llm.types import ChatMessage
+from everalgo.rank.fusion import AgenticConfig  # noqa: TC001  (runtime import required by pydantic field type)
 from everalgo.types import Candidate, RankInput, RankOutput, ScoredItem
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+    from everalgo.rank.fusion import RerankFn, RetrieveFn
 
 __all__ = [
     "DEFAULT_RANK_CONFIG",
@@ -27,7 +29,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-FusionMode = Literal["rrf", "lr", "mrag"]
+FusionMode = Literal["rrf", "lr", "mrag", "agentic"]
 """Top-level ranking strategy — parallel to enterprise ``method`` parameter.
 """
 
@@ -44,6 +46,8 @@ class RankConfig(BaseModel):
 
     expand_limit: int = 3
     max_convergence_rounds: int = 10
+
+    agentic_config: AgenticConfig | None = None
 
 
 DEFAULT_RANK_CONFIG = RankConfig()
@@ -184,13 +188,15 @@ class _RankerSpec(NamedTuple):
 _ALGO_REGISTRY: dict[str, _RankerSpec] = {}
 
 
-async def _basic_arank(
+async def _basic_arank(  # noqa: C901  (4 fusion modes; splitting hurts readability)
     rank_input: RankInput,
     *,
     config: RankConfig = DEFAULT_RANK_CONFIG,
     llm: LLMClient | None = None,
     prompt: str | None = None,
     enable_rerank: bool = False,
+    retrieve_fn: RetrieveFn | None = None,
+    rerank_fn: RerankFn | None = None,
 ) -> RankOutput:
     """Unified pipeline shared by case / skill / episodic facades.
 
@@ -202,16 +208,18 @@ async def _basic_arank(
       ScoredItems.
     - ``"mrag"`` — Full enterprise MRAG via ``fusion.expand`` (Phase 1 + 2-4);
       emit mixed ``"episode"`` + ``"atomic_fact"`` ScoredItems.
+    - ``"agentic"`` — LLM-guided multi-round via ``fusion.aagentic_rank``.
+      ``rerank_fn`` is required (cross-encoder for Round-1 + final rerank);
+      ``retrieve_fn`` is optional (drives Round 2 multi-query; ``None`` skips
+      Round 2 and returns Round-1 rerank truncated to ``top_k``).
 
-    Phase 5 LLM rerank is the shared final step in either branch.
-
-    Aligned with enterprise / opensource现状: no business-field weighting,
-    business metadata is pass-through (see facade docstrings).
+    Phase 5 LLM rerank is the shared optional final step in every branch.
 
     Raises
     ------
         KeyError: ``rank_input.memory_type`` not in ``_ALGO_REGISTRY``.
-        ValueError: ``config.fusion_mode`` not in the facade's allowed modes.
+        ValueError: ``config.fusion_mode`` not in the facade's allowed modes,
+            or ``"agentic"`` chosen without ``rerank_fn``.
     """
     spec = _ALGO_REGISTRY.get(rank_input.memory_type)
     if spec is None:
@@ -250,6 +258,24 @@ async def _basic_arank(
         )
         scored.sort(key=lambda it: it.score, reverse=True)
         meta = {"stage": item_type, "fusion_mode": "mrag", **meta}
+    elif config.fusion_mode == "agentic":
+        if rerank_fn is None:
+            raise ValueError("fusion_mode='agentic' requires a `rerank_fn` callback (cross-encoder)")
+        if not sparse and not dense:
+            return RankOutput(items=[], metadata={"stage": item_type, "stop_reason": "no_candidates"})
+        agentic_cfg = config.agentic_config or fusion.DEFAULT_AGENTIC_CONFIG
+        reranked = await fusion.aagentic_rank(
+            rank_input.query,
+            sparse,
+            dense,
+            rerank=rerank_fn,
+            retrieve=retrieve_fn,
+            top_k=rank_input.top_k,
+            llm=llm,
+            config=agentic_cfg,
+        )
+        scored = [ScoredItem(id=c.id, score=c.score, item_type=item_type, metadata=dict(c.metadata)) for c in reranked]
+        meta = {"stage": item_type, "fusion_mode": "agentic", "round2": retrieve_fn is not None}
     else:
         if not sparse and not dense:
             return RankOutput(items=[], metadata={"stage": item_type, "stop_reason": "no_candidates"})
