@@ -6,6 +6,9 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 
 ## Quick start
 
+> **Interface contract is defined; implementation is a stub.** Calls to `ChatMemCellExtractor.adetect`
+> currently raise `NotImplementedError`. The contract below is what the real impl will satisfy.
+
 ```python
 import asyncio
 
@@ -22,9 +25,13 @@ async def main() -> None:
         Message(role=MessageRole.ASSISTANT, content="Sure — what's the target environment?", timestamp=1700000001000),
         Message(role=MessageRole.USER, content="Switching topic — what's for lunch?", timestamp=1700000002000),
     ]
-    memcells = await ChatMemCellExtractor().adetect(msgs)
-    # The LLM either returns {"split_at": int} -> 2 cells, or {"split_at": null} -> 1 cell.
-    for mc in memcells:
+    # Streaming form: persist `tail` between calls.
+    cells, tail = await ChatMemCellExtractor().adetect(msgs)
+
+    # End-of-session form: tail is folded into the last cell.
+    cells, tail = await ChatMemCellExtractor().adetect(msgs, is_final=True)
+    assert tail == []
+    for mc in cells:
         print(mc.id, len(mc.messages))
 
 
