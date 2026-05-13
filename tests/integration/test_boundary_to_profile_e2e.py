@@ -112,7 +112,7 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
         )
     ]
 
-    memcells, _tail = await ChatMemCellExtractor().adetect(new_msgs, llm=fake, is_final=True)
+    memcells, _tail_start = await ChatMemCellExtractor().adetect(new_msgs, llm=fake, is_final=True)
     assert len(memcells) == 1
     mc = memcells[0]
 

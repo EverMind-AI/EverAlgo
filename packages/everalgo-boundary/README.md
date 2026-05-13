@@ -25,12 +25,11 @@ async def main() -> None:
         Message(role=MessageRole.ASSISTANT, content="Sure — what's the target environment?", timestamp=1700000001000),
         Message(role=MessageRole.USER, content="Switching topic — what's for lunch?", timestamp=1700000002000),
     ]
-    # Streaming form: persist `tail` between calls.
-    cells, tail = await ChatMemCellExtractor().adetect(msgs)
+    cells, tail_start = await ChatMemCellExtractor().adetect(msgs)
+    pending = msgs[tail_start:]
 
-    # End-of-session form: tail is folded into the last cell.
-    cells, tail = await ChatMemCellExtractor().adetect(msgs, is_final=True)
-    assert tail == []
+    cells, tail_start = await ChatMemCellExtractor().adetect(msgs, is_final=True)
+    assert tail_start == len(msgs)
     for mc in cells:
         print(mc.id, len(mc.messages))
 
