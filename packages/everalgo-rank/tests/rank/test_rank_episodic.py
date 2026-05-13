@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from everalgo.rank import FusionMode, RankConfig, episodic
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate, FactCandidate, RankInput
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _make_input(
@@ -157,3 +161,68 @@ async def test_three_fusion_modes_all_runnable(
             config=RankConfig(fusion_mode=mode),
         )
         assert out.items, f"fusion_mode={mode} produced empty output"
+
+
+async def test_arank_agentic_mode_round1_sufficient(
+    dense_candidates: list[Candidate],
+    sparse_candidates: list[Candidate],
+) -> None:
+    """``fusion_mode='agentic'`` routes via ``fusion.aagentic_rank``; sufficient → no Round 2."""
+    from everalgo.rank.fusion import AgenticConfig
+
+    rerank_calls: list[int] = []
+
+    async def _rerank_fn(_q: str, cands: Sequence[Candidate], top_n: int) -> list[Candidate]:
+        rerank_calls.append(top_n)
+        return list(cands)[:top_n]
+
+    fake = FakeLLMClient(responses=[json.dumps({"is_sufficient": True, "reasoning": "ok", "missing_information": []})])
+
+    out = await episodic.arank(
+        _make_input(sparse=sparse_candidates, dense=dense_candidates, top_k=2),
+        config=RankConfig(
+            fusion_mode="agentic",
+            agentic_config=AgenticConfig(round1_rerank_top_n=3),
+        ),
+        llm=fake,
+        rerank_fn=_rerank_fn,
+    )
+
+    assert out.metadata.get("fusion_mode") == "agentic"
+    assert out.metadata.get("round2") is False
+    assert all(it.item_type == "episode" for it in out.items)
+    assert len(out.items) == 2
+    # One rerank: Round 1 (top_n = max(3, top_k=2) = 3)
+    assert rerank_calls == [3]
+    # One LLM call: sufficiency check only
+    assert fake.call_count == 1
+
+
+async def test_arank_agentic_mode_requires_rerank_fn(
+    dense_candidates: list[Candidate],
+    sparse_candidates: list[Candidate],
+) -> None:
+    """``fusion_mode='agentic'`` without ``rerank_fn`` raises ValueError."""
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="rerank_fn"):
+        await episodic.arank(
+            _make_input(sparse=sparse_candidates, dense=dense_candidates, top_k=2),
+            config=RankConfig(fusion_mode="agentic"),
+        )
+
+
+async def test_arank_agentic_mode_empty_input_returns_no_candidates() -> None:
+    """Empty sparse + dense + agentic mode → no_candidates stop_reason, no callback fired."""
+
+    async def _rerank_fn(_q: str, cands: Sequence[Candidate], top_n: int) -> list[Candidate]:
+        raise AssertionError("rerank_fn must not be called when there are no candidates")
+
+    out = await episodic.arank(
+        _make_input(top_k=5),
+        config=RankConfig(fusion_mode="agentic"),
+        rerank_fn=_rerank_fn,
+    )
+
+    assert out.items == []
+    assert out.metadata.get("stop_reason") == "no_candidates"
