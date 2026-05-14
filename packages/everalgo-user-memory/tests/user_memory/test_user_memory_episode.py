@@ -56,7 +56,7 @@ async def test_aextract_returns_episode_from_opensource_title_content_json() -> 
 
 
 async def test_aextract_auto_fills_parent_id_and_owner_id() -> None:
-    """parent_id from memcell.event_id; owner_id derived from participants[0]."""
+    """parent_id from memcell.event_id; owner_id directly taken from the per-sender iteration."""
     fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "c"}', model="fake")])
     mc = _memcell()
 
@@ -68,7 +68,7 @@ async def test_aextract_auto_fills_parent_id_and_owner_id() -> None:
 
 
 async def test_aextract_owner_id_falls_back_to_u_default_when_no_participants() -> None:
-    """If MemCell has no participants and no sender_id, owner_id is 'u_default'."""
+    """Empty sender_ids → group fallback. With no participants and no sender_id, owner_id is 'u_default'."""
     msg = Message(role=MessageRole.USER, content="x", timestamp=1)
     mc = MemCell(
         event_id="mc_x",
@@ -80,6 +80,7 @@ async def test_aextract_owner_id_falls_back_to_u_default_when_no_participants() 
     episodes = await EpisodeExtractor().aextract(mc, llm=fake)
 
     assert episodes[0].owner_id == "u_default"
+    assert fake.call_count == 1  # group fallback issues a single LLM call
 
 
 async def test_aextract_raises_runtimeerror_when_content_missing_after_5_retries() -> None:
@@ -211,3 +212,125 @@ def test_derive_owner_id_falls_back_to_message_sender_id() -> None:
         timestamp=1,
     )
     assert _derive_owner_id(cell) == "u_from_msg"
+
+
+# ==========================================================================
+# Per-sender fan-out — main new behaviour (opensource memory_manager loops over senders;
+# EverAlgo internalises the loop inside the extractor).
+# ==========================================================================
+
+
+def _multi_sender_memcell() -> MemCell:
+    """Three-message MemCell with two distinct senders u_alice and u_bob."""
+    msgs = [
+        Message(
+            role=MessageRole.USER,
+            content="Let's plan the offsite together",
+            timestamp=1700000000000,
+            sender_id="u_alice",
+            sender_name="Alice",
+        ),
+        Message(
+            role=MessageRole.USER,
+            content="Sounds good — I can host on Friday",
+            timestamp=1700000001000,
+            sender_id="u_bob",
+            sender_name="Bob",
+        ),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="I'll send invites to both of you.",
+            timestamp=1700000002000,
+        ),
+    ]
+    return MemCell(
+        event_id="mc_multi_001",
+        original_data=[{"message": m.model_dump(exclude_none=True)} for m in msgs],
+        timestamp=1700000002000,
+        participants=["u_alice", "u_bob"],
+        sender_ids=["u_alice", "u_bob"],
+    )
+
+
+async def test_aextract_produces_one_episode_per_sender_id_with_matching_owner_ids() -> None:
+    """N sender_ids → N LLM calls → N episodes; owner_ids match sender_ids in order."""
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(
+                content='{"title": "Alice offsite plan", "content": "Alice proposed the offsite."}', model="fake"
+            ),
+            ChatResponse(content='{"title": "Bob offsite plan", "content": "Bob offered to host."}', model="fake"),
+        ]
+    )
+
+    episodes = await EpisodeExtractor().aextract(_multi_sender_memcell(), llm=fake)
+
+    assert len(episodes) == 2
+    assert fake.call_count == 2
+    assert [ep.owner_id for ep in episodes] == ["u_alice", "u_bob"]
+    assert episodes[0].subject == "Alice offsite plan"
+    assert episodes[1].subject == "Bob offsite plan"
+
+
+async def test_aextract_per_sender_substitutes_user_name_in_prompt() -> None:
+    """The personal prompt receives the resolved sender_name for each sender_id."""
+    captured: list[str] = []
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        captured.append(messages[0].content)
+        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+    custom = "user_name={user_name} conv={conversation}"
+
+    await EpisodeExtractor().aextract(_multi_sender_memcell(), llm=fake, prompt=custom)
+
+    assert len(captured) == 2
+    assert captured[0].startswith("user_name=Alice ")
+    assert captured[1].startswith("user_name=Bob ")
+
+
+async def test_aextract_per_sender_user_name_falls_back_to_sender_id_when_map_misses() -> None:
+    """sender_id absent from sender_name map (e.g., no matching message) → user_name = sender_id string."""
+    captured: list[str] = []
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        captured.append(messages[0].content)
+        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+
+    # MemCell whose sender_ids references a user id that never appears in any message.
+    msg = Message(
+        role=MessageRole.USER,
+        content="hello",
+        timestamp=1700000000000,
+        sender_id="u_alice",
+        sender_name="Alice",
+    )
+    mc = MemCell(
+        event_id="mc_miss",
+        original_data=[{"message": msg.model_dump(exclude_none=True)}],
+        timestamp=1700000000000,
+        participants=["u_alice", "u_ghost"],
+        sender_ids=["u_alice", "u_ghost"],
+    )
+    fake = FakeLLMClient(handler=handler)
+    custom = "user_name={user_name}"
+
+    episodes = await EpisodeExtractor().aextract(mc, llm=fake, prompt=custom)
+
+    assert [ep.owner_id for ep in episodes] == ["u_alice", "u_ghost"]
+    assert captured[0] == "user_name=Alice"
+    assert captured[1] == "user_name=u_ghost"  # opensource line 261 parity: map.get(uid, uid)
+
+
+async def test_aextract_mid_loop_retry_exhaustion_raises_runtimeerror() -> None:
+    """First sender succeeds, second sender exhausts 5 retries → RuntimeError; no partial result returned."""
+    import pytest
+
+    good = ChatResponse(content='{"title": "Alice", "content": "ok"}', model="fake")
+    bad = ChatResponse(content="garbage", model="fake")
+    fake = FakeLLMClient(responses=[good, bad, bad, bad, bad, bad])
+
+    with pytest.raises(RuntimeError, match="all 5 retries exhausted"):
+        await EpisodeExtractor().aextract(_multi_sender_memcell(), llm=fake)
+    assert fake.call_count == 6  # 1 success for alice + 5 retries for bob

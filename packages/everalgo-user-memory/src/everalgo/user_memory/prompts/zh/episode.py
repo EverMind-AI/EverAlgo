@@ -4,8 +4,10 @@ Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/zh/episode_me
 
 Constants:
     - ``DEFAULT_CUSTOM_INSTRUCTIONS`` — 注入 {custom_instructions} 位的默认指令。
-    - ``GROUP_EPISODE_GENERATION_PROMPT`` — 群组模式。
-    - ``EPISODE_GENERATION_PROMPT`` — 个人模式。
+    - ``GROUP_EPISODE_GENERATION_PROMPT`` — 群组模式，占位符：
+      ``{conversation_start_time}`` / ``{conversation}`` / ``{custom_instructions}``。
+    - ``EPISODE_GENERATION_PROMPT`` — 个人模式，**额外**需要 ``{user_name}`` 占位符
+      (EN 对应模板未引用 ``{user_name}``，opensource 字节等价的刻意非对称)。
 """
 
 DEFAULT_CUSTOM_INSTRUCTIONS = """
