@@ -45,3 +45,52 @@ def render_prompt(default: str, prompt: str | None, /, **fields: Any) -> str:
     'Hi world'
     """
     return (prompt or default).format(**fields)
+
+
+def render_prompt_replace(default: str, prompt: str | None, /, replacements: dict[str, str]) -> str:
+    """Render ``prompt`` with ``replacements`` via :py:meth:`str.replace`; fall back to ``default``.
+
+    Sister of :func:`render_prompt`. Use this when the prompt body contains unescaped ``{`` / ``}`` (e.g.,
+    JSON examples in the body that would otherwise break ``str.format``). The caller passes a mapping from
+    the **exact** placeholder text (e.g., ``"{conversation}"`` or ``"{{EPISODE_TEXT}}"``) to its substitute
+    string — so the same helper handles both opensource ``profile`` conventions (single-brace placeholders
+    coexisting with literal JSON braces) and opensource ``event_log`` conventions (double-brace
+    placeholders).
+
+    Mirrors opensource ``build_profile_prompt`` in
+    ``memory_layer/memory_extractor/profile_memory/conversation.py:410-430``, which chains ``.replace`` calls
+    for each placeholder.
+
+    Parameters
+    ----------
+    default : str
+        Module-level prompt constant.
+    prompt : str or None
+        Caller override; if ``None``, falls back to ``default``.
+    replacements : dict[str, str]
+        Map from placeholder text (verbatim, including any braces) to replacement value.
+
+    Returns
+    -------
+    str
+        Rendered prompt string.
+
+    Examples
+    --------
+    >>> render_prompt_replace(
+    ...     'Hi {name}, here is JSON: {"key": 1}',
+    ...     None,
+    ...     {"{name}": "Alice"},
+    ... )
+    'Hi Alice, here is JSON: {"key": 1}'
+    >>> render_prompt_replace(
+    ...     "TEXT={{TEXT}}",
+    ...     None,
+    ...     {"{{TEXT}}": "hello"},
+    ... )
+    'TEXT=hello'
+    """
+    template = prompt or default
+    for placeholder, value in replacements.items():
+        template = template.replace(placeholder, value)
+    return template

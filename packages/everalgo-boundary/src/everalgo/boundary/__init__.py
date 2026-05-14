@@ -1,10 +1,10 @@
 """Boundary extractors — chat / workspace / agent.
 
 Public surface:
-- ChatMemCellExtractor — slice chat messages into MemCells (interface defined; impl stub)
+- ChatMemCellExtractor — slice chat messages into MemCells (new-release batch multi-boundary algorithm)
+- DetectionOutput — ``(cells, tail)`` NamedTuple returned by ChatMemCellExtractor.adetect
 - WorkspaceMemCellExtractor — Jira / Email / Confluence stub
 - AgentMemCellExtractor — agent trace stub
-- DetectionOutput — ``(cells, tail)`` NamedTuple returned by ChatMemCellExtractor.adetect
 """
 
 import logging

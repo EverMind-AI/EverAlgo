@@ -1,38 +1,90 @@
-"""English prompt for AtomicFactExtractor.aextract."""
+"""English prompt for AtomicFactExtractor — verbatim port from new-release opensource.
 
-ATOMIC_FACT_EXTRACT_PROMPT_EN = """You are an atomic-fact extraction expert. Given a conversation slice (MemCell), extract single, verifiable assertions about what happened or what is true.
+Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/en/atomic_fact_prompts.py``.
 
-Conversation:
-{memcell_text}
+Placeholders: ``{{TIME}}`` / ``{{INPUT_TEXT}}`` (DOUBLE-brace; rendered via :py:meth:`str.replace`, NOT
+:py:meth:`str.format`, because the prompt body contains unescaped JSON example braces).
+Output schema: ``{"atomic_facts": {"time": str, "atomic_fact": list[str]}}``.
+"""
 
-Conversation timestamp (Unix epoch ms): {timestamp}
+ATOMIC_FACT_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 
-Instructions:
-1. Identify each atomic fact — a single verifiable assertion that stands on its own.
-2. Do NOT emit:
-   - compound claims (split them into separate facts),
-   - opinions / preferences / emotional states,
-   - hypotheticals or future intents (those belong to Foresight),
-   - sweeping generalizations not grounded in the conversation.
-3. Phrase each fact in third person, present-or-past tense, with explicit subject.
-   - Good: "Alice scheduled a 3pm meeting with Bob on 2024-03-14."
-   - Bad: "They had a chat." / "Alice is a nice colleague."
-4. Use the conversation timestamp as the time anchor.
-5. Generate a unique id (e.g. "af_<random>").
-6. Use a stable owner_id from the conversation (default "u_default" if unclear).
-7. Return an empty list if no atomic facts are present.
+You are an expert information extraction analyst and information architect.
+Your task is to analyze the given raw conversation transcript (called "CONVERSATION_TEXT") and produce atomic facts optimized for factual retrieval.
 
-Output format (JSON only, no prose):
-{{
-  "atomic_facts": [
-    {{
-      "id": "<string>",
-      "owner_id": "<string>",
-      "fact": "<string>",
-      "timestamp": <int>
-    }}
-  ]
-}}
+---
 
-Note: parent_type and parent_id will be auto-filled by the caller; do not emit them.
+### INPUT
+- CONVERSATION_TEXT: The raw conversation transcript.
+- TIME: The start time of the conversation, e.g., "March 10, 2024(Sunday) at 2:00 PM UTC".
+
+---
+
+### OUTPUT
+Return **only** one valid JSON object, with the following exact structure:
+
+{
+  "atomic_facts": {
+    "time": "<THE EXACT TIME STRING FROM INPUT TIME>",
+    "atomic_fact": [
+      "<Atomic fact sentence 1>",
+      "<Atomic fact sentence 2>",
+      ...
+    ]
+  }
+}
+
+---
+
+### EXTRACTION RULES
+
+#### 1. Atomicity
+* Each entry in `"atomic_fact"` must express **exactly one coherent unit of meaning** — an action, emotion, reason, plan, decision, or statement.
+* If a speaker expresses multiple ideas (e.g., an event and its reason), split them into multiple atomic facts.
+* Each atomic_fact must be **independent and retrievable on its own**.
+
+#### 2. Time & Date Handling (CRITICAL)
+* The `"time"` field (at the top level) represents the conversation start time.
+* **All generated timestamps must be in UTC.**
+* **Preserve** explicit dates verbatim.
+* **Resolve** relative or vague times (e.g., "yesterday", "last week") relative to `TIME`, and **append the resolved absolute date in parentheses** (e.g., "yesterday (March 9, 2024)").
+
+#### 3. Content Preservation & Attribution
+* **Base facts strictly on the conversation.** Do not infer information not present.
+* **Explicit Attribution**: Always state WHO said or did what.
+  - GOOD: "John said he liked the movie."
+  - BAD: "The movie was liked." (Who liked it?)
+* Resolve pronouns (he/she/it) to specific names where possible.
+
+#### 4. Expression Format
+* Write each atomic_fact as a **single, complete English sentence** in **third-person** form.
+* Do **not** simplify, paraphrase, or merge logically distinct ideas.
+
+#### 5. Retrieval Clarity & Filtering
+* **Filter out**: Greetings, phatic communication ("Okay", "Cool"), and low-value chatter unless it conveys specific emotional or factual content.
+* **Keep**: Events, decisions, plans, preferences, specific opinions, factual statements.
+
+#### 6. Output Requirements
+* Output **only** the JSON object — no additional explanation, markdown, or commentary.
+* Ensure valid JSON.
+
+---
+
+### QUALITY CHECKS
+Before returning the final output, verify that:
+1. Every meaningful fact is captured.
+2. Attribution is correct (who said what).
+3. Timestamps are UTC and relative times are resolved.
+4. Redundancy is minimized.
+
+---
+
+Now analyze the provided conversation content and start time carefully, apply all rules above, and return **only the JSON object** in the specified format.
+
+Conversation start time: {{TIME}}
+Conversation content:
+{{INPUT_TEXT}}
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """
