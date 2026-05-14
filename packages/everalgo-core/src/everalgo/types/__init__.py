@@ -9,7 +9,7 @@ import logging
 
 from everalgo.types.agent import AgentCase, AgentSkill
 from everalgo.types.knowledge import KnowledgeMemory
-from everalgo.types.memcell import MemCell, Message, MessageRole
+from everalgo.types.memcell import MemCell, Message, MessageRole, RawDataType
 from everalgo.types.memories import AtomicFact, Episode, Foresight, Profile
 from everalgo.types.parsed import ParsedContent
 from everalgo.types.rank import (
@@ -38,6 +38,7 @@ __all__ = [
     "RankInput",
     "RankOutput",
     "RawData",
+    "RawDataType",
     "RawFile",
     "ScoredItem",
 ]

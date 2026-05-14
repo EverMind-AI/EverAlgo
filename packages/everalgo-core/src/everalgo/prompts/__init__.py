@@ -7,9 +7,9 @@ ships the cross-cutting helpers (rendering, validation) every operator reuses.
 
 import logging
 
-from everalgo.prompts.render import render_prompt
+from everalgo.prompts.render import render_prompt, render_prompt_replace
 
-__all__ = ["render_prompt"]
+__all__ = ["render_prompt", "render_prompt_replace"]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.
 logging.getLogger(__name__).addHandler(logging.NullHandler())

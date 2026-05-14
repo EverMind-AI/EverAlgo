@@ -9,7 +9,11 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        # Prompts are verbatim opensource ports; trailing whitespace is part of the byte content sent to LLMs.
+        exclude: '^packages/.*/prompts/(en|zh)/.*\.py$'
       - id: end-of-file-fixer
+        # Same reason: opensource prompt files end without a forced trailing newline.
+        exclude: '^packages/.*/prompts/(en|zh)/.*\.py$'
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-toml

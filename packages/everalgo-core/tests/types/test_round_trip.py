@@ -16,10 +16,12 @@ from everalgo.types import Episode, MemCell, Message, MessageRole
     [
         Message(role=MessageRole.USER, content="hi", timestamp=1),
         Message(role=MessageRole.ASSISTANT, content="response", timestamp=2),
-        MemCell(id="m_empty", messages=[], timestamp=1),
+        MemCell(original_data=[], timestamp=1, event_id="m_empty"),
         MemCell(
-            id="m_one",
-            messages=[Message(role=MessageRole.USER, content="hi", timestamp=1)],
+            event_id="m_one",
+            original_data=[
+                {"message": Message(role=MessageRole.USER, content="hi", timestamp=1).model_dump(exclude_none=True)}
+            ],
             timestamp=10,
         ),
         Episode(

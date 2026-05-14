@@ -10,15 +10,15 @@ class Episode(BaseModel):
     plus design.md §2.4 line 697: "episode 永远跑"). ``owner_id`` always points to the user, even when the
     source MemCell is an agent conversation; the agent is a participant, not the owner.
 
-    Secondary fields (subject / summary / keywords / location / start_time / end_time / sender_ids /
-    original_data) are intentionally omitted from the minimal type. ``extra="allow"`` keeps any LLM-emitted
-    secondary fields accessible on the model instance until a future minor bump promotes them to first-class
-    fields.
+    Core fields + ``subject`` (= opensource ``title``) — the LLM emits ``{title, content}`` per
+    ``episode_mem_prompts.py`` and we map title → subject, content → episode. ``extra="allow"`` keeps any
+    LLM-emitted secondary fields accessible on the model instance.
     """
 
     id: str
     owner_id: str
     episode: str
+    subject: str = ""
     timestamp: int  # Unix epoch milliseconds
     parent_type: str = "memcell"
     parent_id: str
@@ -29,10 +29,10 @@ class Episode(BaseModel):
 class Foresight(BaseModel):
     """User-side foresight memory — anticipated future event or commitment.
 
-    Mirrors :class:`Episode` shape: a structured trace anchored to a source MemCell. The minimal field set is
-    ``id`` / ``owner_id`` / ``foresight`` / ``evidence`` / ``timestamp`` / ``parent_type`` / ``parent_id``;
-    secondary fields (subject / start_time / end_time / duration_days / confidence / ...) are intentionally
-    omitted and remain accessible via ``extra="allow"`` if the LLM emits them.
+    Mirrors opensource ``foresight_prompts.py`` output shape: the LLM emits a list of
+    ``{content, evidence, start_time, end_time, duration_days}`` items and we map content → foresight.
+    Date fields are stored as ISO ``YYYY-MM-DD`` strings (matching opensource's date normalisation).
+    ``extra="allow"`` keeps any LLM-emitted secondary fields accessible on the model instance.
     """
 
     id: str
@@ -40,6 +40,9 @@ class Foresight(BaseModel):
     foresight: str
     evidence: str
     timestamp: int  # Unix epoch milliseconds
+    start_time: str | None = None  # YYYY-MM-DD per opensource date normalisation
+    end_time: str | None = None  # YYYY-MM-DD
+    duration_days: int | None = None
     parent_type: str = "memcell"
     parent_id: str
 

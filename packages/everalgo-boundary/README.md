@@ -6,9 +6,6 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 
 ## Quick start
 
-> **Interface contract is defined; implementation is a stub.** Calls to `ChatMemCellExtractor.adetect`
-> currently raise `NotImplementedError`. The contract below is what the real impl will satisfy.
-
 ```python
 import asyncio
 

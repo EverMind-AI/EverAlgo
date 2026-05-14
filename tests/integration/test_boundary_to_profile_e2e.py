@@ -1,11 +1,7 @@
 """End-to-end pipeline test: messages → boundary → profile (with prior cluster).
 
-Verifies that ProfileExtractor receives a freshly-detected MemCell plus a caller-fetched prior cluster and
-emits a single Profile snapshot with the LLM-supplied summary + extra fields preserved via
-``ConfigDict(extra='allow')``.
-
-Profile differs from the other EPISODE-path extractors: it is a **user-level aggregate**, so the e2e flow
-includes a pre-existing cluster (synthesized in-test) plus a fresh boundary detection.
+LLM JSON follows new-release ``PROFILE_INITIAL_EXTRACTION_PROMPT`` schema:
+``{"explicit_info": [...], "implicit_traits": [...]}``.
 """
 
 from __future__ import annotations
@@ -22,8 +18,6 @@ from everalgo.testing.assertions import assert_profile_shape
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import MemCell, Message, MessageRole
 from everalgo.user_memory.profile import ProfileExtractor
-
-pytestmark = pytest.mark.skip(reason="boundary.chat.adetect stub — full implementation pending")
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -43,43 +37,49 @@ def reset_everalgo_llm_state() -> Iterator[None]:
 
 
 def _prior_cluster() -> list[MemCell]:
-    """Synthesize two pre-existing MemCells for the same user as cluster context."""
+    """Two pre-existing MemCells for the same user as cluster context."""
+    msg1 = Message(
+        role=MessageRole.USER,
+        content="I've been digging into Python async patterns lately.",
+        timestamp=1690000000000,
+        sender_id="u_alice",
+        sender_name="Alice",
+    )
+    msg2 = Message(
+        role=MessageRole.USER,
+        content="I prefer ruff over black for formatting.",
+        timestamp=1695000000000,
+        sender_id="u_alice",
+        sender_name="Alice",
+    )
     return [
         MemCell(
-            id="mc_prior_001",
-            messages=[
-                Message(
-                    role=MessageRole.USER,
-                    content="I've been digging into Python async patterns lately.",
-                    timestamp=1690000000000,
-                )
-            ],
+            event_id="mc_prior_001",
+            original_data=[{"message": msg1.model_dump(exclude_none=True)}],
             timestamp=1690000000000,
+            participants=["u_alice"],
+            sender_ids=["u_alice"],
         ),
         MemCell(
-            id="mc_prior_002",
-            messages=[
-                Message(
-                    role=MessageRole.USER,
-                    content="I prefer ruff over black for formatting.",
-                    timestamp=1695000000000,
-                )
-            ],
+            event_id="mc_prior_002",
+            original_data=[{"message": msg2.model_dump(exclude_none=True)}],
             timestamp=1695000000000,
+            participants=["u_alice"],
+            sender_ids=["u_alice"],
         ),
     ]
 
 
 async def test_boundary_to_profile_pipeline_e2e() -> None:
-    """Boundary detects 1 MemCell, profile synthesizes a snapshot from it + prior cluster.
+    """Boundary detects 1 MemCell, profile synthesises a snapshot via single-call initial extraction.
 
-    Two LLM calls:
-    - Call 1 (boundary detect): {"split_at": null}
-    - Call 2 (profile extract): profile JSON with extras
+    Two LLM calls total:
+    - Call 1 (boundary detect): new-release batch contract.
+    - Call 2 (profile initial extraction): emits ``{explicit_info, implicit_traits}``.
 
     Verifies:
-    1. Cluster summaries land in the profile prompt (so the LLM sees prior context).
-    2. ``extra="allow"`` preserves LLM-emitted optional fields (interests / communication_style).
+    1. Cluster MemCells land in the profile ``{conversation_text}`` placeholder.
+    2. ``extra="allow"`` preserves explicit_info + implicit_traits as first-class attrs on Profile.
     3. ``assert_profile_shape`` passes.
     """
     call_count = 0
@@ -89,16 +89,26 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return ChatResponse(content='{"split_at": null}', model="fake")
-        # call 2 — profile
-        captured_profile_prompt["content"] = messages[0].content
+            return ChatResponse(
+                content='{"reasoning": "single coherent topic", "boundaries": [], "should_wait": false}',
+                model="fake",
+            )
+        captured_profile_prompt["text"] = messages[0].content
         return ChatResponse(
             content=(
-                '{"id": "pf_alice", "owner_id": "u_alice", '
-                '"summary": "Alice is a Python developer who prefers ruff for linting and is comfortable with async patterns.", '
-                '"timestamp": 1700000010000, '
-                '"interests": ["python", "tooling"], '
-                '"communication_style": "concise"}'
+                '{"explicit_info": ['
+                '{"category": "Technical Skills",'
+                ' "description": "Alice is a Python developer focused on async patterns.",'
+                ' "evidence": "Alice asked about async retry semantics.",'
+                ' "sources": ["2024-03-10 10:00|mc_new"]}'
+                "],"
+                '"implicit_traits": ['
+                '{"trait": "[Pragmatic]",'
+                ' "description": "Prefers tooling that minimises ceremony.",'
+                ' "basis": "Repeated preference for ruff over black.",'
+                ' "evidence": "Mentioned ruff preference in prior conversation.",'
+                ' "sources": ["2024-03-08 09:00|mc_prior_002", "2024-03-10 10:00|mc_new"]}'
+                "]}"
             ),
             model="fake",
         )
@@ -109,24 +119,33 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
             role=MessageRole.USER,
             content="Quick question on async retry semantics in Python.",
             timestamp=1700000010000,
-        )
+            sender_id="u_alice",
+            sender_name="Alice",
+        ),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Sure — what's the failure mode you're seeing?",
+            timestamp=1700000011000,
+        ),
     ]
 
-    memcells, _tail = await ChatMemCellExtractor().adetect(new_msgs, llm=fake, is_final=True)
-    assert len(memcells) == 1
-    mc = memcells[0]
+    output = await ChatMemCellExtractor().adetect(new_msgs, llm=fake, is_final=True)
+    assert output.tail == []
+    assert len(output.cells) == 1
+    mc = output.cells[0]
 
     profile = await ProfileExtractor().aextract(mc, cluster_episodes=_prior_cluster(), llm=fake)
 
     pf = assert_profile_shape(profile)
     assert pf.owner_id == "u_alice"
     assert "Python" in pf.summary
-    # extra="allow" surfaces optional fields as model attributes
-    assert pf.interests == ["python", "tooling"]  # type: ignore[attr-defined]
-    assert pf.communication_style == "concise"  # type: ignore[attr-defined]
+    # explicit_info / implicit_traits preserved via extra="allow"
+    assert pf.explicit_info[0]["category"] == "Technical Skills"  # type: ignore[attr-defined]
+    assert pf.implicit_traits[0]["trait"] == "[Pragmatic]"  # type: ignore[attr-defined]
 
-    # Cluster rendering reached the LLM
-    assert "mc_prior_001" in captured_profile_prompt["content"]
-    assert "Python async patterns" in captured_profile_prompt["content"]
-    assert "ruff over black" in captured_profile_prompt["content"]
-    assert call_count == 2
+    # Cluster rendering reached the profile prompt
+    prompt_text = captured_profile_prompt["text"]
+    assert "mc_prior_001" in prompt_text
+    assert "Python async patterns" in prompt_text
+    assert "ruff over black" in prompt_text
+    assert call_count == 2  # 1 boundary + 1 profile

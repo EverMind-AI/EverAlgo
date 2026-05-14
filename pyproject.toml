@@ -45,6 +45,7 @@ dev = [
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["opensource"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -73,9 +74,11 @@ known-first-party = ["everalgo", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**/*.py" = ["D103", "D401"]
-# Chinese prompts deliberately use full-width punctuation (，。：；) as natural-language LLM input,
-# not the identifier-like context where RUF001's homoglyph protection applies.
-"**/prompts/zh/**/*.py" = ["RUF001"]
+# Prompts are verbatim opensource ports — keep byte-equivalence: opensource files mix full-width / ASCII
+# punctuation (RUF001 / RUF002), retain trailing whitespace + whitespace-only blank lines inside prompt
+# strings (W291 / W293), and use ``{{ }}`` braces in template examples.
+"**/prompts/zh/**/*.py" = ["RUF001", "RUF002", "W291", "W293"]
+"**/prompts/en/**/*.py" = ["RUF001", "RUF002", "W291", "W293"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
@@ -94,6 +97,7 @@ pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
 include = ["packages/*/src", "packages/*/tests", "tests"]
+exclude = ["opensource", "**/__pycache__", ".venv"]
 # pyright's equivalent of mypy's `mypy_path` — required for PEP 420 namespace resolution across the 8 dists.
 extraPaths = [
   "packages/everalgo-core/src",
@@ -117,6 +121,9 @@ namespace_packages = true
 explicit_package_bases = true
 # Pyright runs over the same tree, so some `# type: ignore` lines are pyright-only and look unused to mypy.
 warn_unused_ignores = false
+# Vendored opensource reference code (locomo-benchmark / EverOS) is checked into the repo for algorithm
+# porting; it is not part of the published distributions and must not block the workspace's strict gate.
+exclude = "^opensource/"
 # Required for PEP 420 namespace resolution; also disambiguates `everalgo.types` from stdlib `types`.
 mypy_path = "packages/everalgo-core/src:packages/everalgo-boundary/src:packages/everalgo-clustering/src:packages/everalgo-rank/src:packages/everalgo-parser/src:packages/everalgo-user-memory/src:packages/everalgo-agent-memory/src:packages/everalgo-knowledge/src"
 
