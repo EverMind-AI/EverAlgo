@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "everalgo-boundary"
 version = "0.1.0"
-description = "EverAlgo boundary: MemCell extractors (chat / workspace / agent) + tokenize / split helpers."
+description = "EverAlgo boundary: MemCell extractors (chat / workspace / agent)."
 requires-python = ">=3.12"
 license = "MIT"
 readme = "README.md"
@@ -20,7 +20,6 @@ classifiers = [
 dependencies = [
   "asgiref>=3.0",
   "everalgo-core>=0.1.0,<2.0.0",
-  "tiktoken>=0.7",
 ]
 
 [tool.hatch.build.targets.wheel]

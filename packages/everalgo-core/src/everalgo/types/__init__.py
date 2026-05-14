@@ -9,7 +9,7 @@ import logging
 
 from everalgo.types.agent import AgentCase, AgentSkill
 from everalgo.types.knowledge import KnowledgeMemory
-from everalgo.types.memcell import MemCell, Message, MessageRole, RawDataType
+from everalgo.types.memcell import MemCell, Message, MessageRole, RawDataType, ToolCall
 from everalgo.types.memories import AtomicFact, Episode, Foresight, Profile
 from everalgo.types.parsed import ParsedContent
 from everalgo.types.rank import (
@@ -41,6 +41,7 @@ __all__ = [
     "RawDataType",
     "RawFile",
     "ScoredItem",
+    "ToolCall",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

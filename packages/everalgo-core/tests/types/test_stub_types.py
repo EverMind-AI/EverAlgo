@@ -48,10 +48,24 @@ def test_profile_importable_with_required_fields() -> None:
 
 
 def test_agent_types_importable() -> None:
+    """AgentCase / AgentSkill are no longer stubs (sub-project 4); fields are required."""
     from everalgo.types import AgentCase, AgentSkill
 
-    assert AgentCase().id == ""
-    assert AgentSkill().id == ""
+    case = AgentCase(
+        id="c_001",
+        timestamp=1,
+        parent_id="mc_001",
+        task_intent="solve X",
+    )
+    assert case.id == "c_001"
+    assert case.parent_type == "memcell"
+    assert case.quality_score == 0.5
+
+    skill = AgentSkill(id="s_001", cluster_id="cl_001")
+    assert skill.id == "s_001"
+    assert skill.confidence == 0.0
+    assert skill.maturity_score == 0.6
+    assert "vector" not in skill.model_dump()  # AgentSkill no longer carries vector fields
 
 
 def test_raw_types_importable() -> None:

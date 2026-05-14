@@ -1,8 +1,8 @@
-"""Tests for everalgo.boundary._tokenize — count_tokens + force_split."""
+"""Tests for everalgo._tokenize — count_tokens + force_split."""
 
 import pytest
 
-from everalgo.boundary._tokenize import _get_tokenizer, count_tokens, force_split
+from everalgo._tokenize import _get_tokenizer, count_tokens, force_split
 
 
 def test_count_tokens_empty_string_is_zero() -> None:
@@ -19,7 +19,7 @@ def test_count_tokens_returns_non_negative() -> None:
 def test_count_tokens_matches_o200k_base_encoding() -> None:
     """count_tokens delegates to tiktoken o200k_base — verify via direct encode."""
     tokenizer = _get_tokenizer()
-    text = "Hello world from the EverAlgo boundary tokenizer."
+    text = "Hello world from the EverAlgo shared tokenizer."
     assert count_tokens(text) == len(tokenizer.encode(text))
 
 

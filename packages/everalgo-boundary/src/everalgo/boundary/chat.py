@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from asgiref.sync import async_to_sync
 
 import everalgo.llm
-from everalgo.boundary._tokenize import count_tokens
+from everalgo._tokenize import count_tokens
 from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.types import MemCell, Message, MessageRole, RawDataType
