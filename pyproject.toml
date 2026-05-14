@@ -73,7 +73,7 @@ ignore = [
 known-first-party = ["everalgo", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**/*.py" = ["D103", "D401"]
+"**/tests/**/*.py" = ["D101", "D102", "D103", "D401"]
 # Prompts are verbatim opensource ports — keep byte-equivalence: opensource files mix full-width / ASCII
 # punctuation (RUF001 / RUF002), retain trailing whitespace + whitespace-only blank lines inside prompt
 # strings (W291 / W293), and use ``{{ }}`` braces in template examples.

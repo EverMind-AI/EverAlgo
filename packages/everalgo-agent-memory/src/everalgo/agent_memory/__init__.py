@@ -3,13 +3,14 @@
 import logging
 
 from everalgo.agent_memory.case import AgentCaseExtractor
-from everalgo.agent_memory.skill import AgentSkillExtractor
+from everalgo.agent_memory.skill import AgentSkillExtractor, SkillConfig
 from everalgo.boundary.agent import AgentMemCellExtractor
 
 __all__ = [
     "AgentCaseExtractor",
     "AgentMemCellExtractor",
     "AgentSkillExtractor",
+    "SkillConfig",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

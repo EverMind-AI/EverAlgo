@@ -1,11 +1,11 @@
-"""Token counting + force-split helpers for boundary extractors.
+"""Shared tokenizer + token-count utilities for EverAlgo subpackages.
 
 Token counting uses OpenAI's ``o200k_base`` encoding via :mod:`tiktoken` — the same encoding the GPT-4o /
 GPT-5 / o-series tokenizers use, and what most production callers measure their context budgets against.
-Earlier versions of this module shipped a char/4 heuristic; the upgrade is a SemVer minor bump (signature
-preserved).
 
-NOT exposed in ``__all__`` — module-private utilities for boundary algorithms.
+Module-private (underscore prefix) — implementation detail shared across boundary / agent_memory /
+user_memory rather than part of the public ``everalgo.*`` API surface. End-user-facing wrappers should
+re-export the specific helpers they need from their own modules.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ def force_split(text: str, *, max_tokens: int) -> list[str]:
     """Force-split ``text`` into chunks each containing at most ``max_tokens`` tokens.
 
     No semantic awareness — chunks break wherever the tokenizer's encoding boundaries permit. Intended as a
-    last-resort guardrail for caller-side prompt fitting; semantic boundaries belong to
-    :class:`ChatMemCellExtractor` / future ``WorkspaceMemCellExtractor`` / ``AgentMemCellExtractor`` instead.
+    last-resort guardrail for caller-side prompt fitting; semantic boundaries belong to the boundary
+    extractors (chat / workspace / agent) instead.
 
     Parameters
     ----------

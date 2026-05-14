@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
   "openai>=1.0",
   "pydantic>=2.7",
+  "tiktoken>=0.7",
 ]
 
 # `everalgo` here is a PEP 420 namespace; hatchling packages the directory

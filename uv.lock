@@ -322,14 +322,12 @@ source = { editable = "packages/everalgo-boundary" }
 dependencies = [
     { name = "asgiref" },
     { name = "everalgo-core" },
-    { name = "tiktoken" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "asgiref", specifier = ">=3.0" },
     { name = "everalgo-core", editable = "packages/everalgo-core" },
-    { name = "tiktoken", specifier = ">=0.7" },
 ]
 
 [[package]]
@@ -354,12 +352,14 @@ source = { editable = "packages/everalgo-core" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
+    { name = "tiktoken" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "openai", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "tiktoken", specifier = ">=0.7" },
 ]
 
 [[package]]
