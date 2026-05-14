@@ -14,8 +14,36 @@ for the full workflow.
 
 ### Added
 
-- Stub skeleton exposing `ClusterState`, `ClusterConfig`, `Candidate`,
-  `cluster_by_geometry`, `cluster_by_llm`. Public-API surface is frozen;
-  implementation bodies pending.
+- `cluster_by_geometry` — cosine + time-window + threshold incremental K-means
+  assignment. No LLM. Returns `(cluster_id, new_state)` over a frozen
+  `ClusterState`.
+- `cluster_by_llm` — embedding top-K recall + fast-path skip + LLM ranking
+  with 3-retry JSON parse and geometric fallback. Caller supplies
+  `cluster_previews` (pre-fetched recent text per candidate cluster).
+- `ClusterState` four-field value object: `centroids` / `counts` /
+  `last_ts` (ms epoch int) / `next_idx`. Frozen pydantic model with
+  `empty()` / `from_dict()` / `to_dict()` and a private `_assign()`
+  used by the algorithm functions.
+- `ClusterConfig` threshold bundle:
+  `threshold=0.65` / `time_window_days=7.0` / `k_candidates=30` /
+  `llm_skip_threshold=0.85` (defaults match opensource).
+- English clustering prompt `CLUSTER_LLM_ASSIGN_PROMPT`
+  (`prompts/en/cluster.py`), verbatim port of opensource
+  `AGENT_CLUSTER_LLM_ASSIGN_PROMPT` minus the `AGENT_` prefix
+  (clustering is a neutral operator consumed by both `user_memory`
+  and `agent_memory`). Chinese variant re-exports the English one,
+  mirroring opensource's `zh/cluster_prompts.py` re-export pattern.
+
+### Changed
+
+- Public surface dropped from 5 to 4 symbols: `Candidate` was an
+  internal helper and is no longer exported.
+- `ClusterState.last_ts` now stores **millisecond epoch int** instead
+  of float seconds — aligns with the rest of EverAlgo's time convention
+  (`MemCell.timestamp` / `Episode.timestamp` are ms int).
+- `ClusterState` added a fourth field `next_idx: int` instead of
+  reverse-deriving cluster numbering from `max(centroids.keys())+1`.
+  Reverse derivation is a footgun when ids get deleted; opensource
+  also tracks `next_cluster_idx` as a dedicated field.
 
 <!-- git-cliff-unreleased-end -->
