@@ -69,9 +69,12 @@ def test_raw_types_importable() -> None:
 
 
 def test_parsed_and_knowledge_importable() -> None:
-    from everalgo.types import KnowledgeMemory, ParsedContent
+    from everalgo.types import KnowledgeMemory, Modality, ParsedContent
 
-    assert ParsedContent().id == ""
+    # ParsedContent gained a concrete schema in the parser migration (no more `id` TBD).
+    pc = ParsedContent()
+    assert pc.text == ""
+    assert pc.modality is Modality.UNKNOWN
     assert KnowledgeMemory().id == ""
 
 

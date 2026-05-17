@@ -17,6 +17,12 @@ classifiers = [
 ]
 dependencies = [
   "everalgo-core>=0.1.0,<2.0.0",
+  "asgiref>=3.8.0",
+  "pillow>=10.0.0",
+  "beautifulsoup4>=4.12.0",
+  # The URL parser uses httpx directly for ``http``/``https`` fetches; declare
+  # explicitly rather than relying on the transitive pull-in via openai SDK.
+  "httpx>=0.27.0",
 ]
 
 [project.urls]
@@ -25,6 +31,15 @@ Repository = "https://github.com/EverMind-AI/EverAlgo"
 Issues = "https://github.com/EverMind-AI/EverAlgo/issues"
 Documentation = "https://github.com/EverMind-AI/EverAlgo/tree/main/packages/everalgo-parser"
 Changelog = "https://github.com/EverMind-AI/EverAlgo/blob/main/packages/everalgo-parser/CHANGELOG.md"
+
+[project.optional-dependencies]
+# SVG rasterisation; pulled in only when callers parse .svg files.
+svg = ["cairosvg>=2.7.0"]
+# Office document conversion (docx / xlsx / pptx / ...) requires LibreOffice
+# (``soffice``) as a SYSTEM dependency, not a pip package. Install via:
+#   Linux: apt install libreoffice
+#   macOS: brew install --cask libreoffice
+# There is no pip extra for it — the parser shells out at runtime.
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/everalgo"]

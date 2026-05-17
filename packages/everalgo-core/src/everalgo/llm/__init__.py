@@ -3,9 +3,11 @@
 Public surface, grouped by role:
 
 - protocol:    LLMClient
-- data:        ChatMessage, ChatResponse, Usage, LLMConfig
+- data:        ChatMessage, ChatResponse, ContentPart, ImageUrlInner, ImageUrlPart, TextPart, Usage, LLMConfig
+- helpers:     image_url_part_from_bytes
 - errors:      LLMError
 - factory:     build_client
+- format/parse: Lang, format_message_timestamp, format_natural_language_time, parse_llm_json_object
 
 LLM binding is instance-only: every operator accepts ``llm: LLMClient`` at construction time.
 There is no global default, no scoped context-var override, and no per-call resolution layer.
@@ -24,7 +26,16 @@ from everalgo.llm.factory import build_client
 from everalgo.llm.format import Lang, format_message_timestamp, format_natural_language_time
 from everalgo.llm.parse import parse_llm_json_object
 from everalgo.llm.protocols import LLMClient
-from everalgo.llm.types import ChatMessage, ChatResponse, Usage
+from everalgo.llm.types import (
+    ChatMessage,
+    ChatResponse,
+    ContentPart,
+    ImageUrlInner,
+    ImageUrlPart,
+    TextPart,
+    Usage,
+    image_url_part_from_bytes,
+)
 
 # Library logging setup (ADR-013). NullHandler suppresses "No handlers" noise
 # under Python's library-logging contract; SensitiveHeadersFilter redacts
@@ -36,13 +47,18 @@ _logger.addFilter(SensitiveHeadersFilter())
 __all__ = [
     "ChatMessage",
     "ChatResponse",
+    "ContentPart",
+    "ImageUrlInner",
+    "ImageUrlPart",
     "LLMClient",
     "LLMConfig",
     "LLMError",
     "Lang",
+    "TextPart",
     "Usage",
     "build_client",
     "format_message_timestamp",
     "format_natural_language_time",
+    "image_url_part_from_bytes",
     "parse_llm_json_object",
 ]  # fmt: skip

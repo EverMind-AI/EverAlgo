@@ -19,6 +19,17 @@ from everalgo.types.content import ContentBlock, TextContent
 from everalgo.types.conversation import ConversationItem, MemCell
 from everalgo.types.knowledge import KnowledgeMemory
 from everalgo.types.memories import AtomicFact, Episode, Foresight, Profile
+from everalgo.types.modality import (
+    EXTENSION_TO_MODALITY,
+    MIME_TO_EXTENSION,
+    MIME_TO_MODALITY,
+    SUPPORTED_EXTENSIONS,
+    SUPPORTED_MIMES,
+    Modality,
+    get_extension_from_mime,
+    get_modality,
+    get_modality_from_mime,
+)
 from everalgo.types.parsed import ParsedContent
 from everalgo.types.rank import (
     Candidate,
@@ -30,6 +41,11 @@ from everalgo.types.rank import (
 from everalgo.types.raw import RawData, RawFile
 
 __all__ = [
+    "EXTENSION_TO_MODALITY",
+    "MIME_TO_EXTENSION",
+    "MIME_TO_MODALITY",
+    "SUPPORTED_EXTENSIONS",
+    "SUPPORTED_MIMES",
     "AgentCase",
     "AgentSkill",
     "AtomicFact",
@@ -42,6 +58,7 @@ __all__ = [
     "Foresight",
     "KnowledgeMemory",
     "MemCell",
+    "Modality",
     "ParsedContent",
     "Profile",
     "RankInput",
@@ -54,6 +71,9 @@ __all__ = [
     "ToolCallFunction",
     "ToolCallRequest",
     "ToolCallResult",
+    "get_extension_from_mime",
+    "get_modality",
+    "get_modality_from_mime",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

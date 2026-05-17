@@ -90,6 +90,9 @@ testpaths = ["tests", "packages"]
 # test subdirectories like `types/` from shadowing stdlib modules.
 # https://docs.pytest.org/en/stable/explanation/pythonpath.html
 addopts = "-ra --import-mode=importlib"
+markers = [
+    "integration: real-network / real-LLM tests; gated by env vars (e.g. OPENROUTER_API_KEY)",
+]
 
 [tool.pyright]
 typeCheckingMode = "strict"

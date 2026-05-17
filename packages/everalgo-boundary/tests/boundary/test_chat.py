@@ -99,9 +99,8 @@ async def test_empty_messages_short_circuits_without_calling_llm() -> None:
     assert fake.call_count == 0
 
 
-async def test_missing_llm_raises_value_error() -> None:
-    with pytest.raises(ValueError, match="llm must be provided"):
-        await detect_boundaries(_dialogue(2))
+# NOTE: removed test_missing_llm_raises_value_error — `llm` is now a required
+# keyword-only argument; static type checking catches missing-arg misuse.
 
 
 # ===========================================================================

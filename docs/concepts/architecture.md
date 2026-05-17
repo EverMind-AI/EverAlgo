@@ -109,7 +109,7 @@ Sibling distributions at the same layer do not depend on each other (e.g. `user-
 | Subpackage | Role |
 |---|---|
 | `types` | Shared data contracts: `ChatMessage`, `MemCell`, `Episode`, `RankInput`, `RankOutput`, etc. |
-| `llm` | `LLMClient` Protocol, `LLMConfig`, provider routing, 3-layer injection, `LLMError` hierarchy |
+| `llm` | `LLMClient` Protocol, `LLMConfig`, provider routing, `LLMError` hierarchy |
 | `prompts` | Prompt validator; prompt strings live as module-level constants in each subpackage's `prompts/en/` and `prompts/zh/` |
 | `testing` | `FakeLLMClient`, `CallRecord`, structural assertion helpers |
 

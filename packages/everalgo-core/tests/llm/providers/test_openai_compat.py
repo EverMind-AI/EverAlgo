@@ -133,3 +133,23 @@ async def test_openai_compat_client_normalises_unknown_finish_reason(
         resp = await client.chat([ChatMessage(role="user", content="hi")])
 
     assert resp.finish_reason is None
+
+
+async def test_openai_compat_client_raises_llm_error_for_empty_choices() -> None:
+    """OpenRouter-style 200 with ``choices=[]`` (empty list) must surface as LLMError."""
+    cfg = _build_config()
+    client = OpenAICompatClient(cfg)
+
+    empty_choices_payload: dict[str, object] = {
+        "id": "chatcmpl-empty",
+        "object": "chat.completion",
+        "created": 1700000000,
+        "model": "gpt-4o-mini",
+        "choices": [],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5},
+    }
+
+    with respx.mock(base_url=cfg.base_url) as router:
+        router.post("/chat/completions").mock(return_value=httpx.Response(200, json=empty_choices_payload))
+        with pytest.raises(LLMError, match="no choices"):
+            await client.chat([ChatMessage(role="user", content="hi")])

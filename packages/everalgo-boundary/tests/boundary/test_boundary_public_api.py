@@ -13,6 +13,7 @@ import inspect
 
 import everalgo.boundary
 from everalgo.boundary import DetectionResult, WorkspaceMemCellExtractor, detect_boundaries
+from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_dunder_all_lists_exact_public_surface() -> None:
@@ -59,7 +60,7 @@ def test_workspace_mem_cell_extractor_is_class() -> None:
 
 def test_detect_boundaries_coroutine_is_awaitable() -> None:
     """Calling detect_boundaries() without await returns a coroutine object."""
-    coro = detect_boundaries([])
+    coro = detect_boundaries([], llm=FakeLLMClient(responses=[]))
     assert asyncio.iscoroutine(coro)
     # Clean up: must close to avoid 'coroutine was never awaited' warning.
     coro.close()

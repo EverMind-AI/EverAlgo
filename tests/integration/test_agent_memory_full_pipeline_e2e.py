@@ -113,6 +113,7 @@ def _make_capturing_client() -> tuple[FakeLLMClient, dict[str, str]]:
     def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
         nonlocal call_index
         stage = _STAGE_ORDER[call_index]
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured[stage] = messages[0].content
         call_index += 1
         return ChatResponse(content=_STAGE_RESPONSE[stage], model="fake")

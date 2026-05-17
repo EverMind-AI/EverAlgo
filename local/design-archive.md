@@ -98,7 +98,9 @@ everalgo/                           # PEP 420 namespace package（无 __init__.p
 │   └───────────────────────────────────────────────────────────┘
 │
 ├── ┌─ everalgo-parser ────────────────────────────────────────┐
-│   │ parser/     {image, audio, document, video, url}.py + prompts/
+│   │ parser/     {image, audio, document, video, url}.py    # 5 modality 算子
+│   │             _utils.py                                   # fetch_uri / decode_bytes / aspect-ratio / html-clean
+│   │             prompts/{en,zh}/{image, audio, document}.py # PROMPT_FOR_* 模块常量
 │   └───────────────────────────────────────────────────────────┘
 │
 ├── ┌─ everalgo-boundary ──────────────────────────────────────┐
@@ -499,6 +501,10 @@ for memcell in memcells:
     )
 
 # 场景 D: 多模态文件 → Knowledge
+# parser.aparse 接受 3 种形态的 RawFile（详见 §2.6）：
+#   (a) 仅 bytes：   RawFile(content=pdf_bytes, extension="pdf")
+#   (b) bytes+mime： RawFile(content=pdf_bytes, mime="application/pdf")     # 无 ext 也能派发
+#   (c) 仅 uri：     RawFile(uri="https://...", mime="application/pdf")     # parser 自己 HTTP 抓
 parsed   = await parser.aparse(RawFile(uri=..., mime="application/pdf"))
 memories = await knowledge.KnowledgeExtractor().aextract(
     parsed, llm=scene_router.get("knowledge"))
@@ -957,11 +963,69 @@ class MyFallbackClient:                            # 实现 LLMClient Protocol �
 
 ---
 
+### 2.6 Parser 派发契约（与 §2.1 场景 D 配套）
+
+`everalgo.parser.aparse(RawFile, *, llm=None)` 是 5 个 modality 算子（`image` / `audio` / `document` / `video` / `url`）之上的派发 facade。调用方提供 `RawFile`，facade 决定走哪个子模块。
+
+#### `RawFile` 字段语义
+
+| 字段 | 类型 | 用途 |
+|------|------|------|
+| `content` | `bytes` | 文件字节。可选——`content` 与 `uri` 至少有一个 |
+| `mime` | `str` | MIME 提示，如 `application/pdf` / `text/html`。**派发兜底**：extension 派发不到时用 mime |
+| `extension` | `str` | 不带点小写扩展名（`pdf` / `png` / `mp3` ...）。**主派发依据** |
+| `uri` | `str` | 来源 URI。`http`/`https` 才会被 `url.aparse` 抓；`file://` 拒绝（无状态契约） |
+
+#### 派发顺序（三层 fallback）
+
+1. **`content` 空 + `uri` 是 `http(s)://`** → `url.aparse` 抓取（见下）
+2. **有 `content`** → `get_modality(extension)`；若 UNKNOWN 且 `mime` 非空 → `get_modality_from_mime(mime)`
+3. **Modality → 子模块**：
+   - `IMAGE` → `image.aparse`
+   - `AUDIO` → `audio.aparse`
+   - `PDF` / `DOCUMENT` / `HTML` / `EMAIL` → `document.aparse`（内部按 extension 4 路再分）
+   - `DIRECT`（`txt` / `md` / `csv` / `tsv` / `vtt`）→ 不调 LLM，UTF-8 decode 直接返回
+   - 仍 UNKNOWN → `ValueError`
+
+子模块内部按 `extension` 查 MIME（`image.py` / `audio.py` 各有 `_MIME_MAP`）。当顶层用 mime 兜底解出 modality 时，facade 自动 `model_copy(extension=get_extension_from_mime(mime))`，给子模块填好 extension。
+
+#### URL 内部 dispatch（`url.aparse`）
+
+1. `_utils.fetch_uri(uri)`：httpx GET，限 `http`/`https`，返回 `(bytes, content_type)`。
+2. `get_modality_from_mime(content_type)` → inner Modality；UNKNOWN 时**兜底走 HTML handler**（大多 URL 都是 HTML）。
+3. 按 inner Modality 派发到对应子模块（PDF / IMAGE / AUDIO / DOCUMENT / HTML）。
+4. **仅 HTML 响应**额外抽 Open Graph / Twitter Card / `<meta>` tags 进 `ParsedContent.metadata`。
+5. 返回 `ParsedContent(modality=URL, metadata={inner_modality, fetched_uri, fetched_mime, ...inner.metadata, ...og})`。
+
+`modality` 永远是 `URL` 让调用方知道"来自网络"；真实类型记在 `metadata["inner_modality"]`。
+
+#### `ParsedContent` 输出
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `text` | `str` | 提取后的主文本（Markdown / 纯文本） |
+| `modality` | `Modality` | 来源分类（顶层入口决定，`URL` 表示来自网络） |
+| `mime` | `str` | 源 MIME |
+| `metadata` | `dict[str, Any]` | 按模态填：`model` / `finish_reason` / `tall_image_parts`（图片）/ `inline_image_ocr`（EML）/ `og_tags` / `inner_modality` / `intermediate_pdf_bytes`（Office）/ ... |
+
+#### 类型 / 派发表来源
+
+`Modality` 枚举 + `EXTENSION_TO_MODALITY` / `MIME_TO_MODALITY` / `MIME_TO_EXTENSION` 双向映射 + 4 个 helper 函数（`get_modality` / `get_modality_from_mime` / `get_extension_from_mime`），全部在 `everalgo-core/types/modality.py`，从 `everalgo.types` re-export。Parser facade `everalgo.parser` 也 re-export `RawFile` / `ParsedContent` / `Modality` 让调用方一处 import。
+
+> ✅ **设计自检**
+> - **Why URL 算 modality 而不仅是"传输方式"**：URL 是来源标签（"从网络抓的"vs"传 bytes 进来的"），值得调用方在 `ParsedContent.modality` 上区分。真实类型放 `inner_modality`，两个维度都保住。
+> - **Why HTTP 抓取在算法库里**：AGENTS.md §1 的"无状态"只禁 DB / 文件系统；HTTP I/O 本来就在做（LLM 调用），URL 抓取同性质。`file://` 在 `fetch_uri` 里直接拒（保守边界）。
+> - **Why extension 优先 mime**：调用方写 `extension` 的意图比写 `mime` 更明确（mime 经常是 HTTP 响应头自动填的，可能粗放如 `application/octet-stream`）。
+> - **Why 子模块按 extension 不按 mime**：原 evermemos-multimodal 的 4 个 parser 都按 extension 查 `_MIME_MAP` 表，迁过来保留这套；facade 帮子模块把 mime → extension 转一道。
+
+---
+
 ## 3. 待讨论清单（下一步逐条推进）
 
 | # | 议题 | 备注 |
 |---|------|------|
 | T1 | 数据契约：`Message / RawData / MemCell / Episode / Foresight / AtomicFact / Profile / AgentCase / AgentSkill / ParsedContent / KnowledgeMemory` 的精确 schema | Pydantic v2 建议作为基类，需确认 |
+| ~~T1.parser~~ | ✅ **RESOLVED 2026-05-17**（parser 子集）：`ParsedContent` schema 锁定为 4 字段 — `text: str`（提取文本）/ `modality: Modality`（来源分类）/ `mime: str`（源 MIME）/ `metadata: dict[str, Any]`（按模态填充：`model` / `finish_reason` / `tall_image_parts` / `inline_image_ocr` / `og_tags` / `inner_modality` / 等）。配套新增 `Modality` 枚举（IMAGE / PDF / AUDIO / DOCUMENT / HTML / EMAIL / URL / DIRECT / UNKNOWN）+ **双向映射** `EXTENSION_TO_MODALITY` / `MIME_TO_MODALITY` / `MIME_TO_EXTENSION` + 派发函数 `get_modality(ext)` / `get_modality_from_mime(mime)` / `get_extension_from_mime(mime)`，统一在 `everalgo-core/types/modality.py`，从 `everalgo.types` re-export。`RawFile` 字段定型为 `content: bytes`（可选）/ `mime: str` / `extension: str` / `uri: str`，`content` 与 `uri` 至少有一个；`uri` 仅接受 `http`/`https`（`file://` 拒绝，保 §1 无状态契约）。**顶层 `parser.aparse` 派发**：extension 优先，UNKNOWN 时退到 mime；`uri+http(s)` 走 `url.aparse`，URL 抓回后再按 Content-Type 派发到正确的内层 handler。这样设计文档示例 `RawFile(uri=..., mime="application/pdf")` 真的能走到 PDF handler。其他类型的 schema 待 T1 主条目按子领域分别 RESOLVED |
 | T2 | 算子完整清单（补齐 20 个）+ 每一个函数签名 | 需 BOSS 按子领域逐个对齐 |
 | T3 | `everalgo.configure(...)` 的完整参数表 + env 映射规则 | 仅 LLM 相关（v0.39 起 prompt 不再走 configure，详见 T5）|
 | T4 | `everalgo.llm` 模块的具体 API（`chat` / `stream` / `use()` contextmanager / `configure(llm=...)` / `LLMClient` Protocol / `LLMError` 7 子类 / Provider 路由 `build_client(config)`）| 注：scene 路由出 EverAlgo 归 evermem，详见 §2.5 |
@@ -1067,3 +1131,4 @@ Email / Calendar 天然有 deadline / commitment（Foresight 适用），Conflue
 | v0.46 | 2026-05-06 | **§1.3 仓库管理段"参照"出处分层修正**（BOSS 抓出"pydantic-ai 是唯一 uv workspace 多 dist 实证"是孤证 + design.md 主体段措辞混淆 monorepo 形态与 uv workspace 工具）。4 项目实测调研（LangChain / LlamaIndex / Apache Airflow / Dagster 的 dev workflow，看根 pyproject.toml / CONTRIBUTING / Makefile / scripts/）：① **uv workspace 不是孤证**——Apache Airflow 是同形态大型实证（100+ workspace members + PEP 420 namespace `airflow.providers.*` + 单 `uv.lock` + `uv sync --all-packages`），ADR 001 line 160 早已列入；② **LangChain / LlamaIndex 自身不用 workspace**——LangChain `libs/<pkg>` 各自独立 venv + 独立 `uv.lock`（[libs/Makefile](https://raw.githubusercontent.com/langchain-ai/langchain/master/libs/Makefile)）；LlamaIndex 子包独立 venv + Pants 编排；它们只作"monorepo + 多 dist"形态实证，**不**作 uv workspace 工具实证；③ **其他路线**：Dagster 用 `python scripts/install_dev_python_modules.py` 拼超长 `uv pip install -e A -e B ...` 一把梭进单 venv（独立顶层名，无 namespace 共享），不适配 EverAlgo 同 namespace 需求；LlamaIndex 接受跨包隔离（改上游需手动重装），与 EverAlgo"算法库快速迭代"目标冲突。改动 design.md 主体段 3 处：① **line 249 标题**——"仓库管理：monorepo + uv workspace（参照 LangChain / LlamaIndex）" → "仓库管理：monorepo（参照 LangChain / LlamaIndex）+ uv workspace（参照 Apache Airflow / pydantic-ai）"；② **line 251 段正文**——拆为"形态"和"工具"两层独立举证：monorepo 参照 LangChain / LlamaIndex（明示"它们自身不用 uv workspace"）；uv workspace 参照 Apache Airflow（100+ workspace members 大型实证）+ pydantic-ai（同 namespace 多 dist 同形态）；③ **line 345 注释**——"workspace 模式（仿 LangChain / LlamaIndex / Apache Airflow）" → "workspace 模式（仿 Apache Airflow / pydantic-ai；LangChain / LlamaIndex 是 monorepo 形态参照，不用 workspace）"；④ **§1.3 自检 "Why monorepo + uv workspace" 条**——加"两层论据"明示 monorepo 形态 vs uv workspace 工具的不同实证来源。提炼方法论：**"参照 X / Y"措辞要分层引用** —— monorepo 是仓库形态决策，uv workspace 是工具选型决策，两件事独立举证。把"形态参照库"和"工具参照库"混在同一句"参照 LangChain / LlamaIndex 用 uv workspace"会让读者误以为参照库也用 uv workspace（实际不用）；孤证（仅 pydantic-ai 实证）也不能立——必须翻出第二个同形态实证（Apache Airflow）证据才稳。BOSS 这次抓的是"措辞容易让读者把'形态实证'当成'工具实证'"的精确语义偏差。 |
 | v0.47 | 2026-05-06 | **§2.5 自检 + ADR 012 阵营归类不一致修正（疑点 1）**（v0.46 后扫 design.md 同模式论据，发现 line 945 / 951 + ADR 012 line 124 / 168 / 286 把 LangChain / AutoGen 列入"业界算法库 4/4 实证"，但 design.md 其他章节一致归阵营外——line 400 v0.19 "唯一反例 langchain LCEL（chain 框架，非算法库）"/ line 402 v0.39 "端到端框架阵营 LangChain / CrewAI / Semantic Kernel"/ ADR 011 v0.23 "反例 LangChain — 持 chain 状态 + lifecycle hooks 与 EverAlgo 无状态算子场景不同"/ AutoGen 是 agent 框架同理）。**阵营归类不一致即论据 cherry-picking** —— 同一项目在不同章节按需归阵营是论据强度的弱点。改动：① **design.md line 945 自检 "Why scene 路由不在 EverAlgo"**——"业界算法库 4/4 实证：DSPy / LlamaIndex / LangChain / AutoGen 全部不做 scene 路由" → "**业界主流 LLM 库 4/4 不做 scene 路由（横跨 3 阵营无差别）**：算法库阵营 DSPy + LlamaIndex / chain 框架阵营 LangChain / agent 框架阵营 AutoGen。3 阵营都不做 → 反向印证 scene 路由不属任何阵营 LLM 库的职责"；② **design.md line 951 ADR 012 引用** "4/4 算法库不做 scene 路由实证" → "4/4 主流 LLM 库横跨 3 阵营不做 scene 路由实证"；③ **ADR 012 line 124**——"业界算法库 4/4 实证 (...) 不做 scene 路由" → "业界主流 LLM 库 4/4 横跨 3 阵营都不做 scene 路由 (DSPy + LlamaIndex 算法库 / LangChain chain 框架 / AutoGen agent 框架)，3 阵营都不做 → 反向印证不属任何阵营 LLM 库的职责"；④ **ADR 012 line 168 决策摘要**——"业界算法库 4/4 不做 scene 路由" → "业界主流 LLM 库 4/4 横跨 3 阵营 (算法库 / chain 框架 / agent 框架) 都不做 scene 路由"；⑤ **ADR 012 line 286 段标题 + 表格**——"### Scene 路由不在算法库（4/4 实证）" → "### Scene 路由不在 LLM 库（4/4 横跨 3 阵营实证）"，表格加"阵营"列分类标注 DSPy/LlamaIndex=算法库 / LangChain=chain 框架 / AutoGen=agent 框架，段尾加"3 阵营无差别"小结。**论点反加强**：从"算法库都不做"到"跨 3 阵营都不做"，证据范围更广（不限于算法库阵营），更证明 scene 路由是业务编排职责而非任何 LLM 库的职责。提炼方法论：**阵营归类必须全文一致** —— 同一项目（如 LangChain）在不同章节按论点需要换阵营归类是论据 cherry-picking，会被读者抓出"阵营贴标签是为了凑数"。正确做法是给项目固定阵营标签，论据描述按"是否横跨多阵营"展开（横跨 = 论点更强）。BOSS 抓的是"阵营归类"语义偏差，与 v0.46 抓的"形态参照库 vs 工具参照库"语义偏差是同一类问题——**论据出处的精确性必须经得起跨章节自洽检查**。 |
 | v0.48 | 2026-05-06 | **§1.3 PEP 420 实证修正：拆 uv workspace 工具实证 vs PEP 420 实证两层（v0.46 余 bug）**（v0.46 修了"形态参照库 vs 工具参照库"两层，但残留一个 bug：把 Apache Airflow 同时列为"uv workspace 工具实证"+"PEP 420 namespace 大型实证"——实测 Airflow 的 `airflow/__init__.py` 末行是 `__path__ = pkgutil.extend_path(__path__, __name__)` **pkgutil-style legacy namespace**，不是 PEP 420 native；pydantic-ai 实测是 3 个**独立** namespace（`pydantic_ai` / `pydantic_evals` / `pydantic_graph` 各自有 `__init__.py`），不是同 namespace 多 dist。BOSS 抓出"顶层空一层这个做法规范吗，有依据吗"问题后系统核证）。**新增工业实证（实测各项目 `<namespace>/__init__.py` 状态）**：① **google-cloud-*** 100+ dist 共享 `google.cloud.*`（python-storage / api-core 等仓库的 `google/__init__.py` 与 `google/cloud/__init__.py` 实测均 HTTP 404）—— 工业级最大 PEP 420 实证；② **sphinxcontrib-*** 6 个 PyPA 官方分发的 Sphinx 扩展（applehelp / htmlhelp / qthelp / serializinghtml / devhelp / jsmath）共享 `sphinxcontrib.*` PEP 420 native；③ **PyPA 官方示例** [sample-namespace-packages](https://github.com/pypa/sample-namespace-packages) `native/` 子目录；④ **PyPA 官方文档**[packaging-namespace-packages.html](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages) 直接推荐 PEP 420 native namespace 用于"Py3-only + pip-only"项目（EverAlgo 满足两条：`requires-python=">=3.12"` + uv/pip 安装）。改动 3 文件：① **design.md §1.3 line 249-254 仓库管理段**——从"monorepo + uv workspace 两层"扩为"monorepo + uv workspace + PEP 420 namespace 三层独立举证"，每层附实证 + 反例区分（明示 Airflow 是 pkgutil-style 不是 PEP 420，仅作 uv workspace 工具实证）；② **design.md §1.3 自检 "Why monorepo + uv workspace"** → "Why monorepo + uv workspace + PEP 420 namespace"，3 维度独立溯源；③ **AGENTS.md §2 第 2 段 namespace 描述** 加 PyPA 官方推荐链接 + google-cloud-* / sphinxcontrib-* 工业实证；4 段 uv workspace 描述明示 Airflow / pydantic-ai 仅作 uv workspace 实证、namespace 实现不是 PEP 420；④ **plan 文件依据表** 新增"PEP 420 native namespace 多 dist 共享"行（PyPA 官方 + google-cloud-* + sphinxcontrib-* + PyPA 示例 + 反例区分），uv workspace 行注明"仅作 workspace 实证 not PEP 420"。**EverAlgo 实施未受影响**：之前的实施本身就是 PEP 420 native（`packages/*/src/everalgo/` 顶层无 `__init__.py`），与 PyPA 官方推荐 1:1，且 `everalgo.__path__` 实测包含 8 个目录（步骤 11 自检）—— 错的只是论据出处，方案本身正确。提炼方法论：**"namespace 实现"和"workspace 工具"是两个独立维度**——同一项目可能在 workspace 维度是好榜样、namespace 维度是反例（如 Airflow），不能把"业内大型项目"笼统当作各维度都实证。验证方法是**实测每个候选项目对应 `<namespace>/__init__.py` 文件**：404 = PEP 420 native；含 `extend_path` / `declare_namespace` = pkgutil/setuptools legacy（不是 PEP 420）。BOSS 这次抓的是 v0.46 修复时维度合并不彻底——**论据维度划分要尽可能细，每条出处只承担一个维度的实证责任**。 |
+| v0.49 | 2026-05-17 | **新增 §2.6 Parser 派发契约 + §1.2 parser 目录速览补全**（BOSS 反问"传 url 为什么就不是无状态了" + "按设计文档一次解决所有问题"——根因：之前 design.md 只在 §2.1 line 504 给出 `RawFile(uri=..., mime="application/pdf")` 一行示例，没有正式声明 parser 派发契约，导致实现侧产生 3 个偏离：(a) RawFile 实际把 content 当成必填，不支持只传 uri；(b) url.aparse 写死 `extension="html"` 委托给 HTML handler，无视抓回的 Content-Type；(c) `parser.aparse` 只看 extension，`RawFile(content=bytes, mime="application/pdf")` 无 ext 时拒绝派发）。改动 4 处：① **§1.2 line 100 parser 目录速览扩为 3 行**——补 `_utils.py`（fetch_uri / decode_bytes / aspect-ratio / html-clean）+ `prompts/{en,zh}/{image,audio,document}.py` 双语 PROMPT_FOR_* 常量；② **§2.1 line 504 场景 D 示例追加注释**——明示 RawFile 3 种合法形态：仅 bytes / bytes+mime / 仅 uri，各自的 ext/mime 字段意义；③ **新增 §2.6 Parser 派发契约**——RawFile 字段语义表 + 三层 fallback 派发顺序（content+ext → content+mime → uri+http 自抓 → Content-Type 二次派发）+ url.aparse 内部 dispatch + ParsedContent 输出 4 字段表 + 4 条设计自检（Why URL 算 modality / Why HTTP 在算法库 / Why ext 优先 mime / Why 子模块按 ext）；④ **§3 T1.parser RESOLVED 条目扩写**——补"双向映射 EXTENSION_TO_MODALITY / MIME_TO_MODALITY / MIME_TO_EXTENSION + 4 个 helper" + "顶层派发 ext 优先 mime 兜底 + URL 抓回按 Content-Type 二次派发"两句，与 §2.6 一致。**实现侧同步修正**：everalgo-core/types/modality.py 加 MIME 双向映射 + get_modality_from_mime / get_extension_from_mime；everalgo-parser/parser/__init__.py extension UNKNOWN 时退到 mime + _ensure_extension 子模块兼容；everalgo-parser/parser/url.py 抓回 Content-Type 真分派，OG 抽取仅 HTML 响应才做。**新增测试**：test_modality.py +9（MIME helpers + dispatch agreement）/ test_dispatch.py +8（mime-only 派发 6 种 modality + extension 覆盖 mime / 空 RawFile）/ test_url.py +5（PDF/IMAGE/AUDIO/UNKNOWN-fallback/HTML-metadata Content-Type 多分支）+ e2e test_e2e_design_example_uri_pdf_returns_pdf（真从 W3C 抓 PDF URL → Content-Type 派发到 PDF handler → Gemini 提取）。单测 715 全过 + e2e 17 全过。提炼方法论：**设计文档 §2.x 的示例必须配套契约段** —— 仅靠场景示例一行让实现侧自由发挥会引发偏离，正式契约段（字段语义表 + 派发顺序 + 自检）是消除歧义的最低门槛；先写契约再实现，而非"先实现再补文档"。 |

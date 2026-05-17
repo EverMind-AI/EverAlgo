@@ -167,6 +167,7 @@ async def test_aextract_renders_cluster_into_conversation_text() -> None:
     )
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured["prompt"] = messages[0].content
         return ChatResponse(content=payload, model="fake")
 
@@ -185,6 +186,7 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
     )
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured["prompt"] = messages[0].content
         return ChatResponse(content=payload, model="fake")
 
@@ -332,6 +334,7 @@ async def test_aextract_silently_skips_non_chat_items() -> None:
     captured: dict[str, str] = {}
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured["prompt"] = messages[0].content
         return ChatResponse(content=payload, model="fake")
 

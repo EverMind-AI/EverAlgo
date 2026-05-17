@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200">
+  <rect width="400" height="200" fill="white"/>
+  <text x="20" y="60" font-family="sans-serif" font-size="24" fill="black">SVG 测试文件</text>
+  <text x="20" y="100" font-family="sans-serif" font-size="18" fill="#333">Hello World - 2025年度报告</text>
+  <rect x="20" y="120" width="200" height="30" fill="#4CAF50" rx="5"/>
+  <text x="30" y="140" font-family="sans-serif" font-size="14" fill="white">Sales: ¥1,250,000</text>
+  <rect x="20" y="160" width="140" height="30" fill="#2196F3" rx="5"/>
+  <text x="30" y="180" font-family="sans-serif" font-size="14" fill="white">Cost: ¥820,000</text>
+</svg>
