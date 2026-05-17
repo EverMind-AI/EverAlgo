@@ -33,7 +33,7 @@ This repo is a **monorepo** of 8 publishable distributions sharing the `everalgo
 Install all packages into a shared editable venv, then run the offline examples — no API key required:
 
 ```bash
-git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
+git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 
 uv sync --all-packages          # editable-install all 8 packages into a shared venv
@@ -164,7 +164,7 @@ Steps for releasing `everalgo-clustering v0.2.0`:
    git push origin everalgo-clustering/v0.2.0
    ```
 
-6. **CI publishes to PyPI.** The `.gitlab-ci.yml` build/publish stage triggers on `<dist>/v<semver>` tag push.
+6. **Publish to PyPI.** _Current state (0.1.x): **manual**_ — run `uv build --package everalgo-<name>` then `uv publish` per distribution; see the [PyPA publishing guide](https://packaging.python.org/en/latest/tutorials/packaging-projects/) for the underlying steps. _Planned (post-0.1.x):_ a `.gitlab-ci.yml` publish stage will trigger on `<dist>/v<semver>` tag push using [PyPI Trusted Publishers](https://docs.pypi.org/trusted-publishers/) (OIDC, no long-lived tokens).
 
 Tag format: `<dist-name>/v<semver>` — e.g. `everalgo-core/v0.1.0`, `everalgo-rank/v0.2.0`.
 

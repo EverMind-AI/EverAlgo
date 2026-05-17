@@ -23,4 +23,4 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

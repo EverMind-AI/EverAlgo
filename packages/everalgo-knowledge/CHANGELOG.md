@@ -10,4 +10,4 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - `KnowledgeExtractor` stub; public API surface is frozen, implementation is pending.
 
-[Unreleased]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

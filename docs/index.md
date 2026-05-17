@@ -94,7 +94,7 @@ pip install everalgo-knowledge
 Development install (all 8 packages, editable):
 
 ```bash
-git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
+git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 uv sync --all-packages
 ```

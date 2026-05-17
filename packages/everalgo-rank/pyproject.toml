@@ -20,5 +20,12 @@ dependencies = [
   "everalgo-core>=0.1.0,<2.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/EverMind-AI/EverAlgo"
+Repository = "https://github.com/EverMind-AI/EverAlgo"
+Issues = "https://github.com/EverMind-AI/EverAlgo/issues"
+Documentation = "https://github.com/EverMind-AI/EverAlgo/tree/main/packages/everalgo-rank"
+Changelog = "https://github.com/EverMind-AI/EverAlgo/blob/main/packages/everalgo-rank/CHANGELOG.md"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/everalgo"]

@@ -20,5 +20,12 @@ dependencies = [
   "numpy>=1.26",
 ]
 
+[project.urls]
+Homepage = "https://github.com/EverMind-AI/EverAlgo"
+Repository = "https://github.com/EverMind-AI/EverAlgo"
+Issues = "https://github.com/EverMind-AI/EverAlgo/issues"
+Documentation = "https://github.com/EverMind-AI/EverAlgo/tree/main/packages/everalgo-clustering"
+Changelog = "https://github.com/EverMind-AI/EverAlgo/blob/main/packages/everalgo-clustering/CHANGELOG.md"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/everalgo"]

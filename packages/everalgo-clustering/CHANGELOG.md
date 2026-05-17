@@ -24,4 +24,4 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - Geometric fallback path inside `cluster_by_llm`: the function raises on LLM failure rather than silently falling back to geometry.
 - 3-retry loop in `cluster_by_llm`: the function raises `ValueError` immediately on bad LLM JSON.
 
-[Unreleased]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

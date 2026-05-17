@@ -25,6 +25,13 @@ dependencies = [
   "tiktoken>=0.7",
 ]
 
+[project.urls]
+Homepage = "https://github.com/EverMind-AI/EverAlgo"
+Repository = "https://github.com/EverMind-AI/EverAlgo"
+Issues = "https://github.com/EverMind-AI/EverAlgo/issues"
+Documentation = "https://github.com/EverMind-AI/EverAlgo/tree/main/packages/everalgo-core"
+Changelog = "https://github.com/EverMind-AI/EverAlgo/blob/main/packages/everalgo-core/CHANGELOG.md"
+
 # `everalgo` here is a PEP 420 namespace; hatchling packages the directory
 # tree under `src/everalgo/` belonging to this distribution only.
 # Reference: https://github.com/pydantic/pydantic-ai/blob/main/pydantic_ai_slim/pyproject.toml

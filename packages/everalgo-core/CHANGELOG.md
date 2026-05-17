@@ -31,4 +31,4 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - LLM binding simplified to instance-only injection: `build_client` / constructor `llm=` parameter is the sole binding path. The prior 4-layer resolution (configure / use / current / resolve) was removed in favour of the pattern used by `openai-python`, `anthropic-sdk-python`, LangChain, and Instructor.
 
-[Unreleased]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
