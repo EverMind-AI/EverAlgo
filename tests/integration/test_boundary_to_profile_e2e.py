@@ -72,6 +72,7 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
                 content='{"reasoning": "single coherent topic", "boundaries": [], "should_wait": false}',
                 model="fake",
             )
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured_profile_prompt["text"] = messages[0].content
         return ChatResponse(
             content=(

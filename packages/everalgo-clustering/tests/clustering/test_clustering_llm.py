@@ -114,6 +114,7 @@ async def test_llm_clusters_json_contains_idx_count_preview() -> None:
     captured: dict[str, str] = {}
 
     def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured["prompt"] = messages[0].content
         return ChatResponse(
             content='{"idx": 0, "reason": "test"}',
@@ -142,6 +143,7 @@ async def test_caller_supplied_prompt_overrides_default() -> None:
     captured: dict[str, str] = {}
 
     def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured["prompt"] = messages[0].content
         return ChatResponse(
             content='{"idx": 0, "reason": "ok"}',
@@ -182,6 +184,7 @@ async def test_preview_empty_when_new_cluster_has_no_preview() -> None:
     captured: dict[str, str] = {}
 
     def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured["prompt"] = messages[0].content
         return ChatResponse(
             content='{"idx": 0, "reason": "ok"}', model="fake", usage=None, finish_reason="stop", raw=None

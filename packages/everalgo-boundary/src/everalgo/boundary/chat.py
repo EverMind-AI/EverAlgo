@@ -60,7 +60,7 @@ class DetectionResult(NamedTuple):
 async def detect_boundaries(
     messages: list[ChatMessage],
     *,
-    llm: LLMClient | None = None,
+    llm: LLMClient,
     is_final: bool = False,
     prompt: str | None = None,
     hard_token_limit: int = DEFAULT_HARD_TOKEN_LIMIT,
@@ -70,7 +70,7 @@ async def detect_boundaries(
 
     Args:
         messages: Ordered chat messages, typically ``prior_tail + new_messages``.
-        llm: Required when ``messages`` is non-empty.
+        llm: LLM client. Algorithm always requires an LLM; the caller must supply one.
         is_final: When ``True``, forces the trailing segment into a cell so ``tail == []``.
         prompt: Prompt override; ``None`` uses the bundled default.
         hard_token_limit: Max tokens per cell before forced split.
@@ -84,9 +84,6 @@ async def detect_boundaries(
     # Phase 1 — Input validation
     if not messages:
         return DetectionResult(cells=[], tail=[])
-
-    if llm is None:
-        raise ValueError("llm must be provided")
 
     # Phase 2 — Default resolution
     prompt_template = prompt or CHAT_BOUNDARY_DETECT_PROMPT_EN

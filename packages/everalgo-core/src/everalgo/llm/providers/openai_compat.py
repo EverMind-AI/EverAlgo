@@ -54,6 +54,15 @@ class OpenAICompatClient:
         except openai.OpenAIError as exc:
             raise LLMError(str(exc)) from exc
 
+        # Some OpenAI-compatible upstreams (notably OpenRouter when the upstream
+        # model rejects the payload) return a 200 with ``choices=None`` or an
+        # empty list rather than a structured HTTP error. Surface as LLMError
+        # rather than crashing with ``NoneType`` subscript.
+        if not completion.choices:
+            raise LLMError(
+                f"upstream returned no choices (model={completion.model!r}); "
+                f"likely an upstream rejection or content filter"
+            )
         choice = completion.choices[0]
         usage: Usage | None = None
         if completion.usage is not None:

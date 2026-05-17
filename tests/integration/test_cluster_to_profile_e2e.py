@@ -104,6 +104,7 @@ async def test_two_similar_memcells_cluster_then_profile_sees_prior() -> None:
     captured_prompt: dict[str, str] = {}
 
     def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
         captured_prompt["text"] = messages[0].content
         return ChatResponse(
             content=json.dumps(

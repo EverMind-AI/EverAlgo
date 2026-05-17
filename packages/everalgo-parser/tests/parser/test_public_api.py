@@ -18,13 +18,17 @@ def test_five_submodules_have_dual_interface() -> None:
         assert callable(mod.parse)
 
 
-def test_dunder_all_lists_seven_symbols() -> None:
+def test_dunder_all_lists_public_symbols() -> None:
+    """Re-exports cover the 5 submodules + dispatch fns + 3 facade types."""
     from everalgo.parser import __all__
 
     assert sorted(__all__) == sorted(
         [
-            "audio",
+            "Modality",
+            "ParsedContent",
+            "RawFile",
             "aparse",
+            "audio",
             "document",
             "image",
             "parse",
