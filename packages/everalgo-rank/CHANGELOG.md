@@ -27,4 +27,4 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - Silent fallback in `_apply_rerank_scores`: the function raises `ValueError` when the LLM response cannot be parsed into a valid score list.
 - Outer `try/except` block in `aagentic_rank`: errors from sub-steps propagate to the caller unchanged.
 
-[Unreleased]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

@@ -63,4 +63,4 @@ declared in each `packages/everalgo-*/pyproject.toml`.
 - **`TextMessage` type** — merged into `ChatMessage` with multimodal `content: str | list[ContentBlock]`.
 - **Dead `_conversation_item_adapter`** from `agent_memory/case.py`.
 
-[0.1.0]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
+[0.1.0]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

@@ -10,4 +10,4 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - 5 modality stub submodules: `image`, `audio`, `document`, `video`, `url`; each exposes a `parse` / `aparse` mime-dispatch entry point. All implementation bodies are pending — the public API surface is frozen, not the logic.
 
-[Unreleased]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

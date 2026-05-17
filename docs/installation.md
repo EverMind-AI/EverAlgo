@@ -45,7 +45,7 @@ uv add everalgo-user-memory
 Clone the monorepo and install all 8 packages as editable into a shared venv:
 
 ```bash
-git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
+git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 
 uv sync --all-packages --group dev   # shared venv, all 8 packages editable

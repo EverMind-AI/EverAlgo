@@ -21,7 +21,7 @@ Key sections:
 ## Development setup
 
 ```bash
-git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
+git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 
 uv sync --all-packages --group dev

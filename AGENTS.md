@@ -73,7 +73,7 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
 
 ```bash
 # Prerequisites: Python 3.12+ and uv (https://docs.astral.sh/uv/).
-git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
+git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 
 # Install all 8 packages editable into a shared venv (includes dev tools).
