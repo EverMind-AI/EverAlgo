@@ -10,28 +10,21 @@ def test_top_level_exports() -> None:
 
     assert sorted(__all__) == sorted(
         [
-            "ClusterConfig",
-            "ClusterState",
+            "Cluster",
             "cluster_by_geometry",
             "cluster_by_llm",
         ]
     )
 
 
-def test_value_objects_instantiate_with_defaults() -> None:
-    from everalgo.clustering import ClusterConfig, ClusterState
+def test_cluster_instantiates_with_required_fields() -> None:
+    import numpy as np
 
-    state = ClusterState.empty()
-    assert state.centroids == {}
-    assert state.counts == {}
-    assert state.last_ts == {}
-    assert state.next_idx == 0
+    from everalgo.clustering import Cluster
 
-    config = ClusterConfig()
-    assert config.threshold == 0.65
-    assert config.time_window_days == 7.0
-    assert config.k_candidates == 30
-    assert config.llm_skip_threshold == 0.85
+    c = Cluster(centroid=np.array([1.0, 0.0], dtype=np.float32), last_ts=0)
+    assert c.count == 1
+    assert c.preview == []
 
 
 def test_cluster_functions_are_async() -> None:

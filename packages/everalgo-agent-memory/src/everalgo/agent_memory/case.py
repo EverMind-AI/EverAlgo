@@ -1,13 +1,7 @@
-"""AgentCaseExtractor — distil one agent execution trajectory into at most one :class:`AgentCase`.
+"""AgentCaseExtractor — distil one agent trajectory MemCell into at most one :class:`AgentCase`.
 
-Algorithm ports the opensource ``memory_layer/memory_extractor/agent_case_extractor.py`` 11-step pipeline
-verbatim; the only changes are EverAlgo's mandatory compliance edits — see DESIGN.md §4.5 for the full
-diff. Public API: :class:`AgentCaseExtractor` with ``aextract`` (async) + ``extract`` (sync bridge).
-
-Internals operate directly on typed :class:`Message` objects throughout — no upfront dict conversion.
-OpenAI-format dicts are produced only at the LLM-prompt boundary (and parsed back into :class:`Message`
-when the LLM returns messages), so EverAlgo-private fields (``timestamp`` / ``sender_id`` /
-``sender_name`` / ``refer_list``) never leak into LLM prompts.
+Typed :class:`ConversationItem` objects are used throughout; OpenAI-format dicts are produced only at
+the LLM prompt boundary so EverAlgo-private fields never leak into prompts.
 """
 
 from __future__ import annotations
@@ -20,20 +14,21 @@ from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
 
-import everalgo.llm
 from everalgo.agent_memory._text import count_tokens, json_default, truncate_text
 from everalgo.agent_memory.prompts.case_compress import AGENT_CASE_COMPRESS_PROMPT
 from everalgo.agent_memory.prompts.case_filter import AGENT_CASE_FILTER_PROMPT
 from everalgo.agent_memory.prompts.tool_pre_compress import AGENT_TOOL_PRE_COMPRESS_PROMPT
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
-from everalgo.types import AgentCase, MemCell, Message, MessageRole
+from everalgo.types import AgentCase, ChatMessage, ConversationItem, MemCell, ToolCall, ToolCallRequest, ToolCallResult
+from everalgo.types._render import render_content
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
-
 
 __all__ = [
     # Re-exported prompt constants — monkey-patch at startup to override the LLM prompts
@@ -44,98 +39,59 @@ __all__ = [
 ]
 
 
-# ── Heuristic constants (opensource :50-65) ─────────────────────────────────────────────────────────
+# ── Heuristic constants ─────────────────────────────────────────────────────────────────────────────
 # Tunable algorithm-IP thresholds; override at startup via monkey-patch (DESIGN.md §4.6).
 
 PRE_COMPRESS_CHUNK_SIZE = 100_000
-"""Tool-content token threshold above which selective LLM pre-compression kicks in (opensource :52)."""
-
-HIGH_MESSAGE_COUNT_THRESHOLD = 100
-"""Halve the scale_trigger when message count exceeds this (opensource :57)."""
-
+HIGH_MESSAGE_COUNT_THRESHOLD = 100  # halve scale_trigger when message count exceeds this
 MAX_TOOL_OUTPUT_TOKENS = 1000
 MAX_TOOL_ARGS_TOKENS = 800
 MAX_ASSISTANT_RESPONSE_TOKENS = 3000
-
-MAX_TASK_INTENT_TOKENS = 300
-"""Hard cap on ``task_intent`` token length after LLM extraction (opensource :65, head-only truncation)."""
-
+MAX_TASK_INTENT_TOKENS = 300  # head-only truncation after LLM extraction
 FILTER_NO_TOOL_MAX_MESSAGES = 4
 FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS = 200
 
 
 class AgentCaseExtractor:
-    """Distil one agent-trajectory MemCell into at most one :class:`AgentCase`.
+    """Distil one agent-trajectory MemCell into at most one AgentCase.
 
-    Stateless callable class — no ``__init__``, no instance state. Returns ``list[AgentCase]`` (per
-    DESIGN.md §4.2 / O-1) of length 0 or 1: empty list when the pre-filter / LLM filter rejects the
-    trajectory, a single-element list on success.
-
-    Customize per call via ``llm=`` and per-prompt overrides (``prompt_filter`` / ``prompt_compress`` /
-    ``prompt_tool_pre_compress``); the module-level constants in :mod:`everalgo.agent_memory.prompts.*` are
-    used as defaults when the overrides are ``None``. Startup-time global override is also possible via
-    monkey-patching the prompt constants on this module.
+    Returns a list of length 0 (filtered out) or 1 (successful extraction).
     """
+
+    def __init__(self, *, llm: LLMClient) -> None:
+        self._llm = llm
 
     async def aextract(
         self,
         memcell: MemCell,
         *,
-        llm: LLMClient | None = None,
         prompt_filter: str | None = None,
         prompt_compress: str | None = None,
         prompt_tool_pre_compress: str | None = None,
     ) -> list[AgentCase]:
-        """Async main implementation — runs the 11-step pipeline (DESIGN.md §1.1).
+        """Run the 11-step pipeline on one MemCell; return ``[]`` (filtered) or ``[AgentCase]``.
 
-        Parameters
-        ----------
-        memcell : MemCell
-            Boundary output. ``memcell.messages`` MUST carry the OpenAI agent trajectory: USER / ASSISTANT
-            (with optional ``tool_calls``) / TOOL (with ``tool_call_id``). System prompts are upstream
-            framing and excluded from the schema. Empty / missing messages yields ``[]`` immediately.
-        llm : LLMClient or None, optional
-            Per-call LLM override; falls back through the 3-layer chain.
-        prompt_filter, prompt_compress, prompt_tool_pre_compress : str or None, optional
-            Per-call prompt template overrides for steps 7, 8, and 6 respectively. ``None`` falls back to
-            the corresponding built-in constant on this module.
-
-        Returns
-        -------
-        list[AgentCase]
-            Length 0 when filtered out; length 1 on successful extraction. Caller embeds the resulting
-            ``task_intent`` before persisting (no ``vector`` field on :class:`AgentCase`).
-
-        Raises
-        ------
-        LLMNotConfiguredError
-            No LLM resolvable through the 3-layer chain.
-        LLMError
-            Any provider-side failure (no internal retry — see DESIGN.md §2 / ADR 012).
+        Raises:
+            LLMError: From any provider-side LLM call (no internal retry).
         """
-        # MemCell.event_id is assigned by the persistence layer and may be None when the algorithm runs
-        # before persistence — use empty-string fallback so log messages and parent_id stay non-None.
-        memcell_id = memcell.event_id or ""
-
-        if not memcell.messages:
-            logger.info("no messages on memcell %s, skipping", memcell_id)
+        if not memcell.items:
+            logger.info("no items on memcell (n_items=0), skipping")
             return []
 
-        client = everalgo.llm.resolve(llm)
+        client = self._llm
 
         # Step 1+2: typed view from MemCell, strip system head (drop anything before first user)
-        msgs = _strip_before_first_user(memcell.messages)
+        msgs = _strip_before_first_user(memcell.items)
 
         # Step 3: structural + heuristic pre-filter
         if reason := _should_skip(msgs):
-            logger.info("skipping memcell %s: %s", memcell_id, reason)
+            logger.info("skipping memcell (n_items=%d): %s", len(memcell.items), reason)
             return []
 
         # Step 4: heuristic trim (with scale_trigger adaptation)
         msgs, total_tokens = _heuristic_trim(msgs)
         logger.info(
-            "memcell %s pre-trim total_tokens=%d, message_count=%d",
-            memcell_id,
+            "memcell pre-trim total_tokens=%d, message_count=%d",
             total_tokens,
             len(msgs),
         )
@@ -145,8 +101,7 @@ class AgentCaseExtractor:
             trimmed_tokens = count_tokens(_dump_messages(msgs))
             if trimmed_tokens > PRE_COMPRESS_CHUNK_SIZE * 2:
                 logger.info(
-                    "memcell %s still %d tokens after trim (> %d), skipping",
-                    memcell_id,
+                    "memcell still %d tokens after trim (> %d), skipping",
                     trimmed_tokens,
                     PRE_COMPRESS_CHUNK_SIZE * 2,
                 )
@@ -172,8 +127,7 @@ class AgentCaseExtractor:
         intent = truncate_text(original_intent, MAX_TASK_INTENT_TOKENS, head_ratio=1.0)
         if intent != original_intent:
             logger.info(
-                "memcell %s truncated task_intent to %d tokens",
-                memcell_id,
+                "memcell truncated task_intent to %d tokens",
                 MAX_TASK_INTENT_TOKENS,
             )
 
@@ -183,8 +137,6 @@ class AgentCaseExtractor:
         case = AgentCase(
             id=uuid.uuid4().hex,
             timestamp=memcell.timestamp,
-            parent_type="memcell",
-            parent_id=memcell_id,
             task_intent=intent,
             approach=exp.get("approach", "") or "",
             quality_score=_clamp_quality_score(exp.get("quality_score", 0.5)),
@@ -193,85 +145,78 @@ class AgentCaseExtractor:
         return [case]
 
     extract = async_to_sync(aextract)
-    """Sync bridge — only callable from non-event-loop contexts."""
 
 
-# ── Serialization helpers (Message → OpenAI Chat Completions wire format) ───────────────────────────
+# ── Serialization helpers (ConversationItem → OpenAI Chat Completions wire format) ─────────────────────────
 
 
-def _to_openai_dict(msg: Message) -> dict[str, Any]:
-    """Convert a :class:`Message` to an OpenAI Chat Completions wire-format dict.
-
-    Keeps only OpenAI-recognised fields (``role`` / ``content`` / ``tool_calls`` / ``tool_call_id``);
-    drops EverAlgo-private fields (``timestamp`` / ``sender_id`` / ``sender_name`` / ``refer_list``) that
-    the LLM does not need. ``content`` is omitted when ``None`` (assistant messages carrying only
-    ``tool_calls`` follow OpenAI's wire format); ``tool_calls`` / ``tool_call_id`` are emitted only when
-    set.
-    """
-    d: dict[str, Any] = {"role": msg.role.value}
-    if msg.content is not None:
-        d["content"] = msg.content
-    if msg.tool_calls:
-        d["tool_calls"] = [tc.model_dump(mode="json", exclude_none=True) for tc in msg.tool_calls]
-    if msg.tool_call_id is not None:
-        d["tool_call_id"] = msg.tool_call_id
+def _to_openai_dict(msg: ConversationItem) -> dict[str, Any]:
+    """Convert a ConversationItem to OpenAI Chat Completions wire-format, stripping EverAlgo-private fields."""
+    if isinstance(msg, ChatMessage):
+        d: dict[str, Any] = {"role": msg.role, "content": render_content(msg.content)}
+    elif isinstance(msg, ToolCallRequest):
+        d = {"role": "assistant"}
+        if msg.content is not None:
+            d["content"] = msg.content
+        d["tool_calls"] = [tc.model_dump(mode="json") for tc in msg.tool_calls]
+    else:  # ToolCallResult
+        d = {"role": "tool", "tool_call_id": msg.tool_call_id, "content": msg.content}
     return d
 
 
-def _to_openai_dicts(messages: list[Message]) -> list[dict[str, Any]]:
+def _to_openai_dicts(messages: Sequence[ConversationItem]) -> list[dict[str, Any]]:
     """Vector form of :func:`_to_openai_dict`."""
     return [_to_openai_dict(m) for m in messages]
 
 
-def _dump_messages(messages: list[Message]) -> str:
-    """JSON-dump messages in OpenAI wire format — used for LLM prompts and token counting.
-
-    A single canonical (compact) dump shape keeps the trim/over-size-bail heuristics counting tokens
-    against the exact byte sequence that downstream LLM prompts consume.
-    """
+def _dump_messages(messages: Sequence[ConversationItem]) -> str:
+    """JSON-dump messages in OpenAI wire format for LLM prompts and token counting."""
     return json.dumps(_to_openai_dicts(messages), ensure_ascii=False, default=json_default)
 
 
-# ── Module-level helpers (port of opensource private methods) ───────────────────────────────────────
+# ── Module-level helpers ────────────────────────────────────────────────────────────────────────────
 
 
-def _strip_before_first_user(messages: list[Message]) -> list[Message]:
-    """Drop everything before the first user message (e.g. system prompts). Opensource :501-509."""
+def _strip_before_first_user(messages: Sequence[ConversationItem]) -> list[ConversationItem]:
+    """Drop everything before the first user message (e.g. system prompts)."""
     for i, msg in enumerate(messages):
-        if msg.role == MessageRole.USER:
+        if isinstance(msg, ChatMessage) and msg.role == "user":
             return list(messages[i:])
     return []
 
 
-def _has_tool_calls(messages: list[Message]) -> bool:
-    """Return ``True`` iff any message has tool_calls or is a tool response. Opensource :486-490."""
-    return any(msg.tool_calls or msg.role == MessageRole.TOOL for msg in messages)
+def _has_tool_calls(messages: Sequence[ConversationItem]) -> bool:
+    """Return ``True`` iff any message is a ToolCallRequest or ToolCallResult."""
+    return any(isinstance(msg, (ToolCallRequest, ToolCallResult)) for msg in messages)
 
 
-def _count_tool_call_rounds(messages: list[Message]) -> int:
-    """Count assistant messages that contain tool_calls. Opensource :493-499."""
-    return sum(1 for msg in messages if msg.role == MessageRole.ASSISTANT and msg.tool_calls)
+def _count_tool_call_rounds(messages: Sequence[ConversationItem]) -> int:
+    """Count ToolCallRequest messages (= tool-call rounds)."""
+    return sum(1 for msg in messages if isinstance(msg, ToolCallRequest))
 
 
-def _should_skip(messages: list[Message]) -> str | None:
-    """Pre-filter combining structural + heuristic checks. Opensource :511-561.
-
-    Returns the skip reason (a short string) or ``None`` if the trajectory is worth extracting.
-    """
+def _should_skip(messages: Sequence[ConversationItem]) -> str | None:
+    """Pre-filter combining structural + heuristic checks. Returns skip reason or ``None``."""
     if not messages:
         return "No messages after stripping system prompts"
-    if not any(msg.role == MessageRole.USER for msg in messages):
+    if not any(isinstance(msg, ChatMessage) and msg.role == "user" for msg in messages):
         return "No user messages found"
-    if not any(msg.role == MessageRole.ASSISTANT for msg in messages):
+    has_assistant = any(
+        (isinstance(msg, ChatMessage) and msg.role == "assistant") or isinstance(msg, ToolCallRequest)
+        for msg in messages
+    )
+    if not has_assistant:
         return "No assistant messages found"
 
     last_msg = messages[-1]
-    if last_msg.role != MessageRole.ASSISTANT or last_msg.tool_calls:
+    if isinstance(last_msg, ToolCallRequest) or not (
+        isinstance(last_msg, ChatMessage) and last_msg.role == "assistant"
+    ):
         return "Incomplete agent trajectory (last message is not a final assistant response)"
 
     has_tools = _has_tool_calls(messages)
     if not has_tools:
-        user_count = sum(1 for msg in messages if msg.role == MessageRole.USER)
+        user_count = sum(1 for msg in messages if isinstance(msg, ChatMessage) and msg.role == "user")
         if user_count < 2:
             return "Single-turn conversation without tool calls"
 
@@ -281,7 +226,7 @@ def _should_skip(messages: list[Message]) -> str | None:
             )
 
         assistant_content = " ".join(
-            (msg.content or "") for msg in messages if msg.role == MessageRole.ASSISTANT and not msg.tool_calls
+            render_content(msg.content) for msg in messages if isinstance(msg, ChatMessage) and msg.role == "assistant"
         )
         assistant_tokens = count_tokens(assistant_content)
         if assistant_tokens < FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS:
@@ -293,20 +238,19 @@ def _should_skip(messages: list[Message]) -> str | None:
     return None
 
 
-def _calc_tool_content_size(msg: Message) -> int:
-    """Tool-related token count of a single message. Opensource :140-150."""
-    if msg.role == MessageRole.TOOL:
+def _calc_tool_content_size(msg: ConversationItem) -> int:
+    """Tool-related token count of a single message."""
+    if isinstance(msg, ToolCallResult):
         return count_tokens(msg.content or "")
-    if msg.role == MessageRole.ASSISTANT and msg.tool_calls:
-        return sum(count_tokens(tc.function.get("arguments", "") or "") for tc in msg.tool_calls)
+    if isinstance(msg, ToolCallRequest):
+        return sum(count_tokens(tc.function.arguments or "") for tc in msg.tool_calls)
     return 0
 
 
-def _heuristic_trim(messages: list[Message]) -> tuple[list[Message], int]:
-    """Truncate oversized tool outputs / args / assistant responses; opensource :173-223 + :625-655.
+def _heuristic_trim(messages: Sequence[ConversationItem]) -> tuple[list[ConversationItem], int]:
+    """Truncate oversized tool outputs / args / assistant responses; auto-scales caps on overage.
 
-    Auto-scales the per-message caps inversely to overage when total tokens > scale_trigger. Returns
-    ``(trimmed_messages, original_total_tokens)``.
+    Returns ``(trimmed_messages, original_total_tokens)``.
     """
     total_tokens = count_tokens(_dump_messages(messages))
 
@@ -338,55 +282,55 @@ def _heuristic_trim(messages: list[Message]) -> tuple[list[Message], int]:
     return trimmed, total_tokens
 
 
-def _apply_truncation(  # noqa: C901  — algorithm-intrinsic branches mirror opensource :173-223
-    messages: list[Message],
+def _apply_truncation(  # noqa: C901  — algorithm-intrinsic branches
+    messages: Sequence[ConversationItem],
     max_tool_output: int,
     max_tool_args: int,
     max_assistant: int,
     head_ratio: float = 0.7,
-) -> list[Message]:
-    """Apply per-message head+tail truncation on a deep copy. Opensource :173-223."""
+) -> list[ConversationItem]:
+    """Apply per-message head+tail truncation on a deep copy."""
     result = [m.model_copy(deep=True) for m in messages]
     trimmed_count = 0
     for msg in result:
-        if msg.role == MessageRole.TOOL and msg.content:
+        if isinstance(msg, ToolCallResult) and msg.content:
             original = msg.content
             msg.content = truncate_text(original, max_tool_output, head_ratio=head_ratio)
             if msg.content != original:
                 trimmed_count += 1
-        elif msg.role == MessageRole.ASSISTANT:
-            if msg.tool_calls:
-                for tc in msg.tool_calls:
-                    args = tc.function.get("arguments", "")
-                    if args:
-                        new_args = truncate_text(args, max_tool_args, head_ratio=head_ratio)
-                        if new_args != args:
-                            tc.function["arguments"] = new_args
-                            trimmed_count += 1
+        elif isinstance(msg, ToolCallRequest):
+            for tc in msg.tool_calls:
+                args = tc.function.arguments
+                if args:
+                    new_args = truncate_text(args, max_tool_args, head_ratio=head_ratio)
+                    if new_args != args:
+                        tc.function.arguments = new_args
+                        trimmed_count += 1
             if msg.content:
                 new_content = truncate_text(msg.content, max_assistant, head_ratio=head_ratio)
                 if new_content != msg.content:
                     msg.content = new_content
                     trimmed_count += 1
+        elif isinstance(msg, ChatMessage) and msg.role == "assistant" and isinstance(msg.content, str) and msg.content:
+            new_content = truncate_text(msg.content, max_assistant, head_ratio=head_ratio)
+            if new_content != msg.content:
+                msg.content = new_content
+                trimmed_count += 1
     if trimmed_count > 0:
         logger.info("heuristic trim: truncated %d content fields", trimmed_count)
     return result
 
 
-def _collect_tool_call_groups(items: list[Message]) -> list[list[int]]:
-    """Collect atomic ``assistant-with-tool_calls + following tool responses`` groups. Opensource :225-245.
-
-    Groups must stay together across chunk boundaries — otherwise the LLM compression loses the
-    request/response pairing.
-    """
+def _collect_tool_call_groups(items: Sequence[ConversationItem]) -> list[list[int]]:
+    """Collect atomic ``ToolCallRequest + following ToolCallResult`` groups (must not be split across chunks)."""
     groups: list[list[int]] = []
     i = 0
     while i < len(items):
         msg = items[i]
-        if msg.role == MessageRole.ASSISTANT and msg.tool_calls:
+        if isinstance(msg, ToolCallRequest):
             group = [i]
             j = i + 1
-            while j < len(items) and items[j].role == MessageRole.TOOL:
+            while j < len(items) and isinstance(items[j], ToolCallResult):
                 group.append(j)
                 j += 1
             groups.append(group)
@@ -396,22 +340,25 @@ def _collect_tool_call_groups(items: list[Message]) -> list[list[int]]:
     return groups
 
 
-def _calc_group_size(items: list[Message], group: list[int]) -> int:
+def _calc_group_size(items: Sequence[ConversationItem], group: list[int]) -> int:
     """Total tool-content tokens of a tool-call group."""
     return sum(_calc_tool_content_size(items[idx]) for idx in group)
 
 
-async def _pre_compress_to_list(  # noqa: C901  — algorithm-intrinsic branches mirror opensource :251-363
-    original_data: list[Message],
+async def _pre_compress_to_list(  # noqa: C901  — algorithm-intrinsic branches
+    original_data: Sequence[ConversationItem],
     client: LLMClient,
     *,
     prompt: str | None = None,
-) -> list[Message]:
-    """Run selective LLM compression on the largest tool-call groups. Opensource :251-363.
+) -> list[ConversationItem]:
+    """Selectively compress the largest tool-call groups via parallel LLM calls.
 
-    Only the largest groups (by token size descending) are compressed until estimated total drops below
-    :data:`PRE_COMPRESS_CHUNK_SIZE`. Compressed chunks run in parallel via :func:`asyncio.gather`; per-chunk
-    LLM failure falls back to the originals.
+    Targets the largest groups until estimated total drops below ``PRE_COMPRESS_CHUNK_SIZE``.
+
+    Raises:
+        LLMError: Propagated from a chunk compression LLM call.
+        json.JSONDecodeError: If a chunk LLM response is not valid JSON.
+        ValueError: If a chunk returns None (shape mismatch) or the total compressed count mismatches.
     """
     items = [m.model_copy(deep=True) for m in original_data]
 
@@ -463,7 +410,7 @@ async def _pre_compress_to_list(  # noqa: C901  — algorithm-intrinsic branches
     if current_chunk:
         chunks.append(current_chunk)
 
-    chunk_msg_lists: list[list[Message]] = []
+    chunk_msg_lists: list[list[ConversationItem]] = []
     for chunk_groups in chunks:
         chunk_indices = [idx for group in chunk_groups for idx in group]
         chunk_msg_lists.append([items[idx] for idx in chunk_indices])
@@ -471,44 +418,36 @@ async def _pre_compress_to_list(  # noqa: C901  — algorithm-intrinsic branches
     # Compress all chunks in parallel.
     results = await asyncio.gather(
         *(_compress_tool_chunk(chunk_msgs, client, prompt=prompt) for chunk_msgs in chunk_msg_lists),
-        return_exceptions=True,
     )
-    all_compressed: list[Message] = []
+    all_compressed: list[ConversationItem] = []
     for round_idx, result in enumerate(results):
-        if isinstance(result, BaseException):
-            logger.warning("chunk %d compression error: %s, keeping originals", round_idx + 1, result)
-            all_compressed.extend(chunk_msg_lists[round_idx])
-        elif result is not None:
-            all_compressed.extend(result)
-        else:
-            logger.warning("chunk %d compression failed, keeping originals", round_idx + 1)
-            all_compressed.extend(chunk_msg_lists[round_idx])
+        if result is None:
+            raise ValueError(f"chunk {round_idx + 1} compression returned None (shape mismatch or invalid message)")
+        all_compressed.extend(result)
 
     selected_indices = sorted(idx for group in groups_to_compress for idx in group)
     if len(all_compressed) == len(selected_indices):
         for i, idx in enumerate(selected_indices):
             items[idx] = all_compressed[i]
     else:
-        logger.warning(
-            "compressed count %d != selected count %d, keeping originals",
-            len(all_compressed),
-            len(selected_indices),
-        )
+        raise ValueError(f"compressed count {len(all_compressed)} != selected count {len(selected_indices)}")
     return items
 
 
 async def _compress_tool_chunk(
-    messages: list[Message],
+    messages: Sequence[ConversationItem],
     client: LLMClient,
     *,
     prompt: str | None = None,
-) -> list[Message] | None:
-    """LLM-compress a single chunk of tool-related messages. Opensource :365-396.
+) -> list[ConversationItem] | None:
+    """LLM-compress one chunk of tool messages; preserves original timestamps.
 
-    Dumps the chunk to OpenAI wire format for the prompt (EverAlgo-private fields excluded); parses the
-    LLM response back into typed :class:`Message` objects, preserving each original message's
-    ``timestamp`` (the LLM does not re-emit it). No internal retry (ADR 012). Returns ``None`` on parse
-    failure / shape mismatch / per-message validation failure — caller falls back to originals.
+    Returns ``None`` for structural validation failures (wrong shape, non-dict messages) — those are
+    business validation signals, not parse errors. Parse and LLM errors propagate as exceptions.
+
+    Raises:
+        LLMError: Propagated from the underlying LLM client call.
+        json.JSONDecodeError: If the LLM response is not valid JSON.
     """
     rendered = render_prompt(
         AGENT_TOOL_PRE_COMPRESS_PROMPT,
@@ -516,15 +455,11 @@ async def _compress_tool_chunk(
         messages_json=_dump_messages(messages),
         new_count=len(messages),
     )
-    try:
-        response = await client.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
-        )
-        data: Any = json.loads(response.content)
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.warning("tool pre-compress JSON parse failed: %s", exc)
-        return None
+    response = await client.chat(
+        messages=[LLMChatMessage(role="user", content=rendered)],
+        response_format={"type": "json_object"},
+    )
+    data: Any = json.loads(response.content)  # let JSONDecodeError propagate
 
     if not isinstance(data, dict):
         return None
@@ -538,21 +473,50 @@ async def _compress_tool_chunk(
         logger.warning("tool pre-compress invalid shape (got %d, want %d)", len(compressed_list), len(messages))
         return None
 
-    rebuilt: list[Message] = []
+    rebuilt: list[ConversationItem] = []
     for orig, comp in zip(messages, compressed_list, strict=True):
         if not isinstance(comp, dict):
             logger.warning("tool pre-compress non-dict message in compressed list")
             return None
         comp_dict = cast("dict[str, Any]", comp)
         # LLM-compressed messages carry no timestamp; preserve the original message's timestamp so the
-        # rebuilt Message validates and downstream ordering / logging stays meaningful.
+        # rebuilt ConversationItem validates and downstream ordering / logging stays meaningful.
         merged = {**comp_dict, "timestamp": orig.timestamp}
         try:
-            rebuilt.append(Message.model_validate(merged))
-        except ValueError as exc:
+            rebuilt.append(_openai_dict_to_agent_item(merged, orig.timestamp))
+        except (ValueError, KeyError) as exc:
             logger.warning("tool pre-compress message validation failed: %s", exc)
             return None
     return rebuilt
+
+
+def _openai_dict_to_agent_item(d: dict[str, Any], timestamp: int) -> ConversationItem:
+    """Convert OpenAI-shaped dict back to ConversationItem, inferring discriminator from role / tool_calls."""
+    role = d.get("role")
+    if role == "tool":
+        return ToolCallResult(
+            kind="tool_result",
+            tool_call_id=d["tool_call_id"],
+            content=d.get("content", "") or "",
+            timestamp=timestamp,
+        )
+    if role == "assistant" and d.get("tool_calls"):
+        return ToolCallRequest(
+            kind="tool_call",
+            tool_calls=[ToolCall.model_validate(tc) for tc in d["tool_calls"]],
+            content=d.get("content"),
+            timestamp=timestamp,
+            sender_id=d.get("sender_id") or "assistant",
+        )
+    # else: ChatMessage (user / assistant final response)
+    return ChatMessage(
+        kind="text",
+        id=d.get("id") or "",
+        role=role if role in ("user", "assistant") else "assistant",  # type: ignore[arg-type]
+        content=d.get("content") or "",
+        timestamp=timestamp,
+        sender_id=d.get("sender_id") or role or "",
+    )
 
 
 async def _is_worth_extracting(
@@ -561,24 +525,21 @@ async def _is_worth_extracting(
     *,
     prompt: str | None = None,
 ) -> bool:
-    """LLM filter: decide whether the trajectory is worth extracting. Opensource :398-413.
+    """LLM filter: return ``True`` if the trajectory should proceed to compression.
 
-    Returns ``True`` when the trajectory should proceed to the compress step, ``False`` when the LLM
-    judges it not worth extracting. Used only when ``_count_tool_call_rounds <= 1`` (multi-round
-    trajectories skip this LLM call). ``prompt`` overrides :data:`AGENT_CASE_FILTER_PROMPT` per call;
-    ``None`` keeps the built-in default. Defaults to ``True`` when the LLM response is malformed
-    (opensource opinionated fallback :413 — fail-open so a parse error never silently drops a memory).
+    Used only when ``_count_tool_call_rounds <= 1``. When the LLM omits ``worth_extracting``,
+    defaults to ``True`` (schema permissiveness — not a fallback).
+
+    Raises:
+        LLMError: Propagated from the underlying LLM client call.
+        json.JSONDecodeError: If the LLM response is not valid JSON.
     """
     rendered = render_prompt(AGENT_CASE_FILTER_PROMPT, prompt, messages=messages_json)
-    try:
-        response = await client.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
-        )
-        data: Any = json.loads(response.content)
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.warning("filter LLM JSON parse failed: %s; defaulting to extract", exc)
-        return True
+    response = await client.chat(
+        messages=[LLMChatMessage(role="user", content=rendered)],
+        response_format={"type": "json_object"},
+    )
+    data: Any = json.loads(response.content)  # let JSONDecodeError propagate
 
     if isinstance(data, dict) and "worth_extracting" in data:
         data_dict = cast("dict[str, Any]", data)
@@ -595,22 +556,21 @@ async def _compress_experience(
     *,
     prompt: str | None = None,
 ) -> dict[str, Any] | None:
-    """Single LLM call to extract task_intent / approach / quality_score / key_insight. Opensource :415-449.
+    """Extract task_intent / approach / quality_score / key_insight via one LLM call (no retry).
 
-    ``prompt`` overrides :data:`AGENT_CASE_COMPRESS_PROMPT` per call; ``None`` keeps the built-in default.
-    No internal retry (ADR 012). Returns ``None`` when the LLM emits empty ``task_intent`` or ``approach`` —
-    the upstream skip semantics from opensource.
+    Returns ``None`` when the LLM emits empty ``task_intent`` or ``approach`` — those are business
+    validation failures (the trajectory isn't worth compressing), not parse errors.
+
+    Raises:
+        LLMError: Propagated from the underlying LLM client call.
+        json.JSONDecodeError: If the LLM response is not valid JSON.
     """
     rendered = render_prompt(AGENT_CASE_COMPRESS_PROMPT, prompt, messages=messages_json)
     response = await client.chat(
         messages=[LLMChatMessage(role="user", content=rendered)],
         response_format={"type": "json_object"},
     )
-    try:
-        data: Any = json.loads(response.content)
-    except json.JSONDecodeError as exc:
-        logger.warning("experience compress JSON parse failed: %s", exc)
-        return None
+    data: Any = json.loads(response.content)  # let JSONDecodeError propagate
 
     if not isinstance(data, dict) or "task_intent" not in data:
         logger.warning("experience compress missing 'task_intent' field")
@@ -626,7 +586,7 @@ async def _compress_experience(
 
 
 def _clamp_quality_score(value: Any) -> float:
-    """Clamp to [0.0, 1.0]; non-numeric falls back to ``0.5``. Opensource :451-459."""
+    """Clamp to [0.0, 1.0]; non-numeric defaults to ``0.5``."""
     if value is None:
         return 0.5
     try:

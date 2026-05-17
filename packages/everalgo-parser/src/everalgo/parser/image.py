@@ -11,10 +11,16 @@ __all__ = ["aparse", "parse"]
 
 
 async def aparse(raw_file: RawFile) -> ParsedContent:
-    """Async parse image → ParsedContent (含 OCR). Stub — TBD."""
+    """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+    Async parse image → ParsedContent (含 OCR). Stub — TBD.
+    """
     raise NotImplementedError("stub")
 
 
 def parse(raw_file: RawFile) -> ParsedContent:
-    """Sync parse image → ParsedContent. Stub — TBD."""
+    """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+    Sync parse image → ParsedContent. Stub — TBD.
+    """
     raise NotImplementedError("stub")

@@ -1,9 +1,10 @@
 """End-to-end pipeline test: caller-embedded MemCells → clustering → profile.
 
-Demonstrates the contract: ``cluster_by_geometry`` returns ``(cluster_id, state)``;
-the caller maintains a ``cluster_id -> [MemCell, ...]`` index; the prior
-``MemCell``s of the assigned cluster get handed to ``ProfileExtractor`` as
-``cluster_episodes``.
+Demonstrates the contract: ``cluster_by_geometry`` returns ``Cluster | None``;
+the caller maintains an id-keyed dict ``cluster_id -> Cluster`` and a
+``cluster_id -> [MemCell, ...]`` map; the prior ``MemCell``s of the assigned
+cluster are prepended to the current cell and passed to ``ProfileExtractor`` as a
+single chronological ``memcells`` list.
 
 No real embedding model is used — vectors are deterministic by hand so the
 geometric decisions are predictable.
@@ -11,152 +12,156 @@ geometric decisions are predictable.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import json
+from typing import Any
 
 import numpy as np
-import pytest
 
-import everalgo.llm
-from everalgo.clustering import ClusterConfig, ClusterState, cluster_by_geometry
+from everalgo.clustering import Cluster, cluster_by_geometry
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.types import MemCell, Message, MessageRole
+from everalgo.types import ChatMessage, MemCell
 from everalgo.user_memory.profile import ProfileExtractor
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
-
-@pytest.fixture(autouse=True)
-def reset_everalgo_llm_state() -> Iterator[None]:
-    """Reset the everalgo.llm default + active client between tests."""
-    saved_default = everalgo.llm._default
-    token = everalgo.llm._active.set(None)
-    try:
-        everalgo.llm._default = None
-        yield
-    finally:
-        everalgo.llm._default = saved_default
-        everalgo.llm._active.reset(token)
-
-
-def _memcell(event_id: str, content: str, ts_ms: int) -> MemCell:
-    msg = Message(
-        role=MessageRole.USER,
+def _memcell(content: str, ts_ms: int) -> MemCell:
+    msg = ChatMessage(
+        id="m0",
+        role="user",
         content=content,
         timestamp=ts_ms,
         sender_id="u_alice",
         sender_name="Alice",
     )
-    return MemCell(
-        event_id=event_id,
-        original_data=[{"message": msg.model_dump(exclude_none=True)}],
-        timestamp=ts_ms,
-        participants=["u_alice"],
-        sender_ids=["u_alice"],
-    )
+    return MemCell(items=[msg], timestamp=ts_ms)
 
 
 async def test_two_similar_memcells_cluster_then_profile_sees_prior() -> None:
     """Three MemCells stream through clustering; topic-similar pair shares a cluster.
 
     Scenario:
-    - mc_python_1 (vec=[1,0,0]) — first ever, mints ``cluster_000``.
-    - mc_python_2 (vec=[0.95,0.05,0]) — cosine ≈ 0.998 vs centroid → joins cluster_000.
-    - mc_cooking  (vec=[0,0,1])     — orthogonal → mints ``cluster_001``.
+    - mc_python_1 (vec=[1,0,0]) — first ever, appended as clusters[0].
+    - mc_python_2 (vec=[0.95,0.05,0]) — cosine ≈ 0.998 vs centroid → merged into clusters[0].
+    - mc_cooking  (vec=[0,0,1])     — orthogonal → appended as clusters[1].
 
-    Then ``mc_python_2`` is fed to ``ProfileExtractor`` with the first cell as
-    ``cluster_episodes``. Asserts:
-        1. Cluster ids match expectations.
+    Then ``mc_python_2`` is fed to ``ProfileExtractor`` with the first cell prepended as
+    prior context in a single ``memcells`` list.  Asserts:
+        1. Cluster index assignments match expectations.
         2. ``ProfileExtractor`` receives the prior MemCell's content in its prompt.
         3. Profile owner_id propagates from ``mc_python_2``.
     """
     base_ts = 1_700_000_000_000
-    mc_python_1 = _memcell("mc_py_1", "How do async retry loops work in Python?", base_ts)
-    mc_python_2 = _memcell("mc_py_2", "Followup on async timeouts in asyncio.", base_ts + 60_000)
-    mc_cooking = _memcell("mc_cook_1", "Any tips on sourdough hydration?", base_ts + 120_000)
+    mc_python_1 = _memcell("How do async retry loops work in Python?", base_ts)
+    mc_python_2 = _memcell("Followup on async timeouts in asyncio.", base_ts + 60_000)
+    mc_cooking = _memcell("Any tips on sourdough hydration?", base_ts + 120_000)
 
     vec_python_1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     vec_python_2 = np.array([0.95, 0.05, 0.0], dtype=np.float32)
     vec_cooking = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
-    state = ClusterState.empty()
-    cid_to_memcells: dict[str, list[MemCell]] = {}
-    config = ClusterConfig()
+    cluster_store: dict[str, Cluster] = {}  # id -> Cluster
+    id_to_memcells: dict[str, list[MemCell]] = {}
+    next_id = 0
 
-    for memcell, vec in [
-        (mc_python_1, vec_python_1),
-        (mc_python_2, vec_python_2),
-        (mc_cooking, vec_cooking),
+    for memcell, vec, entity_id in [
+        (mc_python_1, vec_python_1, "mc_001"),
+        (mc_python_2, vec_python_2, "mc_002"),
+        (mc_cooking, vec_cooking, "mc_003"),
     ]:
-        cid, state = await cluster_by_geometry(vec, memcell.timestamp, state, config=config)
-        cid_to_memcells.setdefault(cid, []).append(memcell)
+        new_c = Cluster(centroid=vec, last_ts=memcell.timestamp, members=[entity_id])
+        result = await cluster_by_geometry(new_c, list(cluster_store.values()))
+        if result is None:
+            cid = f"cid_{next_id}"
+            next_id += 1
+            cluster_store[cid] = Cluster(
+                id=cid,
+                centroid=new_c.centroid,
+                count=1,
+                last_ts=new_c.last_ts,
+                preview=new_c.preview,
+                members=new_c.members,
+            )
+            id_to_memcells.setdefault(cid, []).append(memcell)
+        else:
+            assert result.id is not None
+            cluster_store[result.id] = result
+            id_to_memcells.setdefault(result.id, []).append(memcell)
 
     # Geometric expectations.
-    assert state.next_idx == 2
-    assert len(cid_to_memcells) == 2
-    py_cid = next(cid for cid, cells in cid_to_memcells.items() if mc_python_1 in cells)
-    cook_cid = next(cid for cid, cells in cid_to_memcells.items() if mc_cooking in cells)
+    assert len(cluster_store) == 2
+    assert len(id_to_memcells) == 2
+    py_cid = next(cid for cid, cells in id_to_memcells.items() if mc_python_1 in cells)
+    cook_cid = next(cid for cid, cells in id_to_memcells.items() if mc_cooking in cells)
     assert py_cid != cook_cid
-    assert cid_to_memcells[py_cid] == [mc_python_1, mc_python_2]
-    assert cid_to_memcells[cook_cid] == [mc_cooking]
+    assert id_to_memcells[py_cid] == [mc_python_1, mc_python_2]
+    assert id_to_memcells[cook_cid] == [mc_cooking]
+    # members tracks entity ids through merge — python cluster holds mc_001 and mc_002.
+    assert cluster_store[py_cid].members == ["mc_001", "mc_002"]
+    assert cluster_store[cook_cid].members == ["mc_003"]
 
-    # Downstream ProfileExtractor: feed mc_python_2 + its prior cluster MemCells.
+    # Downstream ProfileExtractor: feed [prior_cells..., mc_python_2] as one chronological list.
     captured_prompt: dict[str, str] = {}
 
     def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
         captured_prompt["text"] = messages[0].content
         return ChatResponse(
-            content=(
-                '{"explicit_info": ['
-                '{"category": "Technical Skills",'
-                ' "description": "Alice is a Python developer interested in async.",'
-                ' "evidence": "Asked about async retries and timeouts.",'
-                ' "sources": ["mc_py_1", "mc_py_2"]}'
-                "],"
-                '"implicit_traits": []}'
+            content=json.dumps(
+                {
+                    "explicit_info": [
+                        {
+                            "category": "Technical Skills",
+                            "description": "Alice is a Python developer interested in async.",
+                            "evidence": "Asked about async retries and timeouts.",
+                        }
+                    ],
+                    "implicit_traits": [],
+                }
             ),
             model="fake",
         )
 
     fake = FakeLLMClient(handler=handler)
-    prior_cells = cid_to_memcells[py_cid][:-1]  # everything except mc_python_2 itself
+    prior_cells = id_to_memcells[py_cid][:-1]  # everything except mc_python_2 itself
 
-    profile = await ProfileExtractor().aextract(
-        mc_python_2,
-        cluster_episodes=prior_cells,
-        llm=fake,
+    profile = await ProfileExtractor(llm=fake).aextract(
+        [*prior_cells, mc_python_2],
+        sender_id="u_alice",
     )
 
     assert profile.owner_id == "u_alice"
-    # The prior MemCell's content reached the prompt — proving the pipeline composed.
     rendered = captured_prompt["text"]
     assert "async retry loops" in rendered
     assert "async timeouts" in rendered
 
 
 async def test_state_persistence_roundtrip_keeps_pipeline_consistent() -> None:
-    """Persist after one event, restore, continue clustering — second event lands in the same cluster.
+    """Persist after one event, restore via pydantic serialisation, continue clustering.
 
-    Verifies ``to_dict``/``from_dict`` round-trip is lossless enough for the
-    geometry decision to be identical on the restored state.
+    Verifies Cluster.model_dump() / model_validate() round-trip is lossless enough for the
+    geometry decision to be identical on the restored clusters list.
     """
     base_ts = 1_700_000_000_000
-    mc_1 = _memcell("mc_1", "How does asyncio handle cancellation?", base_ts)
-    mc_2 = _memcell("mc_2", "Followup on asyncio cancel semantics.", base_ts + 60_000)
+    mc_1 = _memcell("How does asyncio handle cancellation?", base_ts)
+    mc_2 = _memcell("Followup on asyncio cancel semantics.", base_ts + 60_000)
 
     vec_1 = np.array([1.0, 0.0], dtype=np.float32)
     vec_2 = np.array([0.99, 0.01], dtype=np.float32)
 
-    state = ClusterState.empty()
-    cid_1, state = await cluster_by_geometry(vec_1, mc_1.timestamp, state, config=ClusterConfig())
+    clusters: list[Cluster] = []
+    new_c1 = Cluster(id="cid_0", centroid=vec_1, last_ts=mc_1.timestamp)
+    result_1 = await cluster_by_geometry(new_c1, clusters)
+    assert result_1 is None
+    clusters.append(new_c1)
 
-    # Caller persists.
-    serialised = state.to_dict()
-    restored = ClusterState.from_dict(serialised)
+    # Caller persists via pydantic serialisation.
+    serialised = [c.model_dump() for c in clusters]
+    restored: list[Cluster] = [Cluster.model_validate(d) for d in serialised]
 
-    # Continue from restored state.
-    cid_2, _ = await cluster_by_geometry(vec_2, mc_2.timestamp, restored, config=ClusterConfig())
+    # Continue from restored clusters list.
+    new_c2 = Cluster(centroid=vec_2, last_ts=mc_2.timestamp)
+    result_2 = await cluster_by_geometry(new_c2, restored)
 
-    assert cid_1 == cid_2 == "cluster_000"
+    assert result_1 is None  # first was a new cluster (appended)
+    assert result_2 is not None  # second merges into restored[0]
+    assert result_2.id == "cid_0"  # id passes through from existing

@@ -9,7 +9,7 @@
 EverAlgo 涉及聚类的链路（基于 memsys_opensource 现状代码核证，2026-04-29）：
 
 - **直接消费 `cluster_id`**：`AgentSkillExtractor.aextract(case, cluster_id=...)` —— 同 cluster 下的多个 `AgentCase` 聚合为一个 `AgentSkill`（agent_skill_extractor.py:427 等多处直接接 `cluster_id: str`）
-- **间接消费 `cluster_id`**：`ProfileExtractor.aextract(memcell, cluster_episodes=...)` —— 算子签名不接 `cluster_id`，编排层按 `cluster_id` 反查 `eventid_to_cluster` + fetch memcells 后传 `cluster_episodes` 列表给算子作上下文
+- **间接消费 `cluster_id`**：`ProfileExtractor.aextract(memcells=[*cluster_memcells, current])` —— 算子签名不接 `cluster_id`，编排层按 `cluster_id` 反查 `eventid_to_cluster` + fetch memcells 后拼接为单一 chronological 列表传给算子作上下文
 - **不消费 cluster**：`AtomicFactExtractor` / `EpisodeExtractor` / `ForesightExtractor` 走独立路径，单条 MemCell 提取，与聚类零关系
 
 **v0.34 论据精确化注**：本 ADR 早期描述"Profile 合并 AtomicFact / AgentSkill 合并 AgentCase 都用聚类，两种策略 centroid + llm_direct"基于 §2.4 早期设计预设；现状代码核证后修正——

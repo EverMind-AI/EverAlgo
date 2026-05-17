@@ -1,71 +1,50 @@
 """End-to-end pipeline test: messages → boundary → profile (with prior cluster).
 
-LLM JSON follows new-release ``PROFILE_INITIAL_EXTRACTION_PROMPT`` schema:
+LLM JSON follows ``PROFILE_INITIAL_EXTRACTION_PROMPT`` schema:
 ``{"explicit_info": [...], "implicit_traits": [...]}``.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-import pytest
-
-import everalgo.llm
-from everalgo.boundary.chat import ChatMemCellExtractor
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.assertions import assert_profile_shape
 from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.types import MemCell, Message, MessageRole
+from everalgo.types import ChatMessage, MemCell
+from everalgo.user_memory import BoundaryDetector
 from everalgo.user_memory.profile import ProfileExtractor
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-
-@pytest.fixture(autouse=True)
-def reset_everalgo_llm_state() -> Iterator[None]:
-    """Reset everalgo.llm._default + _active per test."""
-    saved_default = everalgo.llm._default
-    token = everalgo.llm._active.set(None)
-    try:
-        everalgo.llm._default = None
-        yield
-    finally:
-        everalgo.llm._default = saved_default
-        everalgo.llm._active.reset(token)
 
 
 def _prior_cluster() -> list[MemCell]:
     """Two pre-existing MemCells for the same user as cluster context."""
-    msg1 = Message(
-        role=MessageRole.USER,
-        content="I've been digging into Python async patterns lately.",
-        timestamp=1690000000000,
-        sender_id="u_alice",
-        sender_name="Alice",
-    )
-    msg2 = Message(
-        role=MessageRole.USER,
-        content="I prefer ruff over black for formatting.",
-        timestamp=1695000000000,
-        sender_id="u_alice",
-        sender_name="Alice",
-    )
     return [
         MemCell(
-            event_id="mc_prior_001",
-            original_data=[{"message": msg1.model_dump(exclude_none=True)}],
+            items=[
+                ChatMessage(
+                    id="m10",
+                    role="user",
+                    content="I've been digging into Python async patterns lately.",
+                    timestamp=1690000000000,
+                    sender_id="u_alice",
+                    sender_name="Alice",
+                )
+            ],
             timestamp=1690000000000,
-            participants=["u_alice"],
-            sender_ids=["u_alice"],
         ),
         MemCell(
-            event_id="mc_prior_002",
-            original_data=[{"message": msg2.model_dump(exclude_none=True)}],
+            items=[
+                ChatMessage(
+                    id="m11",
+                    role="user",
+                    content="I prefer ruff over black for formatting.",
+                    timestamp=1695000000000,
+                    sender_id="u_alice",
+                    sender_name="Alice",
+                )
+            ],
             timestamp=1695000000000,
-            participants=["u_alice"],
-            sender_ids=["u_alice"],
         ),
     ]
 
@@ -74,7 +53,7 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
     """Boundary detects 1 MemCell, profile synthesises a snapshot via single-call initial extraction.
 
     Two LLM calls total:
-    - Call 1 (boundary detect): new-release batch contract.
+    - Call 1 (boundary detect): batch boundary detection.
     - Call 2 (profile initial extraction): emits ``{explicit_info, implicit_traits}``.
 
     Verifies:
@@ -99,15 +78,13 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
                 '{"explicit_info": ['
                 '{"category": "Technical Skills",'
                 ' "description": "Alice is a Python developer focused on async patterns.",'
-                ' "evidence": "Alice asked about async retry semantics.",'
-                ' "sources": ["2024-03-10 10:00|mc_new"]}'
+                ' "evidence": "Alice asked about async retry semantics."}'
                 "],"
                 '"implicit_traits": ['
                 '{"trait": "[Pragmatic]",'
                 ' "description": "Prefers tooling that minimises ceremony.",'
                 ' "basis": "Repeated preference for ruff over black.",'
-                ' "evidence": "Mentioned ruff preference in prior conversation.",'
-                ' "sources": ["2024-03-08 09:00|mc_prior_002", "2024-03-10 10:00|mc_new"]}'
+                ' "evidence": "Mentioned ruff preference in prior conversation."}'
                 "]}"
             ),
             model="fake",
@@ -115,26 +92,29 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
 
     fake = FakeLLMClient(handler=handler)
     new_msgs = [
-        Message(
-            role=MessageRole.USER,
+        ChatMessage(
+            id="m1",
+            role="user",
             content="Quick question on async retry semantics in Python.",
             timestamp=1700000010000,
             sender_id="u_alice",
             sender_name="Alice",
         ),
-        Message(
-            role=MessageRole.ASSISTANT,
+        ChatMessage(
+            id="m2",
+            role="assistant",
             content="Sure — what's the failure mode you're seeing?",
             timestamp=1700000011000,
+            sender_id="assistant",
         ),
     ]
 
-    output = await ChatMemCellExtractor().adetect(new_msgs, llm=fake, is_final=True)
+    output = await BoundaryDetector(llm=fake).adetect(new_msgs, is_final=True)
     assert output.tail == []
     assert len(output.cells) == 1
     mc = output.cells[0]
 
-    profile = await ProfileExtractor().aextract(mc, cluster_episodes=_prior_cluster(), llm=fake)
+    profile = await ProfileExtractor(llm=fake).aextract([*_prior_cluster(), mc], sender_id="u_alice")
 
     pf = assert_profile_shape(profile)
     assert pf.owner_id == "u_alice"
@@ -145,7 +125,6 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
 
     # Cluster rendering reached the profile prompt
     prompt_text = captured_profile_prompt["text"]
-    assert "mc_prior_001" in prompt_text
     assert "Python async patterns" in prompt_text
     assert "ruff over black" in prompt_text
     assert call_count == 2  # 1 boundary + 1 profile

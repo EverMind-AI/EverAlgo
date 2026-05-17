@@ -7,175 +7,116 @@ from typing import Any
 import numpy as np
 import pytest
 
-from everalgo.clustering import ClusterConfig, ClusterState, cluster_by_llm
+from everalgo.clustering import Cluster, cluster_by_llm
 from everalgo.llm.types import ChatMessage, ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 
 _BASE_TS_MS = 1_700_000_000_000
 
 
-def _seed_with_two_clusters() -> ClusterState:
-    return ClusterState(
-        centroids={
-            "cluster_000": np.array([1.0, 0.0], dtype=np.float32),
-            "cluster_001": np.array([0.0, 1.0], dtype=np.float32),
-        },
-        counts={"cluster_000": 3, "cluster_001": 2},
-        last_ts={"cluster_000": _BASE_TS_MS, "cluster_001": _BASE_TS_MS},
-        next_idx=2,
-    )
+def _c(vec: list[float], ts: int = _BASE_TS_MS, count: int = 1, preview: list[str] | None = None) -> Cluster:
+    return Cluster(centroid=np.array(vec, dtype=np.float32), last_ts=ts, count=count, preview=preview or [])
 
 
-async def test_empty_state_skips_llm_and_creates_first_cluster() -> None:
-    state = ClusterState.empty()
-    vector = np.array([1.0, 0.0], dtype=np.float32)
-    # FakeLLMClient with no scripted responses — if cluster_by_llm tries to call it, it raises.
+def _two_clusters() -> list[Cluster]:
+    return [
+        _c([1.0, 0.0], count=3),
+        _c([0.0, 1.0], count=2),
+    ]
+
+
+async def test_empty_existing_skips_llm_and_returns_none() -> None:
+    new_c = _c([1.0, 0.0])
     llm = FakeLLMClient(responses=[])
 
-    cid, new_state = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "any text",
-        state,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-    )
+    result = await cluster_by_llm(new_c, [], llm=llm)
 
-    assert cid == "cluster_000"
-    assert new_state.next_idx == 1
+    assert result is None
     assert llm.call_count == 0
 
 
 async def test_fast_path_top1_above_skip_threshold_skips_llm() -> None:
-    seed = _seed_with_two_clusters()
+    existing = _two_clusters()
     # cosine([0.999, 0.001], [1,0]) ≈ 0.9999 > 0.85 skip threshold.
-    vector = np.array([0.999, 0.001], dtype=np.float32)
+    new_c = _c([0.999, 0.001])
     llm = FakeLLMClient(responses=[])
 
-    cid, _new = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "match top1",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-    )
+    result = await cluster_by_llm(new_c, existing, llm=llm)
 
-    assert cid == "cluster_000"
+    assert result is not None
+    assert result.count == 4
     assert llm.call_count == 0
 
 
 async def test_llm_called_when_top1_below_skip_threshold() -> None:
-    seed = _seed_with_two_clusters()
-    # cosine([0.7, 0.7], [1,0]) ≈ 0.707 — below 0.85 skip, above 0.65 fallback threshold.
-    vector = np.array([0.7, 0.7], dtype=np.float32)
-    llm = FakeLLMClient(responses=['{"cluster_id": "cluster_001", "reason": "matches case bucket"}'])
+    existing = _two_clusters()
+    # cosine([0.7, 0.7], [1,0]) ≈ 0.707 — below 0.85 skip.
+    new_c = _c([0.7, 0.7], preview=["ambiguous task"])
+    llm = FakeLLMClient(responses=['{"idx": 1, "reason": "matches case bucket"}'])
 
-    cid, _new = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "ambiguous task",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={"cluster_000": ["prev"], "cluster_001": ["x"]},
-    )
+    result = await cluster_by_llm(new_c, existing, llm=llm)
 
     assert llm.call_count == 1
-    assert cid == "cluster_001"  # LLM's choice wins over geometric top-1.
+    assert result is not None
+    assert result.count == 3  # LLM's choice (existing[1], count=2) + new
 
 
-async def test_llm_returns_unknown_cluster_id_creates_new() -> None:
-    seed = _seed_with_two_clusters()
-    vector = np.array([0.7, 0.7], dtype=np.float32)
-    # LLM picks a cluster that doesn't exist in state → treat as "create new".
-    llm = FakeLLMClient(responses=['{"cluster_id": "cluster_999", "reason": "new domain"}'])
+async def test_llm_returns_minus_one_creates_new() -> None:
+    existing = _two_clusters()
+    new_c = _c([0.7, 0.7], preview=["novel task"])
+    llm = FakeLLMClient(responses=['{"idx": -1, "reason": "new domain"}'])
 
-    cid, new_state = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "novel task",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-    )
+    result = await cluster_by_llm(new_c, existing, llm=llm)
 
-    assert cid == "cluster_002"  # next_idx was 2 → freshly minted.
-    assert new_state.next_idx == 3
+    assert result is None
 
 
-async def test_llm_fallback_after_all_retries_fail_assigns_top1_when_above_threshold() -> None:
-    seed = _seed_with_two_clusters()
-    vector = np.array([0.7, 0.7], dtype=np.float32)  # top-1 sim ~0.707, above 0.65 threshold.
-    # 3 bad responses → retries exhausted → fallback path.
-    llm = FakeLLMClient(responses=["not json", "still not", "garbage"])
+async def test_llm_returns_out_of_range_idx_creates_new() -> None:
+    existing = _two_clusters()
+    new_c = _c([0.7, 0.7])
+    llm = FakeLLMClient(responses=['{"idx": 999, "reason": "new domain"}'])
 
-    cid, _new = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "anything",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-    )
+    result = await cluster_by_llm(new_c, existing, llm=llm)
 
-    assert llm.call_count == 3
-    assert cid == "cluster_000"  # Fell back to geometric top-1.
+    assert result is None
 
 
-async def test_llm_fallback_below_threshold_creates_new() -> None:
-    seed = _seed_with_two_clusters()
-    # cos([0.5, -1], [1, 0]) = 0.5 / sqrt(1.25) ≈ 0.447 → below 0.65 fallback threshold.
-    vector = np.array([0.5, -1.0], dtype=np.float32)
-    llm = FakeLLMClient(responses=["bad", "bad", "bad"])
+async def test_bad_llm_response_raises_value_error() -> None:
+    """Non-JSON response from LLM → ValueError propagates (no retry, no fallback)."""
+    existing = _two_clusters()
+    new_c = _c([0.7, 0.7])
+    llm = FakeLLMClient(responses=["not json"])
 
-    cid, new_state = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "off-distribution",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-    )
+    with pytest.raises(ValueError):
+        await cluster_by_llm(new_c, existing, llm=llm)
 
-    assert cid == "cluster_002"
-    assert new_state.next_idx == 3
+    assert llm.call_count == 1
 
 
-async def test_llm_missing_cluster_id_field_counts_as_retry_failure() -> None:
-    seed = _seed_with_two_clusters()
-    vector = np.array([0.7, 0.7], dtype=np.float32)
-    # All three responses are valid JSON but missing "cluster_id" → retries exhausted → fallback.
-    llm = FakeLLMClient(responses=['{"reason": "x"}', '{"reason": "y"}', '{"reason": "z"}'])
+async def test_llm_missing_idx_field_raises_value_error() -> None:
+    """Valid JSON but missing 'idx' field → ValueError propagates (no fallback)."""
+    existing = _two_clusters()
+    new_c = _c([0.7, 0.7])
+    llm = FakeLLMClient(responses=['{"reason": "x"}'])
 
-    cid, _new = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "schema-broken",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-    )
+    with pytest.raises(ValueError, match="missing 'idx' field"):
+        await cluster_by_llm(new_c, existing, llm=llm)
 
-    assert llm.call_count == 3
-    assert cid == "cluster_000"  # Geometric fallback to top-1.
+    assert llm.call_count == 1
 
 
-async def test_llm_clusters_json_contains_previews_and_counts() -> None:
-    seed = _seed_with_two_clusters()
-    vector = np.array([0.7, 0.7], dtype=np.float32)
+async def test_llm_clusters_json_contains_idx_count_preview() -> None:
+    existing = [
+        _c([1.0, 0.0], count=3, preview=["fix login bug"]),
+        _c([0.0, 1.0], count=2, preview=["refactor auth"]),
+    ]
+    new_c = _c([0.7, 0.7], preview=["investigate token leak"])
     captured: dict[str, str] = {}
 
     def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
         captured["prompt"] = messages[0].content
         return ChatResponse(
-            content='{"cluster_id": "cluster_000", "reason": "test"}',
+            content='{"idx": 0, "reason": "test"}',
             model="fake",
             usage=None,
             finish_reason="stop",
@@ -183,37 +124,27 @@ async def test_llm_clusters_json_contains_previews_and_counts() -> None:
         )
 
     llm = FakeLLMClient(handler=handler)
-    previews = {"cluster_000": ["fix login bug"], "cluster_001": ["refactor auth"]}
 
-    await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "investigate token leak",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews=previews,
-    )
+    await cluster_by_llm(new_c, existing, llm=llm)
 
     rendered = captured["prompt"]
     assert "investigate token leak" in rendered
     assert "fix login bug" in rendered
     assert "refactor auth" in rendered
-    assert '"item_count": 3' in rendered
-    # next_new_id should reflect state.next_idx = 2 → "002".
-    assert "cluster_002" in rendered
+    assert '"count": 3' in rendered
+    assert '"idx": 0' in rendered
 
 
 async def test_caller_supplied_prompt_overrides_default() -> None:
-    seed = _seed_with_two_clusters()
-    vector = np.array([0.7, 0.7], dtype=np.float32)
-    custom = "OVERRIDE memcell={memcell_text} clusters={clusters_json} new={next_new_id}"
+    existing = _two_clusters()
+    new_c = _c([0.7, 0.7], preview=["hello"])
+    custom = "OVERRIDE memcell={memcell_text} clusters={clusters_json}"
     captured: dict[str, str] = {}
 
     def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
         captured["prompt"] = messages[0].content
         return ChatResponse(
-            content='{"cluster_id": "cluster_000", "reason": "ok"}',
+            content='{"idx": 0, "reason": "ok"}',
             model="fake",
             usage=None,
             finish_reason="stop",
@@ -222,16 +153,7 @@ async def test_caller_supplied_prompt_overrides_default() -> None:
 
     llm = FakeLLMClient(handler=handler)
 
-    await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "hello",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-        prompt=custom,
-    )
+    await cluster_by_llm(new_c, existing, llm=llm, prompt=custom)
 
     assert captured["prompt"].startswith("OVERRIDE memcell=hello")
 
@@ -239,24 +161,72 @@ async def test_caller_supplied_prompt_overrides_default() -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        '```json\n{"cluster_id": "cluster_000", "reason": "fence-wrapped"}\n```',
+        '```json\n{"idx": 0, "reason": "fence-wrapped"}\n```',
     ],
 )
 async def test_llm_response_with_json_fence_is_parsed(raw: str) -> None:
-    seed = _seed_with_two_clusters()
-    vector = np.array([0.7, 0.7], dtype=np.float32)
+    existing = _two_clusters()
+    new_c = _c([0.7, 0.7])
     llm = FakeLLMClient(responses=[raw])
 
-    cid, _new = await cluster_by_llm(
-        vector,
-        _BASE_TS_MS,
-        "fenced response",
-        seed,
-        config=ClusterConfig(),
-        llm=llm,
-        cluster_previews={},
-    )
+    result = await cluster_by_llm(new_c, existing, llm=llm)
 
-    # Direct json.loads will fail; the ```json``` fence fallback kicks in.
-    assert cid == "cluster_000"
+    assert result is not None
     assert llm.call_count == 1
+
+
+async def test_preview_empty_when_new_cluster_has_no_preview() -> None:
+    """When new_cluster.preview is empty, query_text is '' and prompt still renders."""
+    existing = _two_clusters()
+    new_c = _c([0.7, 0.7])  # no preview
+    captured: dict[str, str] = {}
+
+    def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
+        captured["prompt"] = messages[0].content
+        return ChatResponse(
+            content='{"idx": 0, "reason": "ok"}', model="fake", usage=None, finish_reason="stop", raw=None
+        )
+
+    llm = FakeLLMClient(handler=handler)
+    await cluster_by_llm(new_c, existing, llm=llm)
+
+    assert "idx" in captured["prompt"]  # prompt rendered without error
+
+
+async def test_merge_appends_members_via_llm_path() -> None:
+    existing = [
+        Cluster(
+            centroid=np.array([1.0, 0.0], dtype=np.float32),
+            last_ts=_BASE_TS_MS,
+            count=2,
+            members=["a", "b"],
+        )
+    ]
+    new_c = Cluster(
+        centroid=np.array([0.999, 0.001], dtype=np.float32),
+        last_ts=_BASE_TS_MS + 1,
+        members=["c"],
+    )
+    # cosine ~0.9999 >= 0.85 skip threshold → fast-path merge, no LLM call.
+    llm = FakeLLMClient(responses=[])
+
+    result = await cluster_by_llm(new_c, existing, llm=llm)
+
+    assert result is not None
+    assert result.members == ["a", "b", "c"]
+    assert llm.call_count == 0
+
+
+async def test_none_path_preserves_new_members_llm() -> None:
+    # Empty existing → None; caller keeps new_c with its members.
+    new_c = Cluster(
+        centroid=np.array([1.0, 0.0], dtype=np.float32),
+        last_ts=_BASE_TS_MS,
+        members=["entity_y"],
+    )
+    llm = FakeLLMClient(responses=[])
+
+    result = await cluster_by_llm(new_c, [], llm=llm)
+
+    assert result is None
+    assert new_c.members == ["entity_y"]

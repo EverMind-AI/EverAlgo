@@ -1,33 +1,71 @@
-"""Agent-side memory data contracts — AgentCase / AgentSkill.
+"""Agent trajectory wire types (``ToolCallRequest``, ``ToolCallResult``) and agent-memory output types."""
 
-Field set is the algorithm-required subset of the opensource ``api_specs/memory_types.py`` shapes (see
-``packages/everalgo-agent-memory/src/everalgo/agent_memory/DESIGN.md`` §6 for the mapping). Caller-managed
-metadata (``user_id`` / ``group_id`` / ``sender_ids`` / ``vector`` etc.) flow through ``extra="allow"`` so
-evermem can attach owner info without forcing a schema bump.
-"""
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+# ---------------------------------------------------------------------------
+# Trajectory wire types — agent-specific items in a ConversationItem union
+# ---------------------------------------------------------------------------
+
+
+class ToolCallFunction(BaseModel):
+    """Function descriptor inside a single :class:`ToolCall` (OpenAI Chat Completion shape)."""
+
+    name: str
+    arguments: str  # Raw JSON string per OpenAI spec; algorithm library does not pre-parse.
+
+
+class ToolCall(BaseModel):
+    """A single tool invocation declared by the assistant within :class:`ToolCallRequest`."""
+
+    id: str  # Unique identifier — referenced back by ToolCallResult.tool_call_id.
+    type: Literal["function"] = "function"
+    function: ToolCallFunction
+
+
+class ToolCallRequest(BaseModel):
+    """Assistant-emitted request to invoke one or more tools.
+
+    A single turn may issue several tool calls in parallel; ``tool_calls`` is the ordered list.
+    ``content`` carries the optional reasoning text the assistant produced alongside the calls.
+    """
+
+    kind: Literal["tool_call"] = "tool_call"
+    tool_calls: list[ToolCall]
+    timestamp: int  # Unix epoch milliseconds
+    content: str | None = None
+    sender_id: str = Field(description="Assistant identity")
+    sender_name: str | None = Field(default=None, description="Assistant display name")
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class ToolCallResult(BaseModel):
+    """Result returned by tool execution; ``tool_call_id`` points back to the originating :class:`ToolCall`."""
+
+    kind: Literal["tool_result"] = "tool_result"
+    tool_call_id: str
+    content: str
+    timestamp: int  # Unix epoch milliseconds
+
+    model_config = ConfigDict(extra="ignore")
+
+
+# ---------------------------------------------------------------------------
+# Agent-memory output types — produced by everalgo-agent-memory extractors
+# ---------------------------------------------------------------------------
 
 
 class AgentCase(BaseModel):
-    """One agent-trajectory experience distilled from a single MemCell.
+    """One agent-trajectory experience distilled from a single MemCell — at most one case per cell.
 
-    Each MemCell of agent-conversation type yields at most one AgentCase; multi-turn problem-solving for a
-    single task is synthesized into a single record. ``task_intent`` is the retrieval anchor (head-truncated
-    to ~300 tokens after extraction); ``approach`` is the natural-language numbered plan with inline
-    decisions, results and lessons; ``quality_score`` ∈ [0.0, 1.0] gates the success-vs-failure prompt
-    selection downstream in :class:`AgentSkillExtractor`; ``key_insight`` is the optional pivotal-strategy
-    quote when the LLM identifies one.
-
-    Caller-managed fields (``vector`` / ``vector_model`` / ``user_id`` / ``group_id`` / ``sender_ids`` / ...)
-    are accepted via ``extra="allow"`` — EverAlgo never sets nor reads them; evermem persists them.
+    ``quality_score`` ∈ [0.0, 1.0] gates success-vs-failure prompt selection in ``AgentSkillExtractor``.
+    Caller-managed fields (``vector``, ``user_id``, …) are accepted via ``extra="allow"``.
     """
 
     id: str
-    timestamp: int  # Unix epoch milliseconds, mirrors MemCell/Episode
-    parent_type: str = "memcell"
-    parent_id: str
-
+    timestamp: int  # Unix epoch milliseconds, mirrors source MemCell
     task_intent: str
     approach: str = ""
     quality_score: float = 0.5
@@ -37,28 +75,22 @@ class AgentCase(BaseModel):
 
 
 class AgentSkill(BaseModel):
-    """Reusable skill aggregated from clustered :class:`AgentCase` instances.
+    """Reusable skill aggregated from clustered ``AgentCase`` instances.
 
-    Skills live under a specific ``cluster_id`` (produced by :func:`everalgo.clustering.cluster_by_llm`).
-    ``name`` + ``description`` form the retrieval anchor (caller embeds before persisting); ``content`` is
-    the SOP markdown body (≤ 5000 tokens budgeted for downstream prompts). ``confidence`` ∈ [0.0, 1.0] is
-    the LLM's belief in the SOP's reliability; values below :attr:`SkillConfig.retire_confidence` signal a
-    soft-retire (see agent_memory DESIGN.md §5.2 list-encoding contract). ``maturity_score`` ∈ [0.0, 1.0]
-    is the LLM-evaluated readiness score (4-dimension scoring, /20 normalized).
+    ``confidence`` ∈ [0.0, 1.0] gates soft-retire; ``maturity_score`` ∈ [0.0, 1.0] is LLM readiness.
+    Embedding / caller-managed fields persist via ``extra="allow"``.
 
-    ``source_case_ids`` traces which :class:`AgentCase` instances contributed to this skill. Embedding
-    fields (``vector`` / ``vector_model``) are not part of the schema — they are caller-managed and persist
-    outside EverAlgo via ``extra="allow"`` if evermem wants to attach them to model instances.
+    ``cluster_id`` is caller-stamped after extraction (algo emits empty); caller fills it from its own cluster identity mapping.
     """
 
     id: str
-    cluster_id: str
+    cluster_id: str = ""
 
     name: str = ""
     description: str = ""
     content: str = ""
     confidence: float = 0.0
-    maturity_score: float = 0.6
+    maturity_score: float = 0.6  # populated only when skip_maturity_scoring=False is passed to aextract
 
     source_case_ids: list[str] = []
 

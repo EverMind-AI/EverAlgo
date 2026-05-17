@@ -19,11 +19,9 @@ from everalgo.types import AtomicFact, Episode, Foresight, Profile
 def _valid_episode_dict() -> dict[str, Any]:
     """Return a fresh copy of a minimal valid Episode dict."""
     return {
-        "id": "ep_001",
         "owner_id": "u1",
         "episode": "Alice scheduled the meeting",
         "timestamp": 1700000000000,
-        "parent_id": "mc_001",
     }
 
 
@@ -32,7 +30,6 @@ def test_dict_input_parsed_and_validated() -> None:
     episode = assert_episode_shape(_valid_episode_dict())
     assert isinstance(episode, Episode)
     assert episode.episode == "Alice scheduled the meeting"
-    assert episode.parent_type == "memcell"  # default applied by pydantic
 
 
 def test_episode_input_passed_through_same_instance() -> None:
@@ -54,12 +51,12 @@ def test_chained_assertion_uses_returned_episode() -> None:
 def test_missing_required_field_raises_validation_error() -> None:
     """Type-level errors surface as pydantic ValidationError, not AssertionError."""
     bad = _valid_episode_dict()
-    del bad["parent_id"]
+    del bad["owner_id"]
     with pytest.raises(ValidationError):
         assert_episode_shape(bad)
 
 
-# ---- 4 business invariants ------------------------------------------------
+# ---- business invariants --------------------------------------------------
 
 
 def test_empty_episode_string_raises_assertion_error() -> None:
@@ -86,22 +83,6 @@ def test_negative_timestamp_raises_assertion_error() -> None:
         assert_episode_shape(bad)
 
 
-def test_wrong_parent_type_raises_assertion_error() -> None:
-    """Episode.parent_type must be 'memcell' (EPISODE path only)."""
-    bad = _valid_episode_dict()
-    bad["parent_type"] = "raw_message"
-    with pytest.raises(AssertionError, match="must be 'memcell'"):
-        assert_episode_shape(bad)
-
-
-def test_empty_parent_id_raises_assertion_error() -> None:
-    """Episode.parent_id must be non-empty."""
-    bad = _valid_episode_dict()
-    bad["parent_id"] = ""
-    with pytest.raises(AssertionError, match=r"Episode\.parent_id is empty"):
-        assert_episode_shape(bad)
-
-
 # ==========================================================================
 # assert_foresight_shape — mirrors the episode test suite
 # ==========================================================================
@@ -110,12 +91,10 @@ def test_empty_parent_id_raises_assertion_error() -> None:
 def _valid_foresight_dict() -> dict[str, Any]:
     """Return a fresh copy of a minimal valid Foresight dict."""
     return {
-        "id": "fs_001",
         "owner_id": "u1",
         "foresight": "Alice will send the draft by Friday",
         "evidence": "I'll send Alice the draft by Friday",
         "timestamp": 1700000000000,
-        "parent_id": "mc_001",
     }
 
 
@@ -124,7 +103,6 @@ def test_foresight_dict_input_parsed_and_validated() -> None:
     foresight = assert_foresight_shape(_valid_foresight_dict())
     assert isinstance(foresight, Foresight)
     assert foresight.foresight == "Alice will send the draft by Friday"
-    assert foresight.parent_type == "memcell"  # default applied by pydantic
 
 
 def test_foresight_input_passed_through_same_instance() -> None:
@@ -137,7 +115,7 @@ def test_foresight_input_passed_through_same_instance() -> None:
 def test_foresight_missing_required_field_raises_validation_error() -> None:
     """Type-level errors surface as pydantic ValidationError, not AssertionError."""
     bad = _valid_foresight_dict()
-    del bad["parent_id"]
+    del bad["owner_id"]
     with pytest.raises(ValidationError):
         assert_foresight_shape(bad)
 
@@ -158,22 +136,6 @@ def test_foresight_zero_timestamp_raises_assertion_error() -> None:
         assert_foresight_shape(bad)
 
 
-def test_foresight_wrong_parent_type_raises_assertion_error() -> None:
-    """Foresight.parent_type must be 'memcell'."""
-    bad = _valid_foresight_dict()
-    bad["parent_type"] = "raw_message"
-    with pytest.raises(AssertionError, match="must be 'memcell'"):
-        assert_foresight_shape(bad)
-
-
-def test_foresight_empty_parent_id_raises_assertion_error() -> None:
-    """Foresight.parent_id must be non-empty."""
-    bad = _valid_foresight_dict()
-    bad["parent_id"] = ""
-    with pytest.raises(AssertionError, match=r"Foresight\.parent_id is empty"):
-        assert_foresight_shape(bad)
-
-
 # ==========================================================================
 # assert_atomic_fact_shape — mirrors the episode test suite
 # ==========================================================================
@@ -182,11 +144,9 @@ def test_foresight_empty_parent_id_raises_assertion_error() -> None:
 def _valid_atomic_fact_dict() -> dict[str, Any]:
     """Return a fresh copy of a minimal valid AtomicFact dict."""
     return {
-        "id": "af_001",
         "owner_id": "u1",
         "fact": "Alice scheduled a 3pm meeting with Bob on 2024-03-14",
         "timestamp": 1700000000000,
-        "parent_id": "mc_001",
     }
 
 
@@ -195,7 +155,6 @@ def test_atomic_fact_dict_input_parsed_and_validated() -> None:
     fact = assert_atomic_fact_shape(_valid_atomic_fact_dict())
     assert isinstance(fact, AtomicFact)
     assert "Alice" in fact.fact
-    assert fact.parent_type == "memcell"  # default applied by pydantic
 
 
 def test_atomic_fact_input_passed_through_same_instance() -> None:
@@ -208,7 +167,7 @@ def test_atomic_fact_input_passed_through_same_instance() -> None:
 def test_atomic_fact_missing_required_field_raises_validation_error() -> None:
     """Type-level errors surface as pydantic ValidationError, not AssertionError."""
     bad = _valid_atomic_fact_dict()
-    del bad["parent_id"]
+    del bad["owner_id"]
     with pytest.raises(ValidationError):
         assert_atomic_fact_shape(bad)
 
@@ -229,22 +188,6 @@ def test_atomic_fact_zero_timestamp_raises_assertion_error() -> None:
         assert_atomic_fact_shape(bad)
 
 
-def test_atomic_fact_wrong_parent_type_raises_assertion_error() -> None:
-    """AtomicFact.parent_type must be 'memcell'."""
-    bad = _valid_atomic_fact_dict()
-    bad["parent_type"] = "raw_message"
-    with pytest.raises(AssertionError, match="must be 'memcell'"):
-        assert_atomic_fact_shape(bad)
-
-
-def test_atomic_fact_empty_parent_id_raises_assertion_error() -> None:
-    """AtomicFact.parent_id must be non-empty."""
-    bad = _valid_atomic_fact_dict()
-    bad["parent_id"] = ""
-    with pytest.raises(AssertionError, match=r"AtomicFact\.parent_id is empty"):
-        assert_atomic_fact_shape(bad)
-
-
 # ==========================================================================
 # assert_profile_shape — user-level aggregate (no parent_id / parent_type)
 # ==========================================================================
@@ -253,7 +196,6 @@ def test_atomic_fact_empty_parent_id_raises_assertion_error() -> None:
 def _valid_profile_dict() -> dict[str, Any]:
     """Return a fresh copy of a minimal valid Profile dict."""
     return {
-        "id": "pf_001",
         "owner_id": "u1",
         "summary": "Alice is a Python developer who prefers ruff for linting.",
         "timestamp": 1700000000000,

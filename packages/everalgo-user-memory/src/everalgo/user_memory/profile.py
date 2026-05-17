@@ -1,190 +1,326 @@
-"""Profile extractor — aligned with new-release single-call initial extraction.
-
-Interface preserves the existing ``aextract(...) -> Profile`` shape (single Profile return). Internally
-runs the new-release initial-extraction prompt with one LLM call and parses
-``{explicit_info, implicit_traits}``.
-
-Algorithm details (mirrors opensource ``profile_memory/extractor.py`` new-release initial path):
-    - One LLM call against :data:`PROFILE_INITIAL_EXTRACTION_PROMPT` with the rendered conversation text
-      (current MemCell + optional prior cluster MemCells concatenated chronologically).
-    - 5-retry on JSON parse / schema failure; on exhaustion returns a minimal fallback Profile so the
-      pipeline can continue.
-    - Parsed ``explicit_info`` / ``implicit_traits`` are preserved on the Profile via ``extra="allow"``;
-      ``summary`` is synthesised from the first explicit_info description (falls back to a sentinel).
-"""
+"""Synthesize a user Profile from a chronological sequence of MemCells."""
 
 from __future__ import annotations
 
 import json
 import logging
-import uuid
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
 
-import everalgo.llm
+from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import MemCell, Profile
-from everalgo.user_memory.prompts.en.profile import PROFILE_INITIAL_EXTRACTION_PROMPT
+from everalgo.user_memory._render import chat_messages, render_content
+from everalgo.user_memory.prompts.en.profile import (
+    PROFILE_COMPACT_PROMPT,
+    PROFILE_INITIAL_EXTRACTION_PROMPT,
+    PROFILE_UPDATE_PROMPT,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
 
-_MAX_LLM_RETRIES = 5
-"""Retry budget on JSON parse / schema failure (matches opensource retry pattern)."""
+_PROFILE_MAX_ITEMS = 30
+_PROFILE_COMPACT_THRESHOLD = int(_PROFILE_MAX_ITEMS * 1.5)
 
 
 class ProfileExtractor:
-    """Synthesize a user profile from a MemCell + optional prior cluster.
+    """Synthesize a Profile from a chronologically ordered sequence of MemCells.
 
-    Stateless callable class. Runs the new-release single-call initial extraction; returns one Profile
-    whose ``summary`` is derived from the first ``explicit_info`` entry and whose ``explicit_info`` /
-    ``implicit_traits`` lists are preserved via Profile's ``extra="allow"``.
-
-    Customize per call via ``prompt=`` override and ``cluster_episodes=`` context passthrough.
+    Non-ChatMessage items are silently skipped (agent → user-memory contract).
+    ``memcells`` must be ordered chronologically; the last element is the most recent and
+    its timestamp becomes ``Profile.timestamp``.
     """
+
+    def __init__(self, *, llm: LLMClient) -> None:
+        self._llm = llm
 
     async def aextract(
         self,
-        memcell: MemCell,
+        memcells: Sequence[MemCell],
         *,
-        cluster_episodes: list[MemCell] | None = None,
-        llm: LLMClient | None = None,
+        sender_id: str,
+        old_profile: Profile | None = None,
         prompt: str | None = None,
     ) -> Profile:
-        """Run a single LLM extraction; return a Profile (or a fallback on exhaustion)."""
-        client = everalgo.llm.resolve(llm)
-        conversation_text = _render_conversation(memcell, cluster_episodes or [])
+        """Extract one Profile for ``sender_id`` from ``memcells``.
+
+        Two extraction modes:
+          INIT   (old_profile is None): full extraction from memcells.
+          UPDATE (old_profile present): LLM emits add/update/delete ops on top of old_profile;
+                                         when post-merge explicit_info+implicit_traits item count
+                                         exceeds the internal compact threshold, a second LLM pass
+                                         runs to re-summarise (compact strategy, caller-transparent).
+        Returns the final Profile in both modes.
+
+        Args:
+            memcells: Must be non-empty and ordered chronologically; last element is the most recent.
+            sender_id: Must be one of the memcells' chat senders; not inferred.
+            old_profile: Existing profile for UPDATE mode; None triggers INIT mode.
+            prompt: Prompt override; None uses the bundled default for the selected mode.
+
+        Raises:
+            ValueError: If ``memcells`` is empty or the LLM response is malformed.
+            LLMError: From the LLM call.
+            json.JSONDecodeError: On unparseable response.
+        """
+        if not memcells:
+            raise ValueError("memcells must contain at least one MemCell")
+
+        if old_profile is None:
+            return await self._init_extract(memcells, sender_id=sender_id, prompt=prompt)
+        return await self._update_extract(memcells, sender_id=sender_id, old_profile=old_profile, prompt=prompt)
+
+    extract = async_to_sync(aextract)
+
+    # ------------------------------------------------------------------
+    # Private: INIT path
+    # ------------------------------------------------------------------
+
+    async def _init_extract(
+        self,
+        memcells: Sequence[MemCell],
+        *,
+        sender_id: str,
+        prompt: str | None,
+    ) -> Profile:
+        conversation_text = _render_conversation(memcells)
         rendered = render_prompt(PROFILE_INITIAL_EXTRACTION_PROMPT, prompt, conversation_text=conversation_text)
 
-        parsed = await _llm_call_with_retry(client, rendered)
-        if parsed is None:
-            return _fallback_profile(memcell)
+        response = await self._llm.chat(
+            messages=[LLMChatMessage(role="user", content=rendered)],
+            response_format={"type": "json_object"},
+        )
+        parsed = _parse_profile_payload(response.content)
 
-        explicit_info = parsed.get("explicit_info") or []
-        implicit_traits = parsed.get("implicit_traits") or []
-        if not isinstance(explicit_info, list):
-            explicit_info = []
-        if not isinstance(implicit_traits, list):
-            implicit_traits = []
-
-        owner_id = _derive_owner_id(memcell)
+        explicit_info = _to_list(parsed.get("explicit_info"))
+        implicit_traits = _to_list(parsed.get("implicit_traits"))
         summary = _build_summary(explicit_info, implicit_traits)
         return Profile.model_validate(
             {
-                "id": f"pf_{uuid.uuid4().hex[:12]}",
-                "owner_id": owner_id,
+                "owner_id": sender_id,
                 "summary": summary,
-                "timestamp": memcell.timestamp,
+                "timestamp": memcells[-1].timestamp,
                 "explicit_info": explicit_info,
                 "implicit_traits": implicit_traits,
             }
         )
 
-    extract = async_to_sync(aextract)
-    """Sync bridge — only callable from non-event-loop contexts."""
+    # ------------------------------------------------------------------
+    # Private: UPDATE path
+    # ------------------------------------------------------------------
+
+    async def _update_extract(
+        self,
+        memcells: Sequence[MemCell],
+        *,
+        sender_id: str,
+        old_profile: Profile,
+        prompt: str | None,
+    ) -> Profile:
+        current_profile_text = _render_profile_for_update(old_profile)
+        conversation_text = _render_conversation(memcells)
+        rendered = render_prompt(
+            PROFILE_UPDATE_PROMPT,
+            prompt,
+            current_profile=current_profile_text,
+            conversations=conversation_text,
+        )
+
+        response = await self._llm.chat(
+            messages=[LLMChatMessage(role="user", content=rendered)],
+            response_format={"type": "json_object"},
+        )
+        ops_payload = _parse_ops_payload(response.content)
+        merged_profile = _apply_ops(old_profile, ops_payload, timestamp=memcells[-1].timestamp)
+
+        explicit_info: list[Any] = list(getattr(merged_profile, "explicit_info", []) or [])
+        implicit_traits: list[Any] = list(getattr(merged_profile, "implicit_traits", []) or [])
+        total_items = len(explicit_info) + len(implicit_traits)
+        if total_items > _PROFILE_COMPACT_THRESHOLD:
+            return await self._compact(merged_profile)
+        return merged_profile
+
+    async def _compact(self, profile: Profile) -> Profile:
+        explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
+        implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
+        total_items = len(explicit_info) + len(implicit_traits)
+        profile_text = json.dumps(
+            {"explicit_info": explicit_info, "implicit_traits": implicit_traits},
+            ensure_ascii=False,
+            indent=2,
+        )
+        rendered = render_prompt(
+            PROFILE_COMPACT_PROMPT,
+            None,
+            total_items=total_items,
+            max_items=_PROFILE_MAX_ITEMS,
+            profile_text=profile_text,
+        )
+
+        response = await self._llm.chat(
+            messages=[LLMChatMessage(role="user", content=rendered)],
+            response_format={"type": "json_object"},
+        )
+        parsed = _parse_compact_payload(response.content)
+        new_explicit = _to_list(parsed.get("explicit_info"))
+        new_implicit = _to_list(parsed.get("implicit_traits"))
+        summary = _build_summary(new_explicit, new_implicit)
+        return Profile.model_validate(
+            {
+                "owner_id": profile.owner_id,
+                "summary": summary,
+                "timestamp": profile.timestamp,
+                "explicit_info": new_explicit,
+                "implicit_traits": new_implicit,
+            }
+        )
 
 
+# ---------------------------------------------------------------------------
 # Module-level helpers.
+# ---------------------------------------------------------------------------
 
 
-def _render_conversation(memcell: MemCell, cluster_episodes: list[MemCell]) -> str:
-    """Render messages as ``[timestamp][event_id] speaker(user_id:xxx): content`` lines.
-
-    Cluster MemCells (if any) are rendered chronologically before the current MemCell so the LLM sees
-    historical context first.
-    """
-    cells = [*cluster_episodes, memcell]
+def _render_conversation(memcells: Sequence[MemCell]) -> str:
+    """Render ChatMessage items as ``[ISO-ts] speaker(user_id:xxx): content`` lines; tool items are skipped."""
     lines: list[str] = []
-    for cell in cells:
-        for m in cell.messages:
-            if not m.content:
+    for cell in memcells:
+        for m in chat_messages(cell):
+            text = render_content(m.content)
+            if not text:
                 continue
-            speaker = m.sender_name or m.role.value
+            speaker = m.sender_name or m.sender_id
             user_id = m.sender_id or ""
-            time_str = datetime.fromtimestamp(m.timestamp / 1000, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            cell_ref = cell.event_id or ""
-            lines.append(f"[{time_str}][{cell_ref}] {speaker}(user_id:{user_id}): {m.content}")
+            time_str = format_message_timestamp(m.timestamp)
+            lines.append(f"[{time_str}] {speaker}(user_id:{user_id}): {text}")
     if not lines:
         lines.append("(no prior MemCells in the cluster)")
     return "\n".join(lines)
 
 
-async def _llm_call_with_retry(client: LLMClient, rendered_prompt: str) -> dict[str, Any] | None:
-    """Call LLM with 5-retry; parse ``{explicit_info, implicit_traits}`` envelope. Return None on exhaustion."""
-    for attempt in range(_MAX_LLM_RETRIES):
-        try:
-            response = await client.chat(
-                messages=[LLMChatMessage(role="user", content=rendered_prompt)],
-                response_format={"type": "json_object"},
-            )
-            return _parse_profile_payload(response.content)
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-            logger.warning("profile retry %d/%d: %s", attempt + 1, _MAX_LLM_RETRIES, e)
-            if attempt == _MAX_LLM_RETRIES - 1:
-                logger.exception("profile extraction exhausted %d retries", _MAX_LLM_RETRIES)
-                return None
-            continue
-    return None
+def _render_profile_for_update(profile: Profile) -> str:
+    """Render existing profile fields as indexed JSON for the UPDATE prompt."""
+    explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
+    implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
+    parts: list[str] = ["=== explicit_info ==="]
+    for i, item in enumerate(explicit_info):
+        parts.append(f"[{i}] {json.dumps(item, ensure_ascii=False)}")
+    parts.append("=== implicit_traits ===")
+    for i, item in enumerate(implicit_traits):
+        parts.append(f"[{i}] {json.dumps(item, ensure_ascii=False)}")
+    return "\n".join(parts)
+
+
+def _to_list(value: object) -> list[Any]:
+    """Coerce to list[Any]; returns [] for non-list values."""
+    return value if isinstance(value, list) else []
 
 
 def _parse_profile_payload(raw: str) -> dict[str, Any]:
-    """Parse the new-release ``{explicit_info, implicit_traits}`` payload.
+    """Parse the ``{explicit_info, implicit_traits}`` JSON payload.
 
-    Raises :class:`ValueError` on shape mismatch (caller catches and retries).
+    Raises:
+        json.JSONDecodeError: If the response is not valid JSON.
+        ValueError: If the top-level is not an object or both expected keys are missing.
     """
     parsed: object = json.loads(raw)
     if not isinstance(parsed, dict):
-        raise ValueError("LLM response is not a JSON object")  # noqa: TRY004 — uniform retry semantics
+        raise ValueError("LLM response is not a JSON object")  # noqa: TRY004
     data = cast("dict[str, Any]", parsed)
     if "explicit_info" not in data and "implicit_traits" not in data:
         raise ValueError("LLM response missing both explicit_info and implicit_traits")
     return data
 
 
-def _build_summary(explicit_info: list[Any], implicit_traits: list[Any]) -> str:
-    """Synthesise a one-line summary from the first available description/trait.
+def _parse_ops_payload(raw: str) -> list[dict[str, Any]]:
+    """Parse the UPDATE ops payload; returns the operations list.
 
-    Prefers the first ``explicit_info[].description``; falls back to the first
-    ``implicit_traits[].description``; sentinel ``"(no summary)"`` when both are empty.
+    Raises:
+        json.JSONDecodeError: If the response is not valid JSON.
+        ValueError: If the top-level is not an object or 'operations' is missing/not a list.
     """
+    parsed: object = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM update response is not a JSON object")  # noqa: TRY004
+    data = cast("dict[str, Any]", parsed)
+    ops = data.get("operations")
+    if not isinstance(ops, list):
+        raise ValueError("LLM update response missing 'operations' list")  # noqa: TRY004
+    return cast("list[dict[str, Any]]", ops)
+
+
+def _parse_compact_payload(raw: str) -> dict[str, Any]:
+    """Parse the compact payload; returns dict with explicit_info + implicit_traits.
+
+    Raises:
+        json.JSONDecodeError: If the response is not valid JSON.
+        ValueError: If the top-level is not an object.
+    """
+    parsed: object = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM compact response is not a JSON object")  # noqa: TRY004
+    return cast("dict[str, Any]", parsed)
+
+
+def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: int) -> Profile:
+    """Apply add/update/delete ops to old_profile and return a new Profile."""
+    explicit_info: list[Any] = list(getattr(old_profile, "explicit_info", []) or [])
+    implicit_traits: list[Any] = list(getattr(old_profile, "implicit_traits", []) or [])
+
+    for op in ops:
+        action = op.get("action")
+        if action == "none":
+            continue
+        op_type = op.get("type")
+        target = explicit_info if op_type == "explicit_info" else implicit_traits
+
+        if action == "add":
+            data = op.get("data")
+            if isinstance(data, dict):
+                target.append(data)
+        elif action == "update":
+            idx = op.get("index")
+            data = op.get("data")
+            if isinstance(idx, int) and isinstance(data, dict) and 0 <= idx < len(target):
+                merged = dict(target[idx])
+                merged.update(data)
+                target[idx] = merged
+        elif action == "delete":
+            idx = op.get("index")
+            if isinstance(idx, int) and 0 <= idx < len(target):
+                target.pop(idx)
+
+    summary = _build_summary(explicit_info, implicit_traits)
+    return Profile.model_validate(
+        {
+            "owner_id": old_profile.owner_id,
+            "summary": summary,
+            "timestamp": timestamp,
+            "explicit_info": explicit_info,
+            "implicit_traits": implicit_traits,
+        }
+    )
+
+
+def _build_summary(explicit_info: list[Any], implicit_traits: list[Any]) -> str:
+    """Return the first ``description`` from explicit_info, then implicit_traits; sentinel ``"(no summary)"`` if both empty."""
     for item in explicit_info:
         if not isinstance(item, dict):
             continue
-        desc = item.get("description")
+        desc = item.get("description")  # type: ignore[reportUnknownVariableType,reportUnknownMemberType]
         if isinstance(desc, str) and desc.strip():
             return desc.strip()
     for item in implicit_traits:
         if not isinstance(item, dict):
             continue
-        desc = item.get("description") or item.get("trait")
+        desc = item.get("description") or item.get("trait")  # type: ignore[reportUnknownVariableType,reportUnknownMemberType]
         if isinstance(desc, str) and desc.strip():
             return desc.strip()
     return "(no summary)"
-
-
-def _fallback_profile(memcell: MemCell) -> Profile:
-    """Return a minimal Profile when the LLM call exhausts retries."""
-    return Profile.model_validate(
-        {
-            "id": f"pf_{uuid.uuid4().hex[:12]}",
-            "owner_id": _derive_owner_id(memcell),
-            "summary": "(no summary)",
-            "timestamp": memcell.timestamp,
-            "explicit_info": [],
-            "implicit_traits": [],
-        }
-    )
-
-
-def _derive_owner_id(memcell: MemCell) -> str:
-    if memcell.participants:
-        return memcell.participants[0]
-    for m in memcell.messages:
-        if m.sender_id:
-            return m.sender_id
-    return "u_default"

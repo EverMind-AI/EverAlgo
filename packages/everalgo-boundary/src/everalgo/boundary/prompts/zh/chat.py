@@ -1,14 +1,17 @@
-"""Chinese prompt for ChatMemCellExtractor — verbatim port from new-release opensource.
+"""Chat-level boundary detection prompt (Chinese).
 
-Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/zh/conv_prompts.py``
-constant ``CONV_BATCH_BOUNDARY_DETECTION_PROMPT``. Per user directive: align with new release.
+Used by ``everalgo.boundary.detect_boundaries``, which is invoked by both
+``everalgo.user_memory.BoundaryDetector`` and ``everalgo.agent_memory.AgentBoundaryDetector``
+(agent variant filters tool items before passing chat-only items to this primitive).
 
-Placeholder: ``{messages}`` — rendered as ``[N] [YYYY-MM-DD HH:MM:SS+TZ] sender_name: content``.
+Placeholder: ``{messages}`` — rendered as ``[N] [YYYY-MM-DDTHH:MM:SSZ] sender_name: content``.
 Output schema: ``{"reasoning": str, "boundaries": list[int], "should_wait": bool}``.
 """
 
 CHAT_BOUNDARY_DETECT_PROMPT_ZH = """
-作为一名对话分析专家，你需要在一段连续的对话中找出所有自然的"情节边界"，将对话流分割成有意义的、可独立记忆的片段（MemCell）。核心原则：**默认合并，谨慎切分**。
+**关键语言规则**：你必须使用与输入对话内容**相同**的语言输出。若对话内容为中文，所有输出**必须**为中文；若为英文，则输出英文。此规则强制执行。
+
+作为一名情节记忆边界检测专家，你需要在一段连续的对话中找出所有自然的"情节边界"，将对话流分割成有意义的、可独立记忆的片段（MemCell）。核心原则：**默认合并，谨慎切分**。
 
 ### 输入格式
 以下是按时间顺序排列的完整对话记录，每条消息前标有编号和时间戳：
@@ -48,12 +51,12 @@ CHAT_BOUNDARY_DETECT_PROMPT_ZH = """
 **示例1——有一个边界：**
 输入消息：
 ```
-[1] [2024-03-10 09:00:00+00:00] 小明: 登录功能有个bug，帮我看看
-[2] [2024-03-10 09:01:00+00:00] 小红: 好的，我看下日志
-[3] [2024-03-10 09:05:00+00:00] 小红: 找到了，AuthService第42行空指针
-[4] [2024-03-10 09:06:00+00:00] 小明: 修好了，谢谢！
-[5] [2024-03-11 10:00:00+00:00] 小明: 今天中午有空吃饭吗？
-[6] [2024-03-11 10:01:00+00:00] 小红: 可以，12:30？
+[1] [2024-03-10T09:00:00Z] 小明: 登录功能有个bug，帮我看看
+[2] [2024-03-10T09:01:00Z] 小红: 好的，我看下日志
+[3] [2024-03-10T09:05:00Z] 小红: 找到了，AuthService第42行空指针
+[4] [2024-03-10T09:06:00Z] 小明: 修好了，谢谢！
+[5] [2024-03-11T10:00:00Z] 小明: 今天中午有空吃饭吗？
+[6] [2024-03-11T10:01:00Z] 小红: 可以，12:30？
 ```
 输出：
 ```json
@@ -67,9 +70,9 @@ CHAT_BOUNDARY_DETECT_PROMPT_ZH = """
 **示例2——无边界：**
 输入消息：
 ```
-[1] [2024-03-10 14:00:00+08:00] 小明: Q2路线图进展怎么样？
-[2] [2024-03-10 14:02:00+08:00] 小红: 完成了60%，还需要确定API规范。
-[3] [2024-03-10 14:10:00+08:00] 小明: 好，明天我们一起过一遍规范。
+[1] [2024-03-10T06:00:00Z] 小明: Q2路线图进展怎么样？
+[2] [2024-03-10T06:02:00Z] 小红: 完成了60%，还需要确定API规范。
+[3] [2024-03-10T06:10:00Z] 小明: 好，明天我们一起过一遍规范。
 ```
 输出：
 ```json
@@ -91,4 +94,6 @@ CHAT_BOUNDARY_DETECT_PROMPT_ZH = """
 ```
 
 **`boundaries: []` 时表示所有消息属于同一情节，不切分。**
+
+**关键语言规则**：你必须使用与输入对话内容**相同**的语言输出。若对话内容为中文，所有输出**必须**为中文；若为英文，则输出英文。此规则强制执行。
 """

@@ -1,7 +1,4 @@
-"""Chinese prompt for ForesightExtractor — verbatim port from opensource ``foresight_prompts.py``.
-
-Source: ``opensource/EverOS/src/memory_layer/prompts/zh/foresight_prompts.py`` (locomo-benchmark branch).
-"""
+"""Chinese prompt for ForesightExtractor."""
 
 FORESIGHT_GENERATION_PROMPT = """
 你是一个高级个人语义分析智能体。你的任务是基于用户的最新MemCell事件，联想预测该事件可能对该用户个人未来行为、习惯、决策和生活方式产生的具体影响。

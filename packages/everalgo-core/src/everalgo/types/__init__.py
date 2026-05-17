@@ -1,15 +1,23 @@
-"""Public data contracts for EverAlgo — minimal EPISODE-path subset.
+"""Public data contracts for EverAlgo.
 
-Sub-project 1 deliverable. Adding more memory types (AtomicFact,
-Foresight, Profile, AgentCase, AgentSkill, ClusterState, ...) later
-is a SemVer minor bump for users that import from this module.
+Adding more memory types (AtomicFact, Foresight, Profile, AgentCase, AgentSkill, ClusterState, ...)
+later is a SemVer minor bump for users that import from this module.
 """
 
 import logging
 
-from everalgo.types.agent import AgentCase, AgentSkill
+from everalgo.types.agent import (
+    AgentCase,
+    AgentSkill,
+    ToolCall,
+    ToolCallFunction,
+    ToolCallRequest,
+    ToolCallResult,
+)
+from everalgo.types.chat import ChatMessage
+from everalgo.types.content import ContentBlock, TextContent
+from everalgo.types.conversation import ConversationItem, MemCell
 from everalgo.types.knowledge import KnowledgeMemory
-from everalgo.types.memcell import MemCell, Message, MessageRole, RawDataType, ToolCall
 from everalgo.types.memories import AtomicFact, Episode, Foresight, Profile
 from everalgo.types.parsed import ParsedContent
 from everalgo.types.rank import (
@@ -26,22 +34,26 @@ __all__ = [
     "AgentSkill",
     "AtomicFact",
     "Candidate",
+    "ChatMessage",
+    "ContentBlock",
+    "ConversationItem",
     "Episode",
     "FactCandidate",
     "Foresight",
     "KnowledgeMemory",
     "MemCell",
-    "Message",
-    "MessageRole",
     "ParsedContent",
     "Profile",
     "RankInput",
     "RankOutput",
     "RawData",
-    "RawDataType",
     "RawFile",
     "ScoredItem",
+    "TextContent",
     "ToolCall",
+    "ToolCallFunction",
+    "ToolCallRequest",
+    "ToolCallResult",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

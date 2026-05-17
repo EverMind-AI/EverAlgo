@@ -6,14 +6,14 @@ import json
 import math
 from typing import TYPE_CHECKING
 
+import pytest
+
 from everalgo.rank import fusion, weight
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
-
-    import pytest
 
     from everalgo.llm.types import ChatResponse
 
@@ -167,7 +167,7 @@ def test_score_propagation_alpha_zero_uses_parent_only() -> None:
     assert math.isclose(out[0].score, 0.2)
 
 
-# ─── aagentic_rank — opensource retrieve_mem_agentic parity ───────────────
+# ─── aagentic_rank ────────────────────────────────────────────────────────
 
 
 def _make_retrieve(
@@ -205,7 +205,7 @@ async def test_aagentic_rank_round1_concat_dedup_no_rrf(
     dense_candidates: list[Candidate],
     sparse_candidates: list[Candidate],
 ) -> None:
-    """Round 1 is concat(sparse, dense) + dedup by id — mirrors opensource _search_hybrid lines 957-961."""
+    """Round 1 is concat(sparse, dense) + dedup by id."""
     captured_round1: list[Candidate] = []
 
     async def _rerank(_q: str, cands: Sequence[Candidate], top_n: int) -> list[Candidate]:
@@ -366,19 +366,18 @@ async def test_aagentic_rank_unlimited_top_k(
     assert truncations == [3]
 
 
-async def test_aagentic_rank_swallows_errors_returns_empty(
+async def test_aagentic_rank_propagates_rerank_errors(
     dense_candidates: list[Candidate],
 ) -> None:
-    """``fallback_on_error`` parity — exceptions surface as ``[]``."""
+    """Exceptions from the rerank callback propagate — no swallow."""
 
     async def _broken_rerank(_q: str, _c: Sequence[Candidate], _n: int) -> list[Candidate]:
         raise RuntimeError("boom")
 
     fake = FakeLLMClient(responses=[])
 
-    out = await fusion.aagentic_rank("q", [], dense_candidates, rerank=_broken_rerank, top_k=5, llm=fake)
-
-    assert out == []
+    with pytest.raises(RuntimeError, match="boom"):
+        await fusion.aagentic_rank("q", [], dense_candidates, rerank=_broken_rerank, top_k=5, llm=fake)
 
 
 # ─── Private helpers — parse + format + LLM-error fallback ────────────────
@@ -414,87 +413,76 @@ def test_parse_json_response_returns_dict_on_valid_input() -> None:
     assert out == {"x": 1, "y": "z"}
 
 
-def test_parse_sufficiency_response_falls_back_on_non_json() -> None:
-    ok, reasoning, missing = fusion._parse_sufficiency_response("not json at all")
-    assert ok is True
-    assert "Parse error" in reasoning
-    assert missing == []
+def test_parse_sufficiency_response_raises_on_non_json() -> None:
+    with pytest.raises(ValueError):
+        fusion._parse_sufficiency_response("not json at all")
 
 
-def test_parse_sufficiency_response_falls_back_when_field_missing() -> None:
-    ok, reasoning, missing = fusion._parse_sufficiency_response(json.dumps({"reasoning": "n/a"}))
-    assert ok is True
-    assert "Parse error" in reasoning
-    assert missing == []
+def test_parse_sufficiency_response_raises_when_field_missing() -> None:
+    with pytest.raises(ValueError, match="missing 'is_sufficient'"):
+        fusion._parse_sufficiency_response(json.dumps({"reasoning": "n/a"}))
 
 
-def test_parse_sufficiency_response_coerces_non_list_missing_field() -> None:
+def test_parse_sufficiency_response_raises_on_non_list_missing_field() -> None:
     raw = json.dumps({"is_sufficient": False, "reasoning": "x", "missing_information": "not-a-list"})
-    ok, _reasoning, missing = fusion._parse_sufficiency_response(raw)
-    assert ok is False
-    assert missing == []
+    with pytest.raises(TypeError, match="not a list"):
+        fusion._parse_sufficiency_response(raw)
 
 
-def test_parse_multi_query_response_falls_back_on_non_json() -> None:
-    queries, reasoning = fusion._parse_multi_query_response("not json", "orig query text")
-    assert queries == ["orig query text"]
-    assert "Parse error" in reasoning
+def test_parse_multi_query_response_raises_on_non_json() -> None:
+    with pytest.raises(ValueError):
+        fusion._parse_multi_query_response("not json", "orig query text")
 
 
-def test_parse_multi_query_response_falls_back_when_field_missing() -> None:
-    queries, reasoning = fusion._parse_multi_query_response(json.dumps({"reasoning": "n/a"}), "orig query text")
-    assert queries == ["orig query text"]
-    assert "Parse error" in reasoning
+def test_parse_multi_query_response_raises_when_field_missing() -> None:
+    with pytest.raises(TypeError, match="expected list"):
+        fusion._parse_multi_query_response(json.dumps({"reasoning": "n/a"}), "orig query text")
 
 
-def test_parse_multi_query_response_uses_original_when_all_filtered() -> None:
-    """Queries shorter than 5 chars or identical to original get filtered → fallback."""
+def test_parse_multi_query_response_raises_when_all_filtered() -> None:
+    """Queries shorter than 5 chars or identical to original get filtered → raises ValueError."""
     raw = json.dumps({"queries": ["x", "orig", "ab"], "reasoning": "n/a"})
-    queries, reasoning = fusion._parse_multi_query_response(raw, "orig")
-    assert queries == ["orig"]
-    assert "Fallback" in reasoning
+    with pytest.raises(ValueError, match="filtered"):
+        fusion._parse_multi_query_response(raw, "orig")
 
 
-async def test_acheck_sufficiency_returns_safe_default_on_llm_error() -> None:
-    """LLM raises → conservative ``(True, "<error>", [])`` so callers don't spin to Round 2."""
+async def test_acheck_sufficiency_propagates_llm_error() -> None:
+    """LLM raises → error propagates (no swallow)."""
     from everalgo.rank.prompts.en.agentic import AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN
 
     def _boom(*_a: object, **_kw: object) -> ChatResponse:
         raise RuntimeError("llm down")
 
     fake = FakeLLMClient(handler=_boom)
-    ok, reasoning, missing = await fusion._acheck_sufficiency(
-        query="q",
-        candidates=[],
-        llm=fake,
-        prompt=AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN,
-        max_docs=5,
-        max_tokens=100,
-        temperature=0.0,
-    )
-    assert ok is True
-    assert "LLM error" in reasoning
-    assert missing == []
+    with pytest.raises(RuntimeError, match="llm down"):
+        await fusion._acheck_sufficiency(
+            query="q",
+            candidates=[],
+            llm=fake,
+            prompt=AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN,
+            max_docs=5,
+            max_tokens=100,
+            temperature=0.0,
+        )
 
 
-async def test_agen_multi_queries_returns_original_on_llm_error() -> None:
-    """LLM raises → fallback to ``[original_query]`` with error reasoning."""
+async def test_agen_multi_queries_propagates_llm_error() -> None:
+    """LLM raises → error propagates (no fallback to original query)."""
     from everalgo.rank.prompts.en.agentic import AGENTIC_MULTI_QUERY_PROMPT_EN
 
     def _boom(*_a: object, **_kw: object) -> ChatResponse:
         raise RuntimeError("llm down")
 
     fake = FakeLLMClient(handler=_boom)
-    queries, reasoning = await fusion._agen_multi_queries(
-        original_query="orig query text",
-        candidates=[],
-        missing_info=["X"],
-        llm=fake,
-        prompt=AGENTIC_MULTI_QUERY_PROMPT_EN,
-        max_docs=5,
-        num_queries=3,
-        max_tokens=100,
-        temperature=0.4,
-    )
-    assert queries == ["orig query text"]
-    assert "LLM error" in reasoning
+    with pytest.raises(RuntimeError, match="llm down"):
+        await fusion._agen_multi_queries(
+            original_query="orig query text",
+            candidates=[],
+            missing_info=["X"],
+            llm=fake,
+            prompt=AGENTIC_MULTI_QUERY_PROMPT_EN,
+            max_docs=5,
+            num_queries=3,
+            max_tokens=100,
+            temperature=0.4,
+        )

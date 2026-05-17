@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 from asgiref.sync import async_to_sync
 from pydantic import BaseModel, ConfigDict
 
-import everalgo.llm
 from everalgo.llm.types import ChatMessage
 from everalgo.rank.fusion import AgenticConfig  # noqa: TC001  (runtime import required by pydantic field type)
 from everalgo.types import Candidate, RankInput, RankOutput, ScoredItem
@@ -58,7 +57,7 @@ async def arerank(
     *,
     prompt: str,
     top_k: int,
-    llm: LLMClient | None = None,
+    llm: LLMClient,
 ) -> list[Candidate]:
     """LLM-driven rerank.
 
@@ -68,25 +67,21 @@ async def arerank(
             ``{top_k}`` placeholders. Callers typically pass one of the modules
             in ``everalgo.rank.prompts.{en,zh}``.
         top_k: Maximum number of items to return.
-        llm: Per-call LLM override; ``None`` resolves through the 3-layer
-            fallback (per-call → scoped → default).
+        llm: LLM client (required — bound at the ranker instance level).
 
-    Returns
-    -------
+    Returns:
         Up to ``top_k`` Candidates, sorted descending by the LLM-assigned score.
         Each result has ``.score`` overwritten with the LLM score; the original
         fusion score is preserved in ``metadata["fusion_score"]``.
 
-    Raises
-    ------
+    Raises:
         KeyError: ``prompt`` is missing one of the required placeholders.
-        LLMError / LLMNotConfiguredError: from ``everalgo.llm.resolve`` + the
-            client's ``chat`` call.
+        LLMError: from the client's ``chat`` call.
     """
     if not items:
         return []
 
-    client = everalgo.llm.resolve(llm)
+    client = llm
 
     query = ""
     for item in items:
@@ -119,21 +114,18 @@ def _apply_rerank_scores(
     raw_content: str,
     top_k: int,
 ) -> list[Candidate]:
-    """Parse the LLM's JSON, replace scores, sort, truncate."""
+    """Parse the LLM's JSON, replace scores, sort, truncate.
 
-    def _preserve_fusion(item: Candidate) -> Candidate:
-        return item.model_copy(update={"metadata": {**item.metadata, "fusion_score": item.score}})
-
-    try:
-        payload = json.loads(raw_content)
-    except json.JSONDecodeError:
-        logger.warning("LLM rerank returned non-JSON content; keeping fusion order")
-        return [_preserve_fusion(item) for item in list(items)[:top_k]]
-
-    ranked = payload.get("ranked", []) if isinstance(payload, dict) else []
+    Raises:
+        json.JSONDecodeError: If the LLM response is not valid JSON.
+        TypeError: If the top-level JSON is not a dict, or the ``ranked`` field is not a list.
+    """
+    payload = json.loads(raw_content)
+    if not isinstance(payload, dict):
+        raise TypeError("rerank LLM response top-level JSON is not an object")
+    ranked = payload.get("ranked")
     if not isinstance(ranked, list):
-        logger.warning("LLM rerank payload has no 'ranked' list; keeping fusion order")
-        return [_preserve_fusion(item) for item in list(items)[:top_k]]
+        raise TypeError("rerank LLM response missing 'ranked' list")
 
     by_id = {item.id: item for item in items}
     out: list[Candidate] = []
@@ -164,20 +156,7 @@ type _AsyncRanker = Callable[..., Awaitable[RankOutput]]
 
 
 class _RankerSpec(NamedTuple):
-    """Per-facade configuration entry stored in ``_ALGO_REGISTRY``.
-
-    Replaces the previous one-callable-per-memory_type registry. Now each
-    entry carries:
-
-    - ``arank`` — dispatch target for ``rank.arank(rank_input)``.
-    - ``modes`` — fusion modes the facade supports; ``()`` for facades that
-      do not use ``fusion_mode`` (profile).
-    - ``rerank_prompt`` — default rerank prompt; ``""`` if the facade has no
-      rerank stage.
-    - ``item_type`` — label stamped on emitted ScoredItems when running the
-      non-mrag (single-output) path. The mrag path always emits mixed
-      ``"episode"`` + ``"atomic_fact"`` items regardless of this field.
-    """
+    """Per-facade config entry in ``_ALGO_REGISTRY`` — arank target, supported modes, rerank prompt, item label."""
 
     arank: _AsyncRanker
     modes: tuple[FusionMode, ...]
@@ -198,28 +177,14 @@ async def _basic_arank(  # noqa: C901  (4 fusion modes; splitting hurts readabil
     retrieve_fn: RetrieveFn | None = None,
     rerank_fn: RerankFn | None = None,
 ) -> RankOutput:
-    """Unified pipeline shared by case / skill / episodic facades.
+    """Unified pipeline dispatched to by all facade rankers.
 
-    Looks up ``_ALGO_REGISTRY[rank_input.memory_type]`` for the
-    facade-specific config (allowed modes, rerank prompt, item_type label),
-    then branches on ``config.fusion_mode``:
+    Branches on ``config.fusion_mode``: ``rrf``/``lr`` run Phase 1 only; ``mrag`` adds Phase 2-4 expansion;
+    ``agentic`` runs LLM-guided multi-round. Phase 5 LLM rerank is an optional shared final step.
 
-    - ``"rrf"`` / ``"lr"`` — Phase 1 fusion only; emit single-``item_type``
-      ScoredItems.
-    - ``"mrag"`` — Full enterprise MRAG via ``fusion.expand`` (Phase 1 + 2-4);
-      emit mixed ``"episode"`` + ``"atomic_fact"`` ScoredItems.
-    - ``"agentic"`` — LLM-guided multi-round via ``fusion.aagentic_rank``.
-      ``rerank_fn`` is required (cross-encoder for Round-1 + final rerank);
-      ``retrieve_fn`` is optional (drives Round 2 multi-query; ``None`` skips
-      Round 2 and returns Round-1 rerank truncated to ``top_k``).
-
-    Phase 5 LLM rerank is the shared optional final step in every branch.
-
-    Raises
-    ------
+    Raises:
         KeyError: ``rank_input.memory_type`` not in ``_ALGO_REGISTRY``.
-        ValueError: ``config.fusion_mode`` not in the facade's allowed modes,
-            or ``"agentic"`` chosen without ``rerank_fn``.
+        ValueError: Unsupported ``fusion_mode`` for the facade, or ``agentic`` without ``rerank_fn`` / ``llm``.
     """
     spec = _ALGO_REGISTRY.get(rank_input.memory_type)
     if spec is None:
@@ -263,6 +228,8 @@ async def _basic_arank(  # noqa: C901  (4 fusion modes; splitting hurts readabil
             raise ValueError("fusion_mode='agentic' requires a `rerank_fn` callback (cross-encoder)")
         if not sparse and not dense:
             return RankOutput(items=[], metadata={"stage": item_type, "stop_reason": "no_candidates"})
+        if llm is None:
+            raise ValueError("fusion_mode='agentic' requires llm to be provided")
         agentic_cfg = config.agentic_config or fusion.DEFAULT_AGENTIC_CONFIG
         reranked = await fusion.aagentic_rank(
             rank_input.query,
@@ -297,6 +264,8 @@ async def _basic_arank(  # noqa: C901  (4 fusion modes; splitting hurts readabil
         meta = {"stage": item_type, "fusion_mode": config.fusion_mode}
 
     if enable_rerank and scored:
+        if llm is None:
+            raise ValueError("enable_rerank=True requires llm to be provided")
         with_query = [
             Candidate(
                 id=item.id,
@@ -323,15 +292,10 @@ async def _basic_arank(  # noqa: C901  (4 fusion modes; splitting hurts readabil
 
 
 async def _arank(rank_input: RankInput, **kwargs: Any) -> RankOutput:
-    """Async dispatch by ``memory_type`` — re-exported as ``arank`` from the package root.
+    """Dispatch by ``memory_type`` to the registered facade ranker.
 
-    Private here (``_arank``) because the file's external public surface is
-    the LLM rerank tool (``arerank`` / ``rerank``); the package re-exports
-    this function as the top-level ``everalgo.rank.arank``.
-
-    Raises
-    ------
-        KeyError: ``rank_input.memory_type`` is not in ``_ALGO_REGISTRY``.
+    Raises:
+        KeyError: ``rank_input.memory_type`` not in ``_ALGO_REGISTRY``.
     """
     spec = _ALGO_REGISTRY.get(rank_input.memory_type)
     if spec is None:
@@ -340,10 +304,6 @@ async def _arank(rank_input: RankInput, **kwargs: Any) -> RankOutput:
 
 
 _rank = async_to_sync(_arank)
-"""Sync bridge over ``_arank`` — re-exported as ``rank`` from the package root.
-
-Only safe outside an event loop (CLI scripts, plain unit tests). For
-FastAPI / asyncio code, ``await arank(...)`` instead.
-"""
+"""Sync bridge over ``_arank``; re-exported as ``rank`` from the package root. Only safe outside an event loop."""
 
 from everalgo.rank import fusion  # noqa: E402  (late import breaks the circular dependency with fusion)

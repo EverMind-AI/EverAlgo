@@ -1,7 +1,6 @@
 """Tests for everalgo.agent_memory._text — token-aware truncation + JSON default.
 
-Port of opensource ``TestTruncateText`` (case extractor) + ``TestTruncateText`` (skill extractor) + edge
-cases. Two modes covered:
+Two modes covered:
 
 - ``suffix is None`` → head + tail with ``"[... trimmed N tokens ...]"`` marker (case-extractor pattern)
 - ``suffix is not None`` → head-only + suffix append (skill-extractor pattern)

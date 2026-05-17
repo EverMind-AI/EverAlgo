@@ -12,22 +12,29 @@ if TYPE_CHECKING:
 class KnowledgeExtractor:
     """Extract knowledge memories from parsed content. Stub."""
 
+    def __init__(self, *, llm: LLMClient) -> None:
+        self._llm = llm
+
     async def aextract(
         self,
         parsed: ParsedContent,
         *,
-        llm: LLMClient | None = None,
         prompt: str | None = None,
     ) -> list[KnowledgeMemory]:
-        """Stub: returns placeholder."""
+        """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+        Stub: returns placeholder.
+        """
         raise NotImplementedError("stub")
 
     def extract(
         self,
         parsed: ParsedContent,
         *,
-        llm: LLMClient | None = None,
         prompt: str | None = None,
     ) -> list[KnowledgeMemory]:
-        """Stub: returns placeholder."""
+        """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+        Stub: returns placeholder.
+        """
         raise NotImplementedError("stub")

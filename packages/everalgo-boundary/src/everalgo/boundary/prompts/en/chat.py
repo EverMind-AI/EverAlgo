@@ -1,9 +1,10 @@
-"""English prompt for ChatMemCellExtractor — verbatim port from new-release opensource.
+"""Chat-level boundary detection prompt.
 
-Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/en/conv_prompts.py``
-constant ``CONV_BATCH_BOUNDARY_DETECTION_PROMPT``. Per user directive: align with new release.
+Used by ``everalgo.boundary.detect_boundaries``, which is invoked by both
+``everalgo.user_memory.BoundaryDetector`` and ``everalgo.agent_memory.AgentBoundaryDetector``
+(agent variant filters tool items before passing chat-only items to this primitive).
 
-Placeholder: ``{messages}`` — rendered as ``[N] [YYYY-MM-DD HH:MM:SS+TZ] sender_name: content``.
+Placeholder: ``{messages}`` — rendered as ``[N] [YYYY-MM-DDTHH:MM:SSZ] sender_name: content``.
 Output schema: ``{"reasoning": str, "boundaries": list[int], "should_wait": bool}``.
 """
 
@@ -43,19 +44,19 @@ Set to `true` when the **last segment** has insufficient information to determin
 - **Merge by default:** When in doubt, do not split; only split on clear signals
 - **Content over form:** Greetings and farewells belong to the episode they serve, not their own
 - **Process continuity:** Consecutive actions toward the same goal (e.g., create group → post first instruction) form one episode
-- **System messages don't trigger splits:** The episode context of a system message is determined by the next human message that follows it
+- **System messages don't trigger splits:** System messages (e.g., `"[User X] joined the group"`) have their episode context determined by the next human message that follows them
 
 ### Examples
 
 **Example 1 — one boundary:**
 Input messages:
 ```
-[1] [2024-03-10 09:00:00+00:00] Alice: Can you help me debug the login issue?
-[2] [2024-03-10 09:01:00+00:00] Bob: Sure, let me check the logs.
-[3] [2024-03-10 09:05:00+00:00] Bob: Found it — a null pointer in AuthService line 42.
-[4] [2024-03-10 09:06:00+00:00] Alice: Fixed, thanks!
-[5] [2024-03-11 10:00:00+00:00] Alice: Hey, are you free for lunch today?
-[6] [2024-03-11 10:01:00+00:00] Bob: Sure, 12:30?
+[1] [2024-03-10T09:00:00Z] Alice: Can you help me debug the login issue?
+[2] [2024-03-10T09:01:00Z] Bob: Sure, let me check the logs.
+[3] [2024-03-10T09:05:00Z] Bob: Found it — a null pointer in AuthService line 42.
+[4] [2024-03-10T09:06:00Z] Alice: Fixed, thanks!
+[5] [2024-03-11T10:00:00Z] Alice: Hey, are you free for lunch today?
+[6] [2024-03-11T10:01:00Z] Bob: Sure, 12:30?
 ```
 Output:
 ```json
@@ -69,9 +70,9 @@ Output:
 **Example 2 — no boundary:**
 Input messages:
 ```
-[1] [2024-03-10 14:00:00+08:00] Alice: What's the status of the Q2 roadmap?
-[2] [2024-03-10 14:02:00+08:00] Bob: About 60% done. Need to finalize the API specs.
-[3] [2024-03-10 14:10:00+08:00] Alice: OK, let's review the specs tomorrow.
+[1] [2024-03-10T06:00:00Z] Alice: What's the status of the Q2 roadmap?
+[2] [2024-03-10T06:02:00Z] Bob: About 60% done. Need to finalize the API specs.
+[3] [2024-03-10T06:10:00Z] Alice: OK, let's review the specs tomorrow.
 ```
 Output:
 ```json

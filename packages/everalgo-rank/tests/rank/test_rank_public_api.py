@@ -12,9 +12,12 @@ def test_top_level_exports_full_surface() -> None:
 
     assert sorted(__all__) == sorted(
         [
+            "CaseRanker",
             "DEFAULT_RANK_CONFIG",
+            "EpisodicRanker",
             "FusionMode",
             "RankConfig",
+            "SkillRanker",
             "arank",
             "case",
             "episodic",

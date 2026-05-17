@@ -1,8 +1,6 @@
-"""Chinese prompt for AtomicFactExtractor — verbatim port from new-release opensource.
+"""Chinese prompt for AtomicFactExtractor.
 
-Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/zh/atomic_fact_prompts.py``.
-
-Placeholders: ``{{TIME}}`` / ``{{INPUT_TEXT}}``. Output schema:
+Placeholders: ``{TIME}`` / ``{INPUT_TEXT}``. Output schema:
 ``{"atomic_facts": {"time": str, "atomic_fact": list[str]}}``.
 """
 
@@ -80,8 +78,8 @@ ATOMIC_FACT_PROMPT = """你是一位专业的信息抽取分析师和信息架�
 
 现在仔细分析提供的对话内容和开始时间，应用上述所有规则，并**仅**返回指定格式的 JSON 对象（生成的事件日志必须与对话文本使用相同的语言）。
 
-对话开始时间: {{TIME}}
+对话开始时间: {TIME}
 对话内容:
-{{INPUT_TEXT}}
+{INPUT_TEXT}
 
 """

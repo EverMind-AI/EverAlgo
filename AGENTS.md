@@ -2,7 +2,7 @@
 
 > **Canonical source of truth.** This file (`AGENTS.md`) is the single source of truth for AI coding assistant context. `CLAUDE.md` (Claude Code) and `.cursorrules` (Cursor) are symlinks to it. Pattern adopted from [Mirascope](https://github.com/Mirascope/mirascope/blob/main/AGENTS.md) and [scikit-learn](https://github.com/scikit-learn/scikit-learn/blob/main/AGENTS.md).
 
-If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboarding to this repository, read this file first, then `docs/design.md` for the full architecture, then the relevant ADR(s) under `docs/decisions/` before touching code.
+If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboarding to this repository, read this file first, then `docs/concepts/architecture.md` for the full architecture, then the relevant ADR(s) under `local/decisions/` before touching code. The `local/` directory contains internal design artefacts (specs, plans, session notes) — not public-facing documentation.
 
 ---
 
@@ -16,7 +16,7 @@ If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboar
   - **Rank** — read path. Input: multi-route recall candidates plus pre-fetched cross-memory linkage. Output: a ranked memory list. Ranker performs **no storage I/O**; cross-memory linkage (e.g. `Episode → AtomicFact`) must be pre-fetched by the caller and passed in.
 - **Orchestration is upstream.** When to call, in what order, with what concurrency, persistence to the markdown filesystem — all owned by **evermem**. EverAlgo does not care whether the caller is open-source or cloud commercial; both paths share this code.
 
-For the rationale and deeper background, read `docs/design.md` §1.1.
+For the rationale and deeper background, read `docs/concepts/architecture.md`
 
 ---
 
@@ -32,18 +32,20 @@ everalgo/                              # monorepo, uv virtual workspace
 ├── .gitignore  .gitlab-ci.yml
 ├── docs/
 │   ├── design.md                      # ⚠️ READ THIS — full architecture
-│   ├── decisions/                     # ADRs (ADR-001…012) — read before challenging design
+│   ├── decisions/                     # ADRs (ADR-001…013) — read before challenging design
 │   ├── concepts/                      # high-level architecture notes
 │   └── reference/                     # API reference (per-distribution)
+├── examples/                          # runnable quickstart scripts (01–06, use FakeLLMClient)
+├── local/                             # internal artefacts (specs, plans, session notes) — not public
 ├── packages/
 │   ├── everalgo-core/                 # types, llm (+ providers), prompts, testing
-│   ├── everalgo-boundary/             # MemCell extractors + tokenize / split
-│   ├── everalgo-clustering/           # cluster_by_geometry / cluster_by_llm
-│   ├── everalgo-rank/                 # 4 rankers + fusion / weight / rerank
-│   ├── everalgo-parser/               # multimodal raw-file → ParsedContent
-│   ├── everalgo-user-memory/          # Episode / Foresight / AtomicFact / Profile
-│   ├── everalgo-agent-memory/         # AgentCase / AgentSkill
-│   └── everalgo-knowledge/            # KnowledgeMemory
+│   ├── everalgo-boundary/             # detect_boundaries + DetectionResult + workspace stub
+│   ├── everalgo-clustering/           # cluster_by_geometry / cluster_by_llm over list[Cluster]
+│   ├── everalgo-rank/                 # 4 rankers + fusion / weight / rerank toolkit
+│   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (EXPERIMENTAL stub)
+│   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile
+│   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill
+│   └── everalgo-knowledge/            # KnowledgeMemory extractor (EXPERIMENTAL stub)
 └── tests/
 ```
 
@@ -51,7 +53,7 @@ Eight publishable distributions share the **`everalgo.*` namespace** through [PE
 
 The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = false` at the root, members under `packages/*`). Same shape: [Apache Airflow](https://github.com/apache/airflow) (100+ workspace members, single root lockfile) and [pydantic-ai](https://github.com/pydantic/pydantic-ai). Note these two projects are *uv-workspace* references only — Airflow's `airflow.providers.*` is pkgutil-style legacy namespace, not PEP 420; pydantic-ai uses three independent namespaces, not one shared. LangChain and LlamaIndex are referenced for the *monorepo* layout only — neither uses uv workspace itself; they keep per-package venvs and lockfiles.
 
-**Dependency topology** (see `docs/design.md` §1.3 for the full graph and rationale):
+**Dependency topology** (see `docs/concepts/architecture.md` for the full graph and rationale):
 
 ```
                                 everalgo-core
@@ -74,8 +76,8 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
 git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
 cd everalgo
 
-# Install all 8 packages editable into a shared venv.
-uv sync --all-packages
+# Install all 8 packages editable into a shared venv (includes dev tools).
+uv sync --all-packages --group dev
 
 # Run tests across the workspace.
 uv run pytest
@@ -84,15 +86,25 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 
-# Type check.
+# Type check (both checkers — they catch different things).
 uv run mypy .
+uv run pyright
 ```
 
 Working on a single package? Sync only that package's dependencies:
 
 ```bash
 uv sync --package everalgo-clustering
-uv run pytest packages/everalgo-clustering/tests/   # once per-package tests exist
+uv run pytest packages/everalgo-clustering/tests/
+```
+
+Try any operator offline using the bundled examples (no API key required):
+
+```bash
+uv run python examples/01_boundary_chat.py          # Chat → MemCell
+uv run python examples/03_user_memory_episode.py    # MemCell → Episode
+uv run python examples/04_agent_memory_case.py      # Agent trajectory → AgentCase
+uv run python examples/06_full_user_memory_pipeline.py   # Full pipeline
 ```
 
 ### Pre-commit hook (required)
@@ -167,18 +179,18 @@ Reference: [uv workspace documentation](https://docs.astral.sh/uv/concepts/proje
 
 ## 5. Code Style
 
-The full rationale lives in `docs/design.md` §1.4 and ADR 010 / 011. Hard rules:
+The full rationale lives in `docs/concepts/architecture.md` and `local/decisions/010-sync-async-dual-interface.md` / `011-protocol-vs-abc.md`. Hard rules:
 
 - **Naming contract — `a` prefix means async.** Methods named `aextract` / `arank` / `adetect` / `aparse` are **native async** (do real I/O — LLM, network, …); call them with `await`. Methods without the `a` prefix (`rank`, `extract`, `count_tokens`, `rrf`, …) are **sync** (pure compute, no I/O); call them directly. Same convention as `dspy.acall` / `litellm.acompletion` / `instructor.AsyncInstructor`.
 - **I/O operators: async-first + sync bridge.** Native async via `asyncio`; sync version is derived through `asgiref.async_to_sync` for non-event-loop callers (CLI scripts, plain unit tests). Never call the sync bridge from inside a running event loop.
 - **Pure-compute operators: sync only.** No async wrapper for `fusion.rrf`, `_tokenize.count_tokens`, clustering distances, etc. Mirrors numpy / scipy / sklearn / pandas conventions.
 - **Prompts as Python string modules.** Concrete prompt strings live in `<subpkg>/prompts/{en,zh}/<name>.py` as module-level constants. Editing a prompt = editing a `.py` file. No external `.md` / `.yaml` / `.toml` prompt stores. Caller customisation: per-call `prompt=` argument (fine-grained) or monkey-patching the module constant at startup (coarse-grained).
-- **`Protocol` for typing, not `ABC`.** EverAlgo operators are stateless; implementations do not need to subclass anything. See ADR 011.
+- **`Protocol` for typing, not `ABC`.** EverAlgo operators are stateless; implementations do not need to subclass anything. See `local/decisions/011-protocol-vs-abc.md`.
 - **No dependency injection in algorithm code.** Module-level functions + global config + monkeypatch in tests. Algorithm authors should be one keystroke away from running their code; do not impose framework ceremony.
-- **Sync bridge for I/O operators: write `extract = async_to_sync(aextract)` one-liner per ADR 010 line 199-214; do not introduce a `DualInterface` mixin.** This keeps type inference predictable, avoids metaclass magic, and matches the pattern shown in the ADR. The `async_to_sync` helper comes from `asgiref.sync`.
-- **Lint configuration.** Workspace-wide ruff is configured in the root `pyproject.toml` (`line-length = 120`, target version inferred from `requires-python = ">=3.12"`, rule set derived from the pytorch + pydantic-ai intersection). NumPy-style docstrings — the convention used by numpy / scipy / scikit-learn / pandas, the industry standard for scientific Python algorithm libraries.
-- **Logging discipline.** On the LLM / I/O path use `logger = logging.getLogger(__name__)` with lazy `%`-format (`logger.debug("count=%d", n)` — never f-strings inside log calls) and `logger.exception(...)` inside `except` blocks. For user-behaviour problems and deprecations use `warnings.warn(..., stacklevel=2)`; for pure-algorithm errors `raise ValueError(...)` with a detailed message (numpy style — `shapes (3,4) and (5,6) not aligned`, etc.). Every public subpackage `__init__.py` already attaches a `NullHandler`; `everalgo.llm` carries a default-on `SensitiveHeadersFilter`. **Forbidden in library code**: `logging.basicConfig`, `addHandler` (anything but `NullHandler`), `setLevel`, explicit `propagate = True/False`, and any module-level `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()` (no-arg) / `logging.root.*` — these all target the root logger and are an application's job. **Forbidden in DEBUG logs**: request / response bodies, prompt text, model outputs (the Filter only redacts headers; bodies leak PII the Filter cannot see). Performance timing is the user's job (`cProfile` / `line_profiler` / `%timeit`); the library does not log durations. ruff rule sets `G` + `LOG` + `TRY` enforce these at lint time. Full rationale, level semantics, and the logging-vs-warnings-vs-exception decision matrix in [ADR 013](docs/decisions/013-logging-conventions.md).
-- **Use the full `line-length = 120` budget when hand-wrapping.** For Python comments / docstrings and TOML/YAML comments, fill each line to roughly 100–115 characters before wrapping — do not pre-wrap at 70 / 79 / 80 / 88 / 100 out of habit. `E501` is in the ignore list, and ruff never flags lines that are *too short*, so this is a writer's discipline rather than a lint check. A 3-line comment that collapses cleanly into 2 lines at 120 should be 2 lines. Exceptions: bullet lists, code blocks, NumPy docstring `name : type` field signatures (one per line on purpose), and any line where a natural break aids comprehension. Markdown files in this repo deliberately use the **one-paragraph-per-line** (no hard-wrap) style — the same convention Prettier emits by default and GitHub renders cleanly — so `.md` prose is exempt from the 100–115 rule entirely; rely on editor soft-wrap.
+- **Sync bridge for I/O operators: write `extract = async_to_sync(aextract)` one-liner; do not introduce a `DualInterface` mixin.** This keeps type inference predictable, avoids metaclass magic. The `async_to_sync` helper comes from `asgiref.sync`. See `local/decisions/010-sync-async-dual-interface.md`.
+- **Lint configuration.** Workspace-wide ruff is configured in the root `pyproject.toml` (`line-length = 120`, target version inferred from `requires-python = ">=3.12"`, rule set derived from the pytorch + pydantic-ai intersection). Google-style docstrings — aligns with Google Python Style Guide. `Args:` / `Returns:` / `Raises:` sections, no type repetition in the body (type annotations in the signature are authoritative).
+- **Logging discipline.** On the LLM / I/O path use `logger = logging.getLogger(__name__)` with lazy `%`-format (`logger.debug("count=%d", n)` — never f-strings inside log calls) and `logger.exception(...)` inside `except` blocks. For user-behaviour problems and deprecations use `warnings.warn(..., stacklevel=2)`; for pure-algorithm errors `raise ValueError(...)` with a detailed message (numpy style — `shapes (3,4) and (5,6) not aligned`, etc.). Every public subpackage `__init__.py` already attaches a `NullHandler`; `everalgo.llm` carries a default-on `SensitiveHeadersFilter`. **Forbidden in library code**: `logging.basicConfig`, `addHandler` (anything but `NullHandler`), `setLevel`, explicit `propagate = True/False`, and any module-level `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()` (no-arg) / `logging.root.*` — these all target the root logger and are an application's job. **Forbidden in DEBUG logs**: request / response bodies, prompt text, model outputs (the Filter only redacts headers; bodies leak PII the Filter cannot see). Performance timing is the user's job (`cProfile` / `line_profiler` / `%timeit`); the library does not log durations. ruff rule sets `G` + `LOG` + `TRY` enforce these at lint time. Full rationale, level semantics, and the logging-vs-warnings-vs-exception decision matrix in [`local/decisions/013-logging-conventions.md`](local/decisions/013-logging-conventions.md).
+- **Use the full `line-length = 120` budget when hand-wrapping.** For Python comments / docstrings and TOML/YAML comments, fill each line to roughly 100–115 characters before wrapping — do not pre-wrap at 70 / 79 / 80 / 88 / 100 out of habit. `E501` is in the ignore list, and ruff never flags lines that are *too short*, so this is a writer's discipline rather than a lint check. A 3-line comment that collapses cleanly into 2 lines at 120 should be 2 lines. Exceptions: bullet lists, code blocks, and any line where a natural break aids comprehension. Markdown files in this repo deliberately use the **one-paragraph-per-line** (no hard-wrap) style — the same convention Prettier emits by default and GitHub renders cleanly — so `.md` prose is exempt from the 100–115 rule entirely; rely on editor soft-wrap.
 - **English only in code, config, and commit messages.** All Python code, comments, identifiers, `pyproject.toml` comments, CI files, and commit messages must be English. The same rule that `evermem` enforces with a pre-commit hook applies here. Design discussion artifacts under `docs/` (`design.md`, `decisions/`, `concepts/`) may stay Chinese — they reflect the working language of the design discussion, not the codebase.
 
 ---
@@ -189,7 +201,7 @@ The full rationale lives in `docs/design.md` §1.4 and ADR 010 / 011. Hard rules
 
 - `main` is the only long-lived branch. It is **GitLab-protected** (Settings → Repository → Protected branches): direct push is denied for everyone; the only path to land changes on `main` is via Merge Request.
 - Feature work happens on short-lived branches: `feat/<topic>`, `fix/<bug>`, `docs/<topic>`, `refactor/<topic>`. Open an MR → squash-merge into `main`.
-- Release = tag on `main` using SemVer per distribution: `everalgo-clustering/v0.2.0`. Each distribution has its own version cadence (HuggingFace pattern; see `docs/design.md` §1.3 and `README.md` "Cutting a release").
+- Release = tag on `main` using SemVer per distribution: `everalgo-clustering/v0.2.0`. Each distribution has its own version cadence (HuggingFace pattern; see `docs/concepts/architecture.md` and `README.md` "Cutting a release").
 - Maintenance branches (`0.1.X-fixes`) are introduced **only when** a published version needs back-ports; not by default.
 
 **Commit messages: Gitmoji + Conventional Commits.** Format: `<emoji> <type>(<scope>): <description>`.
@@ -199,7 +211,7 @@ The full rationale lives in `docs/design.md` §1.4 and ADR 010 / 011. Hard rules
 🐛 fix(boundary): correct token count for emoji-only chat segments
 ♻️ refactor(rank): extract shared fusion helper from case / skill rankers
 ✅ test(user-memory): cover EpisodeExtractor tail-merge edge case
-📝 docs(design): clarify §2.4 cluster_previews shape
+📝 docs(design): clarify cluster_previews shape
 ```
 
 Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
@@ -216,14 +228,14 @@ Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `bu
 
 Follow this checklist when introducing a new extractor / ranker / clusterer:
 
-1. **Pick the subpackage.** Decide which `packages/everalgo-<dist>/src/everalgo/<subpkg>/` the operator lives in based on its product axis (user_memory / agent_memory / knowledge) or tool axis (boundary / clustering / rank / parser). When in doubt, read `docs/design.md` §1.2.
+1. **Pick the subpackage.** Decide which `packages/everalgo-<dist>/src/everalgo/<subpkg>/` the operator lives in based on its product axis (user_memory / agent_memory / knowledge) or tool axis (boundary / clustering / rank / parser). When in doubt, read `docs/concepts/architecture.md`
 2. **Create the module.** `<subpkg>/<operator>.py` — module-level functions or one stateless class implementing the relevant Protocol from `everalgo.protocols`.
 3. **Write the prompt(s).** If the operator calls an LLM, drop prompt strings as module-level constants in `<subpkg>/prompts/en/<operator>.py` (and `zh/<operator>.py` for the Chinese variant when applicable).
-4. **Re-export the public surface.** If the operator is part of the public API of its facade subpackage, add it to `<subpkg>/__init__.py`'s re-export block and `__all__`. See `docs/design.md` §1.3 for the re-export pattern.
+4. **Re-export the public surface.** If the operator is part of the public API of its facade subpackage, add it to `<subpkg>/__init__.py`'s re-export block and `__all__`. See `docs/concepts/architecture.md` for the re-export pattern.
 5. **Wire dependencies.** If the new code requires a new third-party library, add it via `uv add --package everalgo-<dist> <library>`, which updates the right `pyproject.toml`.
-6. **Write tests.** Use `everalgo.testing.fake_llm` to avoid real API calls; use `everalgo.testing.assertions` for structural memory checks.
+6. **Write tests.** Use `everalgo.testing.FakeLLMClient` to avoid real API calls; use `everalgo.testing.assert_*_shape` for structural memory checks.
 7. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`).
-8. **Document architectural decisions.** If the operator embodies a non-trivial design choice (new public Protocol, new distribution boundary, breaking a convention), add an ADR under `docs/decisions/` numbered after the latest.
+8. **Document architectural decisions.** If the operator embodies a non-trivial design choice (new public Protocol, new distribution boundary, breaking a convention), add an ADR under `local/decisions/` numbered after the latest (currently ADR-013).
 
 ---
 
@@ -237,7 +249,7 @@ Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (pe
 4. Map provider-native exceptions onto the canonical `LLMError` subclass tree.
 5. Add per-provider prompts only if the provider needs special formatting (rare — most providers are OpenAI-compatible).
 6. Add tests under `packages/everalgo-core/tests/llm/providers/<provider>/`. **No mocks at the HTTP layer** when a real key is available in CI; otherwise use `respx` to record fixtures.
-7. Update `docs/design.md` §2.5 and `AGENTS.md` if the public surface changes.
+7. Update `docs/concepts/architecture.md` and `AGENTS.md` if the public surface changes.
 
 ---
 
@@ -254,9 +266,11 @@ Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (pe
 
 | Subject | Where |
 |---|---|
-| Architecture (definitive) | [`docs/design.md`](docs/design.md) |
-| Architecture decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |
-| Source of `evermem` contract | Confluence — see `docs/design.md` header for links |
+| Architecture (definitive) | [`docs/concepts/architecture.md`](docs/concepts/architecture.md) |
+| Architecture decisions (ADRs 001–013) | [`local/decisions/`](local/decisions/) |
+| High-level architecture notes | [`docs/concepts/`](docs/concepts/) |
+| Runnable operator examples | [`examples/`](examples/) — use `FakeLLMClient`, no API key needed |
+| Source of `evermem` contract | Confluence — see `local/design-archive.md` header for links |
 | uv workspace concepts | https://docs.astral.sh/uv/concepts/projects/workspaces/ |
 | PEP 420 namespace packages | https://peps.python.org/pep-0420/ |
 | PEP 8 (style) / 257 (docstrings) / 484 (type hints) | https://peps.python.org/ |
@@ -270,5 +284,5 @@ Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (pe
 This file is the contract between human engineers and AI assistants on this repo. When you change it, please:
 
 1. Keep it the **canonical** copy. `CLAUDE.md` and `.cursorrules` should remain symlinks.
-2. Cite a source for every concrete decision — a `docs/design.md` section, an ADR, a public spec / star-project URL. No groundless claims.
-3. Whenever the repository structure or workflow changes, update §2 (layout) and §3-§4 (commands) **in the same MR**.
+2. Cite a source for every concrete decision — a `docs/concepts/architecture.md` section, an ADR, a public spec / star-project URL. No groundless claims.
+3. Whenever the repository structure or workflow changes, update (layout) and-§4 (commands) **in the same MR**.

@@ -1,12 +1,10 @@
-"""English prompts for ProfileExtractor — verbatim port from new-release opensource.
+"""English prompts for ProfileExtractor.
 
-Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/en/profile_prompts.py``.
-
-The new release replaces the prior 2-stage ``CONVERSATION_PROFILE_PART1 + PART2`` flow with a single-call
-``PROFILE_INITIAL_EXTRACTION_PROMPT`` returning ``{explicit_info, implicit_traits}``. The other prompts
-exported here (``PROFILE_UPDATE_PROMPT`` / ``PROFILE_COMPACT_PROMPT`` / ``TEAM_PROFILE_UPDATE_PROMPT``)
-mirror new-release maintenance operations but are not consumed by :class:`ProfileExtractor` yet — kept
-verbatim for byte-equivalence with opensource and ready for future minor extractor releases.
+``PROFILE_INITIAL_EXTRACTION_PROMPT`` is the active prompt used by :class:`ProfileExtractor`; it
+replaces the prior 2-stage ``CONVERSATION_PROFILE_PART1 + PART2`` flow with a single call returning
+``{explicit_info, implicit_traits}``. The other prompts exported here (``PROFILE_UPDATE_PROMPT`` /
+``PROFILE_COMPACT_PROMPT`` / ``TEAM_PROFILE_UPDATE_PROMPT``) cover maintenance operations not yet
+consumed by :class:`ProfileExtractor` — kept for future minor extractor releases.
 
 Placeholders & rendering: all four templates use single-brace placeholders that survive
 :py:meth:`str.format` because their JSON examples already escape literal braces as ``{{ }}``.
@@ -42,10 +40,9 @@ Analyze conversations and output a list of operations (can have multiple). Avail
 【Important Rules】
 1. **Tag Mining**: Implicit traits must include [Personality Tags], e.g., [Risk-Averse], [Socially-Driven], [Data-Oriented].
 2. Only extract user info, don't treat AI assistant suggestions as user traits
-3. sources format: use conversation ID (in brackets, e.g., ep1, ep2)
-4. evidence should include time info - e.g., "In Oct 2024 user mentioned..."
-5. Index numbers for explicit_info and implicit_traits are independent
-6. **Deduplication**: Before using "add", carefully check ALL existing items. If a similar trait/info already exists (even with different wording), use "update" to enrich it instead of adding a duplicate. Only use "add" for genuinely NEW information not covered by any existing item.
+3. evidence should include time info - e.g., "In Oct 2024 user mentioned..."
+4. Index numbers for explicit_info and implicit_traits are independent
+5. **Deduplication**: Before using "add", carefully check ALL existing items. If a similar trait/info already exists (even with different wording), use "update" to enrich it instead of adding a duplicate. Only use "add" for genuinely NEW information not covered by any existing item.
 
 【Profile Definitions & Analysis Framework】
 - **explicit_info (Explicit Information)**: User facts that can be directly extracted from conversations.
@@ -69,9 +66,9 @@ With operations (can combine multiple add/update/delete):
 ```json
 {{
   "operations": [
-    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "...", "sources": ["ep1"]}}}},
-    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "...", "sources": ["ep1", "ep2"]}}}},
-    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "...", "sources": ["ep3"]}}}},
+    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "..."}}}},
+    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}}},
+    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "..."}}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
   ],
   "update_note": "added 2 explicit info and 1 implicit trait, updated 1, deleted 1"
@@ -92,7 +89,7 @@ Compaction strategies:
 1. **Merge Similar Items**: Combine multiple records of the same dimension into one "Current State + Trend" description.
 2. **Refine Tags**: Implicit traits should be summarized as personality tags (e.g., [Risk-Averse]), removing repetitive or shallow descriptions.
 3. Delete unimportant, outdated, or short-term statuses.
-4. Preserve item fields (especially evidence / sources).
+4. Preserve item fields (especially evidence).
 
 Current Profile:
 {profile_text}
@@ -101,10 +98,10 @@ Current Profile:
 ```json
 {{
   "explicit_info": [
-    {{"category": "...", "description": "...", "evidence": "...", "sources": ["episode_id"]}}
+    {{"category": "...", "description": "...", "evidence": "..."}}
   ],
   "implicit_traits": [
-    {{"trait": "...", "description": "...", "basis": "...", "evidence": "...", "sources": ["id1", "id2"]}}
+    {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}
   ],
   "compact_note": "Explain what was deleted/merged"
 }}
@@ -127,9 +124,8 @@ Psychological profile, personality tags, and decision styles inferred from behav
 
 【Extraction Principles】
 1. Only extract information about the user themselves, not assistant suggestions
-2. Implicit traits must be supported by multiple evidence: each implicit trait must have at least 2 sources; evidence can come from the current conversations and/or the existing profile's evidence/sources (when updating), not from a single new conversation alone
+2. Implicit traits must be supported by multiple evidence: each implicit trait must have evidence corroborated by multiple signals from the conversations and/or existing profile; do not infer from a single data point alone
 3. Describe each piece of information in one natural sentence, easy to understand
-4. Mark the source (message ID)
 
 【Output Format】
 Output JSON directly in the following format:
@@ -139,8 +135,7 @@ Output JSON directly in the following format:
     {{
       "category": "category name",
       "description": "one sentence description",
-      "evidence": "one-sentence evidence grounded in the conversations",
-      "sources": ["YYYY-MM-DD HH:MM|episode_id"]
+      "evidence": "one-sentence evidence grounded in the conversations"
     }}
   ],
   "implicit_traits": [
@@ -148,8 +143,7 @@ Output JSON directly in the following format:
       "trait": "trait name",
       "description": "one sentence description of this trait",
       "basis": "inferred from which behaviors/conversations",
-      "evidence": "one-sentence evidence grounded in the conversations",
-      "sources": ["YYYY-MM-DD HH:MM|episode_id1", "YYYY-MM-DD HH:MM|episode_id2"]
+      "evidence": "one-sentence evidence grounded in the conversations"
     }}
   ]
 }}
@@ -192,10 +186,9 @@ Analyze the conversations and output operations ONLY for information about **{ta
 【Important Rules】
 1. **Speaker Attribution**: This is a GROUP conversation with multiple speakers. ONLY extract what **{target_user}** said or what is explicitly about {target_user}. If another participant mentions a fact, it belongs to THAT participant's profile, NOT {target_user}'s.
 2. **Tag Mining**: Implicit traits must include [Personality Tags], e.g., [Risk-Averse], [Socially-Driven], [Data-Oriented].
-3. sources format: use conversation ID (in brackets, e.g., ep1, ep2)
-4. evidence should include time info and speaker - e.g., "In Oct 2024 {target_user} stated..."
-5. Index numbers for explicit_info and implicit_traits are independent
-6. **Deduplication**: Before using "add", check ALL existing items. If a similar trait/info already exists, use "update" instead. Only "add" genuinely NEW information.
+3. evidence should include time info and speaker - e.g., "In Oct 2024 {target_user} stated..."
+4. Index numbers for explicit_info and implicit_traits are independent
+5. **Deduplication**: Before using "add", check ALL existing items. If a similar trait/info already exists, use "update" instead. Only "add" genuinely NEW information.
 
 【Profile Definitions】
 - **explicit_info**: Facts directly stated by or about {target_user} (skills, background, preferences, location, etc.)
@@ -211,9 +204,9 @@ With operations:
 ```json
 {{
   "operations": [
-    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "...", "sources": ["ep1"]}}}},
-    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "...", "sources": ["ep1", "ep2"]}}}},
-    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "...", "sources": ["ep3"]}}}},
+    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "..."}}}},
+    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}}},
+    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "..."}}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
   ],
   "update_note": "..."

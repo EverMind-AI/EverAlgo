@@ -1,21 +1,4 @@
-"""Operation atoms for :class:`AgentSkillExtractor`.
-
-Each function corresponds to one LLM-emitted op (add / update) or one structural helper (maturity scoring,
-prompt formatting). Imported by ``skill.py`` and exercised in isolation by tests; nothing in this module is
-part of the public API. Prompts are hard-coded reads of the ``everalgo.agent_memory.prompts.*`` constants
-(monkey-patch the module attribute at startup for global override; per-call prompt parameters were dropped
-to keep the API surface minimal).
-
-Algorithm sources (line numbers reference ``evermemos-opensource``):
-- ``_apply_add``          ← :431-502
-- ``_apply_update``       ← :526-745
-- ``_evaluate_maturity``  ← :338-382
-- ``_format_cases``       ← :99-115
-- ``_format_existing_skills`` ← :156-209
-- ``_is_skill_content_sufficient`` ← :418-429
-- ``_content_change_ratio`` ← :406-416
-- ``_is_hypothesis_promotion`` ← :389-403
-"""
+"""Operation atoms for :class:`AgentSkillExtractor` — add, update, maturity scoring, and formatting helpers."""
 
 from __future__ import annotations
 
@@ -35,7 +18,7 @@ from everalgo.types import AgentCase, AgentSkill
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from everalgo.agent_memory.skill import SkillConfig
+    from everalgo.agent_memory.skill import _SkillCfg
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -54,11 +37,7 @@ __all__ = [
 
 
 def _op_data(op: dict[str, Any]) -> dict[str, Any]:
-    """Pull the ``data`` field off an LLM-emitted op dict, defaulting to ``{}``.
-
-    Centralised type-narrowing helper so :func:`_apply_add` / :func:`_apply_update` consume ``dict[str, Any]``
-    without strict-mode pyright complaints about ``Unknown`` cascading through ``.get(...)`` chains.
-    """
+    """Pull the ``data`` field off an LLM-emitted op dict, defaulting to ``{}``."""
     raw = op.get("data")
     if isinstance(raw, dict):
         return cast("dict[str, Any]", raw)
@@ -69,7 +48,7 @@ def _op_data(op: dict[str, Any]) -> dict[str, Any]:
 
 
 def _format_cases(case_records: Sequence[AgentCase]) -> str:
-    """Format new :class:`AgentCase` instances as a JSON string for the LLM. Opensource :99-115."""
+    """Serialize AgentCase instances to a JSON string for the LLM prompt."""
     formatted: list[dict[str, Any]] = []
     for rec in case_records:
         entry: dict[str, Any] = {
@@ -85,7 +64,7 @@ def _format_cases(case_records: Sequence[AgentCase]) -> str:
 
 
 def _summarise_case_for_prompt(case_record: AgentCase, max_approach_tokens: int = 200) -> dict[str, Any]:
-    """Compact case summary dict for inclusion in the skill prompt. Opensource :138-154."""
+    """Compact case summary dict for inclusion in the skill prompt."""
     entry: dict[str, Any] = {
         "task_intent": case_record.task_intent or "",
         "quality_score": case_record.quality_score,
@@ -99,24 +78,19 @@ def _summarise_case_for_prompt(case_record: AgentCase, max_approach_tokens: int 
 
 def _format_existing_skills(
     existing_records: Sequence[AgentSkill],
-    case_history: Sequence[AgentCase],
+    supporting_cases: Sequence[AgentCase],
     *,
     max_description_tokens: int,
     max_content_tokens: int,
     max_support_cases: int = 3,
     max_approach_tokens: int = 200,
 ) -> str:
-    """Format existing skills with index numbers + supporting case summaries. Opensource :156-209.
-
-    Each item carries ``index`` (the LLM uses it to address update ops), ``name`` / ``description`` /
-    ``content`` (truncated to per-config caps) / ``confidence``, plus up to ``max_support_cases`` summaries
-    of cases referenced via ``source_case_ids`` when those cases appear in ``case_history``.
-    """
+    """Format existing skills with index numbers and supporting case summaries for the LLM prompt."""
     if not existing_records:
         return "(empty — no existing skills)"
 
     case_map: dict[str, AgentCase] = {}
-    for case_rec in case_history:
+    for case_rec in supporting_cases:
         cid = str(case_rec.id or "")
         if cid:
             case_map[cid] = case_rec
@@ -150,7 +124,7 @@ def _format_existing_skills(
 
 
 def _is_skill_content_sufficient(content: str, min_lines: int = 5, min_length: int = 50) -> bool:
-    """Check that ``content`` has enough substance to be useful. Opensource :418-429."""
+    """Return ``True`` iff ``content`` meets the minimum line count and character length."""
     if not content:
         return False
     stripped = content.strip()
@@ -161,10 +135,7 @@ def _is_skill_content_sufficient(content: str, min_lines: int = 5, min_length: i
 
 
 def _content_change_ratio(old: str, new: str) -> float:
-    """Return 0.0-1.0 indicating how much content changed. Opensource :405-416.
-
-    Uses :class:`difflib.SequenceMatcher`: ``1 - matching_ratio``.
-    """
+    """Return ``1 - SequenceMatcher.ratio()`` as a 0.0-1.0 change fraction."""
     if not old and not new:
         return 0.0
     if not old or not new:
@@ -178,7 +149,7 @@ _VERIFIED_HEADER = re.compile(r"^##\s+Steps", re.MULTILINE)
 
 
 def _is_hypothesis_promotion(old_content: str, new_content: str) -> bool:
-    """Detect ``## Potential Steps`` → ``## Steps`` promotion. Opensource :389-403."""
+    """Detect a ``## Potential Steps`` → ``## Steps`` header promotion."""
     old_has_potential = bool(_HYPOTHESIS_HEADER.search(old_content or ""))
     new_has_steps = bool(_VERIFIED_HEADER.search(new_content or ""))
     new_has_potential = bool(_HYPOTHESIS_HEADER.search(new_content or ""))
@@ -198,15 +169,19 @@ async def _evaluate_maturity(
     content: str,
     confidence: float,
     client: LLMClient,
-    cfg: SkillConfig,
+    cfg: _SkillCfg,
     prompt_maturity: str | None = None,
-) -> float | None:
-    """4-dimension LLM scoring / 20 normalisation. Opensource :338-382.
+) -> float:
+    """4-dimension LLM scoring (completeness / executability / evidence / clarity) normalised to [0,1] via /20.
 
-    ``prompt_maturity`` overrides :data:`AGENT_SKILL_MATURITY_SCORE_PROMPT` per call; ``None`` keeps the
-    built-in default. Returns ``None`` when the LLM response is malformed or the call fails; the caller
-    falls back to a default (O-9 → 0.6 for add, ``prior.maturity_score`` for update).
-    ``cfg.skip_maturity_scoring`` short-circuits to ``1.0``.
+    Short-circuits to ``1.0`` when ``cfg.skip_maturity_scoring`` is ``True`` (default — current retrieval
+    doesn't consult maturity_score; kept for forward compatibility).
+
+    Raises:
+        LLMError: Propagated from the underlying LLM client call.
+        json.JSONDecodeError: If the LLM response is not valid JSON.
+        ValueError: If the response is not a dict or is missing required dimension fields, or if
+            dimension values cannot be converted to float.
     """
     if cfg.skip_maturity_scoring:
         logger.info("maturity scoring skipped by config, returning 1.0")
@@ -220,31 +195,17 @@ async def _evaluate_maturity(
         content=content or "",
         confidence=confidence,
     )
-    try:
-        response = await client.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
-        )
-        data: Any = json.loads(response.content)
-    except Exception as exc:
-        # Opensource :351-382 uses bare `except Exception` so provider failures (LLMError, timeouts,
-        # connection drops, JSON parse errors, ...) all fall back to None → caller uses defaults
-        # (0.6 for _apply_add, prior.maturity_score for _apply_update) instead of failing the entire
-        # extract pipeline. Narrowing to JSONDecodeError + ValueError would let LLMError propagate up
-        # and abort the whole AgentSkillExtractor.aextract call — a port-drift bug.
-        logger.warning("maturity evaluation LLM call failed: %s", exc)
-        return None
+    response = await client.chat(
+        messages=[LLMChatMessage(role="user", content=rendered)],
+        response_format={"type": "json_object"},
+    )
+    data: Any = json.loads(response.content)
 
     if not isinstance(data, dict) or not all(d in data for d in _MATURITY_DIMENSIONS):
-        logger.warning("maturity evaluation returned invalid format")
-        return None
+        raise ValueError("maturity evaluation returned invalid format")
     data_dict = cast("dict[str, Any]", data)
 
-    try:
-        raw_total = sum(float(data_dict[d]) for d in _MATURITY_DIMENSIONS)
-    except (TypeError, ValueError) as exc:
-        logger.warning("maturity dimensions not numeric: %s", exc)
-        return None
+    raw_total = sum(float(data_dict[d]) for d in _MATURITY_DIMENSIONS)
 
     score = max(0.0, min(1.0, raw_total / 20.0))
     logger.info(
@@ -263,19 +224,16 @@ async def _evaluate_maturity(
 
 async def _apply_add(
     op: dict[str, Any],
-    cluster_id: str,
     source_case_ids: Sequence[str],
     *,
     client: LLMClient,
-    cfg: SkillConfig,
+    cfg: _SkillCfg,
     prompt_maturity: str | None = None,
 ) -> AgentSkill | None:
-    """Apply an ``add`` operation. Opensource :431-502.
+    """Apply an ``add`` op: validate content / name / description, clamp confidence, run maturity scoring.
 
-    Validates content / name / description; clamps confidence; runs maturity scoring (or skips per cfg).
-    ``prompt_maturity`` overrides the built-in maturity-scoring prompt per call. Returns a fresh
-    :class:`AgentSkill` (caller distinguishes ADD via ``id ∉ existing_relevant_skills`` and embeds before
-    persisting). Returns ``None`` when validation fails.
+    Returns a fresh :class:`AgentSkill` or ``None`` when validation fails.
+    cluster_id is left empty; caller stamps it after extraction.
     """
     data = _op_data(op)
     content = str(data.get("content") or "")
@@ -314,38 +272,30 @@ async def _apply_add(
 
     return AgentSkill(
         id=uuid.uuid4().hex,
-        cluster_id=cluster_id,
         name=name,
         description=description,
         content=content,
         confidence=confidence,
-        maturity_score=score if score is not None else 0.6,
+        maturity_score=score,
         source_case_ids=list(source_case_ids),
     )
 
 
-async def _apply_update(  # noqa: C901  — branches mirror opensource _apply_update :526-745
+async def _apply_update(  # noqa: C901  — branches mirror the upstream algorithm
     op: dict[str, Any],
     existing_list: Sequence[AgentSkill],
     source_case_ids: Sequence[str],
     source_quality: float,
     *,
     client: LLMClient,
-    cfg: SkillConfig,
+    cfg: _SkillCfg,
     processed_indices: set[int],
     prompt_maturity: str | None = None,
 ) -> AgentSkill | None:
-    """Apply an ``update`` operation. Opensource :526-745.
+    """Apply an ``update`` op; return a modified :class:`AgentSkill` or ``None`` when nothing changed.
 
-    Returns a new :class:`AgentSkill` (via :meth:`pydantic.BaseModel.model_copy`) encoding the operation
-    per DESIGN.md §5.2:
-
-    - retire: ``confidence < cfg.retire_confidence`` — caller soft-deletes
-    - update: ``confidence >= cfg.retire_confidence`` — caller upserts (and diffs ``name`` / ``description``
-      against the prior in ``existing_relevant_skills`` to decide whether to re-embed)
-
-    Returns ``None`` for: invalid index / out-of-range index / duplicate index / insufficient new content /
-    no fields actually changed.
+    ``confidence < cfg.retire_confidence`` signals retire; ``confidence >=`` signals upsert.
+    Returns ``None`` for invalid / duplicate index, insufficient new content, or no changed fields.
     """
     # ── index parse + duplicate guard ─────────────────────────────────────────
     try:
@@ -455,7 +405,7 @@ async def _apply_update(  # noqa: C901  — branches mirror opensource _apply_up
         elif change_ratio >= cfg.maturity_reeval_change_ratio or hyp_promo:
             reason = "hypothesis promotion" if hyp_promo else f"major change ratio={change_ratio:.2f}"
             logger.info("%s for skill[%d], re-evaluating maturity", reason, index)
-            score = await _evaluate_maturity(
+            new_maturity = await _evaluate_maturity(
                 name=eff_name,
                 description=eff_description,
                 content=eff_content,
@@ -464,8 +414,6 @@ async def _apply_update(  # noqa: C901  — branches mirror opensource _apply_up
                 cfg=cfg,
                 prompt_maturity=prompt_maturity,
             )
-            if score is not None:
-                new_maturity = score
         else:
             # moderate band 0.2 ~ 0.4
             old_score = prior.maturity_score or 0.0
@@ -501,7 +449,7 @@ async def _apply_update(  # noqa: C901  — branches mirror opensource _apply_up
                     confidence_dropping,
                     source_quality,
                 )
-                score = await _evaluate_maturity(
+                new_maturity = await _evaluate_maturity(
                     name=eff_name,
                     description=eff_description,
                     content=eff_content,
@@ -510,8 +458,6 @@ async def _apply_update(  # noqa: C901  — branches mirror opensource _apply_up
                     cfg=cfg,
                     prompt_maturity=prompt_maturity,
                 )
-                if score is not None:
-                    new_maturity = score
 
     # ── update branch: emit AgentSkill (caller diffs name/description against prior to decide reembed) ──
     updated = prior.model_copy(

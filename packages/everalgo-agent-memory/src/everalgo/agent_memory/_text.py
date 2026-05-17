@@ -1,9 +1,4 @@
-"""Token-aware text utilities for agent_memory extractors.
-
-Builds on :mod:`everalgo._tokenize` (the shared ``o200k_base`` encoder + ``count_tokens`` / ``force_split``)
-and adds head/tail-preserving truncation used by both Case and Skill extractors. Module-private — not
-exported from ``agent_memory.__init__``.
-"""
+"""Token-aware text utilities for agent_memory extractors (head/tail truncation, json_default)."""
 
 from __future__ import annotations
 
@@ -24,30 +19,10 @@ def truncate_text(
 ) -> str:
     r"""Truncate ``text`` to ``max_tokens`` tokens, preserving head + tail with a marker.
 
-    Two modes:
-
-    - ``suffix is None`` (default): keep a ``head_ratio`` slice from the start and the remainder from the end,
-      joined by ``"\\n[... trimmed N tokens ...]\\n"`` (when ``head_ratio < 1.0``) or a literal ``"..."``
-      append (when ``head_ratio == 1.0``). Mirrors opensource ``_truncate_text`` line 153-171.
-    - ``suffix is not None``: keep only the head ``max_tokens`` tokens and append ``suffix`` (the
-      ``"... [omitted]"`` shape used by opensource skill extractor :125).
-
-    Parameters
-    ----------
-    text : str
-        Source text; empty / non-string returns input unchanged.
-    max_tokens : int
-        Hard cap on output token count (not counting ``suffix`` if provided).
-    head_ratio : float, optional
-        Fraction of ``max_tokens`` allocated to the head when no ``suffix`` override is set. Default ``0.7``
-        matches the opensource ``case`` extractor; pass ``1.0`` for head-only with ``"..."`` append.
-    suffix : str or None, optional
-        When provided, switches to head-only + suffix mode (skill extractor pattern).
-
-    Returns
-    -------
-    str
-        Truncated text. Short / empty inputs are returned unchanged.
+    When ``suffix`` is ``None``: keep ``head_ratio`` of tokens from the start and the remainder from
+    the end, joined by ``"\\n[... trimmed N tokens ...]\\n"`` (or ``"..."`` when ``head_ratio == 1.0``).
+    When ``suffix`` is set: keep the head only and append ``suffix``.
+    Short / empty inputs are returned unchanged.
     """
     if not text:
         return text
@@ -71,11 +46,7 @@ def truncate_text(
 
 
 def json_default(obj: Any) -> Any:
-    """``json.dumps(default=...)`` fallback for non-serialisable values.
-
-    Converts :class:`datetime.datetime` to ISO 8601 strings; falls back to :func:`str` for anything else, so
-    no value can crash the LLM prompt rendering.
-    """
+    """``json.dumps(default=...)`` fallback: datetime → ISO string, anything else → ``str``."""
     if isinstance(obj, datetime):
         return obj.isoformat()
     return str(obj)

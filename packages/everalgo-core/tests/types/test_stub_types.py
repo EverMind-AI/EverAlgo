@@ -6,15 +6,13 @@ def test_foresight_importable_with_required_fields() -> None:
     from everalgo.types import Foresight
 
     fs = Foresight(
-        id="fs_001",
         owner_id="u1",
         foresight="x",
         evidence="x",
         timestamp=1,
-        parent_id="mc_001",
     )
-    assert fs.id == "fs_001"
-    assert fs.parent_type == "memcell"
+    assert fs.owner_id == "u1"
+    assert not hasattr(fs, "parent_type")
 
 
 def test_atomic_fact_importable_with_required_fields() -> None:
@@ -22,14 +20,12 @@ def test_atomic_fact_importable_with_required_fields() -> None:
     from everalgo.types import AtomicFact
 
     af = AtomicFact(
-        id="af_001",
         owner_id="u1",
         fact="x",
         timestamp=1,
-        parent_id="mc_001",
     )
-    assert af.id == "af_001"
-    assert af.parent_type == "memcell"
+    assert af.owner_id == "u1"
+    assert not hasattr(af, "parent_type")
 
 
 def test_profile_importable_with_required_fields() -> None:
@@ -37,12 +33,10 @@ def test_profile_importable_with_required_fields() -> None:
     from everalgo.types import Profile
 
     pf = Profile(
-        id="pf_001",
         owner_id="u1",
         summary="s",
         timestamp=1,
     )
-    assert pf.id == "pf_001"
     # User-level aggregate — no parent_type / parent_id fields exist on the model.
     assert not hasattr(pf, "parent_type")
 
@@ -54,11 +48,10 @@ def test_agent_types_importable() -> None:
     case = AgentCase(
         id="c_001",
         timestamp=1,
-        parent_id="mc_001",
         task_intent="solve X",
     )
     assert case.id == "c_001"
-    assert case.parent_type == "memcell"
+    assert not hasattr(case, "parent_type")
     assert case.quality_score == 0.5
 
     skill = AgentSkill(id="s_001", cluster_id="cl_001")

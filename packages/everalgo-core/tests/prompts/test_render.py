@@ -27,13 +27,14 @@ def test_empty_string_prompt_falls_back_to_default() -> None:
     assert result == "Hello, world!"
 
 
-def test_missing_placeholder_in_fields_raises_key_error() -> None:
-    with pytest.raises(KeyError):
-        render_prompt("Hello, {name}!", None)
+def test_missing_placeholder_in_fields_leaves_verbatim() -> None:
+    """Missing fields leave the placeholder unchanged — no KeyError."""
+    result = render_prompt("Hello, {name}!", None)
+    assert result == "Hello, {name}!"
 
 
 def test_extra_fields_are_silently_ignored() -> None:
-    """``str.format`` ignores kwargs that the template does not reference."""
+    """Extra kwargs that the template does not reference are silently dropped."""
     result = render_prompt("Hello, {name}!", None, name="world", unused="extra")
     assert result == "Hello, world!"
 
@@ -42,3 +43,22 @@ def test_default_and_prompt_are_positional_only() -> None:
     """The ``/`` separator forbids passing ``default=`` or ``prompt=`` as kwargs."""
     with pytest.raises(TypeError):
         render_prompt(default="Hello, {name}!", prompt=None, name="world")  # type: ignore[call-arg]
+
+
+def test_render_prompt_keeps_literal_braces() -> None:
+    """Template containing literal JSON-like braces renders without KeyError."""
+    out = render_prompt('Reply as {"key": value} for {name}', None, name="Alice")
+    assert out == 'Reply as {"key": value} for Alice'
+
+
+def test_render_prompt_literal_braces_in_value_are_preserved() -> None:
+    """Literal braces inside a substituted value are not re-interpreted as placeholders."""
+    out = render_prompt("msg: {messages}", None, messages="hello {} world")
+    assert out == "msg: hello {} world"
+
+
+def test_render_prompt_json_example_in_template() -> None:
+    """Full JSON example block in the template body is untouched after substitution."""
+    template = 'Output JSON like {"key": "value"} for {name}'
+    out = render_prompt(template, None, name="Alice")
+    assert out == 'Output JSON like {"key": "value"} for Alice'

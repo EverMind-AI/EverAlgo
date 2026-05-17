@@ -25,10 +25,16 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
 async def aparse(raw_file: RawFile) -> ParsedContent:
-    """Async parse — dispatch by raw_file.mime. Stub — TBD."""
+    """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+    Async parse — dispatch by raw_file.mime. Stub — TBD.
+    """
     raise NotImplementedError("stub")
 
 
 def parse(raw_file: RawFile) -> ParsedContent:
-    """Sync parse — dispatch by raw_file.mime. Stub — TBD."""
+    """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+    Sync parse — dispatch by raw_file.mime. Stub — TBD.
+    """
     raise NotImplementedError("stub")

@@ -22,7 +22,10 @@ class WorkspaceMemCellExtractor:
         llm: LLMClient | None = None,
         prompt: str | None = None,
     ) -> list[MemCell]:
-        """Stub: returns placeholder."""
+        """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+        Stub: returns placeholder.
+        """
         raise NotImplementedError("stub")
 
     def detect(
@@ -32,5 +35,8 @@ class WorkspaceMemCellExtractor:
         llm: LLMClient | None = None,
         prompt: str | None = None,
     ) -> list[MemCell]:
-        """Stub: returns placeholder."""
+        """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+        Stub: returns placeholder.
+        """
         raise NotImplementedError("stub")

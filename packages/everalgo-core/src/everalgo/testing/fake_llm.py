@@ -12,11 +12,7 @@ from everalgo.llm.types import ChatMessage, ChatResponse
 
 
 class CallRecord(BaseModel):
-    """Single recorded ``FakeLLMClient.chat`` invocation.
-
-    Exposed publicly so tests can assert on captured arguments via ``client.calls[0].messages == [...]`` with
-    full IDE type-checking (mirroring ``unittest.mock.call`` being a public symbol).
-    """
+    """Single recorded ``FakeLLMClient.chat`` invocation; public so tests can assert on captured arguments."""
 
     messages: list[ChatMessage]
     model: str | None = None
@@ -35,14 +31,10 @@ _Handler = Callable[..., _HandlerReturn]
 
 
 class FakeLLMClient:
-    """In-memory ``LLMClient`` Protocol implementation for unit tests.
+    """In-memory ``LLMClient`` for unit tests.
 
-    Two construction modes (mutually exclusive):
-
-    1. **Scripted list** — ``responses=[...]`` popped in call order;
-       exhaustion raises ``RuntimeError``.
-    2. **Callable handler** — ``handler=callable`` invoked per call;
-       sync or async return both accepted.
+    Pass ``responses=[...]`` (popped in order; exhaustion raises ``RuntimeError``) or ``handler=callable``
+    (sync or async). Exactly one must be supplied.
     """
 
     def __init__(
@@ -67,10 +59,7 @@ class FakeLLMClient:
 
     @property
     def calls(self) -> list[CallRecord]:
-        """All recorded ``chat`` invocations, in call order.
-
-        Returns a defensive copy so callers can mutate the result without affecting internal state.
-        """
+        """Return all recorded ``chat`` invocations in call order (defensive copy)."""
         return list(self._calls)
 
     async def chat(

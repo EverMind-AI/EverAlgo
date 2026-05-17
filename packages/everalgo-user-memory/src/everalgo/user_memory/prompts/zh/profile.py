@@ -1,11 +1,9 @@
-"""Chinese prompts for ProfileExtractor — verbatim port from new-release opensource.
+"""Chinese prompts for ProfileExtractor.
 
-Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/zh/profile_prompts.py``.
-
-The new release replaces the prior 2-stage ``CONVERSATION_PROFILE_PART1 + PART2`` flow with a single-call
-``PROFILE_INITIAL_EXTRACTION_PROMPT`` returning ``{explicit_info, implicit_traits}``. The other prompts
-mirror new-release maintenance operations but are not consumed by :class:`ProfileExtractor` yet — kept
-verbatim for byte-equivalence with opensource and ready for future minor extractor releases.
+``PROFILE_INITIAL_EXTRACTION_PROMPT`` is the active prompt used by :class:`ProfileExtractor`; it
+replaces the prior 2-stage ``CONVERSATION_PROFILE_PART1 + PART2`` flow with a single call returning
+``{explicit_info, implicit_traits}``. The other prompts cover maintenance operations not yet consumed
+by :class:`ProfileExtractor` — kept for future minor extractor releases.
 """
 
 # Incremental Update Prompt
@@ -35,10 +33,9 @@ PROFILE_UPDATE_PROMPT = """你是用户画像更新员。根据对话记录，�
 【重要规则】
 1. **挖掘标签**：隐式特征必须包含【性格标签】，例如：[风险厌恶型]、[社交驱动型]、[数据考据党]。
 2. 只提取用户信息，不要把 AI 助手的建议当成用户特征
-3. sources 格式：使用对话 ID（方括号里的，如 ep1, ep2）
-4. evidence 要包含时间信息 - 如"2024年10月用户提到..."
-5. explicit_info 和 implicit_traits 的 index 是独立编号的
-6. **去重**：在使用 "add" 前，仔细检查所有已有条目。如果类似的特征/信息已存在（即使措辞不同），请用 "update" 来补充而非重复添加。只有确实全新的信息才用 "add"。
+3. evidence 要包含时间信息 - 如"2024年10月用户提到..."
+4. explicit_info 和 implicit_traits 的 index 是独立编号的
+5. **去重**：在使用 "add" 前，仔细检查所有已有条目。如果类似的特征/信息已存在（即使措辞不同），请用 "update" 来补充而非重复添加。只有确实全新的信息才用 "add"。
 
 【画像定义与分析框架】
 - **explicit_info（显式信息）**：可以直接从对话中提取的用户事实。
@@ -61,9 +58,9 @@ PROFILE_UPDATE_PROMPT = """你是用户画像更新员。根据对话记录，�
 ```json
 {{
   "operations": [
-    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "...", "sources": ["ep1"]}}}},
-    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "...", "sources": ["ep1", "ep2"]}}}},
-    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "...", "sources": ["ep3"]}}}},
+    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "..."}}}},
+    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}}},
+    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "..."}}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
   ],
   "update_note": "新增2条显式信息和1条隐式特征，更新1条，删除1条"
@@ -79,7 +76,7 @@ PROFILE_COMPACT_PROMPT = """当前用户画像有 {total_items} 条记录（expl
 1. **合并同类项**：将同一维度的多条记录（如多次体重记录）合并为一条"当前状态+趋势"的描述。
 2. **提炼标签**：隐式特征应归纳为性格标签（如[风险厌恶型]），删除重复或浅层的描述。
 3. 删除不重要、已过时或短期状态。
-4. 保留每条条目的字段完整（尤其是 evidence / sources）。
+4. 保留每条条目的字段完整（尤其是 evidence）。
 
 当前画像：
 {profile_text}
@@ -88,10 +85,10 @@ PROFILE_COMPACT_PROMPT = """当前用户画像有 {total_items} 条记录（expl
 ```json
 {{
   "explicit_info": [
-    {{"category": "...", "description": "...", "evidence": "...", "sources": ["episode_id"]}}
+    {{"category": "...", "description": "...", "evidence": "..."}}
   ],
   "implicit_traits": [
-    {{"trait": "...", "description": "...", "basis": "...", "evidence": "...", "sources": ["id1", "id2"]}}
+    {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}
   ],
   "compact_note": "说明删除/合并了哪些内容"
 }}
@@ -110,9 +107,8 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请
 
 【提取原则】
 1. 只提取用户本人的信息，不要把助手的建议当成用户特征
-2. 隐式特征必须有多个证据支撑：同一条隐式特征的 sources 至少包含 2 个来源；证据可以来自【当前对话】与/或【已有画像 current_profile 的 evidence/sources】（更新时可用），不能仅凭单条新对话臆断
+2. 隐式特征必须有多个证据支撑：同一条隐式特征的 evidence 必须来自多个信号；证据可来自【当前对话】与/或【已有画像 current_profile 的 evidence】（更新时可用），不能仅凭单条新对话臆断
 3. 每条信息用一句自然语言描述，通俗易懂
-4. 标注信息来源（消息编号）
 
 【输出格式】
 请直接输出 JSON，格式如下：
@@ -122,8 +118,7 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请
     {{
       "category": "分类名",
       "description": "一句话描述",
-      "evidence": "一句话证据（来自对话内容）",
-      "sources": ["YYYY-MM-DD HH:MM|episode_id"]
+      "evidence": "一句话证据（来自对话内容）"
     }}
   ],
   "implicit_traits": [
@@ -131,8 +126,7 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请
       "trait": "特征名称",
       "description": "一句话描述这个特征",
       "basis": "从哪些行为/对话推断出来的",
-      "evidence": "一句话证据（来自对话内容）",
-      "sources": ["YYYY-MM-DD HH:MM|episode_id1", "YYYY-MM-DD HH:MM|episode_id2"]
+      "evidence": "一句话证据（来自对话内容）"
     }}
   ]
 }}
@@ -174,10 +168,9 @@ TEAM_PROFILE_UPDATE_PROMPT = """你是**群聊场景**的用户画像更新员�
 【重要规则】
 1. **发言者归属**：这是一个多人群聊。只提取 **{target_user}** 说的话或明确关于 {target_user} 的信息。如果其他参与者提到某个事实，那属于其他人的画像，不是 {target_user} 的。
 2. **挖掘标签**：隐式特征必须包含【性格标签】，例如：[风险厌恶型]、[社交驱动型]、[数据考据党]。
-3. sources 格式：使用对话 ID（方括号里的，如 ep1, ep2）
-4. evidence 要包含时间和发言者信息 - 如"2024年10月 {target_user} 提到..."
-5. explicit_info 和 implicit_traits 的 index 是独立编号的
-6. **去重**：在使用 "add" 前，检查所有已有条目。如果类似信息已存在，用 "update" 补充。只有确实全新的信息才用 "add"。
+3. evidence 要包含时间和发言者信息 - 如"2024年10月 {target_user} 提到..."
+4. explicit_info 和 implicit_traits 的 index 是独立编号的
+5. **去重**：在使用 "add" 前，检查所有已有条目。如果类似信息已存在，用 "update" 补充。只有确实全新的信息才用 "add"。
 
 【画像定义】
 - **explicit_info（显式信息）**：{target_user} 直接陈述的或关于其本人的事实（技能、背景、偏好、所在地等）
@@ -193,9 +186,9 @@ TEAM_PROFILE_UPDATE_PROMPT = """你是**群聊场景**的用户画像更新员�
 ```json
 {{
   "operations": [
-    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "...", "sources": ["ep1"]}}}},
-    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "...", "sources": ["ep1", "ep2"]}}}},
-    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "...", "sources": ["ep3"]}}}},
+    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "..."}}}},
+    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}}},
+    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "..."}}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
   ],
   "update_note": "..."

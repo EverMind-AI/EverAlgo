@@ -1,6 +1,4 @@
-"""English prompt for ForesightExtractor — verbatim port from new-release opensource.
-
-Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/en/foresight_prompts.py``.
+"""English prompt for ForesightExtractor.
 
 Placeholders: ``{USER_ID}`` / ``{USER_NAME}`` / ``{CONVERSATION_TEXT}`` (uppercase). Rendered via
 :py:meth:`str.format`.

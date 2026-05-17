@@ -226,3 +226,25 @@ async def test_arank_agentic_mode_empty_input_returns_no_candidates() -> None:
 
     assert out.items == []
     assert out.metadata.get("stop_reason") == "no_candidates"
+
+
+# ── Instance-level llm= binding (EpisodicRanker class) ──────────────────────────────────────────────
+
+
+async def test_episodic_ranker_uses_instance_llm_when_per_call_omitted(
+    dense_candidates: list[Candidate],
+    sparse_candidates: list[Candidate],
+) -> None:
+    """Instance-level llm= is used when EpisodicRanker.arank() is called without per-call llm=."""
+    from everalgo.rank.episodic import EpisodicRanker
+
+    rerank_payload = json.dumps({"ranked": [{"id": "d1", "score": 0.9}]})
+    instance_fake = FakeLLMClient(responses=[rerank_payload])
+    ranker = EpisodicRanker(llm=instance_fake)
+    out = await ranker.arank(
+        _make_input(sparse=sparse_candidates, dense=dense_candidates, top_k=1),
+        config=RankConfig(fusion_mode="rrf"),
+        enable_rerank=True,
+    )
+    assert instance_fake.call_count == 1
+    assert len(out.items) <= 1

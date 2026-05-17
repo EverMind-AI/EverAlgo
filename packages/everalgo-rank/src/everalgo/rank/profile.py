@@ -12,24 +12,9 @@ def rank(
     *,
     threshold: float = 0.0,
 ) -> RankOutput:
-    """Profile ranker facade.
+    """Sort dense candidates, drop below threshold, dedup by id, truncate to top_k.
 
-    Steps:
-    1. Read ``rank_input.dense_candidates`` (already sorted by cosine descending
-       per the caller's contract; we re-sort defensively).
-    2. Drop candidates with ``score < threshold``.
-    3. Deduplicate by ``id`` keeping the first (highest-score) occurrence.
-    4. Truncate to ``rank_input.top_k``.
-
-    Args:
-        rank_input: ``dense_candidates`` is the only source consulted.
-            ``sparse_candidates`` and ``episode_to_facts`` are ignored.
-        threshold: Minimum score to keep. Default ``0.0`` (no filter); callers
-            often pass ``0.65`` or similar based on their embedder.
-
-    Returns
-    -------
-        ``RankOutput`` with ``item_type='profile'``.
+    Only ``dense_candidates`` is consulted; ``sparse_candidates`` and ``episode_to_facts`` are ignored.
     """
     candidates = sorted(rank_input.dense_candidates, key=lambda c: c.score, reverse=True)
 

@@ -1,17 +1,11 @@
 """AgentSkillExtractor — incremental skill maintenance for one cluster.
 
-Port of opensource ``memory_layer/memory_extractor/agent_skill_extractor.py`` 10-step pipeline (see DESIGN.md
-§1.2 / §5). All operation atoms (``_apply_add`` / ``_apply_update`` / ``_evaluate_maturity`` / prompt
-formatters) live in :mod:`everalgo.agent_memory.skill_ops` per the O-7 split decision; this module holds
-the public :class:`AgentSkillExtractor` and the :class:`SkillConfig` dataclass.
+Operation atoms (``_apply_add`` / ``_apply_update`` / ``_evaluate_maturity`` / formatters) live in
+:mod:`everalgo.agent_memory.skill_ops`; this module holds the public :class:`AgentSkillExtractor`.
 
-Return contract: ``list[AgentSkill]`` (O-2 decision). Caller decodes add / update / retire via two object
-fields — see DESIGN.md §5.2 (``id ∈ existing_relevant_skills`` + ``confidence < retire_confidence``).
-
-Caller-side filtering: external code pre-filters the cluster's skill set to the relevant subset (typically
-via vector cosine top-K against the new case's embedding) before passing in — the algorithm no longer takes
-``query_vector`` or runs internal top-K. Caller also owns embedding lifecycle (vector / vector_model are
-not on the EverAlgo schema).
+Return contract: ``list[AgentSkill]`` — caller decodes add / update / retire via
+``id ∈ existing_relevant_skills`` + ``confidence < retire_confidence``.
+The caller pre-filters ``existing_relevant_skills`` to the relevant subset before passing in.
 """
 
 from __future__ import annotations
@@ -23,7 +17,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
 
-import everalgo.llm
 from everalgo.agent_memory.prompts.skill_failure import AGENT_SKILL_FAILURE_EXTRACT_PROMPT
 from everalgo.agent_memory.prompts.skill_success import AGENT_SKILL_SUCCESS_EXTRACT_PROMPT
 from everalgo.agent_memory.skill_ops import (
@@ -49,100 +42,106 @@ __all__ = [
     "AGENT_SKILL_FAILURE_EXTRACT_PROMPT",
     "AGENT_SKILL_SUCCESS_EXTRACT_PROMPT",
     "AgentSkillExtractor",
-    "SkillConfig",
 ]
 
 
 @dataclass(frozen=True)
-class SkillConfig:
-    """Policy thresholds for :class:`AgentSkillExtractor`.
+class _SkillCfg:
+    """Internal threshold bag — packed from aextract kwargs; not part of the public API."""
 
-    Caller MUST hold an instance (or use the defaults) and reads ``retire_confidence`` to identify retired
-    skills in the returned list — see DESIGN.md §5.2 list encoding contract.
-    """
-
-    maturity_threshold: float = 0.6
-    """Maturity score at/above which a skill is considered "mature" — gates re-eval decisions."""
-
-    retire_confidence: float = 0.1
-    """Confidence below which the caller MUST soft-retire (remove from search engines, keep in DB)."""
-
-    failure_quality_threshold: float = 0.5
-    """Below this threshold the failure-extract prompt is used; at/above, the success-extract prompt."""
-
+    # Cases below this quality score short-circuit to [] without calling the LLM.
+    skip_quality_threshold: float = 0.2
+    # Maturity scoring is implemented but default-skipped: current retrieval doesn't consult
+    # maturity_score. Set False to enable; useful for future retrieval paths that filter on it.
     skip_maturity_scoring: bool = True
-    """Skip the per-op maturity LLM call entirely; when ``True`` (default) ``_evaluate_maturity`` returns
-    ``1.0`` without making any LLM call. Set ``False`` to opt into 4-dimension LLM scoring."""
-
+    maturity_threshold: float = 0.6  # only consulted when skip_maturity_scoring=False
+    retire_confidence: float = 0.1
+    failure_quality_threshold: float = 0.5
     max_case_history: int = 9
     max_description_tokens: int = 400
     max_content_tokens: int = 5000
-
+    # Below: change-ratio bands for maturity re-eval; inert when skip_maturity_scoring=True.
     maturity_trivial_change_ratio: float = 0.2
-    """Content change ratio below which maturity re-eval is always skipped."""
-
     maturity_reeval_change_ratio: float = 0.4
-    """Content change ratio at/above which maturity is always re-evaluated."""
 
 
 class AgentSkillExtractor:
-    """Aggregate one new :class:`AgentCase` into incremental skill operations for its cluster.
+    """Aggregate one new AgentCase into incremental skill operations for a cluster.
 
-    Stateless callable class — no ``__init__``, no instance state. **NO DB writes**: returns
-    ``list[AgentSkill]`` carrying add / update / retire signals via the §5.2 encoding, caller persists.
+    Returns ``list[AgentSkill]`` with add / update / retire signals (§5.2 encoding); caller persists.
     """
 
-    async def aextract(  # noqa: C901  — branches mirror opensource extract_and_save :790-941
+    def __init__(self, *, llm: LLMClient) -> None:
+        self._llm = llm
+
+    async def aextract(  # noqa: C901
         self,
         case: AgentCase,
         *,
-        cluster_id: str,
         existing_relevant_skills: Sequence[AgentSkill],
-        case_history: Sequence[AgentCase],
-        llm: LLMClient | None = None,
+        supporting_cases: Sequence[AgentCase],
         prompt_success: str | None = None,
         prompt_failure: str | None = None,
         prompt_maturity: str | None = None,
-        config: SkillConfig | None = None,
+        skip_quality_threshold: float = 0.2,
+        skip_maturity_scoring: bool = True,
+        maturity_threshold: float = 0.6,
+        retire_confidence: float = 0.1,
+        failure_quality_threshold: float = 0.5,
+        max_case_history: int = 9,
+        max_description_tokens: int = 400,
+        max_content_tokens: int = 5000,
+        maturity_trivial_change_ratio: float = 0.2,
+        maturity_reeval_change_ratio: float = 0.4,
     ) -> list[AgentSkill]:
-        """Async main implementation — runs the simplified 5-step pipeline (DESIGN.md §1.2).
+        """Integrate ``case`` into the skill set; return add / update / retire entries.
 
-        Parameters
-        ----------
-        case : AgentCase
-            The freshly extracted case to integrate.
-        cluster_id : str
-            Cluster these skills belong to (caller-managed; from :func:`everalgo.clustering.cluster_by_llm`).
-        existing_relevant_skills : Sequence[AgentSkill]
-            Skills already stored under ``cluster_id``, **pre-filtered by the caller** to the relevant
-            subset (typically via vector cosine top-K against ``case.task_intent``). Pass ``[]`` when none.
-        case_history : Sequence[AgentCase]
-            Historical cases referenced by ``existing_relevant_skills[i].source_case_ids`` — used to attach
-            ``supporting_cases`` summaries inside the prompt. Pass ``[]`` when none.
-        llm : LLMClient or None, optional
-            Per-call LLM override; falls back through the 3-layer chain.
-        prompt_success, prompt_failure, prompt_maturity : str or None, optional
-            Per-call prompt template overrides. ``None`` falls back to the built-in
-            ``AGENT_SKILL_SUCCESS_EXTRACT_PROMPT`` / ``AGENT_SKILL_FAILURE_EXTRACT_PROMPT`` /
-            ``AGENT_SKILL_MATURITY_SCORE_PROMPT`` constants.
-        config : SkillConfig or None, optional
-            Policy thresholds; defaults to ``SkillConfig()`` when ``None``.
+        Args:
+            case: The newly extracted ``AgentCase`` to integrate.
+            existing_relevant_skills: Pre-filtered by the caller (typically top-K cosine). Pass ``[]`` when none.
+            supporting_cases: AgentCase records referenced by ``existing_relevant_skills[*].source_case_ids``;
+                the algorithm builds an ``id → AgentCase`` dict and renders matched cases under each skill in
+                the prompt. Pass ``[]`` when no supporting cases are available.
+            prompt_success: Prompt override for successful-case path.
+            prompt_failure: Prompt override for failed-case path.
+            prompt_maturity: Prompt override for maturity-evaluation step.
+            skip_quality_threshold: Cases with ``quality_score < this`` short-circuit to ``[]`` without LLM call. Default 0.2.
+            skip_maturity_scoring: Skip LLM maturity scoring (default True); set False to enable.
+            maturity_threshold: Minimum score to mark a skill as mature (consulted when not skipping).
+            retire_confidence: Confidence below which a skill is marked for retirement.
+            failure_quality_threshold: Quality score below which the failure prompt branch is used.
+            max_case_history: Maximum number of supporting cases rendered per existing skill.
+            max_description_tokens: Token budget for skill description in the prompt.
+            max_content_tokens: Token budget for skill content in the prompt.
+            maturity_trivial_change_ratio: Change ratio below which maturity re-eval is skipped.
+            maturity_reeval_change_ratio: Change ratio above which maturity is reset and re-evaluated.
 
-        Returns
-        -------
-        list[AgentSkill]
-            Add / update / retire entries under the §5.2 encoding. Caller distinguishes via
-            ``id ∈ existing_relevant_skills`` + ``confidence < cfg.retire_confidence``.
-
-        Raises
-        ------
-        LLMNotConfiguredError
-            No LLM resolvable through the 3-layer chain.
-        LLMError
-            Any provider-side failure on the main extract call (no internal retry, ADR 012).
+        Raises:
+            LLMError: Propagated from the underlying LLM client call.
+            json.JSONDecodeError: If the LLM response is not valid JSON.
+            TypeError: If the LLM response is not a dict, or ``operations`` is not a list.
         """
-        cfg = config or SkillConfig()
-        client = everalgo.llm.resolve(llm)
+        cfg = _SkillCfg(
+            skip_quality_threshold=skip_quality_threshold,
+            skip_maturity_scoring=skip_maturity_scoring,
+            maturity_threshold=maturity_threshold,
+            retire_confidence=retire_confidence,
+            failure_quality_threshold=failure_quality_threshold,
+            max_case_history=max_case_history,
+            max_description_tokens=max_description_tokens,
+            max_content_tokens=max_content_tokens,
+            maturity_trivial_change_ratio=maturity_trivial_change_ratio,
+            maturity_reeval_change_ratio=maturity_reeval_change_ratio,
+        )
+        if case.quality_score < cfg.skip_quality_threshold:
+            logger.debug(
+                "skipping skill extraction: case.quality_score=%.2f < skip_quality_threshold=%.2f",
+                case.quality_score,
+                cfg.skip_quality_threshold,
+            )
+            return []
+
+        client = self._llm
 
         existing_list = list(existing_relevant_skills)
 
@@ -150,7 +149,7 @@ class AgentSkillExtractor:
         new_case_json = _format_cases([case])
         existing_skills_json = _format_existing_skills(
             existing_list,
-            case_history=case_history,
+            supporting_cases=supporting_cases,
             max_description_tokens=cfg.max_description_tokens,
             max_content_tokens=cfg.max_content_tokens,
         )
@@ -174,29 +173,22 @@ class AgentSkillExtractor:
             existing_skills_json=existing_skills_json,
         )
         logger.debug(
-            "incremental extraction: cluster=%s, new_cases=1, existing_relevant_skills=%d",
-            cluster_id,
+            "incremental extraction: case=%s, new_cases=1, existing_relevant_skills=%d",
+            case.id,
             len(existing_list),
         )
         response = await client.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
             response_format={"type": "json_object"},
         )
-        try:
-            llm_result: Any = json.loads(response.content)
-        except json.JSONDecodeError as exc:
-            logger.warning("skill LLM JSON parse failed for cluster=%s: %s", cluster_id, exc)
-            return []
-
+        llm_result: Any = json.loads(response.content)  # let JSONDecodeError propagate
         if not isinstance(llm_result, dict):
-            logger.warning("skill LLM returned non-dict for cluster=%s", cluster_id)
-            return []
+            raise TypeError(f"skill LLM returned non-dict for case={case.id}")
         llm_dict = cast("dict[str, Any]", llm_result)
 
         operations_raw = llm_dict.get("operations", [])
         if not isinstance(operations_raw, list):
-            logger.warning("skill LLM returned non-list operations for cluster=%s", cluster_id)
-            return []
+            raise TypeError(f"skill LLM returned non-list operations for case={case.id}")
         # cast is for pyright strict mode (mypy sees it as redundant — silenced below)
         operations = cast("list[Any]", operations_raw)  # type: ignore[redundant-cast]
 
@@ -219,7 +211,6 @@ class AgentSkillExtractor:
             if action == "add":
                 added = await _apply_add(
                     op,
-                    cluster_id,
                     source_case_ids,
                     client=client,
                     cfg=cfg,
@@ -246,11 +237,10 @@ class AgentSkillExtractor:
                 logger.warning("unknown action %r, skipping", action)
 
         logger.info(
-            "cluster=%s ops applied: total=%d (adds + updates + retires per §5.2 encoding)",
-            cluster_id,
+            "case=%s ops applied: total=%d (adds + updates + retires per §5.2 encoding)",
+            case.id,
             len(result),
         )
         return result
 
     extract = async_to_sync(aextract)
-    """Sync bridge — only callable from non-event-loop contexts."""

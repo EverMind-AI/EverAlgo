@@ -1,18 +1,16 @@
-# Changelog — EverAlgo Monorepo
+# Changelog
 
-This is the **umbrella overview** for the EverAlgo monorepo. Each of the
-8 distributions ships its own independent `CHANGELOG.md` with full history.
+All notable changes to the EverAlgo monorepo are documented here. Format follows
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). Each distribution follows its
+own [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html) cadence — there is no umbrella
+version.
 
-The format follows the [huggingface/transformers](https://github.com/huggingface/transformers)
-/ [huggingface/accelerate](https://github.com/huggingface/accelerate) convention:
-a root file with a current-version overview table, pointing at per-distribution
-changelogs. Each distribution follows its own SemVer cadence — there is no
-umbrella version (see [`docs/design.md`](docs/design.md) §1.3 "Why no meta package").
+Per-distribution changelogs are the source of truth. This file is a navigation index.
 
-## Versions in `main`
+## Distribution status
 
-No distribution has been published to PyPI yet. The table below tracks the
-in-development version declared in each `packages/everalgo-*/pyproject.toml`.
+No distribution has been published to PyPI yet. The table below tracks the in-development version
+declared in each `packages/everalgo-*/pyproject.toml`.
 
 | Distribution | Version | Changelog |
 |---|---|---|
@@ -20,30 +18,49 @@ in-development version declared in each `packages/everalgo-*/pyproject.toml`.
 | `everalgo-boundary` | 0.1.0 (unreleased) | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.1.0 (unreleased) | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.1.0 (unreleased) | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-parser` | 0.1.0 (unreleased) | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.1.0 (unreleased) | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.1.0 (unreleased) | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-parser` | 0.1.0 (unreleased) | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.0 (unreleased) | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
 
-## How releases work
+## [0.1.0] - 2026-05-17
 
-See [`README.md` § Cutting a release](README.md#cutting-a-release) for the
-full workflow. In short:
+### Added
 
-1. Bump `version` in `packages/everalgo-<dist>/pyproject.toml`.
-2. Run `git cliff --tag everalgo-<dist>/v<X.Y.Z> --include-path 'packages/everalgo-<dist>/**' --prepend packages/everalgo-<dist>/CHANGELOG.md`.
-3. Review and manually polish the generated section.
-4. Update the version + release-date row above for that distribution.
-5. Commit (`📝 docs(<dist>): release notes for v<X.Y.Z>`), push the per-distribution tag, CI publishes to PyPI.
+- **Monorepo scaffold** — 8-distribution uv virtual workspace with a shared lockfile and PEP 420 native namespace packages under `everalgo.*`.
+- **Release infrastructure** — `cliff.toml` for per-distribution CHANGELOG generation, `py.typed` markers, pre-commit hook (`ruff check --fix` + `ruff format` + standard sanitisers).
+- **Logging conventions (ADR-013)** — `NullHandler` on every subpackage logger; `SensitiveHeadersFilter` on the `everalgo.llm` logger; ruff rules `G` + `LOG` + `TRY` enforce library-safe logging patterns.
+- **6 runnable quickstart examples** under `examples/` covering boundary detection, geometry clustering, Episode extraction, AgentCase extraction, rerank, and the full user-memory pipeline. All use `FakeLLMClient`; no API key required.
+- **Cross-package integration tests** under `tests/integration/` for the full user-memory pipeline and full agent-memory pipeline.
+- **`Cluster.members: list[str]`** — caller-supplied entity ids; algorithm appends on merge, never inspects semantics. Caller uses this to track which business entities belong to each cluster.
+- **`EpisodeExtractor` generic mode** — pass `sender_id=None` to extract one whole-memcell generic episode using `EPISODE_GENERATION_PROMPT` (cheaper than per-user fan-out). Pass a user id to use the USER-focused `USER_EPISODE_GENERATION_PROMPT`.
+- **`AtomicFactExtractor` generic mode** — pass `sender_id=None` to extract facts not bound to any user.
+- **`ProfileExtractor` UPDATE mode** — pass `old_profile=Profile` to use the incremental ops-based update path. When the merged item count exceeds an internal compact threshold, a second LLM pass runs automatically (caller-transparent). `old_profile=None` continues to trigger full INIT extraction.
+- **`AgentSkillExtractor` expanded kwargs** — all policy thresholds exposed as per-call keyword arguments: `skip_quality_threshold`, `skip_maturity_scoring`, `maturity_threshold`, `retire_confidence`, `failure_quality_threshold`, `max_case_history`, `max_description_tokens`, `max_content_tokens`, `maturity_trivial_change_ratio`, `maturity_reeval_change_ratio`. `SkillConfig` public class removed; `_SkillCfg` is now an internal dataclass.
+- **`skip_quality_threshold=0.2` short-circuit** in `AgentSkillExtractor` — cases with `quality_score < threshold` return `[]` without calling the LLM.
+- **Time-format utilities down to core** — `format_message_timestamp` / `format_natural_language_time` live in `everalgo.llm.format` and are shared across all subpackages.
+- **Robust LLM JSON parser down to core** — `everalgo.llm.parse.parse_llm_json_object` (fence → direct loads → outermost-braces fallback) shared across all subpackages.
+- **Boundary prompt ISO 8601 UTC format** — all boundary detection prompts (EN and ZH) now use `YYYY-MM-DDTHH:MM:SSZ` for timestamps.
+- **Instance-only LLM injection** — `llm=` is passed at constructor time only; the 4-layer global resolution (global default / scoped context / per-call override) has been removed.
+- **`AgentBoundaryDetector`** — filter → detect → remap pipeline for mixed `ConversationItem` trajectories; tool-call items are preserved in output `MemCell.items`.
+- **`BoundaryDetector` renamed** — `ChatBoundaryDetector` → `UserBoundaryDetector` → `BoundaryDetector` (final, matching the no-prefix convention used by all other facades).
+- **Unified `MemCell` contract** — `MemCell.items: list[ConversationItem]` replaces the earlier split between text-only and tool-aware cell types.
+- **Google-style docstrings** workspace-wide.
 
-## Why two-tier (root + per-dist)?
+### Changed
 
-- **Per-distribution history is the source of truth.** Each `packages/everalgo-*/CHANGELOG.md`
-  ships inside its own wheel/sdist — PyPI users browsing the project page see only
-  that distribution's changes, not the entire monorepo's churn.
-- **Root file is the navigation index.** Engineers landing on the GitLab project
-  homepage need one place that answers "what version is each distribution at
-  right now?" without clicking into 8 subdirectories.
-- **Industrial precedent.** HuggingFace transformers + accelerate, scipy
-  (`doc/release/`), Apache Airflow (`RELEASE_NOTES.rst` + per-provider files)
-  all use the two-tier pattern.
+- **Clustering API redesigned** — `cluster_by_geometry` / `cluster_by_llm` now accept `(new_cluster: Cluster, existing_clusters: list[Cluster]) → Cluster | None`; `ClusterState` removed. The caller owns `list[Cluster]`, stamps IDs, and serialises. `ClusterConfig` removed; per-function kwargs replace it.
+- **`AgentSkillExtractor.aextract` signature change** — `cluster_id` parameter removed (caller stamps `AgentSkill.cluster_id` after extraction); `case_history` renamed to `supporting_cases`.
+- **`AgentSkill.cluster_id`** defaults to `""` (caller stamps after extraction; algo emits empty).
+- **Operator-side retry/fallback removed** — retries belong to the LLM SDK or to the caller; EverAlgo operators make exactly one LLM call and propagate errors.
+
+### Removed
+
+- **`Profile.sources` field** — removed from all profile prompts and the `Profile` type surface; the field was LLM-hallucinated and provided no reliable traceability.
+- **`SkillConfig` public class** — replaced by per-call keyword arguments on `AgentSkillExtractor.aextract`.
+- **`ClusterState`** — replaced by caller-owned `list[Cluster]`; see Changed above.
+- **`ClusterConfig`** — replaced by per-function keyword arguments on `cluster_by_geometry` / `cluster_by_llm`.
+- **`TextMessage` type** — merged into `ChatMessage` with multimodal `content: str | list[ContentBlock]`.
+- **Dead `_conversation_item_adapter`** from `agent_memory/case.py`.
+
+[0.1.0]: https://gitlab.com/npc-work/aic/ai/everalgo/-/compare/main...HEAD
