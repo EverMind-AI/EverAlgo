@@ -1,8 +1,7 @@
 """English prompts for ``rank.fusion.aagentic_rank`` — sufficiency check + multi-query generation.
 
-Ported 1:1 from ``memsys_opensource/src/agentic_layer/agentic_utils.py`` (``SUFFICIENCY_CHECK_PROMPT`` and
-``MULTI_QUERY_GENERATION_PROMPT``). Re-exposed here as module-level constants so callers can override per
-call (``sufficiency_prompt=`` / ``multi_query_prompt=``) or monkey-patch globally (CLAUDE.md §5).
+Re-exposed as module-level constants so callers can override per call
+(``sufficiency_prompt=`` / ``multi_query_prompt=``) or monkey-patch globally (AGENTS.md §5).
 """
 
 AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN = """You are a memory retrieval evaluation expert. Please assess whether the currently retrieved memories are sufficient to answer the user's query.

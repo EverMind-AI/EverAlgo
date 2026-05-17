@@ -1,25 +1,22 @@
 """Tests for the everalgo.llm public API surface."""
 
 
-def test_top_level_exports_are_twelve_named_symbols() -> None:
+def test_top_level_exports_are_eleven_named_symbols() -> None:
     from everalgo.llm import __all__
 
     assert sorted(__all__) == sorted(
         [
-            # sub-project 2 (LLM Stack — 7)
             "LLMClient",
             "ChatMessage",
             "ChatResponse",
             "Usage",
             "LLMConfig",
             "LLMError",
+            "Lang",
             "build_client",
-            # sub-project 2.5 (3-layer injection — 5)
-            "LLMNotConfiguredError",
-            "configure",
-            "current",
-            "resolve",
-            "use",
+            "format_message_timestamp",
+            "format_natural_language_time",
+            "parse_llm_json_object",
         ]
     )
 
@@ -28,11 +25,15 @@ def test_top_level_imports_resolve() -> None:
     from everalgo.llm import (
         ChatMessage,
         ChatResponse,
+        Lang,
         LLMClient,
         LLMConfig,
         LLMError,
         Usage,
         build_client,
+        format_message_timestamp,
+        format_natural_language_time,
+        parse_llm_json_object,
     )
 
     assert ChatMessage.__name__ == "ChatMessage"
@@ -42,20 +43,8 @@ def test_top_level_imports_resolve() -> None:
     assert LLMError.__name__ == "LLMError"
     assert Usage.__name__ == "Usage"
     assert build_client.__name__ == "build_client"
-
-
-def test_subproject_2_5_symbols_importable() -> None:
-    """Sub-project 2.5 5 new symbols are importable from everalgo.llm top level."""
-    from everalgo.llm import (
-        LLMNotConfiguredError,
-        configure,
-        current,
-        resolve,
-        use,
-    )
-
-    assert callable(configure)
-    assert callable(use)
-    assert callable(current)
-    assert callable(resolve)
-    assert issubclass(LLMNotConfiguredError, RuntimeError)
+    assert format_message_timestamp.__name__ == "format_message_timestamp"
+    assert format_natural_language_time.__name__ == "format_natural_language_time"
+    assert parse_llm_json_object.__name__ == "parse_llm_json_object"
+    # Lang is a runtime-accessible Literal alias — verify it is importable
+    assert Lang is not None

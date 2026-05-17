@@ -6,22 +6,15 @@ from pydantic import BaseModel, ConfigDict
 class Episode(BaseModel):
     """User-side episodic memory — a structured 'what happened' trace.
 
-    Cross-link: agent paths also produce Episode (mem_memorize.py:870-885 in opensource at release/20260403,
-    plus design.md §2.4 line 697: "episode 永远跑"). ``owner_id`` always points to the user, even when the
-    source MemCell is an agent conversation; the agent is a participant, not the owner.
-
-    Core fields + ``subject`` (= opensource ``title``) — the LLM emits ``{title, content}`` per
-    ``episode_mem_prompts.py`` and we map title → subject, content → episode. ``extra="allow"`` keeps any
-    LLM-emitted secondary fields accessible on the model instance.
+    ``owner_id`` is the user this episode belongs to, or ``None`` for whole-memcell (generic) episodes
+    that do not bind to any user. LLM output maps ``title`` → ``subject`` and ``content`` → ``episode``.
+    ``extra="allow"`` surfaces any LLM-emitted secondary fields without a schema bump.
     """
 
-    id: str
-    owner_id: str
+    owner_id: str | None
     episode: str
     subject: str = ""
     timestamp: int  # Unix epoch milliseconds
-    parent_type: str = "memcell"
-    parent_id: str
 
     model_config = ConfigDict(extra="allow")
 
@@ -29,56 +22,42 @@ class Episode(BaseModel):
 class Foresight(BaseModel):
     """User-side foresight memory — anticipated future event or commitment.
 
-    Mirrors opensource ``foresight_prompts.py`` output shape: the LLM emits a list of
-    ``{content, evidence, start_time, end_time, duration_days}`` items and we map content → foresight.
-    Date fields are stored as ISO ``YYYY-MM-DD`` strings (matching opensource's date normalisation).
-    ``extra="allow"`` keeps any LLM-emitted secondary fields accessible on the model instance.
+    LLM output maps ``content`` → ``foresight``. Date fields are ISO ``YYYY-MM-DD`` strings.
+    ``extra="allow"`` surfaces any LLM-emitted secondary fields without a schema bump.
     """
 
-    id: str
     owner_id: str
     foresight: str
     evidence: str
     timestamp: int  # Unix epoch milliseconds
-    start_time: str | None = None  # YYYY-MM-DD per opensource date normalisation
+    start_time: str | None = None  # YYYY-MM-DD
     end_time: str | None = None  # YYYY-MM-DD
     duration_days: int | None = None
-    parent_type: str = "memcell"
-    parent_id: str
 
     model_config = ConfigDict(extra="allow")
 
 
 class AtomicFact(BaseModel):
-    """User-side atomic fact memory — a single verifiable assertion lifted from a conversation.
+    """User-side atomic fact — a single verifiable assertion lifted from a conversation.
 
-    Mirrors :class:`Episode` shape: each fact is anchored to a source MemCell. The minimal field set is
-    ``id`` / ``owner_id`` / ``fact`` / ``timestamp`` / ``parent_type`` / ``parent_id``; secondary fields
-    (confidence / sources / topic / ...) are intentionally omitted and remain accessible via
-    ``extra="allow"`` if the LLM emits them.
+    ``owner_id`` is the user this fact belongs to, or ``None`` for whole-memcell (generic) facts that do not bind to any user.
+    Secondary LLM fields (confidence, sources, topic, …) land via ``extra="allow"`` without a schema bump.
     """
 
-    id: str
-    owner_id: str
+    owner_id: str | None
     fact: str
     timestamp: int  # Unix epoch milliseconds
-    parent_type: str = "memcell"
-    parent_id: str
 
     model_config = ConfigDict(extra="allow")
 
 
 class Profile(BaseModel):
-    """User-side profile memory — long-term user traits derived from a cluster of conversations.
+    """User-level aggregate of long-term traits — not anchored to a single MemCell.
 
-    Unlike :class:`Episode` / :class:`Foresight` / :class:`AtomicFact`, ``Profile`` is a **user-level
-    aggregate**, not anchored to a single source MemCell — no ``parent_id`` / ``parent_type``. The minimal
-    field set is ``id`` / ``owner_id`` / ``summary`` / ``timestamp``; any structured trait fields
-    (interests / habits / preferences / hard_skills / ...) the LLM emits land in the model via
-    ``extra="allow"`` and are accessible without a schema bump.
+    Structured trait fields (interests, habits, preferences, …) land via ``extra="allow"`` without a schema
+    bump.
     """
 
-    id: str
     owner_id: str
     summary: str
     timestamp: int  # Unix epoch milliseconds

@@ -1,6 +1,7 @@
 """Tests for everalgo.knowledge package-level public API."""
 
 import everalgo.knowledge
+from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_knowledge_extractor_exported() -> None:
@@ -13,8 +14,9 @@ def test_dunder_all_lists_one_symbol() -> None:
     assert everalgo.knowledge.__all__ == ["KnowledgeExtractor"]
 
 
-def test_extractor_instantiable() -> None:
-    """KnowledgeExtractor can be instantiated without args."""
+def test_extractor_instantiable_with_llm() -> None:
+    """KnowledgeExtractor accepts a required llm= keyword argument at construction."""
     from everalgo.knowledge import KnowledgeExtractor
 
-    assert KnowledgeExtractor().__class__.__name__ == "KnowledgeExtractor"
+    fake = FakeLLMClient(responses=[])
+    assert KnowledgeExtractor(llm=fake).__class__.__name__ == "KnowledgeExtractor"

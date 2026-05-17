@@ -538,7 +538,7 @@ from everalgo.boundary._tokenize import count_tokens, force_split
 | Extract | `parser.{image, audio, document, video, url}.{parse, aparse}` | **双接口** | I/O-bound（外部 OCR / ASR / 抓取） |
 | Extract | `boundary.{chat, workspace, agent}.{detect, adetect}` | **双接口** | I/O-bound（调 LLM 检边界） |
 | Extract | `user_memory.{episode, foresight, atomic_fact}.{extract, aextract}` | **双接口** | I/O-bound（独立 LLM 提取，与 cluster 无关）|
-| Extract | `user_memory.profile.{extract, aextract}` | **双接口** | I/O-bound；接 `cluster_episodes: list[MemCell]`（caller 按 cluster_id 预 fetch）|
+| Extract | `user_memory.profile.{extract, aextract}` | **双接口** | I/O-bound；接 `memcells: Sequence[MemCell]`（chronological，last = most recent；caller 按 cluster_id 反查后拼接传入）|
 | Extract | `agent_memory.case.{extract, aextract}` | **双接口** | I/O-bound（独立 LLM 提取）|
 | Extract | `agent_memory.skill.{extract, aextract}` | **双接口** | I/O-bound；**直接接 `cluster_id: str`**（同 cluster 下多个 case 聚合为 skill）|
 | Extract | `knowledge.extractor.{extract, aextract}` | **双接口** | I/O-bound（独立 LLM 提取）|
@@ -739,8 +739,8 @@ async with caller.lock(f"trigger_clustering:{agent_id}"):
     - ForesightExtractor.aextract(memcell)
 
 依赖 cluster_id：
-    - user_memory:  ProfileExtractor.aextract(memcell, cluster_episodes=...)
-                    （caller 按 cluster_id 反查 cluster 内 episodes 后传入）
+    - user_memory:  ProfileExtractor.aextract([*cluster_memcells, memcell], sender_id=..., ...)
+                    （caller 按 cluster_id 反查 cluster 内 MemCells 后拼入，chronological，last = current）
     - agent_memory: AgentSkillExtractor.aextract(case, cluster_id=...)
                     （直接接 cluster_id，独立锁 trigger_agent_skill:{agent_id}:{cluster_id}）
 ```
@@ -755,7 +755,7 @@ async with caller.lock(f"trigger_clustering:{agent_id}"):
 > - **Why `cluster_previews` 直接传 dict 而非 callback**：v0.42 修正——早期 callback `fetch_previews` 论据基于「caller 不能提前预取所有簇文本（O(N) 浪费）」假设；但 EverAlgo 实际场景单 owner_id 簇数 N ≤ 50（按时间窗 + 业务隔离），`k_candidates = 30`，IO 比仅 ~1.6 倍，不构成「严重浪费」。直接传 `dict[ClusterId, list[str]]` 优势：① 纯数据传入，无反向依赖（callback 让算法库调 caller 代码是 code smell）；② 函数签名干净（dict 比嵌套 Callable 直观）；③ caller 端可缓存同一 owner 短时间内的 previews。对齐 sklearn `KMeans.fit(X)` / FAISS `index.add(vectors)` / BIRCH 等算法库阵营——caller 提供完整数据，算法库做几何，不通过 callback 增量获取
 > - **Why LLM prompt 内置 everalgo-clustering**：prompt 是算法 IP（评估/调优 prompt = 调算法），属于算法不可分割部分（与 LLMClient SDK 解耦层不同）；caller 可选 override 但默认值由算法提供
 > - **Why LLM 失败降级保留在算子内**：降级策略（"LLM 失败 → 几何 top-1 + threshold"）是 cluster 算法对 LLM 失败的处置，属算法 IP；与"基础设施 retry"不同（后者由 caller 处理，对齐 ADR 012 算法层不加 retry）
-> - **Why `cluster_id` 不进 `ProfileExtractor` 算子签名**：Profile 算子需要的是"一批历史 episode 上下文"，"按 `cluster_id` 取" 是编排层的实现选择（按时间窗口取 / 按 user_id 取 / 按 cluster 取都可），不是算子的需求；算子签名干净接 `cluster_episodes: list` 即可
+> - **Why `cluster_id` 不进 `ProfileExtractor` 算子签名**：Profile 算子需要的是"一批历史 episode 上下文"，"按 `cluster_id` 取" 是编排层的实现选择（按时间窗口取 / 按 user_id 取 / 按 cluster 取都可），不是算子的需求；算子签名干净接 `memcells: Sequence[MemCell]` 即可（chronological，last = most recent）
 > - **Why 聚类独立子包**：`AgentSkill` 直接消费 + `Profile` 间接消费 + 算法策略多次迭代（centroid 公式 / fast path 阈值 / prompt）独立 SemVer，独立子包合理（[ADR 006](decisions/006-clustering-independent-subpackage.md)）
 
 #### 与现状代码的关键差异

@@ -1,9 +1,7 @@
-"""English prompt for AtomicFactExtractor — verbatim port from new-release opensource.
+"""English prompt for AtomicFactExtractor.
 
-Source: ``opensource/evermemos-opensource/src/memory_layer/prompts/en/atomic_fact_prompts.py``.
-
-Placeholders: ``{{TIME}}`` / ``{{INPUT_TEXT}}`` (DOUBLE-brace; rendered via :py:meth:`str.replace`, NOT
-:py:meth:`str.format`, because the prompt body contains unescaped JSON example braces).
+Placeholders: ``{TIME}`` / ``{INPUT_TEXT}`` (single-brace; rendered via :func:`everalgo.prompts.render_prompt`
+which uses ``str.replace`` so the literal JSON example braces in the prompt body are preserved).
 Output schema: ``{"atomic_facts": {"time": str, "atomic_fact": list[str]}}``.
 """
 
@@ -82,9 +80,9 @@ Before returning the final output, verify that:
 
 Now analyze the provided conversation content and start time carefully, apply all rules above, and return **only the JSON object** in the specified format.
 
-Conversation start time: {{TIME}}
+Conversation start time: {TIME}
 Conversation content:
-{{INPUT_TEXT}}
+{INPUT_TEXT}
 
 **CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """

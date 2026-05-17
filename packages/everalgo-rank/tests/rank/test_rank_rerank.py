@@ -82,14 +82,12 @@ async def test_arerank_returns_empty_for_empty_input() -> None:
     assert fake.call_count == 0
 
 
-async def test_arerank_keeps_fusion_order_on_non_json_response() -> None:
+async def test_arerank_raises_on_non_json_response() -> None:
+    """Non-JSON LLM response → JSONDecodeError propagates (no fusion-order fallback)."""
     fake = FakeLLMClient(responses=["not json at all"])
 
-    out = await rerank_mod.arerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
-
-    # falls back to fusion order, fusion_score preserved
-    assert [c.id for c in out] == ["a", "b", "c"]
-    assert out[0].metadata["fusion_score"] == 0.3
+    with pytest.raises(json.JSONDecodeError):
+        await rerank_mod.arerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
 
 
 def test_arerank_raises_on_prompt_with_unknown_placeholder() -> None:

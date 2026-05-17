@@ -5,13 +5,10 @@ from everalgo.llm.protocols import LLMClient
 
 
 def build_client(config: LLMConfig) -> LLMClient:
-    """Build an OpenAI-compatible LLM client from ``config``.
+    """Build an OpenAI-compatible LLM client.
 
-    Implementation note: ``OpenAICompatClient`` is imported lazily inside the function body so that
-    ``everalgo.llm.factory`` itself does not pull the ``openai`` SDK at import time. This keeps
-    ``import everalgo.llm`` cheap for callers that only need the Protocol / Config / Error types and never call
-    ``build_client``. Maintainers — please do **not** "optimise" this into a top-level import; the laziness is
-    load-bearing.
+    ``OpenAICompatClient`` is imported lazily so that ``import everalgo.llm`` remains cheap for callers
+    that only need the Protocol / Config / Error types. Do not hoist this to a top-level import.
     """
     from everalgo.llm.providers.openai_compat import OpenAICompatClient
 

@@ -3,15 +3,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
-EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, dependency-free of any storage, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in evermem.
+EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, storage-free, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in evermem.
 
 ## Why split EverAlgo from evermem?
 
-- **Algorithm engineers iterate fast.** EverAlgo is "the algorithm team's home base" — every change to extraction strategies, prompts, fusion math, ranker weights happens here without going through service-layer ceremony.
+- **Algorithm engineers iterate fast.** EverAlgo is the algorithm team's home base — every change to extraction strategies, prompts, fusion math, and ranker weights happens here without going through service-layer ceremony.
 - **Pure functions, easy to reason about.** No DB, no filesystem, no business state. All operators are plain in-memory transforms with explicit input / output types.
 - **One codebase serves both the open-source and the commercial cloud builds.** The same `everalgo.*` packages are consumed by both editions.
 
-The full architecture rationale lives in [`docs/design.md`](docs/design.md).
+The full architecture lives in [`docs/concepts/architecture.md`](docs/concepts/architecture.md).
 
 ## Repository layout
 
@@ -19,16 +19,18 @@ This repo is a **monorepo** of 8 publishable distributions sharing the `everalgo
 
 | Distribution | What it provides |
 |---|---|
-| [`everalgo-core`](packages/everalgo-core/) | Types, LLM client + providers, prompt validators, testing helpers |
-| [`everalgo-boundary`](packages/everalgo-boundary/) | MemCell extractors (`Chat` / `Workspace` / `Agent`) + tokenize / split |
-| [`everalgo-clustering`](packages/everalgo-clustering/) | `cluster_by_geometry` / `cluster_by_llm` over `ClusterState` |
-| [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank |
-| [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` |
-| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
-| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentCase` / `AgentSkill` extractors |
-| [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeMemory` extractors |
+| [`everalgo-core`](packages/everalgo-core/) | Types, LLM client + providers, prompt helpers, testing utilities |
+| [`everalgo-boundary`](packages/everalgo-boundary/) | `detect_boundaries` + `DetectionResult` + `WorkspaceMemCellExtractor` stub |
+| [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
+| [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank toolkit |
+| [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (EXPERIMENTAL — stub) |
+| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
+| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCase` / `AgentSkill` extractors |
+| [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeMemory` extractor (EXPERIMENTAL — stub) |
 
-## Quick start
+## 60-second quickstart
+
+Install all packages into a shared editable venv, then run the offline examples — no API key required:
 
 ```bash
 git clone git@gitlab.com:npc-work/aic/ai/everalgo.git
@@ -37,44 +39,109 @@ cd everalgo
 uv sync --all-packages          # editable-install all 8 packages into a shared venv
 uv run pre-commit install       # register the git hook (ruff + standard sanitisers)
 ls .git/hooks/pre-commit        # MUST exist — see AGENTS.md §3 "Common pitfall"
-uv run pytest                   # run the workspace-wide test suite
+
+uv run python examples/01_boundary_chat.py          # Chat → MemCell
+uv run python examples/03_user_memory_episode.py    # MemCell → Episode
+uv run python examples/04_agent_memory_case.py      # Agent trajectory → AgentCase
+uv run python examples/06_full_user_memory_pipeline.py   # Full pipeline
+uv run pytest                                        # workspace-wide test suite
 ```
 
-> **If `.git/hooks/pre-commit` does not exist after the `install` step**, hooks won't fire at `git commit` time and you can land bad code locally that CI then rejects. Verify the file every clone. Details in [`AGENTS.md`](AGENTS.md) §3.
+> [!NOTE]
+> If `.git/hooks/pre-commit` does not exist after the `install` step, hooks won't fire at `git commit` time. Verify the file every clone. Details in [`AGENTS.md`](AGENTS.md) §3.
 
-Install only what you need on the consumer side:
+## Code example — full user-memory pipeline
+
+```python
+import asyncio
+import json
+import numpy as np
+
+from everalgo.clustering import Cluster, cluster_by_geometry
+from everalgo.llm.types import ChatResponse
+from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.types import ChatMessage
+from everalgo.user_memory import (
+    BoundaryDetector, EpisodeExtractor, ForesightExtractor,
+    AtomicFactExtractor, ProfileExtractor,
+)
+
+_BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "should_wait": False})
+_EPISODE_JSON  = json.dumps({"title": "Alice asks about async", "content": "Alice explored async patterns."})
+_FORE_JSON     = json.dumps([{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}])
+_FACT_JSON     = json.dumps({"atomic_facts": {"time": "Nov 14 2023", "atomic_fact": ["Alice is learning Python async."]}})
+_PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"category": "Technical", "description": "Python developer."}]})
+
+
+async def main() -> None:
+    fake = FakeLLMClient(responses=[
+        ChatResponse(content=_BOUNDARY_JSON, model="fake"),
+        ChatResponse(content=_EPISODE_JSON,  model="fake"),
+        ChatResponse(content=_FORE_JSON,     model="fake"),
+        ChatResponse(content=_FACT_JSON,     model="fake"),
+        ChatResponse(content=_PROFILE_JSON,  model="fake"),
+    ])
+
+    messages = [
+        ChatMessage(id="m1", role="user",      content="I want to learn Python async retry patterns.", timestamp=1_700_000_000_000, sender_id="u_alice", sender_name="Alice"),
+        ChatMessage(id="m2", role="assistant",  content="Sure — I'll send a follow-up doc next week.", timestamp=1_700_000_001_000, sender_id="assistant"),
+    ]
+
+    # Step 1 — boundary detection
+    result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
+    mc = result.cells[0]
+
+    # Steps 2–4 — extract user-memory products (sender_id is required, not inferred)
+    episode    = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+    foresights = await ForesightExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+    facts      = await AtomicFactExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+
+    # Step 5 — cluster the cell (caller wraps as size-1 Cluster, no LLM), then extract profile
+    vector = np.random.rand(2560).astype(np.float32)
+    existing: list[Cluster] = []
+    new_cluster = Cluster(centroid=vector, last_ts=mc.timestamp)
+    merged = await cluster_by_geometry(new_cluster, existing)
+    if merged is None:
+        existing.append(new_cluster.model_copy(update={"id": "cid_001"}))
+
+    profile = await ProfileExtractor(llm=fake).aextract([mc], sender_id="u_alice")
+
+    print(f"episode: {episode.subject!r}")
+    print(f"foresights: {len(foresights)}, facts: {len(facts)}")
+    print(f"profile summary: {profile.summary!r}")
+
+
+asyncio.run(main())
+```
+
+## Install — consumers
+
+Install only the distributions you need; transitive deps are pulled automatically:
 
 ```bash
-pip install everalgo-user-memory      # auto-pulls everalgo-core + boundary + clustering
-pip install everalgo-rank             # auto-pulls everalgo-core
-pip install everalgo-knowledge        # auto-pulls everalgo-core + parser
+pip install everalgo-user-memory    # pulls core + boundary
+pip install everalgo-agent-memory   # pulls core + boundary + clustering
+pip install everalgo-rank           # pulls core
+pip install everalgo-clustering     # pulls core
 ```
 
 ## Releasing
 
-Every distribution is released **independently**: each `packages/everalgo-*/pyproject.toml` carries its own `version = "..."` and follows its own SemVer cadence. There is no umbrella version — bumping `everalgo-rank` does not require bumping anything else. (Rationale: see [`docs/design.md`](docs/design.md) §1.3 "Why no meta package".)
+Every distribution is released **independently**: each `packages/everalgo-*/pyproject.toml` carries its own `version = "..."` and follows its own SemVer cadence. There is no umbrella version — bumping `everalgo-rank` does not require bumping anything else.
 
 The repo uses a **two-tier CHANGELOG** (HuggingFace transformers / accelerate pattern):
 - [`CHANGELOG.md`](CHANGELOG.md) at the root — current-version overview table.
 - `packages/everalgo-<dist>/CHANGELOG.md` per distribution — full history; ships inside the wheel.
 
-Per-distribution changelogs are generated by [git-cliff](https://git-cliff.org/) from Conventional Commit messages on `main` (see [`cliff.toml`](cliff.toml) for the parser config; see [`AGENTS.md`](AGENTS.md) §6 for the commit-message contract). Manual review + polish is expected before tagging.
+Per-distribution changelogs are generated by [git-cliff](https://git-cliff.org/) from Conventional Commit messages on `main` (see [`cliff.toml`](cliff.toml) for the parser config; see [`AGENTS.md`](AGENTS.md) §6 for the commit-message contract).
 
 ### Cutting a release
 
-Prerequisites:
-- You have push access to the repo (most maintainers do); `main` is GitLab-protected so the only way to land a version bump is via MR with squash-merge.
-- `uv run git-cliff --version` resolves (installed via the `dev` group in the workspace `pyproject.toml`).
-
 Steps for releasing `everalgo-clustering v0.2.0`:
 
-1. **Bump the version.** Open an MR that edits `packages/everalgo-clustering/pyproject.toml`:
-   ```toml
-   version = "0.2.0"
-   ```
-   MR title: `📝 docs(clustering): bump everalgo-clustering to v0.2.0`. Merge to `main` via squash.
+1. **Bump the version.** Open an MR editing `packages/everalgo-clustering/pyproject.toml`; merge to `main` via squash.
 
-2. **Pull `main`, then generate the changelog fragment.**
+2. **Generate the changelog fragment.**
    ```bash
    git checkout main && git pull
    uv run git-cliff \
@@ -83,11 +150,10 @@ Steps for releasing `everalgo-clustering v0.2.0`:
      --unreleased \
      --prepend packages/everalgo-clustering/CHANGELOG.md
    ```
-   This prepends a new `## [0.2.0] - <today>` section above `[Unreleased]` in the dist's CHANGELOG, populated from squash commits touching `packages/everalgo-clustering/**` since the previous `everalgo-clustering/v*` tag.
 
-3. **Review and polish.** Open `packages/everalgo-clustering/CHANGELOG.md`. Edit the auto-generated section for clarity — git-cliff gives you a draft, not a final. Re-order items by importance, tighten wording, add Breaking-Changes call-outs in plain English when needed.
+3. **Review and polish.** git-cliff gives a draft, not a final — edit for clarity and add Breaking-Changes call-outs.
 
-4. **Update the root CHANGELOG overview.** Bump the `everalgo-clustering` row in `CHANGELOG.md` (root) to the new version + today's date.
+4. **Update the root CHANGELOG** table row for this distribution.
 
 5. **Commit + tag + push.**
    ```bash
@@ -98,53 +164,18 @@ Steps for releasing `everalgo-clustering v0.2.0`:
    git push origin everalgo-clustering/v0.2.0
    ```
 
-6. **CI publishes to PyPI.** The `.gitlab-ci.yml` build/publish stage (tracked separately — see "CI / pipeline status" below) builds the matching wheel + sdist and uploads to PyPI using `UV_PUBLISH_TOKEN`.
+6. **CI publishes to PyPI.** The `.gitlab-ci.yml` build/publish stage triggers on `<dist>/v<semver>` tag push.
 
-### Tag naming
-
-Format: `<dist-name>/v<semver>`. The slash separator keeps per-distribution tags unambiguous from any future repository-wide tag, and matches the `tag_pattern` regex in `cliff.toml`:
-
-```text
-everalgo-core/v0.1.0
-everalgo-rank/v0.2.0
-everalgo-user-memory/v0.1.3
-```
-
-### Local dry-run (no upload)
-
-```bash
-# 1. Preview the changelog diff without writing to the file:
-uv run git-cliff --tag everalgo-clustering/v0.2.0 \
-  --include-path 'packages/everalgo-clustering/**' --unreleased
-
-# 2. Build the wheel + sdist:
-cd packages/everalgo-clustering
-uv build                                 # writes dist/*.whl + *.tar.gz
-
-# 3. Validate the build without uploading:
-uv publish --dry-run
-
-# 4. Actual upload (admins only — usually CI does this):
-uv publish --token "$PYPI_TOKEN"
-```
+Tag format: `<dist-name>/v<semver>` — e.g. `everalgo-core/v0.1.0`, `everalgo-rank/v0.2.0`.
 
 ### Pre-flight checklist
-
-Before pushing a release tag:
 
 - [ ] `uv run pytest` is green on `main`.
 - [ ] `uv run ruff check . && uv run ruff format --check .` pass.
 - [ ] `uv run mypy . && uv run pyright` pass.
-- [ ] The bumped `version` honours SemVer relative to the previous tag (no breaking change in a minor / patch).
-- [ ] Downstream packages' `>=X.Y,<2.0` ranges still allow the new version.
-- [ ] The `packages/everalgo-<dist>/CHANGELOG.md` section for the new version has been **reviewed and edited** — git-cliff drafts, you ship.
-- [ ] The root `CHANGELOG.md` table row for this distribution has been updated.
-
-### CI / pipeline status
-
-The current `.gitlab-ci.yml` runs 5 quality gates on every MR + on `main`: `ruff-check`, `ruff-format`, `mypy`, `pyright`, `pytest` (with junit + cobertura artifacts, total + diff coverage both gated at 90%).
-
-The build + publish stage (`uv build` + `uv publish` triggered on `<dist>/v<semver>` tag push, filtered to publish only the matching distribution) is tracked as a follow-up before the first real release.
+- [ ] The bumped `version` honours SemVer relative to the previous tag.
+- [ ] The `packages/everalgo-<dist>/CHANGELOG.md` section has been reviewed and edited.
+- [ ] The root `CHANGELOG.md` table row has been updated.
 
 ## For AI coding assistants
 
@@ -152,9 +183,15 @@ Read [`AGENTS.md`](AGENTS.md) — the single source of truth for assistant conte
 
 ## Documentation
 
-- [`docs/design.md`](docs/design.md) — full architecture (read this before challenging any design choice)
-- [`docs/decisions/`](docs/decisions/) — ADRs (Architecture Decision Records)
-- [`AGENTS.md`](AGENTS.md) — how to onboard, how to add an operator, how to add an LLM provider
+- [`docs/index.md`](docs/index.md) — project landing page
+- [`docs/installation.md`](docs/installation.md) — install + prerequisites
+- [`docs/getting-started.md`](docs/getting-started.md) — 5-minute quickstart
+- [`docs/concepts/`](docs/concepts/) — architecture, stateless-design, async/sync bridge
+- [`docs/api/`](docs/api/) — per-package API reference
+- [`docs/version-policy.md`](docs/version-policy.md) — SemVer + supported Python versions
+- [`docs/contributing.md`](docs/contributing.md) — how to contribute
+- [`examples/`](examples/) — runnable quickstart scripts (01 through 06)
+- [`AGENTS.md`](AGENTS.md) — onboarding for AI assistants + contributors
 
 ## License
 

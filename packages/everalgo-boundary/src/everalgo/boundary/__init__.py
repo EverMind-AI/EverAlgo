@@ -1,23 +1,23 @@
-"""Boundary extractors — chat / workspace / agent.
+"""Boundary detection — chat MemCell primitive.
 
 Public surface:
-- ChatMemCellExtractor — slice chat messages into MemCells (new-release batch multi-boundary algorithm)
-- DetectionOutput — ``(cells, tail)`` NamedTuple returned by ChatMemCellExtractor.adetect
-- WorkspaceMemCellExtractor — Jira / Email / Confluence stub
-- AgentMemCellExtractor — agent trace stub
+- detect_boundaries — async function: split chat messages into MemCells
+- DetectionResult    — ``(cells, tail)`` NamedTuple returned by detect_boundaries
+- WorkspaceMemCellExtractor — Jira / Email / Confluence stub (unchanged)
+
+Facade classes (BoundaryDetector / AgentBoundaryDetector) live in everalgo-user-memory and
+everalgo-agent-memory respectively; see Stage 3-4 of the refactor.
 """
 
 import logging
 
-from everalgo.boundary.agent import AgentMemCellExtractor
-from everalgo.boundary.chat import ChatMemCellExtractor, DetectionOutput
+from everalgo.boundary.chat import DetectionResult, detect_boundaries
 from everalgo.boundary.workspace import WorkspaceMemCellExtractor
 
 __all__ = [
-    "AgentMemCellExtractor",
-    "ChatMemCellExtractor",
-    "DetectionOutput",
+    "DetectionResult",
     "WorkspaceMemCellExtractor",
+    "detect_boundaries",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

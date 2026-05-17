@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
-import everalgo.llm
 from everalgo.llm.types import ChatMessage
 from everalgo.rank import weight as _weight
 from everalgo.rank.prompts.en.agentic import (
@@ -43,22 +42,9 @@ logger = logging.getLogger(__name__)
 
 
 def rrf(*sources: Sequence[Candidate], k: int = 60) -> list[Candidate]:
-    """Reciprocal Rank Fusion — merge N ranked recall lists.
+    """Reciprocal Rank Fusion over N ranked lists; ``score = Σ 1/(k+rank_i)``.
 
-    Score formula::
-
-        rrf_score(doc) = sum(1 / (k + rank_i)) for each list i containing doc
-
-    Args:
-        *sources: ``N`` ranked Candidate sequences, each already sorted by its
-            own relevance score (descending).
-        k: RRF smoothing constant. Default ``60`` matches the original Cormack
-            et al. 2009 paper and ``enterprise`` production.
-
-    Returns
-    -------
-        A new list of Candidates with ``.score`` set to the accumulated RRF
-        score, sorted descending. Empty input → empty list.
+    Returns candidates sorted descending by accumulated RRF score; empty input → empty list.
     """
     doc_rrf_scores: dict[str, float] = {}
     doc_map: dict[str, Candidate] = {}
@@ -82,21 +68,8 @@ def lr(
 ) -> list[Candidate]:
     """Logistic Regression fusion of embedding + BM25 results.
 
-        logit = emb_score * emb_coef + bm25_score * bm25_coef + intercept
-        prob = 1 / (1 + exp(-logit))
-
-    Args:
-        emb_results: Embedding (cosine) recall results.
-        bm25_results: BM25 recall results.
-        coefs: Trained LR coefficients. ``None`` (default) falls through to
-            ``weight.default_lr_coefs()`` inside ``weight.multi_field_weighting``.
-            Monkey-patching that function shifts the default for every caller
-            without re-passing ``coefs``.
-
-    Returns
-    -------
-        Candidates sorted descending by LR probability, with ``.score``
-        replaced by the probability.
+    ``logit = emb*emb_coef + bm25*bm25_coef + intercept; prob = sigmoid(logit)``.
+    Returns candidates sorted descending by probability; ``coefs=None`` defers to ``weight.default_lr_coefs()``.
     """
     return _weight.multi_field_weighting(
         {"emb": list(emb_results), "bm25": list(bm25_results)},
@@ -110,18 +83,7 @@ def cosine_to_lr_score(
     *,
     coefs: LRCoefs | None = None,
 ) -> float:
-    """Calibrate a raw cosine similarity to an LR probability.
-
-    Args:
-        sim: Cosine similarity in ``[-1, 1]`` (typically ``[0, 1]``).
-        parent_bm25: Parent's BM25 score. Default ``0.0`` if unknown.
-        coefs: Trained LR coefficients; ``None`` → ``weight.default_lr_coefs()``
-            (resolved inside ``weight.multi_field_weighting``).
-
-    Returns
-    -------
-        Calibrated probability in ``[0, 1]``.
-    """
+    """Calibrate a raw cosine similarity to an LR probability in ``[0, 1]``."""
     out = _weight.multi_field_weighting(
         {
             "emb": [Candidate(id="_scalar", score=sim)],
@@ -138,25 +100,10 @@ def score_propagation(
     *,
     alpha: float = 1.0,
 ) -> list[Candidate]:
-    """Hierarchical score propagation: blend child + parent into a final score.
+    """Blend child + parent scores: ``final = alpha*child + (1-alpha)*parent``.
 
-    ``final_score = alpha * child_score + (1 - alpha) * parent_score``
-
-    Args:
-        parents: Parent candidates (e.g. Episodes).
-        children: Child candidates (e.g. AtomicFacts), each with
-            ``metadata['parent_id']`` pointing at a parent ``id``.
-        alpha: Child weight in ``[0, 1]``. Default ``1.0`` reproduces enterprise
-            behaviour (use child only).
-        parent_score_lookup: Optional ``{parent_id: score}`` override. If a
-            child's parent is not in the lookup (and ``parent_score_lookup`` is
-            not ``None``), the parent contribution is ``0``.
-
-    Returns
-    -------
-        New list of children with ``.score`` replaced by ``final_score``;
-        children whose parent cannot be resolved still appear (parent
-        contribution treated as ``0``). Caller decides whether to sort.
+    Children whose parent cannot be resolved still appear with parent contribution treated as ``0``.
+    Caller decides whether to sort the result.
     """
     parent_score_lookup = {p.id: p.score for p in parents}
 
@@ -238,43 +185,12 @@ def expand(
     config: RankConfig | None = None,
     lr_coefs: LRCoefs | None = None,
 ) -> tuple[list[Candidate], list[FactCandidate], dict[str, Any]]:
-    """Full enterprise MRAG pipeline — Phase 1 fusion + Phase 2-4 expansion.
+    """Full MRAG pipeline — Phase 1 RRF+LR fusion and Phase 2-4 hierarchical expansion.
 
-    ``expand`` is the high-level entry the episodic facade calls when
-    ``fusion_mode == "mrag"``. It owns:
+    Facts compete with their parent episode; when a fact climbs into top-N its parent is evicted. Stops when
+    top-N is stable for ``max_convergence_rounds`` iterations.
 
-    - **Phase 1**: RRF over (dense, sparse) for heap ordering, AND LR fusion
-      over (dense, sparse) for propagation scores. Equivalent to enterprise's
-      ``rrf_cosine`` mode (RRF heap + LR-calibrated propagation).
-    - **Phase 2-4**: hierarchical heap collapse via the private
-      ``_expand_heap`` core — facts compete with their parent episode; when a
-      fact climbs into top-N, the parent is evicted. Stop on
-      ``max_convergence_rounds`` consecutive iterations with no top-N change.
-
-    For unit tests that need fine-grained control over the heap inputs (e.g.
-    bespoke ``fused_results`` / ``episode_scores``), call the private
-    ``_expand_heap`` directly.
-
-    Args:
-        sparse: BM25 / keyword recall results (descending).
-        dense: Vector recall results (descending).
-        episode_to_facts: ``{episode_id: [FactCandidate, ...]}`` pre-fetched
-            by EverOS Recall, sorted descending by cosine score within each
-            episode.
-        response_top_k: Maximum items in the final top-N set.
-        config: ``alpha`` / ``rrf_k`` / ``expand_limit`` /
-            ``max_convergence_rounds`` knobs; ``None`` uses
-            ``DEFAULT_RANK_CONFIG``.
-        lr_coefs: Override for the trained LR coefficients; ``None`` defers to
-            ``weight.default_lr_coefs()``.
-
-    Returns
-    -------
-        ``(episodes, facts, metadata)``:
-
-        - ``episodes`` — episodes still in top-N (not replaced by their facts).
-        - ``facts`` — facts that climbed into top-N.
-        - ``metadata`` — diagnostic counters.
+    Returns ``(episodes, facts, metadata)`` where ``episodes`` / ``facts`` are the surviving top-N items.
     """
     if config is None:
         from everalgo.rank import DEFAULT_RANK_CONFIG
@@ -313,7 +229,7 @@ def expand(
     )
 
 
-def _expand_heap(  # noqa: C901  (heap convergence loop ported 1:1 from enterprise mrag_expander)
+def _expand_heap(  # noqa: C901  (heap convergence loop — splitting hurts readability)
     fused_results: list[Candidate],
     episode_scores: dict[str, float],
     prefetched_facts: dict[str, list[FactCandidate]],
@@ -324,31 +240,10 @@ def _expand_heap(  # noqa: C901  (heap convergence loop ported 1:1 from enterpri
     bm25_scores: dict[str, float] | None = None,
     lr_coefs: LRCoefs | None = None,
 ) -> tuple[list[Candidate], list[FactCandidate], dict[str, Any]]:
-    """Phase 2-4 heap convergence loop — core of ``expand``.
+    """Phase 2-4 heap convergence loop — inner core of ``expand``.
 
-    Private because the high-level ``expand`` is the public surface; this
-    helper is exposed only for fine-grained heap-mechanics unit tests that
-    need to construct ``fused_results`` / ``episode_scores`` directly.
-
-    Args:
-        fused_results: Heap-ordering list (descending). Drives the priority queue.
-        episode_scores: ``{episode_id: score}`` used for score propagation.
-        prefetched_facts: ``{episode_id: [FactCandidate, ...]}`` grouped by
-            parent and sorted descending by cosine score.
-        response_top_k: Maximum items in the final top-N set.
-        config: ``alpha`` / ``expand_limit`` / ``max_convergence_rounds`` knobs;
-            ``None`` uses ``DEFAULT_RANK_CONFIG``.
-        use_lr: If ``True``, convert each child fact's cosine to an LR
-            probability before propagation so child and parent live on the
-            same scale.
-        bm25_scores: ``{episode_id: bm25}`` from Phase 1 BM25. Only consumed
-            when ``use_lr=True``.
-        lr_coefs: Override for ``cosine_to_lr_score``; ``None`` defers to
-            ``weight.default_lr_coefs()``.
-
-    Returns
-    -------
-        Same shape as ``expand``: ``(episodes, facts, metadata)``.
+    Exposed separately so unit tests can pass bespoke ``fused_results`` / ``episode_scores`` without going
+    through Phase 1. Returns ``(episodes, facts, metadata)``.
     """
     if config is None:
         from everalgo.rank import DEFAULT_RANK_CONFIG
@@ -447,7 +342,7 @@ def _expand_heap(  # noqa: C901  (heap convergence loop ported 1:1 from enterpri
 
 
 class AgenticConfig(BaseModel):
-    """Tunable knobs for ``aagentic_rank`` — ported 1:1 from opensource ``AgenticConfig``."""
+    """Tunable knobs for ``aagentic_rank``."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -492,112 +387,85 @@ async def aagentic_rank(
     rerank: RerankFn,
     retrieve: RetrieveFn | None = None,
     top_k: int,
-    llm: LLMClient | None = None,
+    llm: LLMClient,
     sufficiency_prompt: str = AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN,
     multi_query_prompt: str = AGENTIC_MULTI_QUERY_PROMPT_EN,
     config: AgenticConfig = DEFAULT_AGENTIC_CONFIG,
 ) -> list[Candidate]:
-    """LLM-guided multi-round agentic retrieval — opensource ``retrieve_mem_agentic`` ported.
+    """LLM-guided multi-round agentic retrieval.
 
-    Parameters
-    ----------
-    query
-        Original user query.
-    sparse
-        BM25 / keyword recall results for ``query`` (Round 1 input).
-    dense
-        Vector recall results for ``query`` (Round 1 input).
-    rerank
-        Cross-encoder rerank callback (required for Round 1 + final).
-    retrieve
-        Round-2 recall callback for newly generated queries; ``None`` skips Round 2.
-    top_k
-        Final result count; ``-1`` for unlimited (returns up to ``combined_total``).
-    llm
-        Per-call LLM override; ``None`` falls through ``everalgo.llm.resolve``.
-    sufficiency_prompt
-        Override for sufficiency-check prompt. Must contain ``{query}`` / ``{retrieved_docs}``.
-    multi_query_prompt
-        Override for multi-query-generation prompt. Must contain ``{original_query}`` /
-        ``{retrieved_docs}`` / ``{missing_info}``.
-    config
-        ``AgenticConfig`` knobs (round sizes, num_queries, …).
+    Round 1 fuses sparse + dense; the LLM checks sufficiency; if insufficient and ``retrieve`` is provided,
+    Round 2 runs multi-query recall and a final rerank. ``top_k=-1`` returns up to ``combined_total``.
     """
     is_unlimited = top_k == -1
     cfg = config
 
-    try:
-        # ========== Round 1: concat + dedup ==========
-        seen_round1: set[str] = set()
-        round1: list[Candidate] = []
-        for c in list(sparse) + list(dense):
-            if c.id and c.id not in seen_round1:
-                seen_round1.add(c.id)
-                round1.append(c)
-        logger.info("agentic round 1: %d candidates (sparse+dense merged)", len(round1))
-        if not round1:
-            return []
-
-        # ========== Round 1 rerank ==========
-        rerank_n = cfg.round1_rerank_top_n if is_unlimited else max(cfg.round1_rerank_top_n, top_k)
-        reranked = list(await rerank(query, round1, rerank_n))
-        topn_for_llm = reranked[: cfg.round1_rerank_top_n]
-
-        # ========== LLM sufficiency check ==========
-        is_sufficient, _, missing_info = await _acheck_sufficiency(
-            query=query,
-            candidates=topn_for_llm,
-            llm=llm,
-            prompt=sufficiency_prompt,
-            max_docs=cfg.round1_rerank_top_n,
-            max_tokens=cfg.llm_max_tokens_sufficiency,
-            temperature=cfg.llm_temperature_sufficiency,
-        )
-        logger.info("agentic sufficiency: %s", is_sufficient)
-
-        if is_sufficient or retrieve is None or not cfg.enable_multi_query:
-            return reranked if is_unlimited else reranked[:top_k]
-
-        # ========== Round 2: multi-query generation ==========
-        refined_queries, _ = await _agen_multi_queries(
-            original_query=query,
-            candidates=topn_for_llm,
-            missing_info=missing_info,
-            llm=llm,
-            prompt=multi_query_prompt,
-            max_docs=cfg.round1_rerank_top_n,
-            num_queries=cfg.num_queries,
-            max_tokens=cfg.llm_max_tokens_multi_query,
-            temperature=cfg.llm_temperature_multi_query,
-        )
-        logger.info("agentic generated %d follow-up queries", len(refined_queries))
-
-        # ========== Round 2: parallel hybrid search per query ==========
-        round2_results = await asyncio.gather(
-            *[retrieve(q, cfg.round2_per_query_top_n) for q in refined_queries],
-            return_exceptions=True,
-        )
-        all_round2: list[Candidate] = [c for r in round2_results if not isinstance(r, BaseException) for c in r]
-
-        # ========== Dedup + merge ==========
-        round2_unique = [c for c in all_round2 if c.id and c.id not in seen_round1]
-        budget = max(cfg.combined_total - len(round1), 0)
-        combined = round1 + round2_unique[:budget]
-        logger.info("agentic combined: %d candidates", len(combined))
-
-        # ========== Final rerank ==========
-        final_rerank_n = cfg.combined_total if is_unlimited else max(cfg.combined_total, top_k)
-        final = list(await rerank(query, combined, final_rerank_n))
-
-        return final if is_unlimited else final[:top_k]
-
-    except Exception:
-        logger.exception("aagentic_rank failed")
+    # ========== Round 1: concat + dedup ==========
+    seen_round1: set[str] = set()
+    round1: list[Candidate] = []
+    for c in list(sparse) + list(dense):
+        if c.id and c.id not in seen_round1:
+            seen_round1.add(c.id)
+            round1.append(c)
+    logger.info("agentic round 1: %d candidates (sparse+dense merged)", len(round1))
+    if not round1:
         return []
+
+    # ========== Round 1 rerank ==========
+    rerank_n = cfg.round1_rerank_top_n if is_unlimited else max(cfg.round1_rerank_top_n, top_k)
+    reranked = list(await rerank(query, round1, rerank_n))
+    topn_for_llm = reranked[: cfg.round1_rerank_top_n]
+
+    # ========== LLM sufficiency check ==========
+    is_sufficient, _, missing_info = await _acheck_sufficiency(
+        query=query,
+        candidates=topn_for_llm,
+        llm=llm,
+        prompt=sufficiency_prompt,
+        max_docs=cfg.round1_rerank_top_n,
+        max_tokens=cfg.llm_max_tokens_sufficiency,
+        temperature=cfg.llm_temperature_sufficiency,
+    )
+    logger.info("agentic sufficiency: %s", is_sufficient)
+
+    if is_sufficient or retrieve is None or not cfg.enable_multi_query:
+        return reranked if is_unlimited else reranked[:top_k]
+
+    # ========== Round 2: multi-query generation ==========
+    refined_queries, _ = await _agen_multi_queries(
+        original_query=query,
+        candidates=topn_for_llm,
+        missing_info=missing_info,
+        llm=llm,
+        prompt=multi_query_prompt,
+        max_docs=cfg.round1_rerank_top_n,
+        num_queries=cfg.num_queries,
+        max_tokens=cfg.llm_max_tokens_multi_query,
+        temperature=cfg.llm_temperature_multi_query,
+    )
+    logger.info("agentic generated %d follow-up queries", len(refined_queries))
+
+    # ========== Round 2: parallel hybrid search per query ==========
+    round2_results = await asyncio.gather(
+        *[retrieve(q, cfg.round2_per_query_top_n) for q in refined_queries],
+    )
+    all_round2: list[Candidate] = [c for r in round2_results for c in r]
+
+    # ========== Dedup + merge ==========
+    round2_unique = [c for c in all_round2 if c.id and c.id not in seen_round1]
+    budget = max(cfg.combined_total - len(round1), 0)
+    combined = round1 + round2_unique[:budget]
+    logger.info("agentic combined: %d candidates", len(combined))
+
+    # ========== Final rerank ==========
+    final_rerank_n = cfg.combined_total if is_unlimited else max(cfg.combined_total, top_k)
+    final = list(await rerank(query, combined, final_rerank_n))
+
+    return final if is_unlimited else final[:top_k]
 
 
 def _format_candidates_for_llm(candidates: Sequence[Candidate], max_docs: int) -> str:
-    """Render candidates as a numbered text block — ported from opensource ``format_documents_for_llm``."""
+    """Render candidates as a numbered text block for LLM context."""
     if not candidates:
         return "No retrieval results"
 
@@ -623,41 +491,44 @@ def _parse_json_response(response: str) -> dict[str, Any]:
 
 
 def _parse_sufficiency_response(response: str) -> tuple[bool, str, list[str]]:
-    """Parse sufficiency-check JSON; on failure return ``(True, "<error>", [])``."""
-    try:
-        payload = _parse_json_response(response)
-    except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        logger.warning("sufficiency parse failed: %s", exc)
-        return True, f"Parse error: {exc}", []
+    """Parse sufficiency-check JSON.
+
+    Raises:
+        ValueError: If no JSON object is found in the response, or ``is_sufficient`` field is missing.
+        TypeError: If the top-level JSON is not a dict, or ``missing_information`` is not a list.
+        json.JSONDecodeError: On parse failure.
+    """
+    payload = _parse_json_response(response)
     if "is_sufficient" not in payload:
-        logger.warning("sufficiency payload missing 'is_sufficient' field")
-        return True, "Parse error: missing 'is_sufficient'", []
+        raise ValueError("sufficiency payload missing 'is_sufficient' field")
     is_sufficient = bool(payload["is_sufficient"])
     reasoning = payload.get("reasoning", "No reasoning provided")
     missing = payload.get("missing_information", [])
     if not isinstance(missing, list):
-        missing = []
+        raise TypeError("'missing_information' is not a list")
     return is_sufficient, reasoning, missing
 
 
 def _parse_multi_query_response(response: str, original_query: str) -> tuple[list[str], str]:
-    """Return ``(queries, reasoning)``; falls back to ``[original_query]`` on any failure."""
-    try:
-        payload = _parse_json_response(response)
-    except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        logger.warning("multi-query parse failed: %s", exc)
-        return [original_query], f"Parse error: {exc}"
+    """Return ``(queries[:3], reasoning)``.
+
+    Raises:
+        ValueError: If no JSON object is found, or ``queries`` field is missing or all queries are
+            filtered (too short, too long, or identical to the original).
+        TypeError: If the top-level JSON is not a dict, or ``queries`` is not a list.
+        json.JSONDecodeError: On parse failure.
+    """
+    payload = _parse_json_response(response)
     queries = payload.get("queries")
     if not isinstance(queries, list):
-        logger.warning("multi-query payload missing or invalid 'queries' field")
-        return [original_query], "Parse error: missing 'queries'"
+        raise TypeError("multi-query payload missing or invalid 'queries' field (expected list)")
     reasoning = payload.get("reasoning", "No reasoning provided")
     original_norm = original_query.lower().strip()
     valid = [
         q.strip() for q in queries if isinstance(q, str) and 5 <= len(q) <= 300 and q.lower().strip() != original_norm
     ]
     if not valid:
-        return [original_query], "Fallback: used original query"
+        raise ValueError("multi-query: all generated queries were filtered (too short/long or identical to original)")
     return valid[:3], reasoning
 
 
@@ -665,25 +536,27 @@ async def _acheck_sufficiency(
     *,
     query: str,
     candidates: Sequence[Candidate],
-    llm: LLMClient | None,
+    llm: LLMClient,
     prompt: str,
     max_docs: int,
     max_tokens: int,
     temperature: float,
 ) -> tuple[bool, str, list[str]]:
-    """LLM call: are these candidates enough to answer the query? Returns opensource-compatible tuple."""
-    client = everalgo.llm.resolve(llm)
+    """LLM call: are these candidates enough to answer the query?
+
+    Raises:
+        LLMError: Propagated from the underlying LLM client call.
+        ValueError: If the response cannot be parsed or is missing required fields.
+        TypeError: If the response fields have unexpected types.
+    """
+    client = llm
     rendered = prompt.format(query=query, retrieved_docs=_format_candidates_for_llm(candidates, max_docs))
-    try:
-        response = await client.chat(
-            messages=[ChatMessage(role="user", content=rendered)],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-    except Exception as exc:
-        logger.exception("sufficiency LLM call failed")
-        return True, f"LLM error: {exc}", []
+    response = await client.chat(
+        messages=[ChatMessage(role="user", content=rendered)],
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format={"type": "json_object"},
+    )
     return _parse_sufficiency_response(response.content)
 
 
@@ -692,29 +565,31 @@ async def _agen_multi_queries(
     original_query: str,
     candidates: Sequence[Candidate],
     missing_info: list[str],
-    llm: LLMClient | None,
+    llm: LLMClient,
     prompt: str,
     max_docs: int,
     num_queries: int,
     max_tokens: int,
     temperature: float,
 ) -> tuple[list[str], str]:
-    """LLM call: produce ``num_queries`` complementary queries focused on ``missing_info``."""
+    """LLM call: produce ``num_queries`` complementary queries focused on ``missing_info``.
+
+    Raises:
+        LLMError: Propagated from the underlying LLM client call.
+        ValueError: If the response cannot be parsed or all generated queries are filtered.
+        TypeError: If the response fields have unexpected types.
+    """
     _ = num_queries
-    client = everalgo.llm.resolve(llm)
+    client = llm
     rendered = prompt.format(
         original_query=original_query,
         retrieved_docs=_format_candidates_for_llm(candidates, max_docs),
         missing_info=", ".join(missing_info) if missing_info else "N/A",
     )
-    try:
-        response = await client.chat(
-            messages=[ChatMessage(role="user", content=rendered)],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-    except Exception as exc:
-        logger.exception("multi-query LLM call failed")
-        return [original_query], f"LLM error: {exc}"
+    response = await client.chat(
+        messages=[ChatMessage(role="user", content=rendered)],
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format={"type": "json_object"},
+    )
     return _parse_multi_query_response(response.content, original_query)

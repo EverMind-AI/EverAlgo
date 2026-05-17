@@ -24,35 +24,9 @@ def weighted_score(
     fields: dict[str, float],
     intercept: float = 0.0,
 ) -> list[Candidate]:
-    """Single-list LR weighting — per-item sigmoid of a linear combination.
+    """Single-list LR weighting — replace each item's score with ``sigmoid(Σ metadata[k]*coef + intercept)``.
 
-    For each item::
-
-        logit = sum(metadata[k] * coef for k, coef in fields.items()) + intercept
-        new_score = 1 / (1 + exp(-logit))
-
-    Use cases:
-
-    - **case facade** — ``base_weight=1.0, fields={"quality_score": w}`` so the
-      fusion score stays in the logit and ``quality_score`` is an additive
-      feature.
-    - **skill facade** — ``base_weight=0.0, fields={"maturity_score": ws,
-      "confidence": wc}`` so the fusion score drops out and only business
-      fields drive the logit.
-
-    Args:
-        items: Candidates whose ``.score`` is the base feature.
-        fields: ``{metadata_key: coef}`` linear-combo terms. Missing keys count
-            as 0 — never raises.
-        base_weight: Coefficient on ``.score``. ``1.0`` keeps the fusion order
-            in the logit; ``0.0`` discards it.
-        intercept: Logit bias. Default ``0.0``; callers with a trained intercept
-            (e.g. from ``LRCoefs``) can pass it explicitly.
-
-    Returns
-    -------
-        New list of Candidates with ``.score`` set to the sigmoid output.
-        **Not** sorted; caller decides whether to sort.
+    Missing metadata keys contribute 0. Result is **not** sorted; caller decides.
     """
     out: list[Candidate] = []
     for item in items:
@@ -69,37 +43,10 @@ def multi_field_weighting(
     intercept: float = 0.0,
     coefs: LRCoefs | None = None,
 ) -> list[Candidate]:
-    """Multi-source LR fusion — N ranked lists → single LR probability per doc.
+    """Multi-source LR fusion — N ranked lists → single LR probability per doc, sorted descending.
 
-    For each candidate id appearing in any source::
-
-        logit = sum(score_in_source[name] * weights[name] for name in weights)
-              + intercept
-        prob  = 1 / (1 + exp(-logit))
-
-    Two modes — selected by whether ``weights`` is supplied:
-
-    - **Generic mode** (``weights`` is not ``None``): use caller-supplied
-      ``weights`` / ``intercept`` directly. Use for ad-hoc multi-route fusion
-      (e.g. emb + bm25 + recency with bespoke coefficients).
-    - **LR-trained mode** (``weights is None``): use trained LR coefficients
-      via ``_lrcoefs_to_weights(coefs)``. ``coefs=None`` resolves to
-      ``default_lr_coefs()``; ``coefs=LRCoefs(...)`` overrides. Expects
-      ``sources`` to contain keys ``"emb"`` and ``"bm25"``. Used internally by
-      ``fusion.lr`` and ``fusion.cosine_to_lr_score``.
-
-    Args:
-        sources: ``{source_name: ranked_list}``. Each list is descending.
-        weights: ``{source_name: coef}``. Sources not in weights contribute 0.
-            Sources in weights but not in sources contribute 0.
-        intercept: Logit bias for generic mode. Default ``0.0``.
-        coefs: LR-trained coefficients for LR mode. Ignored if ``weights`` is
-            supplied.
-
-    Returns
-    -------
-        New list of Candidates, ``.score`` set to the sigmoid output, sorted
-        descending by score.
+    ``weights=None`` activates LR-trained mode using ``coefs`` (defaults to ``default_lr_coefs()``);
+    ``weights=dict(...)`` activates generic mode with caller-supplied coefficients.
     """
     if weights is None:
         weights, intercept = _lrcoefs_to_weights(coefs)
@@ -125,19 +72,7 @@ def multi_field_weighting(
 
 
 class LRCoefs(NamedTuple):
-    """Logistic Regression training coefficients (emb + bm25 + intercept).
-
-    These are the trained coefficients for the 2-source LR in ``fusion.lr`` /
-    ``fusion.cosine_to_lr_score``. Defaults match the production line in
-    ``memsys_enterprise/.../mrag_fusion.py``.
-
-    Customise per call::
-
-        from everalgo.rank import fusion, weight
-
-        coefs = weight.LRCoefs(emb_coef=..., bm25_coef=..., intercept=...)
-        fused = fusion.lr(emb_results, bm25_results, coefs=coefs)
-    """
+    """Trained LR coefficients for the 2-source (emb + bm25) fusion in ``fusion.lr`` / ``cosine_to_lr_score``."""
 
     emb_coef: float = 6.27473151675093
     bm25_coef: float = 0.09395183408310023
@@ -145,17 +80,7 @@ class LRCoefs(NamedTuple):
 
 
 def default_lr_coefs() -> LRCoefs:
-    """Return the current default LR coefficients.
-
-    Implemented as a function (not a module-level constant) for two reasons:
-
-    1. Future-proofing — when scene-specific defaults appear
-       (``case_default_coefs`` etc.), a function can branch internally without
-       breaking callers; a constant cannot.
-    2. Monkey-patch friendly — callers can replace this function at startup,
-       and ``fusion.lr`` / ``fusion.cosine_to_lr_score`` pick up the override
-       automatically because they invoke it lazily when ``coefs=None``.
-    """
+    """Return the current default LR coefficients (monkey-patchable; ``fusion.lr`` defers here when ``coefs=None``)."""
     return LRCoefs()
 
 
@@ -163,13 +88,7 @@ def default_lr_coefs() -> LRCoefs:
 
 
 def _lrcoefs_to_weights(coefs: LRCoefs | None) -> tuple[dict[str, float], float]:
-    """Resolve ``LRCoefs`` to a ``(weights, intercept)`` pair for the 2-source LR.
-
-    Centralises the ``default_lr_coefs()`` lookup so callers of the
-    ``fusion.*`` family never touch the default-coefs function directly. Pass
-    ``None`` to get the production defaults; pass a custom ``LRCoefs`` to
-    override.
-    """
+    """Resolve ``LRCoefs | None`` to a ``(weights, intercept)`` pair; ``None`` uses ``default_lr_coefs()``."""
     resolved = coefs or default_lr_coefs()
     return {"emb": resolved.emb_coef, "bm25": resolved.bm25_coef}, resolved.intercept
 

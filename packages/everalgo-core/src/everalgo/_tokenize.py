@@ -1,11 +1,6 @@
-"""Shared tokenizer + token-count utilities for EverAlgo subpackages.
+"""Shared tokenizer utilities using OpenAI ``o200k_base`` encoding (GPT-4o / o-series).
 
-Token counting uses OpenAI's ``o200k_base`` encoding via :mod:`tiktoken` — the same encoding the GPT-4o /
-GPT-5 / o-series tokenizers use, and what most production callers measure their context budgets against.
-
-Module-private (underscore prefix) — implementation detail shared across boundary / agent_memory /
-user_memory rather than part of the public ``everalgo.*`` API surface. End-user-facing wrappers should
-re-export the specific helpers they need from their own modules.
+Module-private — internal shared implementation; not part of the public ``everalgo.*`` API.
 """
 
 from __future__ import annotations
@@ -25,48 +20,19 @@ def _get_tokenizer() -> tiktoken.Encoding:
 
 
 def count_tokens(text: str) -> int:
-    """Count tokens in ``text`` under the ``o200k_base`` encoding.
-
-    Parameters
-    ----------
-    text : str
-        Input string. Empty string returns 0.
-
-    Returns
-    -------
-    int
-        Token count (always >= 0). Suitable for context-budget gating; matches what OpenAI bills against on
-        chat-completions calls using GPT-4o / GPT-5 / o-series models.
-    """
+    """Count tokens in ``text`` under ``o200k_base``. Empty string returns 0."""
     if not text:
         return 0
     return len(_get_tokenizer().encode(text))
 
 
 def force_split(text: str, *, max_tokens: int) -> list[str]:
-    """Force-split ``text`` into chunks each containing at most ``max_tokens`` tokens.
+    """Split ``text`` into chunks of at most ``max_tokens`` tokens (no semantic awareness).
 
-    No semantic awareness — chunks break wherever the tokenizer's encoding boundaries permit. Intended as a
-    last-resort guardrail for caller-side prompt fitting; semantic boundaries belong to the boundary
-    extractors (chat / workspace / agent) instead.
+    Returns ``[]`` for empty input, ``[text]`` when the whole string already fits.
 
-    Parameters
-    ----------
-    text : str
-        Input string. Empty input returns ``[]``.
-    max_tokens : int
-        Maximum tokens per output chunk. Must be positive.
-
-    Returns
-    -------
-    list[str]
-        Each element has ``count_tokens(element) <= max_tokens``. Returns ``[]`` for empty input and
-        ``[text]`` when the whole string already fits.
-
-    Raises
-    ------
-    ValueError
-        If ``max_tokens <= 0``.
+    Raises:
+        ValueError: If ``max_tokens <= 0``.
     """
     if max_tokens <= 0:
         raise ValueError(f"max_tokens must be positive, got {max_tokens}")

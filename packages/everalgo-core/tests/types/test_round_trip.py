@@ -8,44 +8,33 @@ from typing import Any
 
 import pytest
 
-from everalgo.types import Episode, MemCell, Message, MessageRole
+from everalgo.types import ChatMessage, Episode, MemCell
 
 
 @pytest.mark.parametrize(
     "obj",
     [
-        Message(role=MessageRole.USER, content="hi", timestamp=1),
-        Message(role=MessageRole.ASSISTANT, content="response", timestamp=2),
-        MemCell(original_data=[], timestamp=1, event_id="m_empty"),
+        ChatMessage(id="m1", role="user", content="hi", timestamp=1, sender_id="user"),
+        ChatMessage(id="m2", role="assistant", content="response", timestamp=2, sender_id="assistant"),
+        MemCell(items=[], timestamp=1),
         MemCell(
-            event_id="m_one",
-            original_data=[
-                {"message": Message(role=MessageRole.USER, content="hi", timestamp=1).model_dump(exclude_none=True)}
-            ],
+            items=[ChatMessage(id="m3", role="user", content="hi", timestamp=1, sender_id="user")],
             timestamp=10,
         ),
-        Episode(
-            id="ep1",
-            owner_id="u1",
-            episode="Alice asked about Q3.",
-            timestamp=1,
-            parent_id="m1",
-        ),
+        Episode(owner_id="u1", episode="Alice asked about Q3.", timestamp=1),
         Episode.model_validate(
             {
-                "id": "ep2",
                 "owner_id": "u2",
                 "episode": "Bob shared the plan.",
                 "timestamp": 2,
-                "parent_id": "m2",
                 "summary": "shared plan",
                 "keywords": ["plan"],
             }
         ),
     ],
     ids=[
-        "message-user",
-        "message-assistant",
+        "chatmessage-user",
+        "chatmessage-assistant",
         "memcell-empty",
         "memcell-one-message",
         "episode-minimal",

@@ -11,10 +11,16 @@ __all__ = ["aparse", "parse"]
 
 
 async def aparse(raw_file: RawFile) -> ParsedContent:
-    """Async parse audio → ParsedContent (含 ASR). Stub — TBD."""
+    """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+    Async parse audio → ParsedContent (含 ASR). Stub — TBD.
+    """
     raise NotImplementedError("stub")
 
 
 def parse(raw_file: RawFile) -> ParsedContent:
-    """Sync parse audio → ParsedContent. Stub — TBD."""
+    """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
+
+    Sync parse audio → ParsedContent. Stub — TBD.
+    """
     raise NotImplementedError("stub")

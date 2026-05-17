@@ -1,71 +1,152 @@
 # everalgo-user-memory
 
-User-side memory products — `EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`. Re-exports `ChatMemCellExtractor` / `WorkspaceMemCellExtractor` from `everalgo-boundary` for facade convenience.
+User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`) plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
 
-See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/design.md`](../../docs/design.md).
+See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
+
+## Install
+
+```bash
+pip install everalgo-user-memory
+# Auto-pulls: everalgo-core, everalgo-boundary
+```
 
 ## Quick start
 
-All four extractors are stateless callable classes following the same shape: `aextract(memcell, *, llm=None, prompt=None)` returning a typed memory list (or a single `Profile` for `ProfileExtractor`). The `extract = async_to_sync(aextract)` sync bridge is available for non-event-loop callers.
+All extractors are stateless classes; pass `llm=` at construction time. The `sender_id` argument is always required and is not inferred from the conversation.
 
 ```python
 import asyncio
+import json
 
-import everalgo
-from everalgo.boundary import ChatMemCellExtractor
-from everalgo.llm.providers.openai_compat import OpenAICompatClient
-from everalgo.types import Message, MessageRole
+from everalgo.llm.types import ChatResponse
+from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.types import ChatMessage, MemCell
 from everalgo.user_memory import (
-    AtomicFactExtractor,
+    BoundaryDetector,
     EpisodeExtractor,
     ForesightExtractor,
+    AtomicFactExtractor,
     ProfileExtractor,
 )
 
+_BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "should_wait": False})
+_EPISODE_JSON  = json.dumps({"title": "Alice asks about async retries", "content": "Alice explored async retry patterns."})
+_FORE_JSON     = json.dumps([{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}])
+_FACT_JSON     = json.dumps({"atomic_facts": {"time": "Nov 14 2023", "atomic_fact": ["Alice is learning Python async."]}})
+_PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"category": "Technical", "description": "Python developer."}]})
+
 
 async def main() -> None:
-    everalgo.configure(llm=OpenAICompatClient(model="gpt-4o-mini"))
-
-    msgs = [
-        Message(role=MessageRole.USER, content="Schedule a 3pm sync with Alice; I'll follow up Friday.", timestamp=1700000000000),
-        Message(role=MessageRole.ASSISTANT, content="Done. Invite sent.", timestamp=1700000001000),
+    messages = [
+        ChatMessage(id="m1", role="user",      content="I want to learn Python async retry patterns.", timestamp=1_700_000_000_000, sender_id="u_alice", sender_name="Alice"),
+        ChatMessage(id="m2", role="assistant",  content="Sure — I'll send a follow-up doc next week.", timestamp=1_700_000_001_000, sender_id="assistant"),
     ]
-    cells, _tail = await ChatMemCellExtractor().adetect(msgs, is_final=True)
-    mc = cells[0]
 
-    episodes = await EpisodeExtractor().aextract(mc)         # list[Episode]
-    foresights = await ForesightExtractor().aextract(mc)     # list[Foresight]
-    facts = await AtomicFactExtractor().aextract(mc)         # list[AtomicFact]
+    fake = FakeLLMClient(responses=[
+        ChatResponse(content=_BOUNDARY_JSON, model="fake"),
+        ChatResponse(content=_EPISODE_JSON,  model="fake"),
+        ChatResponse(content=_FORE_JSON,     model="fake"),
+        ChatResponse(content=_FACT_JSON,     model="fake"),
+        ChatResponse(content=_PROFILE_JSON,  model="fake"),
+    ])
 
-    # Profile takes the current cell plus a caller-fetched prior cluster
-    profile = await ProfileExtractor().aextract(
-        mc, cluster_episodes=[],                             # caller passes prior MemCells here
-    )                                                        # -> Profile (single)
+    # Step 1: boundary detection → MemCell
+    result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
+    mc = result.cells[0]
+
+    # Step 2–4: user-memory extractors
+    episode   = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+    foresights = await ForesightExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+    facts      = await AtomicFactExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+
+    # Step 5: Profile takes a chronological Sequence[MemCell]; last is most recent
+    profile = await ProfileExtractor(llm=fake).aextract([mc], sender_id="u_alice")
+
+    print(episode.subject, profile.summary)
 
 
 asyncio.run(main())
 ```
 
-### Customizing prompts
+See [`examples/06_full_user_memory_pipeline.py`](../../examples/06_full_user_memory_pipeline.py) for the complete end-to-end example including geometry clustering.
 
-Per call:
+## Customising prompts
+
+Each extractor accepts a `prompt=` override per call, or the module-level constant can be monkey-patched at startup for a global override:
 
 ```python
+# Per-call: use the bundled Chinese variant
 from everalgo.user_memory.prompts.zh.episode import EPISODE_EXTRACT_PROMPT_ZH
+episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice", prompt=EPISODE_EXTRACT_PROMPT_ZH)
 
-episodes = await EpisodeExtractor().aextract(mc, prompt=EPISODE_EXTRACT_PROMPT_ZH)
+# Global: replace the default English prompt at startup
+import everalgo.user_memory.prompts.en.foresight as _fs
+_fs.FORESIGHT_GENERATION_PROMPT = my_custom_prompt
 ```
 
-Globally (one-time monkey-patch at startup):
+## API surface
 
 ```python
-import everalgo.user_memory.prompts.en.foresight as _fs
+class BoundaryDetector:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def adetect(
+        self, messages: list[ChatMessage], *, is_final: bool = False, prompt: str | None = None
+    ) -> DetectionResult: ...
 
-_fs.FORESIGHT_EXTRACT_PROMPT_EN = my_custom_prompt
+class EpisodeExtractor:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def aextract(
+        self, memcell: MemCell, *,
+        sender_id: str | None,           # None → generic whole-memcell episode (cheaper)
+        prompt: str | None = None,
+        custom_instructions: str | None = None,
+    ) -> Episode: ...
+
+class ForesightExtractor:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def aextract(
+        self, memcell: MemCell, *, sender_id: str, prompt: str | None = None
+    ) -> list[Foresight]: ...
+
+class AtomicFactExtractor:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def aextract(
+        self, memcell: MemCell, *,
+        sender_id: str | None,           # None → generic facts not bound to any user
+        prompt: str | None = None,
+    ) -> list[AtomicFact]: ...
+
+class ProfileExtractor:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def aextract(
+        self, memcells: Sequence[MemCell], *,
+        sender_id: str,
+        old_profile: Profile | None = None,   # None → INIT mode; present → UPDATE mode
+        prompt: str | None = None,
+    ) -> Profile: ...
 ```
 
-### Testing
+`EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).
 
-The `everalgo.testing` subpackage ships `FakeLLMClient` (handler / scripted modes) and `assert_X_shape`
-helpers for each memory type. See the in-tree pattern at
-[`tests/integration/test_boundary_to_episode_e2e.py`](../../tests/integration/test_boundary_to_episode_e2e.py).
+`ProfileExtractor` has two modes: `old_profile=None` triggers INIT extraction; passing an existing profile triggers UPDATE (LLM emits add/update/delete ops). When the merged profile exceeds an internal item count threshold a second compact LLM pass runs automatically — this is transparent to the caller.
+
+All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)` — only for non-event-loop callers (CLI scripts, plain unit tests).
+
+## Testing
+
+```python
+from everalgo.testing import FakeLLMClient, assert_episode_shape
+
+fake = FakeLLMClient(responses=[ChatResponse(content=_EPISODE_JSON, model="fake")])
+episode = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+assert_episode_shape(episode)
+```
+
+See the integration test pattern in [`tests/integration/`](../../tests/integration/).
+
+## Related distributions
+
+- [`everalgo-boundary`](../everalgo-boundary/) — `detect_boundaries` primitive used by `BoundaryDetector`
+- [`everalgo-clustering`](../everalgo-clustering/) — geometry / LLM clustering for grouping MemCells before `ProfileExtractor`
+- [`everalgo-rank`](../everalgo-rank/) — ranks `Episode`, `AtomicFact`, `Profile` candidates at read time

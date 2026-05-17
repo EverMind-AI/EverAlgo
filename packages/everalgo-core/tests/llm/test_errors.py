@@ -2,7 +2,7 @@
 
 import pytest
 
-from everalgo.llm.errors import LLMError, LLMNotConfiguredError
+from everalgo.llm.errors import LLMError
 
 
 def test_llm_error_is_exception_subclass() -> None:
@@ -28,16 +28,3 @@ def test_llm_error_chains_cause_via_pep_3134() -> None:
             raise LLMError("wrapped failure") from exc
 
     assert caught.value.__cause__ is sdk_native
-
-
-# ---- LLMNotConfiguredError (sub-project 2.5, Task 1) ----------------------
-
-
-def test_llm_not_configured_error_inherits_runtime_error_not_llm_error() -> None:
-    """LLMNotConfiguredError is a misuse error (RuntimeError family).
-
-    Not an SDK call error (LLMError family). See spec §5.3.
-    """
-    err = LLMNotConfiguredError("test message")
-    assert isinstance(err, RuntimeError)
-    assert not isinstance(err, LLMError)

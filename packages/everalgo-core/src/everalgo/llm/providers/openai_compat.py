@@ -13,10 +13,8 @@ from everalgo.llm.types import ChatMessage, ChatResponse, Usage
 class OpenAICompatClient:
     """Thin async wrapper over ``openai.AsyncOpenAI``.
 
-    Single-purpose: convert between EverAlgo's ``ChatMessage`` / ``ChatResponse`` types and the openai SDK's
-    native dict / object shapes. No retry layer, no rate-limit logic, no multi-key rotation — those are
-    caller / deployment concerns (matching opensource ``OpenAIProvider`` simplicity, not Letta-grade
-    orchestration).
+    Converts between EverAlgo types and the openai SDK shapes. No retry, rate-limit, or key-rotation logic —
+    those are caller concerns.
     """
 
     def __init__(self, config: LLMConfig) -> None:
@@ -78,12 +76,7 @@ class OpenAICompatClient:
 def _normalise_finish_reason(
     value: str | None,
 ) -> Literal["stop", "length", "content_filter"] | None:
-    """Collapse provider finish reasons to EverAlgo's 3-value Literal subset.
-
-    EPISODE path treats ``tool_calls`` / ``function_call`` as out-of-scope (no tools wired); when a provider
-    unexpectedly emits one the response is classified as ``None``. Logging the unknown value is left to
-    providers.
-    """
+    """Collapse provider finish reasons to EverAlgo's 3-value Literal; unknown values map to ``None``."""
     if value in ("stop", "length", "content_filter"):
         return value  # type: ignore[return-value]
     return None
