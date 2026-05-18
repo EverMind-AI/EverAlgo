@@ -72,8 +72,7 @@ from everalgo.llm.format import format_message_timestamp, format_natural_languag
 ts_str = format_message_timestamp(1_700_000_000_000)
 
 # Human-readable label for LLM time-of-day reasoning
-# EN: "November 14, 2023 (Tuesday) at 10:13 PM UTC"
-# ZH: "2023 年 11 月 14 日（星期二）下午 10:13 UTC"
+# Example output: "November 14, 2023 (Tuesday) at 10:13 PM UTC"
 label = format_natural_language_time(1_700_000_000_000, lang="en")
 ```
 
