@@ -51,7 +51,7 @@ htmlcov/
 # Logs
 *.log
 
-# Project local artifacts (per BOSS rule: 本地产物放被改造子项目的 local/ 下)
+# Project local artifacts (placed under local/ per project convention)
 local/
 
 # Claude Code session-local state (scheduled tasks, agent caches, locks)
