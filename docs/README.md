@@ -22,5 +22,3 @@ Reference  →  api/README.md  +  packages/*/README.md
 Concepts   →  concepts/
 How-to     →  (see AGENTS.md §7–§8 for operator and provider checklists)
 ```
-
-Internal architecture decisions (ADRs) live in `local/decisions/` and are not part of the public documentation.

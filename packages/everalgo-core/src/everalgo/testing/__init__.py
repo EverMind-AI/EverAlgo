@@ -1,8 +1,7 @@
 """Public testing helpers for EverAlgo — assertions + fake_llm.
 
-Mirrors ``numpy.testing`` / ``torch.testing`` (see ADR 005,
-``docs/decisions/005-testing-as-public-subpackage.md``): testing helpers
-live inside ``everalgo-core`` rather than as a separate distribution.
+Mirrors ``numpy.testing`` / ``torch.testing``: testing helpers live inside
+``everalgo-core`` rather than as a separate distribution.
 
 Public symbols (per AGENTS.md §7 step 6 + §9 + spec §3):
 
