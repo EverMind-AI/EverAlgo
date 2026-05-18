@@ -16,7 +16,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 # Loose lower bound + cross-major upper bound, mirroring HuggingFace `transformers`
-# pin on `huggingface-hub`. See docs/design.md §1.3 line 237 (version strategy).
+# pin on `huggingface-hub`. See AGENTS.md §6 (Branching & Commits) for version strategy.
 dependencies = [
   "asgiref>=3.0",
   "everalgo-core>=0.1.0,<2.0.0",

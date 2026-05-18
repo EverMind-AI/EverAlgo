@@ -2,7 +2,7 @@
 
 Multimodal parsing — image / audio / document / video / url raw inputs into `ParsedContent`. Used by `everalgo-knowledge` for file ingestion and by evermem step 1 for inline parsing.
 
-See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/design.md`](../../docs/design.md).
+See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
 ## Quick start
 
@@ -74,6 +74,6 @@ The parser detects `soffice` via `shutil.which("soffice")` and the canonical mac
 
 ## Reference
 
-- Architecture (definitive): [`docs/design.md`](../../docs/design.md) §1.2 / §2.3
+- Architecture (definitive): [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md)
 - Schema source for PDF / image / audio / document / html / email: `evermemos-multimodal` (tag `prod-20260306-0331-v1`).
 - Schema source for URL metadata extraction: `evermemos-opensource/src/common_utils/url_extractor.py`.

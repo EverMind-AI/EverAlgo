@@ -3,9 +3,8 @@
 evermemos-multimodal has no video parser implementation; the upstream
 ``FILE_TYPE_DEFAULT_EXTENSION`` map reserves ``"video": "mp4"`` but no
 parser ever consumed it. Selection between Gemini Video and Whisper +
-frame extraction is a follow-up decision (tracked as TODO in
-``docs/design.md`` §3); when that lands, this stub is replaced with the
-real handler. Calling ``aparse`` / ``parse`` today raises
+frame extraction is a follow-up decision; when that lands, this stub is
+replaced with the real handler. Calling ``aparse`` / ``parse`` today raises
 ``NotImplementedError`` so dispatch in ``everalgo.parser.aparse`` surfaces
 the deferred status cleanly to callers.
 """

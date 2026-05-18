@@ -16,7 +16,7 @@
   - **Rank(排序)** —— 读路径。输入:多路召回候选 + 预先取好的跨记忆关联。输出:排序后的记忆列表。Ranker **不做任何存储 I/O**;跨记忆关联(如 `Episode → AtomicFact`)由调用方提前查好后传进来。
 - **编排在上游**。什么时候调、按什么顺序、并发多少、怎么持久化到 markdown 文件系统 —— 这些全部由 **evermem** 负责。EverAlgo 不关心调用方是开源还是云端商业版,两条线共用同一份算法代码。
 
-要更深入的背景和动机,看 `docs/design.md` §1.1。
+要更深入的背景和动机,看 `docs/concepts/architecture.md`。
 
 ---
 
@@ -32,8 +32,6 @@ everalgo/                              # monorepo,uv 虚拟工作区
 ├── LICENSE                            # MIT
 ├── .gitignore  .gitlab-ci.yml
 ├── docs/
-│   ├── design.md                      # ⚠️ 必读 —— 完整架构
-│   ├── decisions/                     # ADR(ADR-001…012)—— 想挑战设计前先读
 │   ├── concepts/                      # 高层架构笔记
 │   └── reference/                     # API 参考(按 distribution 切分)
 ├── packages/
@@ -52,7 +50,7 @@ everalgo/                              # monorepo,uv 虚拟工作区
 
 开发流程构建在 **uv 虚拟 workspace** 之上(根目录 `[tool.uv] package = false`,成员在 `packages/*` 下)。同样形态的项目:[Apache Airflow](https://github.com/apache/airflow)(100+ workspace 成员 + 单 root lockfile)和 [pydantic-ai](https://github.com/pydantic/pydantic-ai)。注意这俩只是 *uv workspace* 的参考 —— Airflow 的 `airflow.providers.*` 用的是 pkgutil 风格的老式 namespace,不是 PEP 420;pydantic-ai 用了三个独立 namespace,不是共享一个。LangChain / LlamaIndex 只用作 *monorepo* 布局的参考 —— 它俩都没用 uv workspace,而是每个包独立 venv + lockfile。
 
-**依赖拓扑**(完整图和理由见 `docs/design.md` §1.3):
+**依赖拓扑**(完整图和理由见 `docs/concepts/architecture.md`):
 
 ```
                                 everalgo-core
@@ -168,7 +166,7 @@ CI 流水线(`.gitlab-ci.yml`)在每个 MR 上重跑 `ruff check .` + `ruff form
 
 ## 5. 代码规范
 
-完整理由在 `docs/design.md` §1.4 和 ADR 010 / 011。硬性规则:
+完整理由在 `docs/concepts/architecture.md`。硬性规则:
 
 - **命名契约 —— `a` 前缀代表 async**。`aextract` / `arank` / `adetect` / `aparse` 这些方法是**原生异步**(做真实 I/O —— LLM、网络等),要用 `await` 调用;没有 `a` 前缀的(`rank` / `extract` / `count_tokens` / `rrf` 等)是**同步**(纯计算,不做 I/O),直接调用。跟 `dspy.acall` / `litellm.acompletion` / `instructor.AsyncInstructor` 同样的约定。
 - **I/O 算子:async 优先 + sync 桥接**。原生 async 走 `asyncio`;sync 版本通过 `asgiref.async_to_sync` 派生,给非事件循环的调用方用(CLI 脚本、普通单元测试)。**不要**在已经跑着事件循环的地方调 sync 桥接版。
@@ -180,7 +178,7 @@ CI 流水线(`.gitlab-ci.yml`)在每个 MR 上重跑 `ruff check .` + `ruff form
 - **Lint 配置**。整个 workspace 的 ruff 配置在根 `pyproject.toml`(`line-length = 120`,目标版本从 `requires-python = ">=3.12"` 推出,规则集是 pytorch + pydantic-ai 的交集)。docstring 用 NumPy 风格 —— 跟 numpy / scipy / scikit-learn / pandas 一致,是科学 Python 算法库的行业标准。
 - **日志规范**。LLM / I/O 路径上用 `logger = logging.getLogger(__name__)`,配懒计算的 `%`-format(`logger.debug("count=%d", n)` —— **绝不**在 log 调用里写 f-string),`except` 块里用 `logger.exception(...)`。用户行为类问题和废弃提示用 `warnings.warn(..., stacklevel=2)`;纯算法错误用 `raise ValueError(...)` 带详细信息(numpy 风格 —— `shapes (3,4) and (5,6) not aligned` 这种)。每个公开子包的 `__init__.py` 都已经挂了 `NullHandler`;`everalgo.llm` 默认开了 `SensitiveHeadersFilter`。**库代码里禁用**:`logging.basicConfig`、`addHandler`(除了 `NullHandler` 都不行)、`setLevel`、显式 `propagate = True/False`,以及任何模块级的 `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()`(不传 name)/ `logging.root.*` —— 这些都打到 root logger,是 application 的活儿。**DEBUG 日志里禁用**:请求/响应 body、prompt 文本、模型输出(Filter 只能脱敏 header,body 里的 PII 它看不见)。性能计时是用户的事(`cProfile` / `line_profiler` / `%timeit`);库不打 duration。ruff 规则集 `G` + `LOG` + `TRY` 在 lint 阶段强制以上规则。
 - **手动换行时把 `line-length = 120` 用满**。Python 注释 / docstring 和 TOML / YAML 注释,每行写到 100–115 字符再换行 —— 不要出于习惯在 70 / 79 / 80 / 88 / 100 字符就预换行。`E501` 在 ignore 列表里,ruff 也不会标过短的行,所以这是写作纪律不是 lint。3 行注释如果能干净地压到 2 行 @120,就写 2 行。例外:bullet 列表、代码块、NumPy docstring 的 `name : type` 字段(故意一行一条),以及那些自然断句更好读的地方。本仓库的 markdown 文件**故意**用**一段一行**(不硬换行)的风格 —— Prettier 默认就这么排版,GitHub 渲染也干净 —— 所以 `.md` 散文豁免 100–115 规则,靠编辑器软换行。
-- **代码、配置、commit message 只用英文**。所有 Python 代码、注释、标识符、`pyproject.toml` 注释、CI 文件、commit message 必须是英文。`evermem` 用 pre-commit hook 强制这条,这里同样适用。`docs/` 下的设计讨论文档(`design.md`、`decisions/`、`concepts/`)可以保留中文 —— 它们反映的是设计讨论时的工作语言,不是代码本身。
+- **代码、配置、commit message、文档全用英文**。所有 Python 代码、注释、标识符、`pyproject.toml` 注释、CI 文件、commit message、`docs/` 下的内容都必须是英文。`evermem` 用 pre-commit hook 强制这条,这里同样适用。
 
 ---
 
@@ -190,7 +188,7 @@ CI 流水线(`.gitlab-ci.yml`)在每个 MR 上重跑 `ruff check .` + `ruff form
 
 - `main` 是唯一长期存活的分支。它**受 GitLab 保护**(Settings → Repository → Protected branches):所有人都不能直接 push,落到 `main` 的唯一路径是 Merge Request。
 - 功能开发走短期分支:`feat/<topic>` / `fix/<bug>` / `docs/<topic>` / `refactor/<topic>`。开 MR → squash merge 到 `main`。
-- 发布 = 在 `main` 上打 tag,按 distribution 维度的 SemVer:`everalgo-clustering/v0.2.0`。每个 distribution 独立版本节奏(HuggingFace 模式;见 `docs/design.md` §1.3 和 `README.md` "Cutting a release")。
+- 发布 = 在 `main` 上打 tag,按 distribution 维度的 SemVer:`everalgo-clustering/v0.2.0`。每个 distribution 独立版本节奏(HuggingFace 模式;见 `docs/concepts/architecture.md` 和 `README.md` "Cutting a release")。
 - 维护分支(`0.1.X-fixes`)**只在**已发布版本需要 back-port 时才开;默认不开。
 
 **Commit message:Gitmoji + Conventional Commits**。格式:`<emoji> <type>(<scope>): <description>`。
@@ -217,10 +215,10 @@ CI 流水线(`.gitlab-ci.yml`)在每个 MR 上重跑 `ruff check .` + `ruff form
 
 加新的 extractor / ranker / clusterer 时按这份 checklist:
 
-1. **选子包**。基于产品轴(user_memory / agent_memory / knowledge)或工具轴(boundary / clustering / rank / parser)选 `packages/everalgo-<dist>/src/everalgo/<subpkg>/`。拿不准看 `docs/design.md` §1.2。
+1. **选子包**。基于产品轴(user_memory / agent_memory / knowledge)或工具轴(boundary / clustering / rank / parser)选 `packages/everalgo-<dist>/src/everalgo/<subpkg>/`。拿不准看 `docs/concepts/architecture.md`。
 2. **建模块**。`<subpkg>/<operator>.py` —— 模块级函数,或一个无状态类实现 `everalgo.protocols` 里对应的 Protocol。
 3. **写 prompt(如果用 LLM)**。把 prompt 字符串作为模块级常量放进 `<subpkg>/prompts/en/<operator>.py`(需要中文变体的话再加 `zh/<operator>.py`)。
-4. **重新导出公开 API**。如果这个算子是其所在 facade 子包公开 API 的一部分,加进 `<subpkg>/__init__.py` 的 re-export 区段和 `__all__`。re-export 模式见 `docs/design.md` §1.3。
+4. **重新导出公开 API**。如果这个算子是其所在 facade 子包公开 API 的一部分,加进 `<subpkg>/__init__.py` 的 re-export 区段和 `__all__`。re-export 模式见 `docs/concepts/architecture.md`。
 5. **接好依赖**。如果新代码引入了新的第三方库,用 `uv add --package everalgo-<dist> <library>` 加,会自动更新对应包的 `pyproject.toml`。
 6. **写测试**。用 `everalgo.testing.fake_llm` 避免真实 API 调用;用 `everalgo.testing.assertions` 做结构化记忆断言。
 7. **本地跑全套 lint + 格式化 + 类型检查 + 测试** 后再开 MR(`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`)。
@@ -237,7 +235,7 @@ Provider 嵌在 `everalgo-core` 的 `everalgo/llm/providers/<provider>/` 下(根
 4. 把 provider 原生异常映射到统一的 `LLMError` 子类树。
 5. 只有 provider 需要特殊 prompt 格式时才加 per-provider prompt(罕见 —— 多数 provider 都是 OpenAI 兼容的)。
 6. 测试放在 `packages/everalgo-core/tests/llm/providers/<provider>/`。CI 有真实 key 的时候**不要**在 HTTP 层 mock;否则用 `respx` 录 fixture。
-7. 公开 API 有变就更新 `docs/design.md` §2.5 和 `AGENTS.md`。
+7. 公开 API 有变就更新 `docs/concepts/architecture.md` 和 `AGENTS.md`。
 
 ---
 
@@ -254,7 +252,7 @@ Provider 嵌在 `everalgo-core` 的 `everalgo/llm/providers/<provider>/` 下(根
 
 | 主题 | 在哪里 |
 |---|---|
-| 架构(权威) | [`docs/design.md`](docs/design.md) |
+| 架构(权威) | [`docs/concepts/architecture.md`](docs/concepts/architecture.md) |
 | `evermem` 合同来源 | Confluence（内部） |
 | uv workspace 概念 | https://docs.astral.sh/uv/concepts/projects/workspaces/ |
 | PEP 420 namespace 包 | https://peps.python.org/pep-0420/ |
@@ -270,5 +268,5 @@ Provider 嵌在 `everalgo-core` 的 `everalgo/llm/providers/<provider>/` 下(根
 
 1. **保持英文版 `AGENTS.md` 为 canonical**(权威版本)。`CLAUDE.md` 和 `.cursorrules` 继续是 symlink。`AGENTS.zh.md` 是并行翻译,如果与英文版冲突以英文版为准。
 2. **改动后同步翻译**。改英文版的同一个 MR 里把中文版也同步过来,避免漂移。如果只是 typo / 措辞调整,中文版可以下一个 MR 跟。
-3. **每个具体决策都要有出处**。引用 `docs/design.md` 的某节、某个 ADR、或公开规范 / 明星项目 URL。不要写没根据的断言。
+3. **每个具体决策都要有出处**。引用 `docs/concepts/architecture.md` 的某节、或公开规范 / 明星项目 URL。不要写没根据的断言。
 4. **仓库结构或工作流变了**,§2(布局)和 §3-§4(命令)要在**同一个 MR**里同步更新。
