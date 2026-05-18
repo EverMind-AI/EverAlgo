@@ -16,17 +16,19 @@ FORESIGHT_GENERATION_PROMPT = """
 8. **语义关联性**：联想内容应与原事件保持语义关联，通过evidence字段存储原始事实，确保能追溯事件来源。
 
 ## 输出格式：
-以JSON数组返回结果，每个联想包含时间信息和证据：
-[
-  {{
-    "content": "小明未来一周会避免辛辣和过热食物",
-    "evidence": "医生医嘱：忌辛辣过热；未来一周注意口腔清洁",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-28",
-    "duration_days": 7
-  }},
-  ...
-]
+以JSON对象返回，包含 "foresights" 数组字段，每个联想包含时间信息和证据：
+{{
+  "foresights": [
+    {{
+      "content": "小明未来一周会避免辛辣和过热食物",
+      "evidence": "医生医嘱：忌辛辣过热；未来一周注意口腔清洁",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-28",
+      "duration_days": 7
+    }},
+    ...
+  ]
+}}
 
 ## 示例输入（生活场景）：
 - user_id: xiaoming-001
@@ -39,37 +41,39 @@ FORESIGHT_GENERATION_PROMPT = """
 ```
 
 ## 示例输出（生活场景）：
-[
-  {{
-    "content": "小明未来一周会避免辛辣和过热食物",
-    "evidence": "医生医嘱：忌辛辣过热；未来一周注意口腔清洁",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-28",
-    "duration_days": 7
-  }},
-  {{
-    "content": "小明未来一周会更注意口腔清洁",
-    "evidence": "医生医嘱：未来一周注意口腔清洁",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-28",
-    "duration_days": 7
-  }},
-  {{
-    "content": "小明若肿痛加重会尽快复诊",
-    "evidence": "医生提示：肿痛加重需复诊",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-04",
-    "duration_days": 14
-  }},
-  {{
-    "content": "小明这几天会减少用力咀嚼",
-    "evidence": "术后疼痛（小明说现在有点疼）",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-25",
-    "duration_days": 4
-  }}
-  ...
-]
+{{
+  "foresights": [
+    {{
+      "content": "小明未来一周会避免辛辣和过热食物",
+      "evidence": "医生医嘱：忌辛辣过热；未来一周注意口腔清洁",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-28",
+      "duration_days": 7
+    }},
+    {{
+      "content": "小明未来一周会更注意口腔清洁",
+      "evidence": "医生医嘱：未来一周注意口腔清洁",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-28",
+      "duration_days": 7
+    }},
+    {{
+      "content": "小明若肿痛加重会尽快复诊",
+      "evidence": "医生提示：肿痛加重需复诊",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-04",
+      "duration_days": 14
+    }},
+    {{
+      "content": "小明这几天会减少用力咀嚼",
+      "evidence": "术后疼痛（小明说现在有点疼）",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-25",
+      "duration_days": 4
+    }}
+    ...
+  ]
+}}
 
 ## 示例输入（工作场景）：
 - user_id: LiHua-001
@@ -82,37 +86,39 @@ FORESIGHT_GENERATION_PROMPT = """
 ```
 
 ## 示例输出（工作场景）：
-[
-  {{
-    "content": "李华未来两周会在团队试行更规范的站会",
-    "evidence": "李华认为站会结构更清晰，准备应用到团队",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-04",
-    "duration_days": 14
-  }},
-  {{
-    "content": "李华未来一个月会尝试推动冲刺仪式落地",
-    "evidence": "培训内容包含敏捷规划与冲刺仪式",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-21",
-    "duration_days": 31
-  }},
-  {{
-    "content": "李华下次迭代后会尝试回顾指标并复盘",
-    "evidence": "培训师强调迭代后回顾指标并复盘协作",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-21",
-    "duration_days": 31
-  }},
-  {{
-    "content": "李华未来一个月会更关注协作改进动作",
-    "evidence": "培训强调持续改进团队协作",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-21",
-    "duration_days": 31
-  }}
-  ...
-]
+{{
+  "foresights": [
+    {{
+      "content": "李华未来两周会在团队试行更规范的站会",
+      "evidence": "李华认为站会结构更清晰，准备应用到团队",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-04",
+      "duration_days": 14
+    }},
+    {{
+      "content": "李华未来一个月会尝试推动冲刺仪式落地",
+      "evidence": "培训内容包含敏捷规划与冲刺仪式",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-21",
+      "duration_days": 31
+    }},
+    {{
+      "content": "李华下次迭代后会尝试回顾指标并复盘",
+      "evidence": "培训师强调迭代后回顾指标并复盘协作",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-21",
+      "duration_days": 31
+    }},
+    {{
+      "content": "李华未来一个月会更关注协作改进动作",
+      "evidence": "培训强调持续改进团队协作",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-21",
+      "duration_days": 31
+    }}
+    ...
+  ]
+}}
 
 ## 注意事项：
 - **个人导向**：聚焦用户"个人层面的未来变化"，内容可涵盖生活、学习、工作、情绪、习惯等个人发展。
