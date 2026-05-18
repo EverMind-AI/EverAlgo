@@ -108,4 +108,3 @@ In summary:
 ## Questions
 
 Open a GitLab issue or discussion.
-For design decisions, review the ADRs in `local/decisions/` — each one covers a concrete architectural choice with alternatives considered.

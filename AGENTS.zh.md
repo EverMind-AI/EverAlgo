@@ -2,7 +2,7 @@
 
 > **本文件是英文版 [`AGENTS.md`](AGENTS.md) 的中文并行翻译**,方便中文母语的工程师/AI 助手快速了解项目。**`AGENTS.md` 仍是 single source of truth(唯一权威版本)**;`CLAUDE.md`、`.cursorrules` 都是它的符号链接。两份文件出现冲突时以英文版为准。
 
-如果你是 AI 助手(Claude Code / Cursor / Copilot / Codex 等)第一次接入这个仓库,先读这份文件,再读 `docs/design.md` 拿完整架构,接着读 `docs/decisions/` 下相关的 ADR(架构决策记录),最后再动代码。
+如果你是 AI 助手(Claude Code / Cursor / Copilot / Codex 等)第一次接入这个仓库,先读这份文件,再读 `docs/concepts/architecture.md` 拿完整架构,最后再动代码。
 
 ---
 
@@ -178,7 +178,7 @@ CI 流水线(`.gitlab-ci.yml`)在每个 MR 上重跑 `ruff check .` + `ruff form
 - **算法代码里不搞依赖注入**。模块级函数 + 全局 config + 测试里 monkeypatch。算法作者从写代码到能跑应该只差一个回车,别强加框架仪式感。
 - **I/O 算子的 sync 桥接:照 ADR 010 第 199-214 行,写一行 `extract = async_to_sync(aextract)`;不要引入 `DualInterface` mixin**。这让类型推导可预期,也避免 metaclass 黑魔法,跟 ADR 里展示的模式一致。`async_to_sync` 这个 helper 来自 `asgiref.sync`。
 - **Lint 配置**。整个 workspace 的 ruff 配置在根 `pyproject.toml`(`line-length = 120`,目标版本从 `requires-python = ">=3.12"` 推出,规则集是 pytorch + pydantic-ai 的交集)。docstring 用 NumPy 风格 —— 跟 numpy / scipy / scikit-learn / pandas 一致,是科学 Python 算法库的行业标准。
-- **日志规范**。LLM / I/O 路径上用 `logger = logging.getLogger(__name__)`,配懒计算的 `%`-format(`logger.debug("count=%d", n)` —— **绝不**在 log 调用里写 f-string),`except` 块里用 `logger.exception(...)`。用户行为类问题和废弃提示用 `warnings.warn(..., stacklevel=2)`;纯算法错误用 `raise ValueError(...)` 带详细信息(numpy 风格 —— `shapes (3,4) and (5,6) not aligned` 这种)。每个公开子包的 `__init__.py` 都已经挂了 `NullHandler`;`everalgo.llm` 默认开了 `SensitiveHeadersFilter`。**库代码里禁用**:`logging.basicConfig`、`addHandler`(除了 `NullHandler` 都不行)、`setLevel`、显式 `propagate = True/False`,以及任何模块级的 `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()`(不传 name)/ `logging.root.*` —— 这些都打到 root logger,是 application 的活儿。**DEBUG 日志里禁用**:请求/响应 body、prompt 文本、模型输出(Filter 只能脱敏 header,body 里的 PII 它看不见)。性能计时是用户的事(`cProfile` / `line_profiler` / `%timeit`);库不打 duration。ruff 规则集 `G` + `LOG` + `TRY` 在 lint 阶段强制以上规则。完整理由、级别语义和 logging-vs-warnings-vs-exception 决策矩阵见 [ADR 013](docs/decisions/013-logging-conventions.md)。
+- **日志规范**。LLM / I/O 路径上用 `logger = logging.getLogger(__name__)`,配懒计算的 `%`-format(`logger.debug("count=%d", n)` —— **绝不**在 log 调用里写 f-string),`except` 块里用 `logger.exception(...)`。用户行为类问题和废弃提示用 `warnings.warn(..., stacklevel=2)`;纯算法错误用 `raise ValueError(...)` 带详细信息(numpy 风格 —— `shapes (3,4) and (5,6) not aligned` 这种)。每个公开子包的 `__init__.py` 都已经挂了 `NullHandler`;`everalgo.llm` 默认开了 `SensitiveHeadersFilter`。**库代码里禁用**:`logging.basicConfig`、`addHandler`(除了 `NullHandler` 都不行)、`setLevel`、显式 `propagate = True/False`,以及任何模块级的 `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()`(不传 name)/ `logging.root.*` —— 这些都打到 root logger,是 application 的活儿。**DEBUG 日志里禁用**:请求/响应 body、prompt 文本、模型输出(Filter 只能脱敏 header,body 里的 PII 它看不见)。性能计时是用户的事(`cProfile` / `line_profiler` / `%timeit`);库不打 duration。ruff 规则集 `G` + `LOG` + `TRY` 在 lint 阶段强制以上规则。
 - **手动换行时把 `line-length = 120` 用满**。Python 注释 / docstring 和 TOML / YAML 注释,每行写到 100–115 字符再换行 —— 不要出于习惯在 70 / 79 / 80 / 88 / 100 字符就预换行。`E501` 在 ignore 列表里,ruff 也不会标过短的行,所以这是写作纪律不是 lint。3 行注释如果能干净地压到 2 行 @120,就写 2 行。例外:bullet 列表、代码块、NumPy docstring 的 `name : type` 字段(故意一行一条),以及那些自然断句更好读的地方。本仓库的 markdown 文件**故意**用**一段一行**(不硬换行)的风格 —— Prettier 默认就这么排版,GitHub 渲染也干净 —— 所以 `.md` 散文豁免 100–115 规则,靠编辑器软换行。
 - **代码、配置、commit message 只用英文**。所有 Python 代码、注释、标识符、`pyproject.toml` 注释、CI 文件、commit message 必须是英文。`evermem` 用 pre-commit hook 强制这条,这里同样适用。`docs/` 下的设计讨论文档(`design.md`、`decisions/`、`concepts/`)可以保留中文 —— 它们反映的是设计讨论时的工作语言,不是代码本身。
 
@@ -224,7 +224,6 @@ CI 流水线(`.gitlab-ci.yml`)在每个 MR 上重跑 `ruff check .` + `ruff form
 5. **接好依赖**。如果新代码引入了新的第三方库,用 `uv add --package everalgo-<dist> <library>` 加,会自动更新对应包的 `pyproject.toml`。
 6. **写测试**。用 `everalgo.testing.fake_llm` 避免真实 API 调用;用 `everalgo.testing.assertions` 做结构化记忆断言。
 7. **本地跑全套 lint + 格式化 + 类型检查 + 测试** 后再开 MR(`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`)。
-8. **记录架构决策**。如果这个算子涉及非平凡的设计选择(新的公开 Protocol、新的 distribution 边界、打破某个约定),在 `docs/decisions/` 下加一个新的 ADR,编号接最新的之后。
 
 ---
 
@@ -256,8 +255,7 @@ Provider 嵌在 `everalgo-core` 的 `everalgo/llm/providers/<provider>/` 下(根
 | 主题 | 在哪里 |
 |---|---|
 | 架构(权威) | [`docs/design.md`](docs/design.md) |
-| 架构决策(ADR) | [`docs/decisions/`](docs/decisions/) |
-| `evermem` 合同来源 | Confluence —— 链接见 `docs/design.md` 的 header |
+| `evermem` 合同来源 | Confluence（内部） |
 | uv workspace 概念 | https://docs.astral.sh/uv/concepts/projects/workspaces/ |
 | PEP 420 namespace 包 | https://peps.python.org/pep-0420/ |
 | PEP 8(风格)/ 257(docstring)/ 484(类型注解) | https://peps.python.org/ |

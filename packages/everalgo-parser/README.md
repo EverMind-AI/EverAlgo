@@ -67,14 +67,13 @@ The parser detects `soffice` via `shutil.which("soffice")` and the canonical mac
 
 ## Conventions
 
-- `aparse(...)` is async; `parse(...)` is the sync bridge via `asgiref.async_to_sync` ([ADR-010](../../docs/decisions/010-sync-async-dual-interface.md)).
+- `aparse(...)` is async; `parse(...)` is the sync bridge via `asgiref.async_to_sync`.
 - Prompts live as module-level string constants under `prompts/{en,zh}/<operator>.py` ([AGENTS.md §5](../../AGENTS.md#5-code-style)). Swap languages by re-binding the constant at startup.
 - The library is **stateless**: it never reads the filesystem and never owns business state. HTTP I/O (LLM calls, URL fetching) is explicitly allowed.
-- No retry / fallback / metrics inside operators — surface failures via `LLMError`, let the caller wrap. See [ADR-012](../../docs/decisions/012-llm-stack-architecture.md).
+- No retry / fallback / metrics inside operators — surface failures via `LLMError`, let the caller wrap.
 
 ## Reference
 
 - Architecture (definitive): [`docs/design.md`](../../docs/design.md) §1.2 / §2.3
-- ADRs: [010 sync/async dual interface](../../docs/decisions/010-sync-async-dual-interface.md) · [011 Protocol over ABC](../../docs/decisions/011-protocol-vs-abc.md) · [013 logging](../../docs/decisions/013-logging-conventions.md)
 - Schema source for PDF / image / audio / document / html / email: `evermemos-multimodal` (tag `prod-20260306-0331-v1`).
 - Schema source for URL metadata extraction: `evermemos-opensource/src/common_utils/url_extractor.py`.

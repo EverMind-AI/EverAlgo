@@ -2,7 +2,7 @@
 
 > **Canonical source of truth.** This file (`AGENTS.md`) is the single source of truth for AI coding assistant context. `CLAUDE.md` (Claude Code) and `.cursorrules` (Cursor) are symlinks to it. Pattern adopted from [Mirascope](https://github.com/Mirascope/mirascope/blob/main/AGENTS.md) and [scikit-learn](https://github.com/scikit-learn/scikit-learn/blob/main/AGENTS.md).
 
-If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboarding to this repository, read this file first, then `docs/concepts/architecture.md` for the full architecture, then the relevant ADR(s) under `local/decisions/` before touching code. The `local/` directory contains internal design artefacts (specs, plans, session notes) — not public-facing documentation.
+If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboarding to this repository, read this file first, then `docs/concepts/architecture.md` for the full architecture before touching code.
 
 ---
 
@@ -36,7 +36,6 @@ everalgo/                              # monorepo, uv virtual workspace
 │   ├── concepts/                      # high-level architecture notes
 │   └── reference/                     # API reference (per-distribution)
 ├── examples/                          # runnable quickstart scripts (01–06, use FakeLLMClient)
-├── local/                             # internal artefacts (specs, plans, session notes) — not public
 ├── packages/
 │   ├── everalgo-core/                 # types, llm (+ providers), prompts, testing
 │   ├── everalgo-boundary/             # detect_boundaries + DetectionResult + workspace stub
@@ -179,17 +178,17 @@ Reference: [uv workspace documentation](https://docs.astral.sh/uv/concepts/proje
 
 ## 5. Code Style
 
-The full rationale lives in `docs/concepts/architecture.md` and `local/decisions/010-sync-async-dual-interface.md` / `011-protocol-vs-abc.md`. Hard rules:
+The full rationale lives in `docs/concepts/architecture.md`. Hard rules:
 
 - **Naming contract — `a` prefix means async.** Methods named `aextract` / `arank` / `adetect` / `aparse` are **native async** (do real I/O — LLM, network, …); call them with `await`. Methods without the `a` prefix (`rank`, `extract`, `count_tokens`, `rrf`, …) are **sync** (pure compute, no I/O); call them directly. Same convention as `dspy.acall` / `litellm.acompletion` / `instructor.AsyncInstructor`.
 - **I/O operators: async-first + sync bridge.** Native async via `asyncio`; sync version is derived through `asgiref.async_to_sync` for non-event-loop callers (CLI scripts, plain unit tests). Never call the sync bridge from inside a running event loop.
 - **Pure-compute operators: sync only.** No async wrapper for `fusion.rrf`, `_tokenize.count_tokens`, clustering distances, etc. Mirrors numpy / scipy / sklearn / pandas conventions.
 - **Prompts as Python string modules.** Concrete prompt strings live in `<subpkg>/prompts/{en,zh}/<name>.py` as module-level constants. Editing a prompt = editing a `.py` file. No external `.md` / `.yaml` / `.toml` prompt stores. Caller customisation: per-call `prompt=` argument (fine-grained) or monkey-patching the module constant at startup (coarse-grained).
-- **`Protocol` for typing, not `ABC`.** EverAlgo operators are stateless; implementations do not need to subclass anything. See `local/decisions/011-protocol-vs-abc.md`.
+- **`Protocol` for typing, not `ABC`.** EverAlgo operators are stateless; implementations do not need to subclass anything.
 - **No dependency injection in algorithm code.** Module-level functions + global config + monkeypatch in tests. Algorithm authors should be one keystroke away from running their code; do not impose framework ceremony.
-- **Sync bridge for I/O operators: write `extract = async_to_sync(aextract)` one-liner; do not introduce a `DualInterface` mixin.** This keeps type inference predictable, avoids metaclass magic. The `async_to_sync` helper comes from `asgiref.sync`. See `local/decisions/010-sync-async-dual-interface.md`.
+- **Sync bridge for I/O operators: write `extract = async_to_sync(aextract)` one-liner; do not introduce a `DualInterface` mixin.** This keeps type inference predictable, avoids metaclass magic. The `async_to_sync` helper comes from `asgiref.sync`.
 - **Lint configuration.** Workspace-wide ruff is configured in the root `pyproject.toml` (`line-length = 120`, target version inferred from `requires-python = ">=3.12"`, rule set derived from the pytorch + pydantic-ai intersection). Google-style docstrings — aligns with Google Python Style Guide. `Args:` / `Returns:` / `Raises:` sections, no type repetition in the body (type annotations in the signature are authoritative).
-- **Logging discipline.** On the LLM / I/O path use `logger = logging.getLogger(__name__)` with lazy `%`-format (`logger.debug("count=%d", n)` — never f-strings inside log calls) and `logger.exception(...)` inside `except` blocks. For user-behaviour problems and deprecations use `warnings.warn(..., stacklevel=2)`; for pure-algorithm errors `raise ValueError(...)` with a detailed message (numpy style — `shapes (3,4) and (5,6) not aligned`, etc.). Every public subpackage `__init__.py` already attaches a `NullHandler`; `everalgo.llm` carries a default-on `SensitiveHeadersFilter`. **Forbidden in library code**: `logging.basicConfig`, `addHandler` (anything but `NullHandler`), `setLevel`, explicit `propagate = True/False`, and any module-level `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()` (no-arg) / `logging.root.*` — these all target the root logger and are an application's job. **Forbidden in DEBUG logs**: request / response bodies, prompt text, model outputs (the Filter only redacts headers; bodies leak PII the Filter cannot see). Performance timing is the user's job (`cProfile` / `line_profiler` / `%timeit`); the library does not log durations. ruff rule sets `G` + `LOG` + `TRY` enforce these at lint time. Full rationale, level semantics, and the logging-vs-warnings-vs-exception decision matrix in [`local/decisions/013-logging-conventions.md`](local/decisions/013-logging-conventions.md).
+- **Logging discipline.** On the LLM / I/O path use `logger = logging.getLogger(__name__)` with lazy `%`-format (`logger.debug("count=%d", n)` — never f-strings inside log calls) and `logger.exception(...)` inside `except` blocks. For user-behaviour problems and deprecations use `warnings.warn(..., stacklevel=2)`; for pure-algorithm errors `raise ValueError(...)` with a detailed message (numpy style — `shapes (3,4) and (5,6) not aligned`, etc.). Every public subpackage `__init__.py` already attaches a `NullHandler`; `everalgo.llm` carries a default-on `SensitiveHeadersFilter`. **Forbidden in library code**: `logging.basicConfig`, `addHandler` (anything but `NullHandler`), `setLevel`, explicit `propagate = True/False`, and any module-level `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()` (no-arg) / `logging.root.*` — these all target the root logger and are an application's job. **Forbidden in DEBUG logs**: request / response bodies, prompt text, model outputs (the Filter only redacts headers; bodies leak PII the Filter cannot see). Performance timing is the user's job (`cProfile` / `line_profiler` / `%timeit`); the library does not log durations. ruff rule sets `G` + `LOG` + `TRY` enforce these at lint time.
 - **Use the full `line-length = 120` budget when hand-wrapping.** For Python comments / docstrings and TOML/YAML comments, fill each line to roughly 100–115 characters before wrapping — do not pre-wrap at 70 / 79 / 80 / 88 / 100 out of habit. `E501` is in the ignore list, and ruff never flags lines that are *too short*, so this is a writer's discipline rather than a lint check. A 3-line comment that collapses cleanly into 2 lines at 120 should be 2 lines. Exceptions: bullet lists, code blocks, and any line where a natural break aids comprehension. Markdown files in this repo deliberately use the **one-paragraph-per-line** (no hard-wrap) style — the same convention Prettier emits by default and GitHub renders cleanly — so `.md` prose is exempt from the 100–115 rule entirely; rely on editor soft-wrap.
 - **English only in code, config, and commit messages.** All Python code, comments, identifiers, `pyproject.toml` comments, CI files, and commit messages must be English. The same rule that `evermem` enforces with a pre-commit hook applies here. Design discussion artifacts under `docs/` (`design.md`, `decisions/`, `concepts/`) may stay Chinese — they reflect the working language of the design discussion, not the codebase.
 
@@ -235,7 +234,6 @@ Follow this checklist when introducing a new extractor / ranker / clusterer:
 5. **Wire dependencies.** If the new code requires a new third-party library, add it via `uv add --package everalgo-<dist> <library>`, which updates the right `pyproject.toml`.
 6. **Write tests.** Use `everalgo.testing.FakeLLMClient` to avoid real API calls; use `everalgo.testing.assert_*_shape` for structural memory checks.
 7. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`).
-8. **Document architectural decisions.** If the operator embodies a non-trivial design choice (new public Protocol, new distribution boundary, breaking a convention), add an ADR under `local/decisions/` numbered after the latest (currently ADR-013).
 
 ---
 
@@ -267,10 +265,9 @@ Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (pe
 | Subject | Where |
 |---|---|
 | Architecture (definitive) | [`docs/concepts/architecture.md`](docs/concepts/architecture.md) |
-| Architecture decisions (ADRs 001–013) | [`local/decisions/`](local/decisions/) |
 | High-level architecture notes | [`docs/concepts/`](docs/concepts/) |
 | Runnable operator examples | [`examples/`](examples/) — use `FakeLLMClient`, no API key needed |
-| Source of `evermem` contract | Confluence — see `local/design-archive.md` header for links |
+| Source of `evermem` contract | Confluence (internal) |
 | uv workspace concepts | https://docs.astral.sh/uv/concepts/projects/workspaces/ |
 | PEP 420 namespace packages | https://peps.python.org/pep-0420/ |
 | PEP 8 (style) / 257 (docstrings) / 484 (type hints) | https://peps.python.org/ |
