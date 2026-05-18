@@ -81,7 +81,7 @@ flowchart TD
 
 **关键规则**:
 - `uri=http(s)://` + `content=b""` → 走 `url.aparse`(内部抓取 + 按 Content-Type 再分派)。
-- 已经有 `content`:**extension 优先**,extension 解析不到时**用 mime 兜底**(`get_modality_from_mime`)。这样 design.md §2.1 的 `RawFile(uri=..., mime="application/pdf")` 走 URL 抓取后能再走到 PDF handler。
+- 已经有 `content`:**extension 优先**,extension 解析不到时**用 mime 兜底**(`get_modality_from_mime`)。这样 `RawFile(uri=..., mime="application/pdf")` 走 URL 抓取后能再走到 PDF handler。
 - 子模块内部派发用 extension(`_MIME_MAP[ext]` 查 mime)。当顶层用 mime 解出 modality 时,自动 `model_copy(extension=get_extension_from_mime(mime))` 给子模块。
 - `file://` 在 `_utils.fetch_uri` 里直接拒绝(AGENTS.md §1)。
 - `Modality.URL` 是顶层 dispatch 产生的"来源标签",不出现在 extension 派发表里。
@@ -285,7 +285,7 @@ flowchart LR
 | 懒 `%`-format 日志 | ✅ `logger.debug("count=%d", n)` 风格(ADR-013) |
 | Prompt = `prompts/{en,zh}/<name>.py` 模块常量 | ✅ |
 | Numpy-style docstring | ✅ |
-| 英文 docstring / 标识符 / commit | ✅(docs/ 下 design.md 例外,中文 OK) |
+| 英文 docstring / 标识符 / commit | ✅ |
 
 ---
 

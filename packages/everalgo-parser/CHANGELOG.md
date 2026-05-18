@@ -43,8 +43,8 @@ for the full workflow.
   `metadata["inner_modality"]`. Metadata-extractor schema lifted from
   `evermemos-opensource/src/common_utils/url_extractor.py`.
 - **MIME-aware top-level dispatch** — `parser.aparse` now falls back to
-  `mime` when `extension` is missing or `UNKNOWN`, so design.md §2.1's
-  example `RawFile(uri=..., mime="application/pdf")` actually routes to
+  `mime` when `extension` is missing or `UNKNOWN`, so the canonical
+  `RawFile(uri=..., mime="application/pdf")` example actually routes to
   the PDF handler. Added `Modality` helpers in `everalgo-core/types/
   modality.py`: `MIME_TO_MODALITY` / `MIME_TO_EXTENSION` /
   `get_modality_from_mime(mime)` / `get_extension_from_mime(mime)`.
