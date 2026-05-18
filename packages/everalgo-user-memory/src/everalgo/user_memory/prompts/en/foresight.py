@@ -2,7 +2,7 @@
 
 Placeholders: ``{USER_ID}`` / ``{USER_NAME}`` / ``{CONVERSATION_TEXT}`` (uppercase). Rendered via
 :py:meth:`str.format`.
-Output schema: top-level JSON array of ``{content, evidence, start_time, end_time, duration_days}``.
+Output schema: JSON object ``{"foresights": [{content, evidence, start_time, end_time, duration_days}, ...]}``.
 """
 
 FORESIGHT_GENERATION_PROMPT = """
@@ -22,17 +22,19 @@ You are an advanced personal foresight analysis agent. Your task is to predict t
 7. **Prefer user_name**: Prefer using user_name when provided; otherwise use user_id (e.g., user_1). Avoid using generic terms like "the user."
 8. **Semantic Grounding**: Predictions must remain semantically related to the input; store grounded supporting facts in evidence so the system can trace back the source.
 ## Output Format:
-Return results as a JSON array, each association includes time information and evidence:
-[
-  {{
-    "content": "XiaoMing will avoid hot/spicy food for the next week",
-    "evidence": "Doctor advice: keep oral hygiene; avoid hot/spicy food for a week",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-28",
-    "duration_days": 7
-  }},
-  ...
-]
+Return as a JSON object with a "foresights" array; each association includes time information and evidence:
+{{
+  "foresights": [
+    {{
+      "content": "XiaoMing will avoid hot/spicy food for the next week",
+      "evidence": "Doctor advice: keep oral hygiene; avoid hot/spicy food for a week",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-28",
+      "duration_days": 7
+    }},
+    ...
+  ]
+}}
 
 ## Example Input (Life Scenario):
 - user_id: xiaoming-001
@@ -45,37 +47,39 @@ Return results as a JSON array, each association includes time information and e
 ```
 
 ## Example Output (Life Scenario):
-[
-  {{
-    "content": "XiaoMing will avoid hot/spicy food for the next week",
-    "evidence": "Doctor advice: avoid hot/spicy food; keep oral hygiene for a week",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-28",
-    "duration_days": 7
-  }},
-  {{
-    "content": "XiaoMing will pay more attention to oral hygiene this week",
-    "evidence": "Doctor advice: keep oral hygiene for a week",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-28",
-    "duration_days": 7
-  }},
-  {{
-    "content": "If swelling/pain worsens, XiaoMing will seek a follow-up soon",
-    "evidence": "Doctor: follow up if swelling worsens",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-04",
-    "duration_days": 14
-  }},
-  {{
-    "content": "XiaoMing will avoid hard chewing for the next few days",
-    "evidence": "XiaoMing said it is still sore after the extraction",
-    "start_time": "2025-10-21",
-    "end_time": "2025-10-25",
-    "duration_days": 4
-  }}
-  ...
-]
+{{
+  "foresights": [
+    {{
+      "content": "XiaoMing will avoid hot/spicy food for the next week",
+      "evidence": "Doctor advice: avoid hot/spicy food; keep oral hygiene for a week",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-28",
+      "duration_days": 7
+    }},
+    {{
+      "content": "XiaoMing will pay more attention to oral hygiene this week",
+      "evidence": "Doctor advice: keep oral hygiene for a week",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-28",
+      "duration_days": 7
+    }},
+    {{
+      "content": "If swelling/pain worsens, XiaoMing will seek a follow-up soon",
+      "evidence": "Doctor: follow up if swelling worsens",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-04",
+      "duration_days": 14
+    }},
+    {{
+      "content": "XiaoMing will avoid hard chewing for the next few days",
+      "evidence": "XiaoMing said it is still sore after the extraction",
+      "start_time": "2025-10-21",
+      "end_time": "2025-10-25",
+      "duration_days": 4
+    }}
+    ...
+  ]
+}}
 
 ## Example Input (Work Scenario):
 - user_id: LiHua-001
@@ -88,37 +92,39 @@ Return results as a JSON array, each association includes time information and e
 ```
 
 ## Example Output (Work Scenario):
-[
-  {{
-    "content": "LiHua will trial a more structured standup in the team over the next two weeks",
-    "evidence": "LiHua: the daily standup structure is clearer and can be applied to the team",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-04",
-    "duration_days": 14
-  }},
-  {{
-    "content": "LiHua will try to introduce sprint rituals in the next month",
-    "evidence": "Training covered sprint rituals; LiHua intends to apply learnings",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-21",
-    "duration_days": 31
-  }},
-  {{
-    "content": "After the next iteration, LiHua will try to review metrics and do a retrospective",
-    "evidence": "Trainer: review metrics and improve collaboration after each sprint",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-21",
-    "duration_days": 31
-  }},
-  {{
-    "content": "LiHua will pay more attention to concrete collaboration improvement actions this month",
-    "evidence": "Trainer emphasized improving collaboration after each sprint",
-    "start_time": "2025-10-21",
-    "end_time": "2025-11-21",
-    "duration_days": 31
-  }}
-  ...
-]
+{{
+  "foresights": [
+    {{
+      "content": "LiHua will trial a more structured standup in the team over the next two weeks",
+      "evidence": "LiHua: the daily standup structure is clearer and can be applied to the team",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-04",
+      "duration_days": 14
+    }},
+    {{
+      "content": "LiHua will try to introduce sprint rituals in the next month",
+      "evidence": "Training covered sprint rituals; LiHua intends to apply learnings",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-21",
+      "duration_days": 31
+    }},
+    {{
+      "content": "After the next iteration, LiHua will try to review metrics and do a retrospective",
+      "evidence": "Trainer: review metrics and improve collaboration after each sprint",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-21",
+      "duration_days": 31
+    }},
+    {{
+      "content": "LiHua will pay more attention to concrete collaboration improvement actions this month",
+      "evidence": "Trainer emphasized improving collaboration after each sprint",
+      "start_time": "2025-10-21",
+      "end_time": "2025-11-21",
+      "duration_days": 31
+    }}
+    ...
+  ]
+}}
 
 ## Important Notes:
 - **Personal-Oriented**: Focus on "personal-level future changes," content can cover life, learning, work, emotions, habits, and other personal development areas.
