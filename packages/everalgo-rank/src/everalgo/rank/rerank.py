@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from asgiref.sync import async_to_sync
 from pydantic import BaseModel, ConfigDict
@@ -93,7 +93,7 @@ async def arerank(
     candidates_payload = [{"id": item.id, "score": item.score, **item.metadata} for item in items]
     rendered = prompt.format(
         query=query,
-        candidates_json=json.dumps(candidates_payload, ensure_ascii=False),
+        candidates_json=json.dumps(candidates_payload, ensure_ascii=False, default=str),
         top_k=top_k,
     )
 
@@ -123,15 +123,18 @@ def _apply_rerank_scores(
     payload = json.loads(raw_content)
     if not isinstance(payload, dict):
         raise TypeError("rerank LLM response top-level JSON is not an object")
-    ranked = payload.get("ranked")
+    payload_dict = cast("dict[str, Any]", payload)
+    ranked = payload_dict.get("ranked")
     if not isinstance(ranked, list):
         raise TypeError("rerank LLM response missing 'ranked' list")
+    ranked_list = cast("list[Any]", ranked)  # type: ignore[redundant-cast]  # pyright narrowing via cast
 
     by_id = {item.id: item for item in items}
     out: list[Candidate] = []
-    for entry in ranked:
-        if not isinstance(entry, dict):
+    for raw_entry in ranked_list:
+        if not isinstance(raw_entry, dict):
             continue
+        entry = cast("dict[str, Any]", raw_entry)
         eid = entry.get("id")
         score = entry.get("score")
         if not isinstance(eid, str) or eid not in by_id:
@@ -167,7 +170,7 @@ class _RankerSpec(NamedTuple):
 _ALGO_REGISTRY: dict[str, _RankerSpec] = {}
 
 
-async def _basic_arank(  # noqa: C901  (4 fusion modes; splitting hurts readability)
+async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
     rank_input: RankInput,
     *,
     config: RankConfig = DEFAULT_RANK_CONFIG,

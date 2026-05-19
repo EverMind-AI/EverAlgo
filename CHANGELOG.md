@@ -17,7 +17,7 @@ declared in each `packages/everalgo-*/pyproject.toml`.
 | `everalgo-core` | 0.1.0 (unreleased) | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.1.0 (unreleased) | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.1.0 (unreleased) | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.1.0 (unreleased) | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-rank` | 0.1.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.1.0 (unreleased) | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.1.0 (unreleased) | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.1.0 (unreleased) | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
