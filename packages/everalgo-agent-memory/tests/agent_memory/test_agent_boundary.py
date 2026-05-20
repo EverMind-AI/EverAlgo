@@ -39,9 +39,18 @@ def _tool_res(content: str = "result", *, ts: int = _TS, call_id: str = "call_1"
     return ToolCallResult(tool_call_id=call_id, content=content, timestamp=ts)
 
 
-def _boundary_response(boundaries: list[int], *, should_wait: bool = False) -> str:
-    """Build the JSON string ``detect_boundaries`` expects from the LLM."""
-    return json.dumps({"boundaries": boundaries, "should_wait": should_wait})
+def _boundary_response(
+    boundaries: list[int],
+    *,
+    should_wait: bool = False,
+    reasoning: str = "test boundary decision reasoning",
+) -> str:
+    """Build the JSON string ``detect_boundaries`` expects from the LLM.
+
+    ``reasoning`` is required by ``_BoundaryDetectionLLMResponse`` schema; provides
+    a default so existing call sites stay terse.
+    """
+    return json.dumps({"reasoning": reasoning, "boundaries": boundaries, "should_wait": should_wait})
 
 
 # ── 1. Chat-only passthrough ─────────────────────────────────────────────────────────────────────────

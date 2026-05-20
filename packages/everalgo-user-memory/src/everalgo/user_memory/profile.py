@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field
 
 from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
@@ -25,6 +26,61 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# Pydantic schemas for structured outputs (json_schema mode)
+# ------------------------------------------------------------------
+
+
+class _ExplicitInfoItem(BaseModel):
+    """Single explicit_info item from profile extraction."""
+
+    category: str
+    description: str
+    evidence: str
+
+
+class _ImplicitTraitItem(BaseModel):
+    """Single implicit_traits item from profile extraction."""
+
+    trait: str
+    description: str
+    basis: str
+    evidence: str
+
+
+class _ProfileInitialExtractionResponse(BaseModel):
+    """Response schema for PROFILE_INITIAL_EXTRACTION_PROMPT."""
+
+    explicit_info: list[_ExplicitInfoItem]
+    implicit_traits: list[_ImplicitTraitItem]
+
+
+class _ProfileOperation(BaseModel):
+    """Single operation for profile update."""
+
+    action: str
+    type: str | None = Field(default=None)
+    index: int | None = Field(default=None)
+    data: dict[str, Any] | None = Field(default=None)
+    reason: str | None = Field(default=None)
+
+
+class _ProfileUpdateResponse(BaseModel):
+    """Response schema for PROFILE_UPDATE_PROMPT."""
+
+    operations: list[_ProfileOperation]
+    update_note: str
+
+
+class _ProfileCompactResponse(BaseModel):
+    """Response schema for PROFILE_COMPACT_PROMPT."""
+
+    explicit_info: list[_ExplicitInfoItem]
+    implicit_traits: list[_ImplicitTraitItem]
+    compact_note: str
+
 
 _PROFILE_MAX_ITEMS = 30
 _PROFILE_COMPACT_THRESHOLD = int(_PROFILE_MAX_ITEMS * 1.5)
@@ -95,12 +151,14 @@ class ProfileExtractor:
 
         response = await self._llm.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
+            response_format=_ProfileInitialExtractionResponse,
         )
-        parsed = _parse_profile_payload(response.content)
+        parsed = response.parsed
+        if not isinstance(parsed, _ProfileInitialExtractionResponse):
+            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
 
-        explicit_info = _to_list(parsed.get("explicit_info"))
-        implicit_traits = _to_list(parsed.get("implicit_traits"))
+        explicit_info = [item.model_dump() for item in parsed.explicit_info]
+        implicit_traits = [item.model_dump() for item in parsed.implicit_traits]
         summary = _build_summary(explicit_info, implicit_traits)
         return Profile.model_validate(
             {
@@ -135,9 +193,12 @@ class ProfileExtractor:
 
         response = await self._llm.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
+            response_format=_ProfileUpdateResponse,
         )
-        ops_payload = _parse_ops_payload(response.content)
+        parsed = response.parsed
+        if not isinstance(parsed, _ProfileUpdateResponse):
+            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
+        ops_payload = [op.model_dump(exclude_none=True) for op in parsed.operations]
         merged_profile = _apply_ops(old_profile, ops_payload, timestamp=memcells[-1].timestamp)
 
         explicit_info: list[Any] = list(getattr(merged_profile, "explicit_info", []) or [])
@@ -166,11 +227,13 @@ class ProfileExtractor:
 
         response = await self._llm.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
+            response_format=_ProfileCompactResponse,
         )
-        parsed = _parse_compact_payload(response.content)
-        new_explicit = _to_list(parsed.get("explicit_info"))
-        new_implicit = _to_list(parsed.get("implicit_traits"))
+        parsed = response.parsed
+        if not isinstance(parsed, _ProfileCompactResponse):
+            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
+        new_explicit = [item.model_dump() for item in parsed.explicit_info]
+        new_implicit = [item.model_dump() for item in parsed.implicit_traits]
         summary = _build_summary(new_explicit, new_implicit)
         return Profile.model_validate(
             {
@@ -221,52 +284,6 @@ def _render_profile_for_update(profile: Profile) -> str:
 def _to_list(value: object) -> list[Any]:
     """Coerce to list[Any]; returns [] for non-list values."""
     return value if isinstance(value, list) else []
-
-
-def _parse_profile_payload(raw: str) -> dict[str, Any]:
-    """Parse the ``{explicit_info, implicit_traits}`` JSON payload.
-
-    Raises:
-        json.JSONDecodeError: If the response is not valid JSON.
-        ValueError: If the top-level is not an object or both expected keys are missing.
-    """
-    parsed: object = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError("LLM response is not a JSON object")  # noqa: TRY004
-    data = cast("dict[str, Any]", parsed)
-    if "explicit_info" not in data and "implicit_traits" not in data:
-        raise ValueError("LLM response missing both explicit_info and implicit_traits")
-    return data
-
-
-def _parse_ops_payload(raw: str) -> list[dict[str, Any]]:
-    """Parse the UPDATE ops payload; returns the operations list.
-
-    Raises:
-        json.JSONDecodeError: If the response is not valid JSON.
-        ValueError: If the top-level is not an object or 'operations' is missing/not a list.
-    """
-    parsed: object = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError("LLM update response is not a JSON object")  # noqa: TRY004
-    data = cast("dict[str, Any]", parsed)
-    ops = data.get("operations")
-    if not isinstance(ops, list):
-        raise ValueError("LLM update response missing 'operations' list")  # noqa: TRY004
-    return cast("list[dict[str, Any]]", ops)
-
-
-def _parse_compact_payload(raw: str) -> dict[str, Any]:
-    """Parse the compact payload; returns dict with explicit_info + implicit_traits.
-
-    Raises:
-        json.JSONDecodeError: If the response is not valid JSON.
-        ValueError: If the top-level is not an object.
-    """
-    parsed: object = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError("LLM compact response is not a JSON object")  # noqa: TRY004
-    return cast("dict[str, Any]", parsed)
 
 
 def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: int) -> Profile:

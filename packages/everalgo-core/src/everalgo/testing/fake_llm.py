@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage, ChatResponse
 
 
@@ -18,10 +19,10 @@ class CallRecord(BaseModel):
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
-    response_format: Mapping[str, Any] | None = None
+    response_format: type[BaseModel] | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
 
 
 # ---- FakeLLMClient (Task 2: constructor only) ----------------------------
@@ -69,7 +70,7 @@ class FakeLLMClient:
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        response_format: Mapping[str, Any] | None = None,
+        response_format: type[BaseModel] | None = None,
         **extra: Any,
     ) -> ChatResponse:
         """Match ``LLMClient.chat`` Protocol; record + dispatch by mode."""
@@ -84,7 +85,7 @@ class FakeLLMClient:
             )
         )
         if self._handler is not None:
-            return await _invoke_handler(
+            base_response = await _invoke_handler(
                 self._handler,
                 messages,
                 model=model,
@@ -93,6 +94,13 @@ class FakeLLMClient:
                 response_format=response_format,
                 **extra,
             )
+            if (
+                inspect.isclass(response_format)
+                and issubclass(response_format, BaseModel)
+                and base_response.parsed is None
+            ):
+                return _attach_parsed(base_response, response_format)
+            return base_response
         # scripted-list mode
         assert self._responses is not None  # narrowed by __init__ invariant
         if not self._responses:
@@ -101,7 +109,10 @@ class FakeLLMClient:
                 f"(used {self._initial_response_count} of "
                 f"{self._initial_response_count} responses)"
             )
-        return self._responses.pop(0)
+        base_response = self._responses.pop(0)
+        if inspect.isclass(response_format) and issubclass(response_format, BaseModel):
+            return _attach_parsed(base_response, response_format)
+        return base_response
 
 
 def _coerce_response(value: str | ChatResponse) -> ChatResponse:
@@ -133,3 +144,21 @@ async def _invoke_handler(
             f"FakeLLMClient handler must return ChatResponse or Awaitable[ChatResponse], got {type(result).__name__}"
         )
     return result
+
+
+def _attach_parsed(response: ChatResponse, schema: type[BaseModel]) -> ChatResponse:
+    """Construct a ``parsed`` instance from ``response.content`` and attach it.
+
+    Mirrors ``OpenAICompatClient``'s parse-branch behaviour so tests written against
+    ``FakeLLMClient`` see the same ``ChatResponse.parsed`` field as production code.
+
+    Raises:
+        LLMError: If ``response.content`` is not valid JSON or does not conform to ``schema``.
+    """
+    try:
+        parsed = schema.model_validate_json(response.content)
+    except Exception as exc:
+        raise LLMError(
+            f"FakeLLMClient: content {response.content!r} is not valid for schema {schema.__name__}: {exc}"
+        ) from exc
+    return response.model_copy(update={"parsed": parsed})

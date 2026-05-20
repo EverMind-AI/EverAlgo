@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field
 
 from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
@@ -21,6 +21,28 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# Pydantic schemas for structured outputs (json_schema mode)
+# ------------------------------------------------------------------
+
+
+class _ForesightItem(BaseModel):
+    """Single foresight item from LLM response."""
+
+    content: str
+    evidence: str
+    start_time: str
+    end_time: str | None = Field(default=None)
+    duration_days: int | None = Field(default=None)
+
+
+class _ForesightGenerationResponse(BaseModel):
+    """Response schema for FORESIGHT_GENERATION_PROMPT."""
+
+    foresights: list[_ForesightItem]
+
 
 _FORESIGHT_TEMPERATURE = 0.3
 _FORESIGHT_MAX_COUNT = 10
@@ -67,11 +89,14 @@ class ForesightExtractor:
 
         response = await self._llm.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
+            response_format=_ForesightGenerationResponse,
             temperature=_FORESIGHT_TEMPERATURE,
         )
-        foresights = _parse_and_build_foresights(
-            response.content,
+        parsed = response.parsed
+        if not isinstance(parsed, _ForesightGenerationResponse):
+            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
+        foresights = _build_foresights_from_parsed(
+            parsed,
             memcell=memcell,
             sender_id=sender_id,
             start_time_fallback=start_time_fallback,
@@ -149,45 +174,24 @@ def _calculate_duration_days(start_time: str, end_time: str) -> int | None:
     return (end_date - start_date).days
 
 
-def _parse_and_build_foresights(
-    raw: str,
+def _build_foresights_from_parsed(
+    parsed: _ForesightGenerationResponse,
     *,
     memcell: MemCell,
     sender_id: str,
     start_time_fallback: str,
 ) -> list[Foresight]:
-    """Parse LLM foresight payload + apply date cleaning + mutual time computation.
-
-    Accepts top-level JSON array OR ``{"foresights": [...]}`` wrapped form.
-    """
-    data = _parse_llm_response(raw)
-
-    items: list[Any]
-    if isinstance(data, list):
-        items = cast("list[Any]", data)  # type: ignore[redundant-cast]
-    elif isinstance(data, dict):
-        wrapped = cast("dict[str, Any]", data).get("foresights")
-        if isinstance(wrapped, list):
-            items = cast("list[Any]", wrapped)  # type: ignore[redundant-cast]
-        else:
-            return []
-    else:
-        return []
-
+    """Build Foresight entities from parsed LLM response; apply date cleaning + mutual time computation."""
     out: list[Foresight] = []
-    for raw_item in items:
-        if not isinstance(raw_item, dict):
+    for item in parsed.foresights:
+        content = item.content.strip()
+        if not content:
             continue
-        item = cast("dict[str, Any]", raw_item)
-        content = item.get("content")
-        if not isinstance(content, str) or not content.strip():
-            continue
-        evidence_raw = item.get("evidence", "")
-        evidence = evidence_raw if isinstance(evidence_raw, str) else ""
+        evidence = item.evidence or ""
 
-        item_start_time = _clean_date_string(item.get("start_time")) or start_time_fallback
-        item_end_time = _clean_date_string(item.get("end_time"))
-        item_duration_days = item.get("duration_days") if isinstance(item.get("duration_days"), int) else None
+        item_start_time = _clean_date_string(item.start_time) or start_time_fallback
+        item_end_time = _clean_date_string(item.end_time) if item.end_time else None
+        item_duration_days = item.duration_days
 
         # Mutual time computation
         if item_start_time:
@@ -208,20 +212,3 @@ def _parse_and_build_foresights(
             )
         )
     return out
-
-
-def _parse_llm_response(raw: str) -> object:
-    r"""Parse LLM JSON response: `` ```json `` fence first, then direct ``json.loads``.
-
-    Raises:
-        json.JSONDecodeError: If both strategies fail.
-    """
-    if "```json" in raw:
-        start = raw.find("```json") + 7
-        end = raw.find("```", start)
-        if end > start:
-            try:
-                return json.loads(raw[start:end].strip())
-            except json.JSONDecodeError:
-                pass
-    return json.loads(raw)

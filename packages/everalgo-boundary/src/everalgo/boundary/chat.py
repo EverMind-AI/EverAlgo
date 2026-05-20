@@ -6,19 +6,50 @@ and ``everalgo-agent-memory`` (``AgentBoundaryDetector``).
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, cast
+
+from pydantic import BaseModel, Field, field_validator
 
 from everalgo._tokenize import count_tokens
 from everalgo.boundary.prompts.en.chat import CHAT_BOUNDARY_DETECT_PROMPT_EN
 from everalgo.llm.format import format_message_timestamp
-from everalgo.llm.parse import parse_llm_json_object
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import ChatMessage, ConversationItem, MemCell
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+
+
+# ---------------------------------------------------------------------------
+# Structured outputs schema for boundary detection.
+# ---------------------------------------------------------------------------
+
+
+class _BoundaryDetectionLLMResponse(BaseModel):
+    """Structured outputs schema for boundary detection."""
+
+    reasoning: str = Field(..., description="One sentence explaining all boundary decisions")
+    boundaries: list[int] = Field(..., description="1-indexed message numbers after which to split")
+    should_wait: bool = Field(
+        ..., description="Whether the last segment has insufficient information to determine episode context"
+    )
+
+    @field_validator("boundaries", mode="before")
+    @classmethod
+    def _coerce_and_filter_boundaries(cls, v: object) -> list[int]:
+        """Coerce non-int items to int; skip items that fail; silently skip null."""
+        if not isinstance(v, list):
+            raise TypeError(f"boundaries must be a list, got {type(v).__name__}")
+        result: list[int] = []
+        for item in v:
+            if item is None:
+                continue
+            with contextlib.suppress(ValueError, TypeError):
+                result.append(int(item))
+        return result
 
 
 DEFAULT_HARD_TOKEN_LIMIT = 65536
@@ -181,39 +212,20 @@ async def _detect_boundaries(
     Boundary indices validated to ``1 <= b < len(messages)`` and deduplicated.
 
     Raises:
-        ValueError: If the LLM response cannot be parsed as a valid JSON object.
-        TypeError: If the ``boundaries`` field is not a list.
+        ValueError: If the LLM returns no parsed structured output.
     """
     messages_text = _format_messages_with_indices(messages)
     rendered = render_prompt(prompt_template, None, messages=messages_text)
 
     response = await llm.chat(
         messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format={"type": "json_object"},
+        response_format=_BoundaryDetectionLLMResponse,
     )
-    result = _parse_batch_boundary_response(response.content)
-    valid = sorted({b for b in result.boundaries if 1 <= b < len(messages)})
-    return _BatchBoundaryResult(boundaries=valid, should_wait=result.should_wait)
-
-
-def _parse_batch_boundary_response(raw: str) -> _BatchBoundaryResult:
-    """Parse LLM batch-boundary response.
-
-    Schema: ``{"boundaries": list[int], "should_wait": bool, ...}``.
-    Non-int boundary entries are silently skipped.
-
-    Raises:
-        ValueError: If the response cannot be parsed as a valid JSON object.
-        TypeError: If ``boundaries`` is not a list.
-    """
-    data = parse_llm_json_object(raw)
-
-    raw_boundaries_val = data.get("boundaries", [])
-    if not isinstance(raw_boundaries_val, list):
-        raise TypeError("LLM boundary response 'boundaries' field is not a list")
-    boundaries: list[int] = [int(item) for item in cast("list[int | str]", raw_boundaries_val)]
-
-    return _BatchBoundaryResult(boundaries=boundaries, should_wait=bool(data.get("should_wait", False)))
+    parsed = cast("_BoundaryDetectionLLMResponse | None", response.parsed)
+    if parsed is None:
+        raise ValueError("LLM returned no parsed structured output")
+    valid = sorted({b for b in parsed.boundaries if 1 <= b < len(messages)})
+    return _BatchBoundaryResult(boundaries=valid, should_wait=parsed.should_wait)
 
 
 def _make_cell(slice_msgs: list[ChatMessage]) -> MemCell:

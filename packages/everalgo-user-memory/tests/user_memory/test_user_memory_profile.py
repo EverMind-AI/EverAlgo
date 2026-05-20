@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
@@ -24,7 +25,6 @@ from everalgo.user_memory.profile import (
     _PROFILE_COMPACT_THRESHOLD,
     ProfileExtractor,
     _build_summary,
-    _parse_profile_payload,
     _render_conversation,
 )
 
@@ -79,6 +79,13 @@ def _payload(explicit_info: list[dict[str, Any]], implicit_traits: list[dict[str
     return json.dumps({"explicit_info": explicit_info, "implicit_traits": implicit_traits})
 
 
+def _implicit_trait(
+    trait: str = "[Test]", description: str = "Test trait", basis: str = "test basis", evidence: str = "test evidence"
+) -> dict[str, Any]:
+    """Helper to create a complete implicit_traits item with all required fields."""
+    return {"trait": trait, "description": description, "basis": basis, "evidence": evidence}
+
+
 async def test_aextract_builds_profile_from_explicit_info() -> None:
     """``summary`` derives from first explicit_info description; lists preserved as extras."""
     payload = _payload(
@@ -90,12 +97,12 @@ async def test_aextract_builds_profile_from_explicit_info() -> None:
             },
         ],
         implicit_traits=[
-            {
-                "trait": "[Pragmatic]",
-                "description": "Prefers tooling that minimises ceremony.",
-                "basis": "Repeated preference for ruff over black.",
-                "evidence": "Alice mentioned ruff preference.",
-            },
+            _implicit_trait(
+                trait="[Pragmatic]",
+                description="Prefers tooling that minimises ceremony.",
+                basis="Repeated preference for ruff over black.",
+                evidence="Alice mentioned ruff preference.",
+            ),
         ],
     )
     fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
@@ -113,7 +120,7 @@ async def test_aextract_summary_falls_back_to_implicit_trait_when_explicit_empty
     payload = _payload(
         explicit_info=[],
         implicit_traits=[
-            {"trait": "[Pragmatic]", "description": "Prefers minimal-ceremony tooling.", "evidence": "x"},
+            _implicit_trait(trait="[Pragmatic]", description="Prefers minimal-ceremony tooling."),
         ],
     )
     fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
@@ -124,22 +131,22 @@ async def test_aextract_summary_falls_back_to_implicit_trait_when_explicit_empty
 
 
 async def test_aextract_raises_on_payload_missing_required_keys() -> None:
-    """Payload without both explicit_info and implicit_traits → ValueError (no retry)."""
+    """Payload without both explicit_info and implicit_traits → LLMError (no retry)."""
     bad = ChatResponse(content="{}", model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(ValueError, match="missing both explicit_info and implicit_traits"):
+    with pytest.raises(LLMError):
         await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
 
     assert fake.call_count == 1
 
 
 async def test_aextract_raises_on_bad_json() -> None:
-    """Unparseable JSON → JSONDecodeError propagates immediately (no retry)."""
+    """Unparseable JSON → LLMError propagates immediately (no retry)."""
     bad = ChatResponse(content="not json", model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises((json.JSONDecodeError, ValueError)):
+    with pytest.raises(LLMError):
         await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -200,33 +207,6 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
 
 
 # ==========================================================================
-# Defensive type guards (lines 71, 73)
-# ==========================================================================
-
-
-async def test_aextract_coerces_non_list_explicit_info_to_empty() -> None:
-    """When LLM returns a non-list ``explicit_info`` (e.g. dict), coerce to []."""
-    payload = '{"explicit_info": {"not": "a list"}, "implicit_traits": []}'
-    fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
-
-    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
-
-    assert profile.summary == "(no summary)"  # empty list → sentinel
-
-
-async def test_aextract_coerces_non_list_implicit_traits_to_empty() -> None:
-    """When LLM returns a non-list ``implicit_traits``, coerce to []."""
-    payload = (
-        '{"explicit_info": [{"category": "x", "description": "y", "evidence": "z"}], "implicit_traits": "not a list"}'
-    )
-    fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
-
-    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
-
-    assert profile.summary == "y"  # explicit list still used
-
-
-# ==========================================================================
 # _render_conversation helper
 # ==========================================================================
 
@@ -257,17 +237,6 @@ def test_render_conversation_uses_sentinel_when_all_inputs_empty() -> None:
     )
     rendered = _render_conversation([empty_cell])
     assert rendered == "(no prior MemCells in the cluster)"
-
-
-# ==========================================================================
-# _parse_profile_payload
-# ==========================================================================
-
-
-def test_parse_profile_payload_raises_on_non_object() -> None:
-    """Top-level JSON that isn't an object raises ValueError."""
-    with pytest.raises(ValueError, match="not a JSON object"):
-        _parse_profile_payload("[1, 2, 3]")
 
 
 # ==========================================================================
@@ -389,7 +358,7 @@ def _old_profile(
         {"category": "Skills", "description": "Alice writes Python.", "evidence": "x"}
     ]
     it: list[dict[str, Any]] = implicit_traits or [
-        {"trait": "[Pragmatic]", "description": "Minimal ceremony.", "evidence": "y"}
+        _implicit_trait(trait="[Pragmatic]", description="Minimal ceremony.", basis="test basis", evidence="y")
     ]
     return Profile.model_validate(
         {
@@ -485,7 +454,7 @@ async def test_update_merge_correctness_add_update_delete() -> None:
             {"category": "Location", "description": "In Berlin.", "evidence": "y"},
         ],
         implicit_traits=[
-            {"trait": "[Pragmatic]", "description": "Minimal ceremony.", "evidence": "z"},
+            _implicit_trait(trait="[Pragmatic]", description="Minimal ceremony.", basis="test", evidence="z"),
         ],
     )
     ops_json = json.dumps(

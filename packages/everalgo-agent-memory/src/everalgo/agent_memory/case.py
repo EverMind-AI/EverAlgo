@@ -13,6 +13,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field
 
 from everalgo.agent_memory._text import count_tokens, json_default, truncate_text
 from everalgo.agent_memory.prompts.case_compress import AGENT_CASE_COMPRESS_PROMPT
@@ -29,6 +30,31 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+class ToolPreCompressResponse(BaseModel):
+    """LLM tool message pre-compression response schema."""
+
+    compressed_messages: list[Any] = Field(..., description="Compressed messages in same order as input")
+
+
+class CaseFilterResponse(BaseModel):
+    """LLM case filtering response schema."""
+
+    worth_extracting: bool | None = Field(
+        default=None, description="Whether case is worth extracting (defaults to True if missing)"
+    )
+    reason: str = Field(default="", description="Reason for the decision")
+
+
+class CaseCompressResponse(BaseModel):
+    """LLM case compression response schema."""
+
+    task_intent: str = Field(..., description="Specific task as self-contained statement")
+    approach: str = Field(..., description="Compressed problem-solving approach")
+    key_insight: str = Field(..., description="Pivotal decision or knowledge application")
+    quality_score: float = Field(..., ge=0.0, le=1.0, description="Task completion quality 0-1")
+
 
 __all__ = [
     # Re-exported prompt constants — monkey-patch at startup to override the LLM prompts
@@ -457,18 +483,13 @@ async def _compress_tool_chunk(
     )
     response = await client.chat(
         messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format={"type": "json_object"},
+        response_format=ToolPreCompressResponse,
     )
-    data: Any = json.loads(response.content)  # let JSONDecodeError propagate
+    llm_response = cast("ToolPreCompressResponse | None", response.parsed)
+    if llm_response is None:
+        raise ValueError("LLM returned no parsed structured output")
+    compressed_list = llm_response.compressed_messages
 
-    if not isinstance(data, dict):
-        return None
-    data_dict = cast("dict[str, Any]", data)
-    compressed = data_dict.get("compressed_messages")
-    if not isinstance(compressed, list):
-        logger.warning("tool pre-compress invalid shape (got non-list, want %d)", len(messages))
-        return None
-    compressed_list = cast("list[Any]", compressed)  # type: ignore[redundant-cast]
     if len(compressed_list) != len(messages):
         logger.warning("tool pre-compress invalid shape (got %d, want %d)", len(compressed_list), len(messages))
         return None
@@ -537,17 +558,16 @@ async def _is_worth_extracting(
     rendered = render_prompt(AGENT_CASE_FILTER_PROMPT, prompt, messages=messages_json)
     response = await client.chat(
         messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format={"type": "json_object"},
+        response_format=CaseFilterResponse,
     )
-    data: Any = json.loads(response.content)  # let JSONDecodeError propagate
+    llm_response = cast("CaseFilterResponse | None", response.parsed)
+    if llm_response is None:
+        raise ValueError("LLM returned no parsed structured output")
 
-    if isinstance(data, dict) and "worth_extracting" in data:
-        data_dict = cast("dict[str, Any]", data)
-        worth = bool(data_dict["worth_extracting"])
-        if not worth:
-            logger.info("filtered out by LLM: %s", data_dict.get("reason", ""))
-        return worth
-    return True
+    worth = llm_response.worth_extracting if llm_response.worth_extracting is not None else True
+    if not worth:
+        logger.info("filtered out by LLM: %s", llm_response.reason)
+    return worth
 
 
 async def _compress_experience(
@@ -568,21 +588,19 @@ async def _compress_experience(
     rendered = render_prompt(AGENT_CASE_COMPRESS_PROMPT, prompt, messages=messages_json)
     response = await client.chat(
         messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format={"type": "json_object"},
+        response_format=CaseCompressResponse,
     )
-    data: Any = json.loads(response.content)  # let JSONDecodeError propagate
+    llm_response = cast("CaseCompressResponse | None", response.parsed)
+    if llm_response is None:
+        raise ValueError("LLM returned no parsed structured output")
 
-    if not isinstance(data, dict) or "task_intent" not in data:
-        logger.warning("experience compress missing 'task_intent' field")
-        return None
-    data_dict = cast("dict[str, Any]", data)
-    if not data_dict.get("task_intent"):
+    if not llm_response.task_intent:
         logger.info("LLM returned empty 'task_intent', skipping")
         return None
-    if not data_dict.get("approach"):
+    if not llm_response.approach:
         logger.warning("LLM returned empty 'approach', skipping")
         return None
-    return data_dict
+    return llm_response.model_dump()
 
 
 def _clamp_quality_score(value: Any) -> float:

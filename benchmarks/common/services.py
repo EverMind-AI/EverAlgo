@@ -29,6 +29,7 @@ class ChatResponse(BaseModel):
     model: str
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    parsed: BaseModel | None = None
 
 
 async def _retry_with_backoff[T](
@@ -105,9 +106,14 @@ class LLMClient:
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        response_format: dict[str, Any] | None = None,
+        response_format: type[BaseModel] | None = None,
     ) -> ChatResponse:
-        """Send a chat completion request and return the assistant response."""
+        """Send a chat completion request and return the assistant response.
+
+        When ``response_format`` is a Pydantic ``BaseModel`` subclass, the request is sent
+        to OpenRouter with the ``json_schema`` structured-outputs format, and the response
+        content is validated and deserialized into ``ChatResponse.parsed``.
+        """
 
         async def call() -> dict[str, Any]:
             payload: dict[str, Any] = {
@@ -117,7 +123,14 @@ class LLMClient:
                 "max_tokens": max_tokens if max_tokens is not None else self._max_tokens,
             }
             if response_format is not None:
-                payload["response_format"] = response_format
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": response_format.__name__,
+                        "strict": True,
+                        "schema": response_format.model_json_schema(),
+                    },
+                }
             r = await self._client.post("/chat/completions", json=payload)
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
@@ -125,11 +138,18 @@ class LLMClient:
         data = await _retry_with_backoff(call, max_retries=self._max_retries)
         choice = data["choices"][0]
         usage = data.get("usage", {})
+        content = choice["message"]["content"] or ""
+
+        parsed: BaseModel | None = None
+        if response_format is not None:
+            parsed = response_format.model_validate_json(content)
+
         return ChatResponse(
-            content=choice["message"]["content"] or "",
+            content=content,
             model=data.get("model", self._model),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
+            parsed=parsed,
         )
 
     async def close(self) -> None:

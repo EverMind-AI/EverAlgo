@@ -401,51 +401,6 @@ def test_format_candidates_for_llm_renders_known_fields() -> None:
     assert "lunch chat" in out
 
 
-def test_parse_json_response_raises_when_no_braces() -> None:
-    import pytest as _pt
-
-    with _pt.raises(ValueError, match="No JSON object"):
-        fusion._parse_json_response("no braces in this text")
-
-
-def test_parse_json_response_returns_dict_on_valid_input() -> None:
-    out = fusion._parse_json_response('prose before {"x": 1, "y": "z"} prose after')
-    assert out == {"x": 1, "y": "z"}
-
-
-def test_parse_sufficiency_response_raises_on_non_json() -> None:
-    with pytest.raises(ValueError):
-        fusion._parse_sufficiency_response("not json at all")
-
-
-def test_parse_sufficiency_response_raises_when_field_missing() -> None:
-    with pytest.raises(ValueError, match="missing 'is_sufficient'"):
-        fusion._parse_sufficiency_response(json.dumps({"reasoning": "n/a"}))
-
-
-def test_parse_sufficiency_response_raises_on_non_list_missing_field() -> None:
-    raw = json.dumps({"is_sufficient": False, "reasoning": "x", "missing_information": "not-a-list"})
-    with pytest.raises(TypeError, match="not a list"):
-        fusion._parse_sufficiency_response(raw)
-
-
-def test_parse_multi_query_response_raises_on_non_json() -> None:
-    with pytest.raises(ValueError):
-        fusion._parse_multi_query_response("not json", "orig query text")
-
-
-def test_parse_multi_query_response_raises_when_field_missing() -> None:
-    with pytest.raises(TypeError, match="expected list"):
-        fusion._parse_multi_query_response(json.dumps({"reasoning": "n/a"}), "orig query text")
-
-
-def test_parse_multi_query_response_raises_when_all_filtered() -> None:
-    """Queries shorter than 5 chars or identical to original get filtered → raises ValueError."""
-    raw = json.dumps({"queries": ["x", "orig", "ab"], "reasoning": "n/a"})
-    with pytest.raises(ValueError, match="filtered"):
-        fusion._parse_multi_query_response(raw, "orig")
-
-
 async def test_acheck_sufficiency_propagates_llm_error() -> None:
     """LLM raises → error propagates (no swallow)."""
     from everalgo.rank.prompts.en.agentic import AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN

@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from everalgo.llm.types import ChatMessage, ChatResponse
 from everalgo.testing.fake_llm import CallRecord, FakeLLMClient
@@ -17,23 +18,6 @@ def test_call_record_minimum_fields() -> None:
     assert record.max_tokens is None
     assert record.response_format is None
     assert record.extra == {}
-
-
-def test_call_record_all_fields_populated() -> None:
-    """All optional fields can be set explicitly."""
-    record = CallRecord(
-        messages=[ChatMessage(role="user", content="hi")],
-        model="gpt-4o-mini",
-        temperature=0.7,
-        max_tokens=128,
-        response_format={"type": "json_object"},
-        extra={"seed": 42},
-    )
-    assert record.model == "gpt-4o-mini"
-    assert record.temperature == 0.7
-    assert record.max_tokens == 128
-    assert record.response_format == {"type": "json_object"}
-    assert record.extra == {"seed": 42}
 
 
 def test_call_record_extra_field_is_independent_per_instance() -> None:
@@ -176,14 +160,12 @@ async def test_chat_handler_receives_messages_and_kwargs() -> None:
         model="gpt-4o-mini",
         temperature=0.5,
         max_tokens=64,
-        response_format={"type": "json_object"},
         seed=42,
     )
     assert captured["messages"] == msgs
     assert captured["kwargs"]["model"] == "gpt-4o-mini"
     assert captured["kwargs"]["temperature"] == 0.5
     assert captured["kwargs"]["max_tokens"] == 64
-    assert captured["kwargs"]["response_format"] == {"type": "json_object"}
     assert captured["kwargs"]["seed"] == 42
 
 
@@ -223,7 +205,6 @@ async def test_calls_property_records_messages_and_kwargs() -> None:
         model="gpt-4o-mini",
         temperature=0.7,
         max_tokens=128,
-        response_format={"type": "json_object"},
         seed=99,
     )
     assert len(client.calls) == 1
@@ -233,7 +214,7 @@ async def test_calls_property_records_messages_and_kwargs() -> None:
     assert record.model == "gpt-4o-mini"
     assert record.temperature == 0.7
     assert record.max_tokens == 128
-    assert record.response_format == {"type": "json_object"}
+    assert record.response_format is None
     assert record.extra == {"seed": 99}
 
 
@@ -252,3 +233,111 @@ def test_fake_llm_client_satisfies_llm_client_protocol() -> None:
     """Isinstance check works thanks to @runtime_checkable on LLMClient."""
     client = FakeLLMClient(responses=["a"])
     assert isinstance(client, LLMClient)
+
+
+# ---- FakeLLMClient BaseModel response_format (T4 — parse parity) ----------
+
+
+class _Tag(BaseModel):
+    """Minimal schema for BaseModel response_format tests."""
+
+    label: str
+
+
+async def test_basemodel_response_format_constructs_parsed_from_content() -> None:
+    """When response_format is a BaseModel subclass, parsed is populated from content JSON."""
+    client = FakeLLMClient(responses=['{"label": "news"}'])
+    resp = await client.chat(
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format=_Tag,
+    )
+    assert resp.parsed is not None
+    assert isinstance(resp.parsed, _Tag)
+    assert resp.parsed.label == "news"
+    assert resp.content == '{"label": "news"}'
+
+
+async def test_basemodel_response_format_records_schema_class_in_call_record() -> None:
+    """CallRecord.response_format stores the BaseModel class itself (not a dict)."""
+    client = FakeLLMClient(responses=['{"label": "x"}'])
+    await client.chat(
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format=_Tag,
+    )
+    record = client.calls[0]
+    assert record.response_format is _Tag
+
+
+async def test_basemodel_response_format_invalid_json_raises_llm_error() -> None:
+    """Content that is not valid JSON for the schema must raise LLMError."""
+    from everalgo.llm.errors import LLMError
+
+    client = FakeLLMClient(responses=["not-valid-json"])
+    with pytest.raises(LLMError):
+        await client.chat(
+            messages=[ChatMessage(role="user", content="hi")],
+            response_format=_Tag,
+        )
+
+
+async def test_basemodel_response_format_wrong_schema_raises_llm_error() -> None:
+    """Valid JSON that does not match the schema must raise LLMError."""
+    from everalgo.llm.errors import LLMError
+
+    client = FakeLLMClient(responses=['{"wrong_field": 123}'])
+    with pytest.raises(LLMError):
+        await client.chat(
+            messages=[ChatMessage(role="user", content="hi")],
+            response_format=_Tag,
+        )
+
+
+# ---- FakeLLMClient handler path BaseModel parity (fix for missing _attach_parsed) ----
+
+
+async def test_fake_llm_handler_path_attaches_parsed_for_basemodel_response_format() -> None:
+    """Handler mode + BaseModel response_format must auto-populate ChatResponse.parsed.
+
+    T4 only wired _attach_parsed for the scripted-list path.  The handler path was
+    left without it, causing response.parsed to remain None for any caller that used
+    FakeLLMClient(handler=...) with response_format=SomeModel.  This test pins the
+    corrected behaviour: if the handler returns a ChatResponse whose .parsed is None,
+    FakeLLMClient must derive parsed by deserialising .content against the schema.
+    """
+    from typing import Any
+
+    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
+        return ChatResponse(content='{"label": "handler-tag"}', model="fake")
+
+    client = FakeLLMClient(handler=handler)
+    resp = await client.chat(
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format=_Tag,
+    )
+    assert resp.parsed is not None
+    assert isinstance(resp.parsed, _Tag)
+    assert resp.parsed.label == "handler-tag"
+    assert resp.content == '{"label": "handler-tag"}'
+
+
+async def test_fake_llm_handler_path_preserves_explicit_parsed_override() -> None:
+    """Handler that already sets parsed must not be overwritten by _attach_parsed.
+
+    This validates the skip-if-already-set contract: if the handler explicitly
+    returns ChatResponse(parsed=X), FakeLLMClient must honour that and not
+    re-derive parsed from content.
+    """
+    from typing import Any
+
+    explicit_tag = _Tag(label="explicit")
+
+    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
+        return ChatResponse(content='{"label": "content-tag"}', model="fake", parsed=explicit_tag)
+
+    client = FakeLLMClient(handler=handler)
+    resp = await client.chat(
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format=_Tag,
+    )
+    assert resp.parsed is explicit_tag
+    assert resp.parsed.label == "explicit"

@@ -407,9 +407,11 @@ class TestIsWorthExtracting:
         assert await _is_worth_extracting("[]", fake) is False
 
     async def test_malformed_json_raises(self) -> None:
-        """Malformed JSON from LLM → JSONDecodeError propagates (no fail-open fallback)."""
+        """Malformed JSON from LLM → LLMError propagates (schema validation)."""
+        from everalgo.llm.errors import LLMError
+
         fake = FakeLLMClient(responses=["not valid json {{"])
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(LLMError):
             await _is_worth_extracting("[]", fake)
 
     async def test_missing_field_defaults_to_true(self) -> None:
@@ -475,7 +477,12 @@ class TestAgentCaseExtractorAExtract:
     async def test_single_round_tool_runs_filter_then_compress(self) -> None:
         """tool_rounds == 1 triggers filter; passing filter then runs compress."""
         compress_response = json.dumps(
-            {"task_intent": "search", "approach": "1. search 2. answer", "quality_score": 0.7}
+            {
+                "task_intent": "search",
+                "approach": "1. search 2. answer",
+                "key_insight": "use proper keywords",
+                "quality_score": 0.7,
+            }
         )
         fake = FakeLLMClient(
             responses=[
@@ -508,7 +515,7 @@ class TestAgentCaseExtractorAExtract:
 
     async def test_compress_empty_task_intent_yields_no_case(self) -> None:
         """Empty task_intent → return [] regardless."""
-        compress_response = json.dumps({"task_intent": "", "approach": "x", "quality_score": 0.5})
+        compress_response = json.dumps({"task_intent": "", "approach": "x", "key_insight": "", "quality_score": 0.5})
         fake = FakeLLMClient(
             responses=[
                 ChatResponse(content='{"worth_extracting": true}', model="fake"),
@@ -527,7 +534,9 @@ class TestAgentCaseExtractorAExtract:
     async def test_per_call_prompt_compress_override(self) -> None:
         """``prompt_compress=`` overrides the built-in compress prompt for this call only."""
         custom_prompt = "PER_CALL_COMPRESS__{messages}__END"
-        compress_response = json.dumps({"task_intent": "T", "approach": "A", "quality_score": 0.6})
+        compress_response = json.dumps(
+            {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.6}
+        )
         fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
         msgs: list[ConversationItem] = [
             _user_msg("solve X"),
@@ -543,7 +552,9 @@ class TestAgentCaseExtractorAExtract:
     async def test_per_call_prompt_filter_override(self) -> None:
         """``prompt_filter=`` overrides the filter prompt for single-round-tool trajectories."""
         custom_filter = "PER_CALL_FILTER__{messages}__END"
-        compress_response = json.dumps({"task_intent": "T", "approach": "A", "quality_score": 0.6})
+        compress_response = json.dumps(
+            {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.6}
+        )
         fake = FakeLLMClient(
             responses=[
                 ChatResponse(content='{"worth_extracting": true}', model="fake"),
@@ -567,7 +578,9 @@ class TestAgentCaseExtractorAExtract:
         original = case_mod.AGENT_CASE_COMPRESS_PROMPT
         case_mod.AGENT_CASE_COMPRESS_PROMPT = "MONKEY_PATCH_COMPRESS__{messages}__END"
         try:
-            compress_response = json.dumps({"task_intent": "T", "approach": "A", "quality_score": 0.6})
+            compress_response = json.dumps(
+                {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.6}
+            )
             fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
             msgs: list[ConversationItem] = [
                 _user_msg("solve X"),
@@ -584,7 +597,9 @@ class TestAgentCaseExtractorAExtract:
 
     async def test_prompt_payload_strips_everalgo_private_fields(self) -> None:
         """LLM prompt must not contain ``timestamp`` / ``sender_id`` / ``sender_name`` (OpenAI fields only)."""
-        compress_response = json.dumps({"task_intent": "T", "approach": "A", "quality_score": 0.6})
+        compress_response = json.dumps(
+            {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.6}
+        )
         fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
         msgs: list[ConversationItem] = [
             ChatMessage(
@@ -784,7 +799,9 @@ class TestPreCompressToList:
             await _pre_compress_to_list(msgs, fake)
 
     async def test_compression_returns_none_raises_value_error(self) -> None:
-        """LLM returns malformed JSON → _compress_tool_chunk raises JSONDecodeError."""
+        """LLM returns malformed JSON → _compress_tool_chunk raises LLMError."""
+        from everalgo.llm.errors import LLMError
+
         fake = FakeLLMClient(responses=[ChatResponse(content="not valid json {{", model="fake")])
         big = _huge_text(60_000)
         msgs: list[ConversationItem] = [
@@ -795,7 +812,7 @@ class TestPreCompressToList:
             _tool_response_msg(big, call_id="call_2", ts=1700000000400),
             _assistant_msg("done", ts=1700000000500),
         ]
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(LLMError):
             await _pre_compress_to_list(msgs, fake)
 
     async def test_compressed_count_mismatch_raises_value_error(self) -> None:
@@ -857,23 +874,13 @@ class TestCompressToolChunk:
         assert result[1].timestamp == msgs[1].timestamp
 
     async def test_json_decode_failure_raises(self) -> None:
-        """Malformed JSON from LLM → JSONDecodeError propagates."""
+        """Malformed JSON from LLM → LLMError propagates (schema validation)."""
+        from everalgo.llm.errors import LLMError
+
         msgs: list[ConversationItem] = [_tool_response_msg("x")]
         fake = FakeLLMClient(responses=[ChatResponse(content="not json {{", model="fake")])
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(LLMError):
             await _compress_tool_chunk(msgs, fake)
-
-    async def test_response_not_dict_returns_none(self) -> None:
-        """Response is JSON but not a dict (e.g. a bare list) → None."""
-        msgs: list[ConversationItem] = [_tool_response_msg("x")]
-        fake = FakeLLMClient(responses=[ChatResponse(content="[1, 2, 3]", model="fake")])
-        assert await _compress_tool_chunk(msgs, fake) is None
-
-    async def test_compressed_field_not_list_returns_none(self) -> None:
-        """Response dict but ``compressed_messages`` is not a list → None."""
-        msgs: list[ConversationItem] = [_tool_response_msg("x")]
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"compressed_messages": "not a list"}', model="fake")])
-        assert await _compress_tool_chunk(msgs, fake) is None
 
     async def test_compressed_list_wrong_length_returns_none(self) -> None:
         """Response has a list but wrong length → None."""
@@ -915,30 +922,36 @@ class TestCompressToolChunk:
 
 
 class TestCompressExperience:
-    async def test_missing_task_intent_returns_none(self) -> None:
-        """Response dict without 'task_intent' key → None."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"approach": "x"}', model="fake")])
-        assert await _compress_experience("[]", fake) is None
-
     async def test_empty_task_intent_returns_none(self) -> None:
         """Response 'task_intent' is empty string → None."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"task_intent": "", "approach": "x"}', model="fake")])
+        fake = FakeLLMClient(
+            responses=[
+                ChatResponse(
+                    content='{"task_intent": "", "approach": "x", "key_insight": "", "quality_score": 0.5}',
+                    model="fake",
+                )
+            ]
+        )
         assert await _compress_experience("[]", fake) is None
 
     async def test_empty_approach_returns_none(self) -> None:
         """Response 'approach' is empty → None."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"task_intent": "t", "approach": ""}', model="fake")])
-        assert await _compress_experience("[]", fake) is None
-
-    async def test_non_dict_response_returns_none(self) -> None:
-        """Response is JSON but not a dict → None."""
-        fake = FakeLLMClient(responses=[ChatResponse(content="[1, 2, 3]", model="fake")])
+        fake = FakeLLMClient(
+            responses=[
+                ChatResponse(
+                    content='{"task_intent": "t", "approach": "", "key_insight": "", "quality_score": 0.5}',
+                    model="fake",
+                )
+            ]
+        )
         assert await _compress_experience("[]", fake) is None
 
     async def test_json_decode_failure_raises(self) -> None:
-        """Malformed JSON from LLM → JSONDecodeError propagates."""
+        """Malformed JSON from LLM → LLMError propagates (schema validation)."""
+        from everalgo.llm.errors import LLMError
+
         fake = FakeLLMClient(responses=[ChatResponse(content="not json {{", model="fake")])
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(LLMError):
             await _compress_experience("[]", fake)
 
 
@@ -949,7 +962,9 @@ class TestAgentCaseExtractorTruncationLogging:
     async def test_task_intent_truncation_logged(self) -> None:
         """LLM-emitted long task_intent gets head-truncated to MAX_TASK_INTENT_TOKENS."""
         big_intent = " ".join(f"word_{i}" for i in range(400))  # > 300 tokens
-        compress_response = json.dumps({"task_intent": big_intent, "approach": "1. do thing", "quality_score": 0.7})
+        compress_response = json.dumps(
+            {"task_intent": big_intent, "approach": "1. do thing", "key_insight": "key", "quality_score": 0.7}
+        )
         fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
         msgs: list[ConversationItem] = [
             _user_msg("solve"),
@@ -1046,7 +1061,9 @@ class TestAgentCaseExtractorBetweenThresholds:
         msgs.append(_tool_response_msg("ok 2", call_id="call_2", ts=1700000099101))
         msgs.append(_assistant_msg("Done.", ts=1700000099999))
 
-        compress_response = json.dumps({"task_intent": "T", "approach": "A", "quality_score": 0.7})
+        compress_response = json.dumps(
+            {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.7}
+        )
         fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
         cases = await AgentCaseExtractor(llm=fake).aextract(MemCell(items=msgs, timestamp=1700000099999))
         assert len(cases) == 1
@@ -1088,7 +1105,9 @@ def _minimal_multi_round_memcell() -> MemCell:
 
 async def test_aextract_uses_instance_llm_when_per_call_omitted() -> None:
     """Instance-level llm= is used when aextract() is called without a per-call llm= argument."""
-    compress_response = json.dumps({"task_intent": "Instance task", "approach": "approach A", "quality_score": 0.8})
+    compress_response = json.dumps(
+        {"task_intent": "Instance task", "approach": "approach A", "key_insight": "key", "quality_score": 0.8}
+    )
     instance_fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="inst")])
     extractor = AgentCaseExtractor(llm=instance_fake)
     cases = await extractor.aextract(_minimal_multi_round_memcell())

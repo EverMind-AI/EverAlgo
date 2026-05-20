@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from asgiref.sync import async_to_sync
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from everalgo.llm.types import ChatMessage
 from everalgo.rank.fusion import AgenticConfig  # noqa: TC001  (runtime import required by pydantic field type)
@@ -25,6 +25,20 @@ __all__ = [
     "arerank",
     "rerank",
 ]
+
+
+class RankedItem(BaseModel):
+    """Single ranked candidate from rerank LLM."""
+
+    id: str
+    score: float
+
+
+class RerankResponse(BaseModel):
+    """LLM rerank output schema."""
+
+    ranked: list[RankedItem] = Field(..., description="Ranked candidates with scores")
+
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +113,13 @@ async def arerank(
 
     response = await client.chat(
         messages=[ChatMessage(role="user", content=rendered)],
-        response_format={"type": "json_object"},
+        response_format=RerankResponse,
     )
 
-    return _apply_rerank_scores(items, response.content, top_k)
+    parsed = cast("RerankResponse | None", response.parsed)
+    if parsed is None:
+        raise ValueError("LLM returned no parsed structured output")
+    return _apply_rerank_scores(items, parsed, top_k)
 
 
 rerank = async_to_sync(arerank)
@@ -111,41 +128,20 @@ rerank = async_to_sync(arerank)
 
 def _apply_rerank_scores(
     items: Sequence[Candidate],
-    raw_content: str,
+    response: RerankResponse,
     top_k: int,
 ) -> list[Candidate]:
-    """Parse the LLM's JSON, replace scores, sort, truncate.
-
-    Raises:
-        json.JSONDecodeError: If the LLM response is not valid JSON.
-        TypeError: If the top-level JSON is not a dict, or the ``ranked`` field is not a list.
-    """
-    payload = json.loads(raw_content)
-    if not isinstance(payload, dict):
-        raise TypeError("rerank LLM response top-level JSON is not an object")
-    payload_dict = cast("dict[str, Any]", payload)
-    ranked = payload_dict.get("ranked")
-    if not isinstance(ranked, list):
-        raise TypeError("rerank LLM response missing 'ranked' list")
-    ranked_list = cast("list[Any]", ranked)  # type: ignore[redundant-cast]  # pyright narrowing via cast
-
+    """Apply LLM-assigned scores to candidates, sort, truncate."""
     by_id = {item.id: item for item in items}
     out: list[Candidate] = []
-    for raw_entry in ranked_list:
-        if not isinstance(raw_entry, dict):
+    for ranked_item in response.ranked:
+        if ranked_item.id not in by_id:
             continue
-        entry = cast("dict[str, Any]", raw_entry)
-        eid = entry.get("id")
-        score = entry.get("score")
-        if not isinstance(eid, str) or eid not in by_id:
-            continue
-        if not isinstance(score, (int, float)):
-            continue
-        original = by_id[eid]
+        original = by_id[ranked_item.id]
         out.append(
             original.model_copy(
                 update={
-                    "score": float(score),
+                    "score": ranked_item.score,
                     "metadata": {**original.metadata, "fusion_score": original.score},
                 }
             )

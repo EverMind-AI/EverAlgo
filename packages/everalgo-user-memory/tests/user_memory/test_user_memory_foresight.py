@@ -19,7 +19,6 @@ from everalgo.user_memory.foresight import (
     _calculate_duration_days,
     _calculate_end_time_from_duration,
     _clean_date_string,
-    _parse_llm_response,
     _render_conversation,
     _resolve_user_name,
 )
@@ -41,16 +40,16 @@ def _memcell() -> MemCell:
     )
 
 
-async def test_aextract_parses_array_payload() -> None:
-    """Top-level JSON array of {content, evidence, ...} → list[Foresight]."""
+async def test_aextract_parses_wrapped_foresight_payload() -> None:
+    """Wrapped JSON object with foresights array → list[Foresight]."""
     llm_json = (
-        "[{"
+        '{"foresights": [{'
         '"content": "Alice will follow up with Bob next week",'
         '"evidence": "Alice said she will follow up",'
         '"start_time": "2024-01-01",'
         '"end_time": "2024-01-08",'
         '"duration_days": 7'
-        "}]"
+        "}]}"
     )
     fake = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
 
@@ -66,13 +65,10 @@ async def test_aextract_parses_array_payload() -> None:
     assert fs.owner_id == "u_alice"
 
 
-async def test_aextract_parses_wrapped_foresights_payload() -> None:
-    """{"foresights": [...]} wrapped form; start_time falls back to memcell.timestamp date."""
+async def test_aextract_fallback_start_time_to_memcell_date() -> None:
+    """When start_time is null/invalid, falls back to memcell.timestamp date."""
     llm_json = (
-        '{"foresights": [{'
-        '"content": "X", "evidence": "y", '
-        '"start_time": null, "end_time": null, "duration_days": null'
-        "}]}"
+        '{"foresights": [{"content": "X", "evidence": "y", "start_time": "", "end_time": null, "duration_days": null}]}'
     )
     fake = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
 
@@ -86,16 +82,22 @@ async def test_aextract_parses_wrapped_foresights_payload() -> None:
 
 async def test_aextract_owner_id_equals_sender_id() -> None:
     """``Foresight.owner_id`` must equal the ``sender_id`` argument."""
-    fake = FakeLLMClient(responses=[ChatResponse(content='[{"content": "x", "evidence": "y"}]', model="fake")])
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(
+                content='{"foresights": [{"content": "x", "evidence": "y", "start_time": "2024-01-01"}]}', model="fake"
+            )
+        ]
+    )
 
     foresights = await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert foresights[0].owner_id == "u_alice"
 
 
-async def test_aextract_returns_empty_list_when_llm_returns_empty_array() -> None:
-    """Empty array from LLM → return [] immediately (no retry)."""
-    fake = FakeLLMClient(responses=[ChatResponse(content="[]", model="fake")])
+async def test_aextract_returns_empty_list_when_llm_returns_empty_foresights() -> None:
+    """Empty foresights array from LLM → return [] immediately (no retry)."""
+    fake = FakeLLMClient(responses=[ChatResponse(content='{"foresights": []}', model="fake")])
 
     result = await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
@@ -104,10 +106,12 @@ async def test_aextract_returns_empty_list_when_llm_returns_empty_array() -> Non
 
 
 async def test_aextract_raises_on_bad_json() -> None:
-    """Unparseable JSON → JSONDecodeError propagates immediately."""
+    """Unparseable JSON → LLMError propagates immediately."""
+    from everalgo.llm.errors import LLMError
+
     fake = FakeLLMClient(responses=[ChatResponse(content="not json", model="fake")])
 
-    with pytest.raises((json.JSONDecodeError, ValueError)):
+    with pytest.raises(LLMError):
         await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -118,7 +122,7 @@ async def test_aextract_skips_invalid_items() -> None:
     fake = FakeLLMClient(
         responses=[
             ChatResponse(
-                content='[{"content": "valid", "evidence": "y"}, {"content": "", "evidence": "y"}]',
+                content='{"foresights": [{"content": "valid", "evidence": "y", "start_time": "2024-01-01"}, {"content": "", "evidence": "y", "start_time": "2024-01-01"}]}',
                 model="fake",
             )
         ]
@@ -133,7 +137,7 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
         captured["content"] = messages[0].content
-        return ChatResponse(content="[]", model="fake")
+        return ChatResponse(content='{"foresights": []}', model="fake")
 
     fake = FakeLLMClient(handler=handler)
     custom = "CUSTOM FORESIGHT id={USER_ID} name={USER_NAME} conv={CONVERSATION_TEXT}"
@@ -152,8 +156,8 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
 
 async def test_aextract_truncates_when_more_than_10_foresights() -> None:
     """LLM returns 12 foresights → truncated to 10."""
-    items = [{"content": f"f-{i}", "evidence": "e"} for i in range(12)]
-    fake = FakeLLMClient(responses=[ChatResponse(content=json.dumps(items), model="fake")])
+    items = [{"content": f"f-{i}", "evidence": "e", "start_time": "2024-01-01"} for i in range(12)]
+    fake = FakeLLMClient(responses=[ChatResponse(content=json.dumps({"foresights": items}), model="fake")])
 
     foresights = await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
     assert len(foresights) == 10
@@ -252,37 +256,13 @@ def test_calculate_duration_days_returns_none_on_bad_input() -> None:
 
 
 # ==========================================================================
-# _parse_and_build_foresights branches
+# Time computation helpers
 # ==========================================================================
-
-
-async def test_aextract_returns_empty_when_wrapped_inner_not_a_list() -> None:
-    """``{"foresights": "not a list"}`` → [] (no retry)."""
-    bad = ChatResponse(content='{"foresights": "not a list"}', model="fake")
-    fake = FakeLLMClient(responses=[bad])
-    assert await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice") == []
-    assert fake.call_count == 1
-
-
-async def test_aextract_returns_empty_when_top_level_is_neither_list_nor_dict() -> None:
-    """Top-level scalar (e.g. number) → []."""
-    bad = ChatResponse(content="42", model="fake")
-    fake = FakeLLMClient(responses=[bad])
-    assert await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice") == []
-
-
-async def test_aextract_skips_non_dict_items_in_array() -> None:
-    """Mixed array with non-dict entries: non-dict items skipped."""
-    raw = '[{"content": "valid", "evidence": "e"}, "string-item", 42, null]'
-    fake = FakeLLMClient(responses=[ChatResponse(content=raw, model="fake")])
-    foresights = await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-    assert len(foresights) == 1
-    assert foresights[0].foresight == "valid"
 
 
 async def test_aextract_computes_end_time_from_duration_when_only_duration_provided() -> None:
     """``start + duration`` → ``end_time`` computed."""
-    raw = '[{"content": "c", "evidence": "e", "start_time": "2024-03-14", "end_time": null, "duration_days": 7}]'
+    raw = '{"foresights": [{"content": "c", "evidence": "e", "start_time": "2024-03-14", "end_time": null, "duration_days": 7}]}'
     fake = FakeLLMClient(responses=[ChatResponse(content=raw, model="fake")])
     foresights = await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
     assert foresights[0].end_time == "2024-03-21"
@@ -292,25 +272,13 @@ async def test_aextract_computes_end_time_from_duration_when_only_duration_provi
 async def test_aextract_computes_duration_from_end_time_when_only_end_provided() -> None:
     """``start + end`` → ``duration_days`` computed."""
     raw = (
-        '[{"content": "c", "evidence": "e", '
-        '"start_time": "2024-03-14", "end_time": "2024-03-21", "duration_days": null}]'
+        '{"foresights": [{"content": "c", "evidence": "e", '
+        '"start_time": "2024-03-14", "end_time": "2024-03-21", "duration_days": null}]}'
     )
     fake = FakeLLMClient(responses=[ChatResponse(content=raw, model="fake")])
     foresights = await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
     assert foresights[0].duration_days == 7
     assert foresights[0].end_time == "2024-03-21"
-
-
-# ==========================================================================
-# _parse_llm_response — json fence path
-# ==========================================================================
-
-
-def test_parse_llm_response_handles_json_fence() -> None:
-    """`````json ... ````` fenced response."""
-    raw = '```json\n[{"content": "c", "evidence": "e"}]\n```'
-    parsed = _parse_llm_response(raw)
-    assert parsed == [{"content": "c", "evidence": "e"}]
 
 
 # ==========================================================================
@@ -324,7 +292,7 @@ async def test_aextract_silently_skips_non_chat_items() -> None:
     Locks the agent → user-memory pipeline contract: a MemCell with mixed items (ChatMessage +
     tool calls) must produce the same Foresight list as a chat-only MemCell with the same ChatMessages.
     """
-    llm_json = '[{"content": "Alice will follow up with Bob next week", "evidence": "stated directly"}]'
+    llm_json = '{"foresights": [{"content": "Alice will follow up with Bob next week", "evidence": "stated directly", "start_time": "2023-11-14"}]}'
 
     chat_only_cell = MemCell(
         items=[

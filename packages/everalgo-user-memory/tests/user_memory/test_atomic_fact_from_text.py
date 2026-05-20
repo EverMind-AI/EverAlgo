@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
@@ -47,39 +48,39 @@ async def test_empty_atomic_fact_list_returns_empty() -> None:
 
 
 async def test_missing_atomic_facts_key_raises_value_error() -> None:
-    """FakeLLM returns a dict without 'atomic_facts' key → ValueError."""
+    """FakeLLM returns a dict without 'atomic_facts' key → LLMError."""
     fake = FakeLLMClient(responses=['{"foo": "bar"}'])
-    with pytest.raises(ValueError, match="atomic_facts"):
+    with pytest.raises(LLMError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
 async def test_missing_inner_atomic_fact_key_raises_value_error() -> None:
-    """FakeLLM returns 'atomic_facts' dict without inner 'atomic_fact' key → ValueError."""
+    """FakeLLM returns 'atomic_facts' dict without inner 'atomic_fact' key → LLMError."""
     fake = FakeLLMClient(responses=['{"atomic_facts": {"time": "March 10, 2024 (Sunday) at 2:00 PM UTC"}}'])
-    with pytest.raises(ValueError, match="atomic_fact"):
+    with pytest.raises(LLMError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
 async def test_atomic_facts_not_a_dict_raises_type_error() -> None:
-    """FakeLLM returns 'atomic_facts' as a string → TypeError."""
+    """FakeLLM returns 'atomic_facts' as a string → LLMError."""
     fake = FakeLLMClient(responses=['{"atomic_facts": "not a dict"}'])
-    with pytest.raises(TypeError):
+    with pytest.raises(LLMError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
 async def test_atomic_fact_not_a_list_raises_type_error() -> None:
-    """FakeLLM returns 'atomic_fact' as a string inside atomic_facts → TypeError."""
+    """FakeLLM returns 'atomic_fact' as a string inside atomic_facts → LLMError."""
     fake = FakeLLMClient(
         responses=['{"atomic_facts": {"time": "March 10, 2024 (Sunday) at 2:00 PM UTC", "atomic_fact": "not a list"}}']
     )
-    with pytest.raises(TypeError):
+    with pytest.raises(LLMError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
 async def test_invalid_json_raises_value_error() -> None:
-    """FakeLLM returns non-JSON → ValueError."""
+    """FakeLLM returns non-JSON → LLMError."""
     fake = FakeLLMClient(responses=["not json at all"])
-    with pytest.raises(ValueError):
+    with pytest.raises(LLMError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
