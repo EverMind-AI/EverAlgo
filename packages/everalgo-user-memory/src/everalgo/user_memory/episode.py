@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import re
 from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field
 
 from everalgo.llm.format import format_message_timestamp, format_natural_language_time
-from everalgo.llm.parse import parse_llm_json_object
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
@@ -22,6 +20,22 @@ from everalgo.user_memory.prompts.en.episode import (
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+
+
+# ---------------------------------------------------------------------------
+# Structured outputs schema for episode LLM extraction.
+# ---------------------------------------------------------------------------
+
+
+class _EpisodeLLMResponse(BaseModel):
+    """Structured outputs schema for episode LLM extraction."""
+
+    title: str = Field(..., description="A short, descriptive title for the episode")
+    content: str = Field(..., description="The full episode body, in narrative form")
+    summary: str | None = Field(
+        default=None,
+        description="Optional 1-2 sentence summary; if absent, caller may derive from content",
+    )
 
 
 class EpisodeExtractor:
@@ -53,8 +67,7 @@ class EpisodeExtractor:
 
         Raises:
             LLMError: From the LLM call.
-            json.JSONDecodeError: If all parse strategies fail.
-            ValueError: If the LLM response is missing a non-empty ``title`` or ``content``.
+            ValueError: If the LLM returns no parsed structured output.
         """
         custom_instr = custom_instructions or DEFAULT_CUSTOM_INSTRUCTIONS
         conv_start = _format_conversation_start_time(memcell.timestamp)
@@ -81,15 +94,12 @@ class EpisodeExtractor:
 
         response = await self._llm.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
+            response_format=_EpisodeLLMResponse,
         )
-        data = _parse_llm_response(response.content)
-        if "title" not in data or not data["title"]:
-            raise ValueError("LLM response missing title field")
-        if "content" not in data or not data["content"]:
-            raise ValueError("LLM response missing content field")
-
-        return _build_episode(data, sender_id=sender_id, memcell=memcell)
+        parsed = cast("_EpisodeLLMResponse | None", response.parsed)
+        if parsed is None:
+            raise ValueError("LLM returned no parsed structured output")
+        return _build_episode(_parsed_to_dict(parsed), sender_id=sender_id, memcell=memcell)
 
     extract = async_to_sync(aextract)
 
@@ -140,20 +150,6 @@ def _render_conversation(memcell: MemCell) -> str:
     return "\n".join(lines)
 
 
-def _parse_llm_response(raw: str) -> dict[str, Any]:
-    """Parse LLM JSON response.
-
-    Schema-specific regex is tried first as a main-path optimisation (targets in-prose
-    ``{"title": ..., "content": ...}`` fragments); falls back to the shared three-tier parser
-    (fence → direct loads → outermost braces).
-
-    Raises:
-        ValueError: If all strategies fail.
-    """
-    match = re.search(r'\{[^{}]*"title"[^{}]*"content"[^{}]*\}', raw, re.DOTALL)
-    if match:
-        try:
-            return cast("dict[str, Any]", json.loads(match.group()))
-        except json.JSONDecodeError:
-            pass
-    return parse_llm_json_object(raw)
+def _parsed_to_dict(parsed: _EpisodeLLMResponse) -> dict[str, Any]:
+    """Serialise a validated ``_EpisodeLLMResponse`` to a plain dict for ``_build_episode``."""
+    return parsed.model_dump(exclude_none=False)

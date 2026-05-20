@@ -5,20 +5,18 @@ No internal retry — exceptions propagate directly to the caller.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pytest
 
+from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 from everalgo.user_memory.atomic_fact import (
     AtomicFactExtractor,
-    _parse_llm_response,
     _render_input_text,
-    _validate_atomic_facts,
 )
 
 
@@ -79,11 +77,11 @@ async def test_aextract_owner_id_equals_custom_sender_id() -> None:
 
 
 async def test_aextract_raises_when_atomic_facts_missing() -> None:
-    """No atomic_facts key → ValueError propagates immediately (no retry)."""
+    """No atomic_facts key → LLMError propagates immediately (no retry)."""
     bad = ChatResponse(content='{"unrelated": []}', model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(ValueError, match="Missing 'atomic_facts'"):
+    with pytest.raises(LLMError, match="atomic_facts"):
         await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -110,11 +108,11 @@ async def test_aextract_accepts_empty_atomic_fact_list() -> None:
 
 
 async def test_aextract_raises_on_bad_json() -> None:
-    """Unparseable JSON → ValueError propagates immediately."""
+    """Unparseable JSON → LLMError propagates immediately."""
     bad = ChatResponse(content="not json", model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises((json.JSONDecodeError, ValueError)):
+    with pytest.raises(LLMError):
         await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -167,74 +165,6 @@ def test_render_input_text_skips_empty_content() -> None:
     rendered = _render_input_text(cell)
     assert "Alice: hi" in rendered
     assert "Bob" not in rendered
-
-
-# ==========================================================================
-# _parse_llm_response — 4 parse strategies
-# ==========================================================================
-
-
-def test_parse_llm_response_handles_json_fence() -> None:
-    """Strategy 1: ```json``` fenced response."""
-    raw = '```json\n{"atomic_facts": {"time": "T", "atomic_fact": ["x"]}}\n```'
-    parsed = _parse_llm_response(raw)
-    assert parsed == {"atomic_facts": {"time": "T", "atomic_fact": ["x"]}}
-
-
-def test_parse_llm_response_handles_generic_code_fence_with_lang_specifier() -> None:
-    """Strategy 2: ```yaml / ```python / ```anything fence with leading lang line."""
-    raw = '```python\n{"atomic_facts": {"time": "T", "atomic_fact": ["x"]}}\n```'
-    parsed = _parse_llm_response(raw)
-    assert parsed == {"atomic_facts": {"time": "T", "atomic_fact": ["x"]}}
-
-
-def test_parse_llm_response_falls_back_to_regex_embedded_object() -> None:
-    """Strategy 3: regex finds embedded ``{atomic_facts{time,atomic_fact}}`` object."""
-    raw = 'Some prose {"atomic_facts": {"time": "T", "atomic_fact": ["x"]}} trailing'
-    parsed = _parse_llm_response(raw)
-    assert parsed == {"atomic_facts": {"time": "T", "atomic_fact": ["x"]}}
-
-
-def test_parse_llm_response_falls_back_to_direct_load_with_strip() -> None:
-    """Strategy 4: direct ``json.loads(raw.strip())``. Whitespace padding shouldn't break it."""
-    raw = '   {"other": "shape"}   '
-    parsed = _parse_llm_response(raw)
-    assert parsed == {"other": "shape"}
-
-
-def test_parse_llm_response_raises_when_all_strategies_fail() -> None:
-    """All strategies fail → ValueError."""
-    with pytest.raises(ValueError):
-        _parse_llm_response("totally not json at all")
-
-
-# ==========================================================================
-# _validate_atomic_facts schema branches
-# ==========================================================================
-
-
-def test_validate_atomic_facts_raises_on_non_dict_input() -> None:
-    """Top-level non-dict → ValueError."""
-    with pytest.raises(ValueError, match="not a JSON object"):
-        _validate_atomic_facts([1, 2, 3])
-
-
-def test_validate_atomic_facts_raises_when_time_missing() -> None:
-    """Missing ``time`` field → ValueError."""
-    with pytest.raises(ValueError, match="Missing time"):
-        _validate_atomic_facts({"atomic_facts": {"atomic_fact": ["x"]}})
-
-
-def test_validate_atomic_facts_raises_when_atomic_fact_key_missing() -> None:
-    """Missing ``atomic_fact`` key → ValueError."""
-    with pytest.raises(ValueError, match="Missing atomic_fact"):
-        _validate_atomic_facts({"atomic_facts": {"time": "T"}})
-
-
-def test_validate_atomic_facts_raises_when_atomic_fact_not_a_list() -> None:
-    """``atomic_fact`` not a list → ValueError."""
-    with pytest.raises(ValueError, match="atomic_fact is not a list"):
-        _validate_atomic_facts({"atomic_facts": {"time": "T", "atomic_fact": "single string"}})
 
 
 # ==========================================================================

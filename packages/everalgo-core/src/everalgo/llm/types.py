@@ -105,6 +105,16 @@ class ChatResponse(BaseModel):
     model: str
     usage: Usage | None = None
     finish_reason: Literal["stop", "length", "content_filter"] | None = None
+    parsed: BaseModel | None = Field(
+        default=None,
+        description=(
+            "Structured output instance returned by providers that support the OpenAI "
+            "Structured Outputs API (``client.beta.chat.completions.parse``).  "
+            "Callers should cast to the concrete schema type they passed as "
+            "``response_format``.  ``None`` when the provider used ``json_object`` "
+            "mode or when no ``response_format`` was requested."
+        ),
+    )
     raw: dict[str, Any] | None = Field(
         default=None,
         description=(

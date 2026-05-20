@@ -21,9 +21,9 @@ from everalgo.boundary.chat import (
     DetectionResult,
     _find_force_split_point,
     _format_messages_with_indices,
-    _parse_batch_boundary_response,
     detect_boundaries,
 )
+from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
@@ -245,58 +245,27 @@ async def test_empty_boundaries_list_yields_no_closed_cells() -> None:
 
 
 async def test_invalid_json_response_raises_value_error() -> None:
-    """Since retries were removed, a single non-JSON response raises ValueError immediately."""
+    """Since retries were removed, a single non-JSON response raises LLMError immediately."""
     msgs = _dialogue(2)
     bad = ChatResponse(content="not json at all", model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(ValueError):
+    with pytest.raises(LLMError):
         await detect_boundaries(msgs, llm=fake)
 
     assert fake.call_count == 1  # single call — no retry
 
 
 async def test_boundaries_not_list_in_json_raises_type_error() -> None:
-    """``boundaries`` field present but not a list → TypeError on the single LLM call."""
+    """``boundaries`` field present but not a list → LLMError on the single LLM call."""
     msgs = _dialogue(2)
     bad = ChatResponse(content='{"boundaries": "not-a-list", "should_wait": false}', model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(TypeError):
+    with pytest.raises(LLMError):
         await detect_boundaries(msgs, llm=fake)
 
     assert fake.call_count == 1
-
-
-async def test_json_fence_response_is_parsed_successfully() -> None:
-    """LLM response wrapped in ```json``` fence is still parsed correctly."""
-    msgs = _dialogue(4)
-    fence_response = ChatResponse(
-        content='```json\n{"boundaries": [2], "should_wait": false}\n```',
-        model="fake",
-    )
-    fake = FakeLLMClient(responses=[fence_response])
-
-    result = await detect_boundaries(msgs, llm=fake)
-
-    assert fake.call_count == 1
-    assert len(result.cells) == 1
-    assert result.cells[0].items == msgs[:2]
-
-
-async def test_prose_wrapped_json_response_is_parsed_via_outermost_braces() -> None:
-    """LLM response with surrounding prose is parsed via outermost-braces fallback."""
-    msgs = _dialogue(4)
-    prose_response = ChatResponse(
-        content='Reasoning here. {"boundaries": [2], "should_wait": false} Trailing.',
-        model="fake",
-    )
-    fake = FakeLLMClient(responses=[prose_response])
-
-    result = await detect_boundaries(msgs, llm=fake)
-
-    assert fake.call_count == 1
-    assert len(result.cells) == 1
 
 
 # ===========================================================================
@@ -505,61 +474,6 @@ def test_find_force_split_point_halves_when_head_exceeds_token_limit() -> None:
     split = _find_force_split_point(long_msgs, hard_token_limit=1, hard_msg_limit=500)
     # Halving loop bottoms out at 1 (floor guard).
     assert 1 <= split <= 9
-
-
-# ===========================================================================
-# Helper: _parse_batch_boundary_response
-# ===========================================================================
-
-
-def test_parse_batch_response_direct_json_with_boundaries() -> None:
-    raw = '{"boundaries": [2, 4], "should_wait": true}'
-    result = _parse_batch_boundary_response(raw)
-    assert result.boundaries == [2, 4]
-    assert result.should_wait is True
-
-
-def test_parse_batch_response_json_fence_unwrapped() -> None:
-    raw = '```json\n{"boundaries": [3], "should_wait": false}\n```'
-    result = _parse_batch_boundary_response(raw)
-    assert result.boundaries == [3]
-    assert result.should_wait is False
-
-
-def test_parse_batch_response_outermost_braces_fallback() -> None:
-    raw = 'some reasoning {"boundaries": [1], "should_wait": false} trailing text'
-    result = _parse_batch_boundary_response(raw)
-    assert result.boundaries == [1]
-
-
-def test_parse_batch_response_filters_non_int_boundary_entries() -> None:
-    """Non-integer boundary entries are silently skipped (TypeError → int() fails)."""
-    raw = '{"boundaries": [2, 4], "should_wait": false}'
-    result = _parse_batch_boundary_response(raw)
-    assert result.boundaries == [2, 4]
-
-
-def test_parse_batch_response_raises_value_error_on_bad_json() -> None:
-    with pytest.raises(ValueError):
-        _parse_batch_boundary_response("totally not json")
-
-
-def test_parse_batch_response_raises_type_error_when_boundaries_not_list() -> None:
-    with pytest.raises(TypeError):
-        _parse_batch_boundary_response('{"boundaries": "oops", "should_wait": false}')
-
-
-def test_parse_batch_response_empty_boundaries_list() -> None:
-    raw = '{"boundaries": [], "should_wait": false}'
-    result = _parse_batch_boundary_response(raw)
-    assert result.boundaries == []
-    assert result.should_wait is False
-
-
-def test_parse_batch_response_defaults_should_wait_to_false() -> None:
-    raw = '{"boundaries": [1]}'
-    result = _parse_batch_boundary_response(raw)
-    assert result.should_wait is False
 
 
 # NOTE: The three-tier JSON parsing logic that used to live in _parse_json_three_tier

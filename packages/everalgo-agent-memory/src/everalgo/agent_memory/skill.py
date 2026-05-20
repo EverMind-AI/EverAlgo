@@ -10,12 +10,12 @@ The caller pre-filters ``existing_relevant_skills`` to the relevant subset befor
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field
 
 from everalgo.agent_memory.prompts.skill_failure import AGENT_SKILL_FAILURE_EXTRACT_PROMPT
 from everalgo.agent_memory.prompts.skill_success import AGENT_SKILL_SUCCESS_EXTRACT_PROMPT
@@ -35,6 +35,30 @@ if TYPE_CHECKING:
     from everalgo.types import AgentCase, AgentSkill
 
 logger = logging.getLogger(__name__)
+
+
+class SkillOperationData(BaseModel):
+    """Schema for a single skill operation's data payload."""
+
+    name: str | None = None
+    description: str | None = None
+    content: str | None = None
+    confidence: float | None = None
+
+
+class SkillOperation(BaseModel):
+    """Schema for a single skill operation (add/update/none)."""
+
+    action: Literal["add", "update", "none"]
+    data: SkillOperationData | None = Field(default=None)
+    index: int | None = Field(default=None)  # For update operations
+
+
+class SkillExtractResponse(BaseModel):
+    """LLM skill extraction response schema."""
+
+    operations: list[SkillOperation] = Field(..., description="List of skill operations")
+    update_note: str = Field(default="", description="Explanation of overlap check and decisions")
 
 
 __all__ = [
@@ -74,7 +98,7 @@ class AgentSkillExtractor:
     def __init__(self, *, llm: LLMClient) -> None:
         self._llm = llm
 
-    async def aextract(  # noqa: C901
+    async def aextract(
         self,
         case: AgentCase,
         *,
@@ -177,22 +201,9 @@ class AgentSkillExtractor:
             case.id,
             len(existing_list),
         )
-        response = await client.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
-        )
-        llm_result: Any = json.loads(response.content)  # let JSONDecodeError propagate
-        if not isinstance(llm_result, dict):
-            raise TypeError(f"skill LLM returned non-dict for case={case.id}")
-        llm_dict = cast("dict[str, Any]", llm_result)
-
-        operations_raw = llm_dict.get("operations", [])
-        if not isinstance(operations_raw, list):
-            raise TypeError(f"skill LLM returned non-list operations for case={case.id}")
-        # cast is for pyright strict mode (mypy sees it as redundant — silenced below)
-        operations = cast("list[Any]", operations_raw)  # type: ignore[redundant-cast]
-
-        note = str(llm_dict.get("update_note") or "")
+        llm_response = await self._call_skill_llm(client, rendered)
+        operations = llm_response.operations
+        note = llm_response.update_note
         if note:
             logger.debug("LLM update_note: %s", note)
 
@@ -201,16 +212,12 @@ class AgentSkillExtractor:
         processed_indices: set[int] = set()
         source_case_ids = [case.id] if case.id else []
 
-        for raw_op in operations:
-            if not isinstance(raw_op, dict):
-                logger.warning("skipping non-dict op: %r", raw_op)
-                continue
-            op = cast("dict[str, Any]", raw_op)
-            action = str(op.get("action") or "none")
+        for op in operations:
+            action = op.action
 
             if action == "add":
                 added = await _apply_add(
-                    op,
+                    op.model_dump(),
                     source_case_ids,
                     client=client,
                     cfg=cfg,
@@ -220,7 +227,7 @@ class AgentSkillExtractor:
                     result.append(added)
             elif action == "update":
                 updated = await _apply_update(
-                    op,
+                    op.model_dump(),
                     existing_list,
                     source_case_ids,
                     source_quality=max_quality,
@@ -242,5 +249,22 @@ class AgentSkillExtractor:
             len(result),
         )
         return result
+
+    async def _call_skill_llm(self, client: LLMClient, rendered: str) -> SkillExtractResponse:
+        """Invoke the LLM and return a validated ``SkillExtractResponse``.
+
+        Extracted to keep ``aextract`` within the McCabe complexity budget (C901 ≤ 10).
+
+        Raises:
+            ValueError: If the LLM returns no parsed structured output.
+        """
+        response = await client.chat(
+            messages=[LLMChatMessage(role="user", content=rendered)],
+            response_format=SkillExtractResponse,
+        )
+        llm_response = cast("SkillExtractResponse | None", response.parsed)
+        if llm_response is None:
+            raise ValueError("LLM returned no parsed structured output")
+        return llm_response
 
     extract = async_to_sync(aextract)

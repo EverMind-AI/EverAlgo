@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pytest
@@ -13,7 +12,6 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 from everalgo.user_memory.episode import (
     EpisodeExtractor,
-    _parse_llm_response,
     _render_conversation,
     _resolve_user_name,
 )
@@ -105,44 +103,14 @@ async def test_aextract_llm_error_propagates_immediately() -> None:
 # ==========================================================================
 
 
-async def test_aextract_json_decode_error_propagates_immediately() -> None:
-    """Unparseable LLM response raises JSONDecodeError after a single call — no retry."""
+async def test_aextract_invalid_json_propagates_immediately() -> None:
+    """Unparseable LLM response raises LLMError (via FakeLLMClient schema validation) after a single call."""
+    from everalgo.llm.errors import LLMError
+
     bad = ChatResponse(content="not json at all", model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises((json.JSONDecodeError, ValueError)):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert fake.call_count == 1
-
-
-# ==========================================================================
-# (4) Missing title propagates immediately (no retry)
-# ==========================================================================
-
-
-async def test_aextract_raises_valueerror_when_title_missing() -> None:
-    """Empty title field → ValueError after a single call, no retry."""
-    bad = ChatResponse(content='{"title": "", "content": "c"}', model="fake")
-    fake = FakeLLMClient(responses=[bad])
-
-    with pytest.raises(ValueError, match="missing title"):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert fake.call_count == 1
-
-
-# ==========================================================================
-# (5) Missing content propagates immediately (no retry)
-# ==========================================================================
-
-
-async def test_aextract_raises_valueerror_when_content_missing() -> None:
-    """Empty content field → ValueError after a single call, no retry."""
-    bad = ChatResponse(content='{"title": "T", "content": ""}', model="fake")
-    fake = FakeLLMClient(responses=[bad])
-
-    with pytest.raises(ValueError, match="missing content"):
+    with pytest.raises(LLMError):
         await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -321,25 +289,6 @@ def test_render_conversation_skips_empty_content() -> None:
     rendered = _render_conversation(cell)
     assert "Alice: hi" in rendered
     assert "Bob" not in rendered
-
-
-# ==========================================================================
-# _parse_llm_response strategies — ```json fence + regex
-# ==========================================================================
-
-
-def test_parse_llm_response_handles_json_fence() -> None:
-    """`````json ... ````` fenced response is tier-1 parsed."""
-    raw = '```json\n{"title": "T", "content": "c"}\n```'
-    parsed = _parse_llm_response(raw)
-    assert parsed == {"title": "T", "content": "c"}
-
-
-def test_parse_llm_response_falls_back_to_regex_embedded_object() -> None:
-    """Prose surrounds an embedded {title...content} object → regex tier extracts it."""
-    raw = 'Some preamble {"title": "T", "content": "c"} trailing text'
-    parsed = _parse_llm_response(raw)
-    assert parsed == {"title": "T", "content": "c"}
 
 
 # ==========================================================================

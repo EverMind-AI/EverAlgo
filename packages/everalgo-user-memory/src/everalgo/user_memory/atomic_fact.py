@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field, field_validator
 
 from everalgo.llm.format import format_message_timestamp, format_natural_language_time
-from everalgo.llm.parse import parse_llm_json_object
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import AtomicFact, MemCell
@@ -22,6 +20,32 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Structured outputs schemas for atomic fact LLM extraction.
+# ---------------------------------------------------------------------------
+
+
+class _AtomicFactsBlock(BaseModel):
+    """Nested atomic facts data returned by the LLM."""
+
+    time: str = Field(..., description="The conversation/text start time as an exact string from input")
+    atomic_fact: list[str] = Field(..., description="List of atomic fact sentences")
+
+    @field_validator("atomic_fact", mode="before")
+    @classmethod
+    def _filter_non_strings(cls, v: object) -> list[str]:
+        """Filter out non-string items and empty strings; robust against LLM quirks."""
+        if not isinstance(v, list):
+            raise TypeError(f"atomic_fact must be a list, got {type(v).__name__}")
+        return [item for item in v if isinstance(item, str) and item.strip()]
+
+
+class _AtomicFactLLMResponse(BaseModel):
+    """Structured outputs schema for atomic fact extraction."""
+
+    atomic_facts: _AtomicFactsBlock = Field(..., description="Nested block containing time and atomic_fact list")
 
 
 class AtomicFactExtractor:
@@ -52,8 +76,7 @@ class AtomicFactExtractor:
 
         Raises:
             LLMError: From the LLM call.
-            json.JSONDecodeError: If all parse strategies fail.
-            ValueError: On schema validation failure (missing required fields or empty list).
+            ValueError: If the LLM returns no parsed structured output.
         """
         rendered = render_prompt(
             ATOMIC_FACT_PROMPT,
@@ -64,11 +87,12 @@ class AtomicFactExtractor:
 
         response = await self._llm.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
+            response_format=_AtomicFactLLMResponse,
         )
-        data = _parse_llm_response(response.content)
-        atomic_facts_block = _validate_atomic_facts(data)
-        return _build_atomic_facts(atomic_facts_block, sender_id=sender_id, memcell=memcell)
+        parsed = cast("_AtomicFactLLMResponse | None", response.parsed)
+        if parsed is None:
+            raise ValueError("LLM returned no parsed structured output")
+        return _build_atomic_facts(parsed.atomic_facts, sender_id=sender_id, memcell=memcell)
 
     extract = async_to_sync(aextract)
 
@@ -96,9 +120,7 @@ class AtomicFactExtractor:
             List of atomic-fact sentences. Empty list if text yields no facts.
 
         Raises:
-            ValueError: LLM JSON unparseable, ``atomic_facts`` field missing, or ``atomic_fact``
-                field missing inside ``atomic_facts``.
-            TypeError: ``atomic_facts`` is not a dict, or ``atomic_fact`` is not a list.
+            ValueError: If the LLM returns no parsed structured output.
             LLMError: Propagated from LLM client.
         """
         time_str = format_natural_language_time(timestamp)
@@ -107,9 +129,12 @@ class AtomicFactExtractor:
 
         response = await self._llm.chat(
             messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format={"type": "json_object"},
+            response_format=_AtomicFactLLMResponse,
         )
-        facts = _parse_and_validate_atomic_fact_from_text(response.content)
+        parsed = cast("_AtomicFactLLMResponse | None", response.parsed)
+        if parsed is None:
+            raise ValueError("LLM returned no parsed structured output")
+        facts = parsed.atomic_facts.atomic_fact
         logger.debug("aextract_from_text extracted %d facts", len(facts))
         return facts
 
@@ -144,55 +169,12 @@ def _format_time_label(timestamp_ms: int) -> str:
     return format_natural_language_time(timestamp_ms)
 
 
-def _parse_llm_response(raw: str) -> object:
-    """Parse LLM JSON response.
-
-    Schema-specific regex is tried first as a main-path optimisation (targets the nested
-    ``{"atomic_facts": {"time": ..., "atomic_fact": [...]}}`` shape); falls back to the shared
-    three-tier parser (fence → direct loads → outermost braces).
-
-    Raises:
-        ValueError: If all strategies fail to find a valid JSON object.
-    """
-    match = re.search(
-        r'\{[^{}]*"atomic_facts"[^{}]*\{[^{}]*"time"[^{}]*"atomic_fact"[^{}]*\}[^{}]*\}',
-        raw,
-        re.DOTALL,
-    )
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-    return parse_llm_json_object(raw)
-
-
-def _validate_atomic_facts(data: object) -> dict[str, Any]:
-    """Validate ``atomic_facts`` schema; raise :class:`ValueError` on any violation."""
-    if not isinstance(data, dict):
-        raise ValueError("LLM response is not a JSON object")  # noqa: TRY004
-    data_dict = cast("dict[str, Any]", data)
-    block_raw = data_dict.get("atomic_facts")
-    if not isinstance(block_raw, dict):
-        raise ValueError("Missing 'atomic_facts' field in LLM response")  # noqa: TRY004
-    block = cast("dict[str, Any]", block_raw)
-    if "time" not in block or not block["time"]:
-        raise ValueError("Missing time field in atomic_facts")
-    if "atomic_fact" not in block:
-        raise ValueError("Missing atomic_fact field in atomic_facts")
-    atomic_fact_raw = block["atomic_fact"]
-    if not isinstance(atomic_fact_raw, list):
-        raise ValueError(f"atomic_fact is not a list: {type(atomic_fact_raw)}")  # noqa: TRY004
-    return block
-
-
-def _build_atomic_facts(block: dict[str, Any], *, sender_id: str | None, memcell: MemCell) -> list[AtomicFact]:
+def _build_atomic_facts(block: _AtomicFactsBlock, *, sender_id: str | None, memcell: MemCell) -> list[AtomicFact]:
     """Split ``atomic_facts.atomic_fact`` list into individual AtomicFact entities."""
-    time_label = block["time"] if isinstance(block.get("time"), str) else _format_time_label(memcell.timestamp)
-    facts_list = cast("list[object]", block["atomic_fact"])
+    time_label = block.time if block.time else _format_time_label(memcell.timestamp)
     out: list[AtomicFact] = []
-    for item in facts_list:
-        if not isinstance(item, str) or not item.strip():
+    for item in block.atomic_fact:
+        if not item.strip():
             continue
         out.append(
             AtomicFact.model_validate(
@@ -205,34 +187,3 @@ def _build_atomic_facts(block: dict[str, Any], *, sender_id: str | None, memcell
             )
         )
     return out
-
-
-def _parse_and_validate_atomic_fact_from_text(raw: str) -> list[str]:
-    """Parse and validate the nested ``{"atomic_facts": {"time": str, "atomic_fact": [...]}}`` response.
-
-    Args:
-        raw: Raw LLM response string.
-
-    Returns:
-        List of atomic-fact strings (may be empty).
-
-    Raises:
-        ValueError: JSON unparseable, ``atomic_facts`` key missing, or ``atomic_fact`` key missing inside.
-        TypeError: ``atomic_facts`` value is not a dict, or ``atomic_fact`` value is not a list.
-    """
-    try:
-        data = parse_llm_json_object(raw)
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise ValueError(f"Failed to parse LLM response as JSON: {exc}") from exc
-    if "atomic_facts" not in data:
-        raise ValueError("Missing 'atomic_facts' field in LLM response")
-    inner_raw = data["atomic_facts"]
-    if not isinstance(inner_raw, dict):
-        raise TypeError(f"'atomic_facts' is not a dict: {type(inner_raw)}")
-    inner = cast("dict[str, Any]", inner_raw)
-    if "atomic_fact" not in inner:
-        raise ValueError("Missing 'atomic_fact' field inside 'atomic_facts'")
-    facts_raw = inner["atomic_fact"]
-    if not isinstance(facts_raw, list):
-        raise TypeError(f"'atomic_fact' is not a list: {type(facts_raw)}")
-    return cast("list[str]", facts_raw)

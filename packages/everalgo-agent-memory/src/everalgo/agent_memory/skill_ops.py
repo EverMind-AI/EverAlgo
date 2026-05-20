@@ -9,6 +9,8 @@ import uuid
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any, cast
 
+from pydantic import BaseModel, Field
+
 from everalgo.agent_memory._text import json_default, truncate_text
 from everalgo.agent_memory.prompts.skill_maturity import AGENT_SKILL_MATURITY_SCORE_PROMPT
 from everalgo.llm.types import ChatMessage as LLMChatMessage
@@ -22,6 +24,16 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+class MaturityScoreResponse(BaseModel):
+    """LLM maturity evaluation response schema."""
+
+    completeness: int = Field(..., ge=1, le=5, description="Completeness score 1-5")
+    executability: int = Field(..., ge=1, le=5, description="Executability score 1-5")
+    evidence: int = Field(..., ge=1, le=5, description="Evidence score 1-5")
+    clarity: int = Field(..., ge=1, le=5, description="Clarity score 1-5")
+    reason: str = Field(..., description="Brief justification for the scores")
 
 
 __all__ = [
@@ -197,17 +209,15 @@ async def _evaluate_maturity(
     )
     response = await client.chat(
         messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format={"type": "json_object"},
+        response_format=MaturityScoreResponse,
     )
-    data: Any = json.loads(response.content)
+    llm_response = cast("MaturityScoreResponse | None", response.parsed)
+    if llm_response is None:
+        raise ValueError("LLM returned no parsed structured output")
 
-    if not isinstance(data, dict) or not all(d in data for d in _MATURITY_DIMENSIONS):
-        raise ValueError("maturity evaluation returned invalid format")
-    data_dict = cast("dict[str, Any]", data)
+    raw_total = sum(getattr(llm_response, d) for d in _MATURITY_DIMENSIONS)
 
-    raw_total = sum(float(data_dict[d]) for d in _MATURITY_DIMENSIONS)
-
-    score = max(0.0, min(1.0, raw_total / 20.0))
+    score: float = max(0.0, min(1.0, raw_total / 20.0))
     logger.info(
         "maturity evaluation: name=%r, raw=%.1f, score=%.2f, threshold=%.2f, ready=%s",
         name,

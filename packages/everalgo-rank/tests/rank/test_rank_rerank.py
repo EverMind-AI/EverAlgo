@@ -83,11 +83,13 @@ async def test_arerank_returns_empty_for_empty_input() -> None:
     assert fake.call_count == 0
 
 
-async def test_arerank_raises_on_non_json_response() -> None:
-    """Non-JSON LLM response → JSONDecodeError propagates (no fusion-order fallback)."""
+async def test_arerank_raises_on_invalid_response() -> None:
+    """Invalid LLM response (not matching schema) → LLMError propagates."""
+    from everalgo.llm.errors import LLMError
+
     fake = FakeLLMClient(responses=["not json at all"])
 
-    with pytest.raises(json.JSONDecodeError):
+    with pytest.raises(LLMError):
         await rerank_mod.arerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
 
 

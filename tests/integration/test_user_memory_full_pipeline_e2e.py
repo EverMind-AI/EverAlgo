@@ -101,11 +101,11 @@ _EPISODE_JSON = (
 )
 
 _FORESIGHT_JSON = (
-    "["
+    '{"foresights": ['
     '{"content": "Alice will read the assistant\'s follow-up doc on async retries next week",'
     ' "evidence": "Assistant committed to a follow-up doc next week",'
     ' "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}'
-    "]"
+    "]}"
 )
 
 _ATOMIC_FACT_JSON = (

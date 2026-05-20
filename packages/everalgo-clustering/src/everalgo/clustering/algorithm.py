@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from everalgo.clustering.prompts.en.cluster import CLUSTER_LLM_ASSIGN_PROMPT
 from everalgo.clustering.state import Cluster
-from everalgo.llm.parse import parse_llm_json_object
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 
@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 
 _MS_PER_DAY = 86_400_000
 _NORM_EPSILON = 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Structured outputs schema for cluster assignment.
+# ---------------------------------------------------------------------------
+
+
+class _ClusterAssignmentLLMResponse(BaseModel):
+    """Structured outputs schema for LLM-based cluster assignment."""
+
+    idx: int = Field(..., description="Target cluster index, or -1 for a new cluster")
+    reason: str = Field(..., description="Short reasoning for the assignment decision")
 
 
 async def cluster_by_geometry(
@@ -117,14 +129,14 @@ async def cluster_by_llm(
     )
     response = await llm.chat(
         messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format={"type": "json_object"},
+        response_format=_ClusterAssignmentLLMResponse,
     )
-    llm_result = parse_llm_json_object(response.content)
-    if "idx" not in llm_result:
-        raise ValueError("cluster_by_llm: LLM response missing 'idx' field")
+    parsed = cast("_ClusterAssignmentLLMResponse | None", response.parsed)
+    if parsed is None:
+        raise ValueError("LLM returned no parsed structured output")
 
-    chosen_idx = llm_result.get("idx")
-    if isinstance(chosen_idx, int) and 0 <= chosen_idx < len(existing_clusters):
+    chosen_idx = parsed.idx
+    if 0 <= chosen_idx < len(existing_clusters):
         return _merge(existing_clusters[chosen_idx], new_cluster, preview_cap=preview_cap)
     return None
 

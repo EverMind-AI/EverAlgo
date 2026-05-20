@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import heapq
-import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from everalgo.llm.types import ChatMessage
 from everalgo.rank import weight as _weight
@@ -39,6 +38,24 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+class SufficiencyCheckResponse(BaseModel):
+    """LLM sufficiency-check response schema."""
+
+    is_sufficient: bool = Field(..., description="Whether retrieved documents are sufficient")
+    reasoning: str = Field(..., description="Reasoning for the judgment")
+    missing_information: list[str] = Field(
+        default_factory=list,
+        description="List of missing information (empty if sufficient)",
+    )
+
+
+class MultiQueryResponse(BaseModel):
+    """LLM multi-query generation response schema."""
+
+    queries: list[str] = Field(..., description="Generated complementary queries (2-3 items)")
+    reasoning: str = Field(..., description="Explanation of query generation strategy")
 
 
 def rrf(*sources: Sequence[Candidate], k: int = 60) -> list[Candidate]:
@@ -478,58 +495,22 @@ def _format_candidates_for_llm(candidates: Sequence[Candidate], max_docs: int) -
     return "\n".join(lines)
 
 
-def _parse_json_response(response: str) -> dict[str, Any]:
-    """Extract a JSON object from LLM output (may have leading/trailing prose)."""
-    start = response.find("{")
-    end = response.rfind("}") + 1
-    if start == -1 or end == 0:
-        raise ValueError("No JSON object found in response")
-    payload = json.loads(response[start:end])
-    if not isinstance(payload, dict):
-        raise TypeError("Top-level JSON is not an object")
-    return payload
+def _format_sufficiency_response(response: SufficiencyCheckResponse) -> tuple[bool, str, list[str]]:
+    """Convert parsed sufficiency-check response to tuple format."""
+    return response.is_sufficient, response.reasoning, response.missing_information
 
 
-def _parse_sufficiency_response(response: str) -> tuple[bool, str, list[str]]:
-    """Parse sufficiency-check JSON.
-
-    Raises:
-        ValueError: If no JSON object is found in the response, or ``is_sufficient`` field is missing.
-        TypeError: If the top-level JSON is not a dict, or ``missing_information`` is not a list.
-        json.JSONDecodeError: On parse failure.
-    """
-    payload = _parse_json_response(response)
-    if "is_sufficient" not in payload:
-        raise ValueError("sufficiency payload missing 'is_sufficient' field")
-    is_sufficient = bool(payload["is_sufficient"])
-    reasoning = payload.get("reasoning", "No reasoning provided")
-    missing = payload.get("missing_information", [])
-    if not isinstance(missing, list):
-        raise TypeError("'missing_information' is not a list")
-    return is_sufficient, reasoning, missing
-
-
-def _parse_multi_query_response(response: str, original_query: str) -> tuple[list[str], str]:
-    """Return ``(queries[:3], reasoning)``.
-
-    Raises:
-        ValueError: If no JSON object is found, or ``queries`` field is missing or all queries are
-            filtered (too short, too long, or identical to the original).
-        TypeError: If the top-level JSON is not a dict, or ``queries`` is not a list.
-        json.JSONDecodeError: On parse failure.
-    """
-    payload = _parse_json_response(response)
-    queries = payload.get("queries")
-    if not isinstance(queries, list):
-        raise TypeError("multi-query payload missing or invalid 'queries' field (expected list)")
-    reasoning = payload.get("reasoning", "No reasoning provided")
+def _format_multi_query_response(response: MultiQueryResponse, original_query: str) -> tuple[list[str], str]:
+    """Filter and format multi-query response, ensuring queries are valid and distinct from original."""
     original_norm = original_query.lower().strip()
     valid = [
-        q.strip() for q in queries if isinstance(q, str) and 5 <= len(q) <= 300 and q.lower().strip() != original_norm
+        q.strip()
+        for q in response.queries
+        if isinstance(q, str) and 5 <= len(q) <= 300 and q.lower().strip() != original_norm
     ]
     if not valid:
         raise ValueError("multi-query: all generated queries were filtered (too short/long or identical to original)")
-    return valid[:3], reasoning
+    return valid[:3], response.reasoning
 
 
 async def _acheck_sufficiency(
@@ -555,9 +536,12 @@ async def _acheck_sufficiency(
         messages=[ChatMessage(role="user", content=rendered)],
         temperature=temperature,
         max_tokens=max_tokens,
-        response_format={"type": "json_object"},
+        response_format=SufficiencyCheckResponse,
     )
-    return _parse_sufficiency_response(response.content)
+    parsed = cast("SufficiencyCheckResponse | None", response.parsed)
+    if parsed is None:
+        raise ValueError("LLM returned no parsed structured output")
+    return _format_sufficiency_response(parsed)
 
 
 async def _agen_multi_queries(
@@ -590,6 +574,9 @@ async def _agen_multi_queries(
         messages=[ChatMessage(role="user", content=rendered)],
         temperature=temperature,
         max_tokens=max_tokens,
-        response_format={"type": "json_object"},
+        response_format=MultiQueryResponse,
     )
-    return _parse_multi_query_response(response.content, original_query)
+    parsed = cast("MultiQueryResponse | None", response.parsed)
+    if parsed is None:
+        raise ValueError("LLM returned no parsed structured output")
+    return _format_multi_query_response(parsed, original_query)

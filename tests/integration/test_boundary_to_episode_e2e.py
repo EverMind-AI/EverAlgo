@@ -89,11 +89,11 @@ async def test_boundary_to_foresight_pipeline_e2e() -> None:
             content = _BOUNDARY_CONTINUE_JSON
         else:
             content = (
-                "["
+                '{"foresights": ['
                 '{"content": "User will follow up on the Alice meeting next week",'
                 ' "evidence": "I will follow up next week",'
                 ' "start_time": "2024-01-01", "end_time": "2024-01-08", "duration_days": 7}'
-                "]"
+                "]}"
             )
         return ChatResponse(content=content, model="fake")
 

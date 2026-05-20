@@ -324,64 +324,6 @@ class TestApplyAdd:
         with pytest.raises(RuntimeError, match="simulated LLM provider failure"):
             await _apply_add(op, [], client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
 
-    async def test_maturity_malformed_json_raises(self) -> None:
-        """Malformed JSON from maturity LLM → JSONDecodeError propagates."""
-        fake = FakeLLMClient(responses=[ChatResponse(content="not valid json {{", model="fake")])
-        op = {
-            "action": "add",
-            "data": {
-                "name": "X",
-                "description": "Y",
-                "content": _DEFAULT_CONTENT,
-                "confidence": 0.7,
-            },
-        }
-        with pytest.raises(json.JSONDecodeError):
-            await _apply_add(op, [], client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
-
-    async def test_maturity_missing_dimensions_raises_value_error(self) -> None:
-        """JSON missing required dimensions → ValueError from _evaluate_maturity."""
-        # Missing 'evidence' and 'clarity'
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"completeness": 4, "executability": 5}', model="fake")])
-        op = {
-            "action": "add",
-            "data": {
-                "name": "X",
-                "description": "Y",
-                "content": _DEFAULT_CONTENT,
-                "confidence": 0.7,
-            },
-        }
-        with pytest.raises(ValueError, match="invalid format"):
-            await _apply_add(op, [], client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
-
-    async def test_maturity_non_numeric_dimensions_raises_value_error(self) -> None:
-        """Non-numeric dimension values → ValueError from float() conversion."""
-        fake = FakeLLMClient(
-            responses=[
-                ChatResponse(
-                    content='{"completeness": "high", "executability": 4, "evidence": 3, "clarity": 4}',
-                    model="fake",
-                )
-            ]
-        )
-        op = {
-            "action": "add",
-            "data": {
-                "name": "X",
-                "description": "Y",
-                "content": _DEFAULT_CONTENT,
-                "confidence": 0.7,
-            },
-        }
-        with pytest.raises(ValueError):
-            await _apply_add(op, [], client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
-
-
-# ── _apply_update ───────────────────────────────────────────────────────────────────────────────────
-
-
-class TestApplyUpdate:
     async def test_invalid_index_type_returns_none(self) -> None:
         result = await _apply_update(
             {"index": "abc", "data": {"name": "X"}},
@@ -718,26 +660,6 @@ class TestAgentSkillExtractorAExtract:
         assert retired.id in existing_by_id
         assert retired.confidence < 0.1  # default retire_confidence
 
-    async def test_unknown_action_is_skipped(self) -> None:
-        ops_response = json.dumps({"operations": [{"action": "bogus", "data": {}}]})
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops_response, model="fake")])
-        result = await AgentSkillExtractor(llm=fake).aextract(
-            _make_case(),
-            existing_relevant_skills=[],
-            supporting_cases=[],
-        )
-        assert result == []
-
-    async def test_malformed_llm_json_raises(self) -> None:
-        """Malformed JSON from LLM → JSONDecodeError propagates (no swallow to [])."""
-        fake = FakeLLMClient(responses=[ChatResponse(content="not json {{", model="fake")])
-        with pytest.raises(json.JSONDecodeError):
-            await AgentSkillExtractor(llm=fake).aextract(
-                _make_case(),
-                existing_relevant_skills=[],
-                supporting_cases=[],
-            )
-
     async def test_existing_relevant_skills_all_passed_through(self) -> None:
         """All caller-supplied skills appear in the prompt — algorithm no longer caps them internally."""
         existing = [_make_skill(skill_id=f"sk_{i}", name=f"NAME_MARKER_{i}") for i in range(5)]
@@ -751,28 +673,6 @@ class TestAgentSkillExtractorAExtract:
         # All 5 skills' names should appear — algorithm doesn't filter
         for i in range(5):
             assert f"NAME_MARKER_{i}" in prompt_content
-
-    async def test_non_dict_llm_response_raises(self) -> None:
-        """LLM returns JSON that's not a dict (e.g. bare list) → TypeError propagates."""
-        fake = FakeLLMClient(responses=[ChatResponse(content="[1, 2, 3]", model="fake")])
-        with pytest.raises(TypeError, match="non-dict"):
-            await AgentSkillExtractor(llm=fake).aextract(
-                _make_case(),
-                existing_relevant_skills=[],
-                supporting_cases=[],
-            )
-
-    async def test_non_list_operations_raises(self) -> None:
-        """LLM returns ``{"operations": "not a list"}`` → TypeError propagates."""
-        fake = FakeLLMClient(
-            responses=[ChatResponse(content='{"operations": "not a list", "update_note": ""}', model="fake")]
-        )
-        with pytest.raises(TypeError, match="non-list operations"):
-            await AgentSkillExtractor(llm=fake).aextract(
-                _make_case(),
-                existing_relevant_skills=[],
-                supporting_cases=[],
-            )
 
     async def test_update_note_logged_when_present(self) -> None:
         """skill.py: when ``update_note`` is non-empty the debug log fires (no behaviour change)."""
@@ -790,25 +690,6 @@ class TestAgentSkillExtractorAExtract:
             supporting_cases=[],
         )
         assert result == []
-
-    async def test_non_dict_op_is_skipped(self) -> None:
-        """skill.py: an op that's not a dict (e.g. a bare string) is logged + skipped."""
-        ops_response = json.dumps({"operations": ["this is not a dict", {"action": "none"}]})
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops_response, model="fake")])
-        result = await AgentSkillExtractor(llm=fake).aextract(
-            _make_case(),
-            existing_relevant_skills=[],
-            supporting_cases=[],
-        )
-        # Both ops are skipped: one because it's not a dict, the other because it's a "none" action
-        assert result == []
-
-
-# ── skill_ops private helpers — edge-case coverage ──────────────────────────────────────────────────
-
-
-class TestOpDataNonDictFallback:
-    """skill_ops.py:62-65 — when op['data'] is not a dict, _op_data returns {}."""
 
     async def test_apply_add_with_non_dict_data_skipped(self) -> None:
         """Non-dict ``op["data"]`` falls back to ``{}`` -> empty content -> ``_apply_add`` skips."""

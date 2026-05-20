@@ -5,21 +5,47 @@ EverCore's evaluation/src/adapters/evermemos/tools/agentic_utils.py with the
 exact same prompts to preserve baseline parity.
 
 The LLM call shape used here differs from EverCore's LLMProvider.generate():
-we call ``await llm.chat(messages, response_format={"type": "json_object"})``
-and parse ``response.content`` as JSON.  Fallback behaviour mirrors EverCore's
-conservative defaults (assume sufficient / return original query on error).
+we call ``await llm.chat(messages, response_format=<PydanticBaseModel>)`` and
+consume ``response.parsed`` directly (strict json_schema enforced at sampling
+time by OpenAI SDK).  Fallback behaviour mirrors EverCore's conservative
+defaults (assume sufficient / return original query on error).
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from benchmarks.common.services import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Structured outputs schemas for agentic retrieval LLM calls.
+# ---------------------------------------------------------------------------
+
+
+class _CheckSufficiencyResponse(BaseModel):
+    """Structured outputs schema for sufficiency check."""
+
+    is_sufficient: bool = Field(..., description="Whether retrieval results sufficiently answer the query")
+    reasoning: str = Field(..., description="1-2 sentence explanation")
+    key_information_found: list[str] = Field(default_factory=list, description="List of resolved entities/facts found")
+    missing_information: list[str] = Field(
+        default_factory=list, description="Specific missing components using resolved entity names"
+    )
+
+
+class _MultiQueriesResponse(BaseModel):
+    """Structured outputs schema for multi-query generation."""
+
+    queries: list[str] = Field(..., description="List of refined queries for Round 2 retrieval")
+    reasoning: str = Field(..., description="Brief explanation of how temporal boundaries were expanded")
+
 
 # ---------------------------------------------------------------------------
 # Prompt templates — verbatim ports from EverCore's prompt files:
@@ -261,14 +287,14 @@ async def check_sufficiency(
         response = await llm.chat(
             [{"role": "user", "content": prompt}],
             model=judge_model,
-            response_format={"type": "json_object"},
+            response_format=_CheckSufficiencyResponse,
             temperature=0.0,
             max_tokens=500,  # Mirror locomo-benchmark agentic_utils.py:324
         )
-        data: dict[str, Any] = json.loads(response.content)
-    except json.JSONDecodeError as exc:
-        logger.warning("check_sufficiency: JSON parse error: %s", exc)
-        return (True, f"JSON parse error: {exc}", [], [], {})
+        parsed = cast("_CheckSufficiencyResponse | None", response.parsed)
+        if not isinstance(parsed, _CheckSufficiencyResponse):
+            msg = "LLM returned no parsed structured output"
+            raise TypeError(msg)  # noqa: TRY301
     except Exception as exc:
         logger.warning("check_sufficiency: LLM call failed: %s", exc)
         return (True, f"Error: {exc}", [], [], {})
@@ -278,10 +304,10 @@ async def check_sufficiency(
         "completion_tokens": response.completion_tokens,
     }
     return (
-        bool(data.get("is_sufficient", True)),
-        str(data.get("reasoning", "")),
-        list(data.get("missing_information", [])),
-        list(data.get("key_information_found", [])),
+        parsed.is_sufficient,
+        parsed.reasoning,
+        parsed.missing_information,
+        parsed.key_information_found,
         tokens,
     )
 
@@ -331,14 +357,14 @@ async def generate_multi_queries(
         response = await llm.chat(
             [{"role": "user", "content": prompt}],
             model=judge_model,
-            response_format={"type": "json_object"},
+            response_format=_MultiQueriesResponse,
             temperature=0.4,
             max_tokens=300,  # Mirror locomo-benchmark agentic_utils.py:439
         )
-        data = json.loads(response.content)
-    except json.JSONDecodeError as exc:
-        logger.warning("generate_multi_queries: JSON parse error: %s", exc)
-        return ([original_query], f"Parse error: {exc}", {})
+        parsed = cast("_MultiQueriesResponse | None", response.parsed)
+        if not isinstance(parsed, _MultiQueriesResponse):
+            msg = "LLM returned no parsed structured output"
+            raise TypeError(msg)  # noqa: TRY301
     except Exception as exc:
         logger.warning("generate_multi_queries: LLM call failed: %s", exc)
         return ([original_query], f"Error: {exc}", {})
@@ -347,8 +373,8 @@ async def generate_multi_queries(
         "prompt_tokens": response.prompt_tokens,
         "completion_tokens": response.completion_tokens,
     }
-    raw_queries: list[Any] = data.get("queries", [])
-    strategy: str = str(data.get("reasoning", ""))
+    raw_queries: list[Any] = parsed.queries
+    strategy: str = parsed.reasoning
 
     valid: list[str] = [
         q.strip()
