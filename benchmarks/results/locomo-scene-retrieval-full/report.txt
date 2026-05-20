@@ -1,0 +1,77 @@
+============================================================
+EverAlgo Benchmark Report — locomo / scene-retrieval-full
+============================================================
+
+Total Questions: 1540
+Correct: 1410
+Overall Accuracy: 0.9158 (91.58%)
+
+Per-Category Accuracy:
+  Category 1 (single-hop   ) 0.9279 (262/282)
+  Category 2 (temporal     ) 0.8785 (282/321)
+  Category 3 (open-domain  ) 0.7639 ( 73/ 96)
+  Category 4 (multi-hop    ) 0.9433 (793/841)
+
+Avg Context Tokens: 2904
+
+Stage Summary:
+  extract    duration=391.3s  prompt_tokens=355786  completion_tokens=171671
+  index      duration=79.7s  prompt_tokens=111399  completion_tokens=0
+  search     duration=1097.8s  prompt_tokens=5051335  completion_tokens=396788
+  answer     duration=1016.8s  prompt_tokens=5631761  completion_tokens=1169823
+  evaluate   duration=94.9s  prompt_tokens=2325465  completion_tokens=27735
+
+Config:
+  retrieval_mode: agentic
+  use_hybrid_search: True
+  use_reranker: True
+  use_multi_query: True
+  emb_recall_top_n: 40
+  reranker_top_n: 20
+  hybrid_emb_candidates: 50
+  hybrid_bm25_candidates: 50
+  hybrid_rrf_k: 60
+  multi_query_num: 3
+  response_top_k: 10
+  round1_rerank_top_n: 5
+  reranker_batch_size: 32
+  reranker_concurrent_batches: 2
+  reranker_max_retries: 3
+  reranker_retry_delay: 0.8
+  reranker_timeout: 60.0
+  reranker_fallback_threshold: 0.3
+  reranker_instruction: Determine if the passage contains specific facts, entities (names, dates, locations), or details that directly answer the question.
+  llm_model: openai/gpt-4.1-mini
+  llm_base_url: https://openrouter.ai/api/v1
+  llm_temperature: 0.3
+  llm_max_tokens: 16384
+  llm_timeout: 60.0
+  llm_max_retries: 5
+  extract_boundary_batch_size: 20
+  enable_clustering: True
+  cluster_similarity_threshold: 0.7
+  cluster_max_time_gap_days: 7.0
+  enable_scene_retrieval: True
+  scene_top_k: 10
+  level1_emb_candidates: 50
+  level1_bm25_candidates: 50
+  level1_rrf_k: 40
+  embedding_batch_size: 256
+  embedding_concurrent_batches: 5
+  judge_model: openai/gpt-4o-mini
+  judge_temperature: 0.0
+  judge_runs: 3
+  embedding_model: Qwen/Qwen3-Embedding-4B
+  embedding_base_url: https://api.deepinfra.com/v1/openai
+  embedding_dimensions: 1024
+  reranker_model: Qwen/Qwen3-Reranker-4B
+  deepinfra_base_url: https://api.deepinfra.com/v1/inference
+  max_concurrent_qa: 30
+
+Package Versions:
+  everalgo-core: 0.1.0
+  everalgo-boundary: 0.1.0
+  everalgo-user-memory: 0.1.0
+  everalgo-rank: 0.1.0
+
+============================================================

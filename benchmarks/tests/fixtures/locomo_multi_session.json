@@ -1,0 +1,21 @@
+[
+  {
+    "conversation": {
+      "speaker_a": "Alice",
+      "speaker_b": "Bob",
+      "session_1": [
+        {"speaker": "Alice", "text": "First session msg", "dia_id": "D1:1"}
+      ],
+      "session_1_date_time": "1:00 pm on 1 May, 2023",
+      "session_2": [
+        {"speaker": "Alice", "text": "Second session msg", "dia_id": "D2:1"}
+      ],
+      "session_2_date_time": "1:00 pm on 2 May, 2023",
+      "session_10": [
+        {"speaker": "Alice", "text": "Tenth session msg", "dia_id": "D10:1"}
+      ],
+      "session_10_date_time": "1:00 pm on 10 May, 2023"
+    },
+    "qa": []
+  }
+]

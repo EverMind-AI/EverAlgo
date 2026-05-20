@@ -1,0 +1,28 @@
+[project]
+name = "everalgo-benchmarks"
+version = "0"
+description = "Internal benchmark suite for EverAlgo — not published."
+requires-python = ">=3.12"
+dependencies = [
+    "everalgo-core",
+    "everalgo-boundary",
+    "everalgo-user-memory",
+    "everalgo-rank",
+    "httpx>=0.27",
+    "rank-bm25>=0.2.2",
+    "tiktoken>=0.8",
+    "python-dotenv>=1.0",
+    "pydantic>=2.0",
+    "nltk>=3.9",
+    "numpy>=1.26",
+    "tqdm>=4.66",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+everalgo-core = { workspace = true }
+everalgo-boundary = { workspace = true }
+everalgo-user-memory = { workspace = true }
+everalgo-rank = { workspace = true }

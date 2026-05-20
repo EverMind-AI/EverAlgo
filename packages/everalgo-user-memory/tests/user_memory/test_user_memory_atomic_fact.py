@@ -89,14 +89,23 @@ async def test_aextract_raises_when_atomic_facts_missing() -> None:
     assert fake.call_count == 1
 
 
-async def test_aextract_raises_when_atomic_fact_list_empty() -> None:
-    """Empty atomic_fact list → ValueError propagates immediately (no retry)."""
-    bad = ChatResponse(content='{"atomic_facts": {"time": "T", "atomic_fact": []}}', model="fake")
-    fake = FakeLLMClient(responses=[bad])
+@pytest.mark.asyncio
+async def test_aextract_accepts_empty_atomic_fact_list() -> None:
+    """Regression: empty atomic_fact list must return [] without raising.
 
-    with pytest.raises(ValueError, match="atomic_fact list is empty"):
-        await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+    EverCore's original atomic_fact_extractor.py accepts empty arrays for
+    MemCells with no extractable facts (e.g. greeting-only conversations).
+    EverAlgo's port had added a stricter check that broke benchmark parity —
+    removing it restores the EverCore contract.
 
+    Surfaced by LoCoMo benchmark Stage 1 (smoke5: 2 ok, 1 failed).
+    """
+    response = ChatResponse(content='{"atomic_facts": {"time": "T", "atomic_fact": []}}', model="fake")
+    fake = FakeLLMClient(responses=[response])
+
+    facts = await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+
+    assert facts == []
     assert fake.call_count == 1
 
 

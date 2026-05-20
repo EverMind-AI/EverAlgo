@@ -232,11 +232,12 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     assert "{INPUT_TEXT}" not in atomic_prompt
     # TIME label is rendered as natural-language UTC.
     assert "November 14, 2023" in atomic_prompt, "atomic_fact prompt missing rendered TIME label"
-    # AtomicFact's _render_input_text emits `speaker: content` lines WITHOUT timestamp prefix —
-    # different from foresight / profile (which both prepend `[ISO]`).  This divergence is intentional,
-    # AtomicFact's _render_input_text emits lines without a timestamp prefix by design.
-    assert "\nAlice: I've been getting into Python async" in atomic_prompt
-    assert "\nassistant: Sure — what failure mode" in atomic_prompt
+    # AtomicFact's _render_input_text emits `[<ISO>] <speaker>: <content>` lines (mirroring
+    # EverCore main `atomic_fact_extractor.py:255-262`) — the timestamp prefix anchors message-level
+    # time signals into the LLM context so atomic_fact extraction can preserve when each event
+    # happened (critical for LoCoMo temporal questions).
+    assert "[2023-11-14T22:13:20Z] Alice: I've been getting into Python async" in atomic_prompt
+    assert "[2023-11-14T22:13:21Z] assistant: Sure — what failure mode" in atomic_prompt
 
     # --- cluster_by_geometry (no LLM call — count stays at 5) -----------------
     mc_prior = _prior_memcell()
