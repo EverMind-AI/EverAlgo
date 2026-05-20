@@ -1,0 +1,42 @@
+{
+  "extract": {
+    "duration_seconds": 391.31678174994886,
+    "prompt_tokens": 355786,
+    "completion_tokens": 171671,
+    "http_calls": 0,
+    "success": 10,
+    "failed": 0
+  },
+  "index": {
+    "duration_seconds": 79.72376299998723,
+    "prompt_tokens": 111399,
+    "completion_tokens": 0,
+    "http_calls": 0,
+    "success": 10,
+    "failed": 0
+  },
+  "search": {
+    "duration_seconds": 1097.8031650829362,
+    "prompt_tokens": 5051335,
+    "completion_tokens": 396788,
+    "http_calls": 0,
+    "success": 1540,
+    "failed": 0
+  },
+  "answer": {
+    "duration_seconds": 1016.8289041669341,
+    "prompt_tokens": 5631761,
+    "completion_tokens": 1169823,
+    "http_calls": 0,
+    "success": 1540,
+    "failed": 0
+  },
+  "evaluate": {
+    "duration_seconds": 94.92650012497324,
+    "prompt_tokens": 2325465,
+    "completion_tokens": 27735,
+    "http_calls": 0,
+    "success": 1410,
+    "failed": 130
+  }
+}

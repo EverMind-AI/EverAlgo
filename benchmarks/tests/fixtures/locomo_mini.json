@@ -1,0 +1,17 @@
+[
+  {
+    "conversation": {
+      "speaker_a": "Alice",
+      "speaker_b": "Bob",
+      "session_1": [
+        {"speaker": "Alice", "text": "Hi Bob!", "dia_id": "D1:1"},
+        {"speaker": "Bob", "text": "Hello Alice!", "dia_id": "D1:2"}
+      ],
+      "session_1_date_time": "1:00 pm on 1 May, 2023"
+    },
+    "qa": [
+      {"question": "Who greeted whom first?", "answer": "Alice greeted Bob first.", "category": 1},
+      {"question": "Did Bob mention his job?", "answer": "Not mentioned.", "category": 5}
+    ]
+  }
+]

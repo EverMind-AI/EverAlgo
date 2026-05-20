@@ -1,0 +1,149 @@
+{
+  "dataset": "locomo",
+  "run_name": "scene-retrieval-full",
+  "overall_accuracy": 0.915800865800866,
+  "total_questions": 1540,
+  "correct": 1410,
+  "per_category": {
+    "2": {
+      "label": "temporal",
+      "correct": 282,
+      "total": 321,
+      "accuracy": 0.8785046728971962,
+      "run_accuracies": [
+        0.8785046728971962,
+        0.8785046728971962,
+        0.8785046728971962
+      ]
+    },
+    "3": {
+      "label": "open-domain",
+      "correct": 73,
+      "total": 96,
+      "accuracy": 0.7638888888888888,
+      "run_accuracies": [
+        0.7604166666666666,
+        0.7604166666666666,
+        0.7708333333333334
+      ]
+    },
+    "1": {
+      "label": "single-hop",
+      "correct": 262,
+      "total": 282,
+      "accuracy": 0.9278959810874704,
+      "run_accuracies": [
+        0.9290780141843972,
+        0.925531914893617,
+        0.9290780141843972
+      ]
+    },
+    "4": {
+      "label": "multi-hop",
+      "correct": 793,
+      "total": 841,
+      "accuracy": 0.9433214427269124,
+      "run_accuracies": [
+        0.9429250891795482,
+        0.9441141498216409,
+        0.9429250891795482
+      ]
+    }
+  },
+  "avg_context_tokens": 2904,
+  "stage_summary": {
+    "extract": {
+      "duration_seconds": 391.31678174994886,
+      "prompt_tokens": 355786,
+      "completion_tokens": 171671,
+      "http_calls": 0,
+      "success": 10,
+      "failed": 0
+    },
+    "index": {
+      "duration_seconds": 79.72376299998723,
+      "prompt_tokens": 111399,
+      "completion_tokens": 0,
+      "http_calls": 0,
+      "success": 10,
+      "failed": 0
+    },
+    "search": {
+      "duration_seconds": 1097.8031650829362,
+      "prompt_tokens": 5051335,
+      "completion_tokens": 396788,
+      "http_calls": 0,
+      "success": 1540,
+      "failed": 0
+    },
+    "answer": {
+      "duration_seconds": 1016.8289041669341,
+      "prompt_tokens": 5631761,
+      "completion_tokens": 1169823,
+      "http_calls": 0,
+      "success": 1540,
+      "failed": 0
+    },
+    "evaluate": {
+      "duration_seconds": 94.92650012497324,
+      "prompt_tokens": 2325465,
+      "completion_tokens": 27735,
+      "http_calls": 0,
+      "success": 1410,
+      "failed": 130
+    }
+  },
+  "config": {
+    "retrieval_mode": "agentic",
+    "use_hybrid_search": true,
+    "use_reranker": true,
+    "use_multi_query": true,
+    "emb_recall_top_n": 40,
+    "reranker_top_n": 20,
+    "hybrid_emb_candidates": 50,
+    "hybrid_bm25_candidates": 50,
+    "hybrid_rrf_k": 60,
+    "multi_query_num": 3,
+    "response_top_k": 10,
+    "round1_rerank_top_n": 5,
+    "reranker_batch_size": 32,
+    "reranker_concurrent_batches": 2,
+    "reranker_max_retries": 3,
+    "reranker_retry_delay": 0.8,
+    "reranker_timeout": 60.0,
+    "reranker_fallback_threshold": 0.3,
+    "reranker_instruction": "Determine if the passage contains specific facts, entities (names, dates, locations), or details that directly answer the question.",
+    "llm_model": "openai/gpt-4.1-mini",
+    "llm_base_url": "https://openrouter.ai/api/v1",
+    "llm_temperature": 0.3,
+    "llm_max_tokens": 16384,
+    "llm_timeout": 60.0,
+    "llm_max_retries": 5,
+    "extract_boundary_batch_size": 20,
+    "enable_clustering": true,
+    "cluster_similarity_threshold": 0.7,
+    "cluster_max_time_gap_days": 7.0,
+    "enable_scene_retrieval": true,
+    "scene_top_k": 10,
+    "level1_emb_candidates": 50,
+    "level1_bm25_candidates": 50,
+    "level1_rrf_k": 40,
+    "embedding_batch_size": 256,
+    "embedding_concurrent_batches": 5,
+    "judge_model": "openai/gpt-4o-mini",
+    "judge_temperature": 0.0,
+    "judge_runs": 3,
+    "embedding_model": "Qwen/Qwen3-Embedding-4B",
+    "embedding_base_url": "https://api.deepinfra.com/v1/openai",
+    "embedding_dimensions": 1024,
+    "reranker_model": "Qwen/Qwen3-Reranker-4B",
+    "deepinfra_base_url": "https://api.deepinfra.com/v1/inference",
+    "max_concurrent_qa": 30
+  },
+  "package_versions": {
+    "everalgo-core": "0.1.0",
+    "everalgo-boundary": "0.1.0",
+    "everalgo-user-memory": "0.1.0",
+    "everalgo-rank": "0.1.0"
+  }
+}
