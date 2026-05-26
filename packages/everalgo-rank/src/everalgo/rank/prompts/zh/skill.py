@@ -1,21 +1,18 @@
-"""Chinese prompt for ``rank.skill.arank`` LLM rerank."""
+"""Chinese prompt for ``rank.skill.arank`` LLM rerank.
 
-SKILL_RERANK_PROMPT_ZH = """你是相关性裁判。给定一个用户查询和一组检索到的 agent skill 候选，给每个 skill 打分，衡量它对完成查询任务的帮助程度。
+Anchors on the enterprise hybrid-rerank ``instruction`` passed to the cross-encoder
+in ``search_mem_service._search_agent_skills`` — methodology + domain applicability,
+same-domain preference, directly-relevant steps. The downstream
+``AGENT_SKILL_RELEVANCE_VERIFY_PROMPT`` is a separate post-rerank verification stage
+and is intentionally NOT inlined here.
+"""
 
-如果一个 skill **非常有帮助**（分数接近 1.0），通常满足：
-- 提供了可直接应用于该查询的可执行步骤、知识或方法
-- 覆盖了查询所属的问题类型（即使关键词没精确匹配）
-- 遵循该 skill 能显著提高 agent 处理该查询的能力
-
-如果一个 skill **没有帮助**（分数接近 0.0），通常是因为：
-- 只是表面相关（共享关键词但解决的是另一类问题）
-- 太宽泛或太局部，对当前查询没有实际价值
-- 查询不落在该 skill 的"何时使用"场景里
+SKILL_RERANK_PROMPT_ZH = """判断每个 agent skill 的方法（methodology）和领域（domain）是否适用于用户查询，优先选择同领域且步骤直接相关的 skill。按 0.0（完全不适用）到 1.0（方法和领域都强适配）给每个 skill 打分。
 
 用户查询：
 {query}
 
-候选列表（JSON 数组；每项含 `id`、`score`，以及元数据如 `name` / `description` / `maturity_score` / `confidence`）：
+候选列表（JSON 数组；每项含 `id`、`score`，以及元数据如 `name` / `description` / `content` / `confidence`）：
 {candidates_json}
 
 最多返回 {top_k} 项，按 score 降序排列。分数接近 0 的候选直接丢弃。

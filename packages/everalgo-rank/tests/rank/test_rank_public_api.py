@@ -179,7 +179,7 @@ def test_registry_modes_table_matches_per_facade_capabilities() -> None:
     """Each registry entry declares which fusion modes the facade supports."""
     from everalgo.rank.rerank import _ALGO_REGISTRY
 
-    assert _ALGO_REGISTRY["case"].modes == ("rrf", "lr", "agentic")
+    assert _ALGO_REGISTRY["case"].modes == ("rrf", "lr", "vector_anchored", "agentic")
     assert _ALGO_REGISTRY["skill"].modes == ("rrf", "lr", "agentic")
     assert _ALGO_REGISTRY["episodic"].modes == ("rrf", "lr", "mrag", "agentic")
     # Profile does not use fusion_mode at all.
@@ -197,6 +197,26 @@ async def test_invalid_fusion_mode_for_facade_raises() -> None:
         await case.arank(
             RankInput(query="q", memory_type="case"),
             config=RankConfig(fusion_mode="mrag"),
+        )
+
+
+async def test_vector_anchored_rejected_by_non_case_facades() -> None:
+    """``vector_anchored`` is registered only for case; episodic/skill must refuse it."""
+    import pytest as _pytest
+
+    from everalgo.rank import RankConfig, episodic, skill
+    from everalgo.types import RankInput
+
+    with _pytest.raises(ValueError, match="not supported"):
+        await episodic.arank(
+            RankInput(query="q", memory_type="episodic"),
+            config=RankConfig(fusion_mode="vector_anchored"),
+        )
+
+    with _pytest.raises(ValueError, match="not supported"):
+        await skill.arank(
+            RankInput(query="q", memory_type="skill"),
+            config=RankConfig(fusion_mode="vector_anchored"),
         )
 
 
