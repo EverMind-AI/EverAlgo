@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "everalgo-retrieval"
+version = "0.1.0"
+description = "EverAlgo retrieval: hybrid / agentic-wrapper / hierarchical strategies over caller-injected RetrieveFn."
+requires-python = ">=3.12"
+license = "MIT"
+readme = "README.md"
+authors = [{ name = "EverMind" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "everalgo-core>=0.1.0,<2.0.0",
+  "everalgo-rank>=0.1.0,<2.0.0",
+  "asgiref>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/EverMind-AI/EverAlgo"
+Repository = "https://github.com/EverMind-AI/EverAlgo"
+Issues = "https://github.com/EverMind-AI/EverAlgo/issues"
+Documentation = "https://github.com/EverMind-AI/EverAlgo/tree/main/packages/everalgo-retrieval"
+Changelog = "https://github.com/EverMind-AI/EverAlgo/blob/main/packages/everalgo-retrieval/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/everalgo"]

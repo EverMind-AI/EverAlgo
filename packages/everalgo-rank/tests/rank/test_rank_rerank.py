@@ -16,7 +16,7 @@ from everalgo.types import Candidate
 
 def _items() -> list[Candidate]:
     return [
-        Candidate(id="a", score=0.3, metadata={"__rerank_query__": "show me history"}),
+        Candidate(id="a", score=0.3, metadata={}),
         Candidate(id="b", score=0.5, metadata={}),
         Candidate(id="c", score=0.7, metadata={}),
     ]
@@ -37,7 +37,9 @@ async def test_arerank_replaces_scores_and_sorts_descending() -> None:
         ]
     )
 
-    out = await rerank_mod.arerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
+    out = await rerank_mod.arerank(
+        _items(), query="show me history", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake
+    )
 
     assert [c.id for c in out] == ["b", "a", "c"]
     assert math.isclose(out[0].score, 0.95)
@@ -60,7 +62,9 @@ async def test_arerank_respects_top_k() -> None:
         ]
     )
 
-    out = await rerank_mod.arerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=2, llm=fake)
+    out = await rerank_mod.arerank(
+        _items(), query="show me history", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=2, llm=fake
+    )
 
     assert len(out) == 2
     assert [c.id for c in out] == ["c", "a"]
@@ -69,7 +73,9 @@ async def test_arerank_respects_top_k() -> None:
 async def test_arerank_drops_hallucinated_and_omitted_ids() -> None:
     fake = FakeLLMClient(responses=[json.dumps({"ranked": [{"id": "ghost", "score": 1.0}, {"id": "a", "score": 0.5}]})])
 
-    out = await rerank_mod.arerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
+    out = await rerank_mod.arerank(
+        _items(), query="show me history", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake
+    )
 
     assert [c.id for c in out] == ["a"]
 
@@ -77,20 +83,18 @@ async def test_arerank_drops_hallucinated_and_omitted_ids() -> None:
 async def test_arerank_returns_empty_for_empty_input() -> None:
     fake = FakeLLMClient(responses=[json.dumps({"ranked": []})])
 
-    out = await rerank_mod.arerank([], prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
+    out = await rerank_mod.arerank([], query="test query", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
 
     assert out == []
     assert fake.call_count == 0
 
 
 async def test_arerank_raises_on_invalid_response() -> None:
-    """Invalid LLM response (not matching schema) → LLMError propagates."""
-    from everalgo.llm.errors import LLMError
-
+    """Invalid LLM response (not matching schema) → ValueError immediately (fail-loud, no retry)."""
     fake = FakeLLMClient(responses=["not json at all"])
 
-    with pytest.raises(LLMError):
-        await rerank_mod.arerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
+    with pytest.raises(ValueError):
+        await rerank_mod.arerank(_items(), query="show me history", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
 
 
 def test_arerank_raises_on_prompt_with_unknown_placeholder() -> None:
@@ -100,6 +104,7 @@ def test_arerank_raises_on_prompt_with_unknown_placeholder() -> None:
     with pytest.raises(KeyError):
         rerank_mod.rerank(
             _items(),
+            query="test query",
             prompt="bad template {nonexistent}",
             top_k=2,
             llm=fake,
@@ -110,7 +115,7 @@ def test_sync_bridge_callable_from_pytest() -> None:
     """``rerank`` (sync) should work outside an event loop."""
     fake = FakeLLMClient(responses=[json.dumps({"ranked": [{"id": "a", "score": 0.99}]})])
 
-    out = rerank_mod.rerank(_items(), prompt=EPISODIC_RERANK_PROMPT_EN, top_k=1, llm=fake)
+    out = rerank_mod.rerank(_items(), query="show me history", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=1, llm=fake)
 
     assert [c.id for c in out] == ["a"]
 
@@ -148,11 +153,13 @@ async def test_arerank_serializes_non_native_metadata_via_default_str() -> None:
     candidate = Candidate(
         id="dt_item",
         score=0.6,
-        metadata={"__rerank_query__": "recent events", "timestamp": ts},
+        metadata={"timestamp": ts},
     )
 
     # Must not raise TypeError
-    out = await rerank_mod.arerank([candidate], prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
+    out = await rerank_mod.arerank(
+        [candidate], query="recent events", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake
+    )
 
     # The serialized datetime string must appear in the prompt sent to the LLM
     assert len(captured_prompt) == 1
@@ -161,4 +168,4 @@ async def test_arerank_serializes_non_native_metadata_via_default_str() -> None:
     # Result shape: one item with the LLM-assigned score
     assert len(out) == 1
     assert out[0].id == "dt_item"
-    assert out[0].score == pytest.approx(0.88)
+    assert out[0].score == pytest.approx(0.88)  # pyright: ignore[reportUnknownMemberType]

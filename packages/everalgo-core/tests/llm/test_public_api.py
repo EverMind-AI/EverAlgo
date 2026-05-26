@@ -15,6 +15,8 @@ def test_top_level_exports_match_all() -> None:
             "LLMError",
             "Lang",
             "build_client",
+            "format_atomic_fact_time",
+            "format_iso_timestamp",
             "format_message_timestamp",
             "format_natural_language_time",
             "parse_llm_json_object",
@@ -38,6 +40,8 @@ def test_top_level_imports_resolve() -> None:
         LLMError,
         Usage,
         build_client,
+        format_atomic_fact_time,
+        format_iso_timestamp,
         format_message_timestamp,
         format_natural_language_time,
         parse_llm_json_object,
@@ -50,6 +54,8 @@ def test_top_level_imports_resolve() -> None:
     assert LLMError.__name__ == "LLMError"
     assert Usage.__name__ == "Usage"
     assert build_client.__name__ == "build_client"
+    assert format_atomic_fact_time.__name__ == "format_atomic_fact_time"
+    assert format_iso_timestamp.__name__ == "format_iso_timestamp"
     assert format_message_timestamp.__name__ == "format_message_timestamp"
     assert format_natural_language_time.__name__ == "format_natural_language_time"
     assert parse_llm_json_object.__name__ == "parse_llm_json_object"

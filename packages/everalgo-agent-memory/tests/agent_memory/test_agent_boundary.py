@@ -14,6 +14,7 @@ import json
 import pytest
 
 from everalgo.agent_memory.boundary import AgentBoundaryDetector
+from everalgo.llm.types import ChatResponse as LLMChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, ConversationItem, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 
@@ -91,11 +92,9 @@ async def test_adetect_filters_tool_calls_from_llm_prompt() -> None:
 
     captured: list[str] = []
 
-    def _capture_handler(messages, **_kwargs):  # type: ignore[no-untyped-def]
-        from everalgo.llm.types import ChatResponse
-
-        captured.extend(m.content for m in messages if hasattr(m, "content"))
-        return ChatResponse(content=_boundary_response([]), model="fake")
+    def _capture_handler(messages: list[ChatMessage], **_kwargs: object) -> LLMChatResponse:
+        captured.extend(str(m.content) for m in messages if hasattr(m, "content") and isinstance(m.content, str))
+        return LLMChatResponse(content=_boundary_response([]), model="fake")
 
     fake = FakeLLMClient(handler=_capture_handler)
     await AgentBoundaryDetector(llm=fake).adetect(items, is_final=True)

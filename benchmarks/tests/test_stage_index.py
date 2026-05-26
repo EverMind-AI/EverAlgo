@@ -14,7 +14,7 @@ from pytest import MonkeyPatch
 
 from benchmarks.common.config import BenchmarkConfig
 from benchmarks.common.services import Services
-from benchmarks.common.stages.index import _build_scene_index, run_index_stage
+from benchmarks.common.stages.index import _build_cluster_index, run_index_stage
 from benchmarks.common.stages.types import StageContext
 
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ from benchmarks.common.stages.types import StageContext
 _CLUSTERS_DATA: dict[str, Any] = {
     "clusters": [
         {
-            "id": "scene_0",
+            "id": "cluster_0",
             "centroid": [0.1, 0.2, 0.3],
             "count": 2,
             "last_ts": 1_700_000_000_000,
@@ -32,7 +32,7 @@ _CLUSTERS_DATA: dict[str, Any] = {
             "preview": ["Alice went fishing", "Bob joined"],
         },
         {
-            "id": "scene_1",
+            "id": "cluster_1",
             "centroid": [0.4, 0.5, 0.6],
             "count": 1,
             "last_ts": 1_700_100_000_000,
@@ -41,59 +41,48 @@ _CLUSTERS_DATA: dict[str, Any] = {
         },
     ],
     "memcell_to_cluster": {
-        "mc_1": "scene_0",
-        "mc_2": "scene_0",
-        "mc_3": "scene_1",
+        "mc_1": "cluster_0",
+        "mc_2": "cluster_0",
+        "mc_3": "cluster_1",
     },
 }
 
 
 # ---------------------------------------------------------------------------
-# Unit: _build_scene_index
+# Unit: _build_cluster_index
 # ---------------------------------------------------------------------------
 
 
-def test_build_scene_index_reshape() -> None:
-    """Pure reshape: cluster JSON -> scene-index dict has the exact target shape."""
-    result = _build_scene_index(_CLUSTERS_DATA)
+def test_build_cluster_index_returns_list_of_cluster_dumps() -> None:
+    """``_build_cluster_index`` returns ``list[Cluster.model_dump()]`` aligned with algo schema."""
+    import numpy as np
 
-    assert result["total_scenes"] == 2
-    assert result["total_memcells"] == 3
-    assert result["memcell_to_scene"] == {
-        "mc_1": "scene_0",
-        "mc_2": "scene_0",
-        "mc_3": "scene_1",
-    }
+    from everalgo.clustering import Cluster
 
-    scenes: list[dict[str, Any]] = result["scenes"]
-    assert len(scenes) == 2
+    result = _build_cluster_index(_CLUSTERS_DATA)
+    assert isinstance(result, list)
+    assert len(result) == 2
 
-    s0 = next(s for s in scenes if s["scene_id"] == "scene_0")
-    assert s0["centroid"] == [0.1, 0.2, 0.3]
-    assert s0["memcell_ids"] == ["mc_1", "mc_2"]
-    assert s0["memcell_count"] == 2
-    assert s0["last_timestamp"] == 1_700_000_000_000
-
-    s1 = next(s for s in scenes if s["scene_id"] == "scene_1")
-    assert s1["centroid"] == [0.4, 0.5, 0.6]
-    assert s1["memcell_ids"] == ["mc_3"]
-    assert s1["memcell_count"] == 1
-    assert s1["last_timestamp"] == 1_700_100_000_000
-
-    # Centroid must be plain list[float], not numpy array.
-    assert isinstance(s0["centroid"], list)
-    assert all(isinstance(v, float) for v in s0["centroid"])
+    # Each entry is a Cluster.model_dump() — round-trip via Cluster.model_validate.
+    clusters = [Cluster.model_validate(d) for d in result]
+    by_id = {c.id: c for c in clusters}
+    assert set(by_id) == {"cluster_0", "cluster_1"}
+    c0 = by_id["cluster_0"]
+    assert c0.members == ["mc_1", "mc_2"]
+    assert c0.count == 2
+    assert c0.last_ts == 1_700_000_000_000
+    assert np.allclose(c0.centroid, np.array([0.1, 0.2, 0.3]))
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: scene pickle is written when cluster file is present
+# End-to-end: cluster pickle is written when cluster file is present
 # ---------------------------------------------------------------------------
 
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_run_index_stage_writes_scene_pickle(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """When enable_scene_retrieval=True and clusters_conv_0.json exists, scene pickle is written."""
+async def test_run_index_stage_writes_cluster_pickle(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """When enable_cluster_retrieval=True and clusters_conv_0.json exists, cluster pickle is written."""
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
     respx.post("https://api.deepinfra.com/v1/openai/embeddings").mock(
@@ -117,7 +106,12 @@ async def test_run_index_stage_writes_scene_pickle(tmp_path: Path, monkeypatch: 
                     "timestamp": 0,
                     "items": [],
                     "episode": {"subject": "fishing trip", "content": "Alice caught a fish"},
-                    "atomic_facts": [{"fact": "Alice fished"}],
+                    "atomic_facts": {
+                        "time": "T",
+                        "timestamp": 0,
+                        "atomic_fact": ["Alice fished"],
+                        "fact_embeddings": [],
+                    },
                 }
             ]
         )
@@ -128,7 +122,7 @@ async def test_run_index_stage_writes_scene_pickle(tmp_path: Path, monkeypatch: 
     fixture = Path(__file__).parent / "fixtures" / "locomo_mini.json"
     from benchmarks.datasets.locomo.loader import LocomoDataset
 
-    cfg = BenchmarkConfig(enable_scene_retrieval=True)
+    cfg = BenchmarkConfig(enable_cluster_retrieval=True)
     ctx = StageContext(
         config=cfg,
         services=Services.from_config(cfg),
@@ -140,32 +134,33 @@ async def test_run_index_stage_writes_scene_pickle(tmp_path: Path, monkeypatch: 
     assert stats.success >= 1
     assert stats.failed == 0
 
-    scene_pkl = tmp_path / "stage2_index" / "scene_index_conv_0.pkl"
-    assert scene_pkl.exists(), "scene_index_conv_0.pkl was not written"
+    cluster_pkl = tmp_path / "stage2_index" / "cluster_index_conv_0.pkl"
+    assert cluster_pkl.exists(), "cluster_index_conv_0.pkl was not written"
 
-    with scene_pkl.open("rb") as fh:
-        loaded: dict[str, Any] = pickle.load(fh)
+    from everalgo.clustering import Cluster
 
-    assert loaded["total_scenes"] == 2
-    assert loaded["total_memcells"] == 3
-    assert set(loaded["memcell_to_scene"].keys()) == {"mc_1", "mc_2", "mc_3"}
-    assert len(loaded["scenes"]) == 2
-    scene_ids = {s["scene_id"] for s in loaded["scenes"]}
-    assert scene_ids == {"scene_0", "scene_1"}
-    # Centroid survives the pickle round-trip as plain list.
-    for scene in loaded["scenes"]:
-        assert isinstance(scene["centroid"], list)
+    with cluster_pkl.open("rb") as fh:
+        raw: list[dict[str, Any]] = pickle.load(fh)
+    assert isinstance(raw, list)
+    clusters = [Cluster.model_validate(d) for d in raw]
+    assert {c.id for c in clusters} == {"cluster_0", "cluster_1"}
+    assert sum(c.count for c in clusters) == 3
 
 
 # ---------------------------------------------------------------------------
-# Graceful skip when cluster file is missing
+# Fast-fail when cluster file is missing with enable_cluster_retrieval=True
 # ---------------------------------------------------------------------------
 
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_run_index_stage_skips_scene_when_cluster_file_missing(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """enable_scene_retrieval=True but no cluster file: no scene pkl, no crash."""
+async def test_run_index_stage_raises_when_cluster_file_missing(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """enable_cluster_retrieval=True but no cluster file: stage raises FileNotFoundError.
+
+    The cluster-index failure is intentionally un-caught so a missing cluster file
+    terminates the pipeline rather than silently producing a partial index that
+    would corrupt Stage 3 metrics.
+    """
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
     respx.post("https://api.deepinfra.com/v1/openai/embeddings").mock(
@@ -189,7 +184,12 @@ async def test_run_index_stage_skips_scene_when_cluster_file_missing(tmp_path: P
                     "timestamp": 0,
                     "items": [],
                     "episode": {"subject": "hiking", "content": "Bob hiked"},
-                    "atomic_facts": [{"fact": "Bob hiked a trail"}],
+                    "atomic_facts": {
+                        "time": "T",
+                        "timestamp": 0,
+                        "atomic_fact": ["Bob hiked a trail"],
+                        "fact_embeddings": [],
+                    },
                 }
             ]
         )
@@ -199,7 +199,7 @@ async def test_run_index_stage_skips_scene_when_cluster_file_missing(tmp_path: P
     fixture = Path(__file__).parent / "fixtures" / "locomo_mini.json"
     from benchmarks.datasets.locomo.loader import LocomoDataset
 
-    cfg = BenchmarkConfig(enable_scene_retrieval=True)
+    cfg = BenchmarkConfig(enable_cluster_retrieval=True)
     ctx = StageContext(
         config=cfg,
         services=Services.from_config(cfg),
@@ -207,17 +207,8 @@ async def test_run_index_stage_skips_scene_when_cluster_file_missing(tmp_path: P
         input_dir=stage1_dir,
         output_dir=tmp_path / "stage2_index",
     )
-    # Must not raise.
-    stats = await run_index_stage(ctx)
-    assert stats.success >= 1
-    assert stats.failed == 0
-
-    # BM25 + emb are still written.
-    assert (tmp_path / "stage2_index" / "bm25_conv_0.pkl").exists()
-    assert (tmp_path / "stage2_index" / "emb_conv_0.pkl").exists()
-    # No scene index, no error sidecar.
-    assert not (tmp_path / "stage2_index" / "scene_index_conv_0.pkl").exists()
-    assert not (tmp_path / "stage2_index" / "scene_index_conv_0.error.txt").exists()
+    with pytest.raises(FileNotFoundError, match="enable_cluster_retrieval=True but cluster file missing"):
+        await run_index_stage(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +258,12 @@ async def test_index_writes_bm25_and_emb_pickles(tmp_path: Path, monkeypatch: Mo
                         "subject": "fishing trip",
                         "content": "Alice caught a fish",
                     },
-                    "atomic_facts": [{"fact": "Alice fished"}],
+                    "atomic_facts": {
+                        "time": "T",
+                        "timestamp": 0,
+                        "atomic_fact": ["Alice fished"],
+                        "fact_embeddings": [],
+                    },
                 }
             ]
         )
@@ -276,7 +272,7 @@ async def test_index_writes_bm25_and_emb_pickles(tmp_path: Path, monkeypatch: Mo
     fixture = Path(__file__).parent / "fixtures" / "locomo_mini.json"
     from benchmarks.datasets.locomo.loader import LocomoDataset
 
-    cfg = BenchmarkConfig()
+    cfg = BenchmarkConfig(enable_cluster_retrieval=False)
     ctx = StageContext(
         config=cfg,
         services=Services.from_config(cfg),
@@ -319,8 +315,10 @@ async def test_index_writes_bm25_and_emb_pickles(tmp_path: Path, monkeypatch: Mo
     assert len(embeddings["atomic_facts"]) == 1
     assert "subject" in embeddings
     assert "summary" not in embeddings
-    assert "content" not in embeddings  # not embedded when fact / subject already present
-    assert "episode" not in embeddings  # episode is now a nested dict, not a string field
+    # 93 alignment: "episode" fallback row is only emitted when atomic_facts is missing.
+    # This fixture has 1 atomic_fact so the fallback path is suppressed.
+    assert "episode" not in embeddings
+    assert "content" not in embeddings  # legacy field name (pre-93-alignment); confirmed dropped
 
 
 def test_run_index_stage_callable():

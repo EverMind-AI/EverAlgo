@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -64,10 +65,11 @@ def test_chat_message_accepts_multimodal_content_list() -> None:
     dumped = msg.model_dump()
     assert dumped["role"] == "user"
     assert isinstance(dumped["content"], list)
-    assert len(dumped["content"]) == 2
-    assert dumped["content"][0] == {"type": "text", "text": "describe this"}
-    assert dumped["content"][1]["type"] == "image_url"
-    assert dumped["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    content = cast("list[dict[str, Any]]", dumped["content"])
+    assert len(content) == 2
+    assert content[0] == {"type": "text", "text": "describe this"}
+    assert content[1]["type"] == "image_url"
+    assert cast("str", content[1]["image_url"]["url"]).startswith("data:image/png;base64,")
 
 
 def test_chat_message_multimodal_json_round_trip() -> None:

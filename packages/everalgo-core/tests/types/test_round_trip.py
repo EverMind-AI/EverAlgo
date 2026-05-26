@@ -43,5 +43,5 @@ from everalgo.types import ChatMessage, Episode, MemCell
 )
 def test_model_dump_json_then_validate_json_round_trips(obj: Any) -> None:
     serialised = obj.model_dump_json()
-    rebuilt = type(obj).model_validate_json(serialised)
+    rebuilt = type(obj).model_validate_json(serialised)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
     assert rebuilt == obj

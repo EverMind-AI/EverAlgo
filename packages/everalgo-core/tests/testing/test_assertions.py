@@ -145,7 +145,7 @@ def _valid_atomic_fact_dict() -> dict[str, Any]:
     """Return a fresh copy of a minimal valid AtomicFact dict."""
     return {
         "owner_id": "u1",
-        "fact": "Alice scheduled a 3pm meeting with Bob on 2024-03-14",
+        "content": "Alice scheduled a 3pm meeting with Bob on 2024-03-14",
         "timestamp": 1700000000000,
     }
 
@@ -154,7 +154,7 @@ def test_atomic_fact_dict_input_parsed_and_validated() -> None:
     """Valid dict returns the parsed AtomicFact instance."""
     fact = assert_atomic_fact_shape(_valid_atomic_fact_dict())
     assert isinstance(fact, AtomicFact)
-    assert "Alice" in fact.fact
+    assert "Alice" in fact.content
 
 
 def test_atomic_fact_input_passed_through_same_instance() -> None:
@@ -173,10 +173,10 @@ def test_atomic_fact_missing_required_field_raises_validation_error() -> None:
 
 
 def test_empty_atomic_fact_string_raises_assertion_error() -> None:
-    """AtomicFact.fact must be non-empty."""
+    """AtomicFact.content must be non-empty."""
     bad = _valid_atomic_fact_dict()
-    bad["fact"] = ""
-    with pytest.raises(AssertionError, match=r"AtomicFact\.fact is empty"):
+    bad["content"] = ""
+    with pytest.raises(AssertionError, match=r"AtomicFact\.content is empty"):
         assert_atomic_fact_shape(bad)
 
 

@@ -192,9 +192,15 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     assert "{conversation_start_time}" not in episode_prompt
     assert "{conversation}" not in episode_prompt
     assert "{custom_instructions}" not in episode_prompt
-    # Conversation lines must carry sender markers in `[YYYY-MM-DDTHH:MM:SSZ] speaker:` form.
-    assert "[2023-11-14T22:13:20Z] Alice:" in episode_prompt, "episode conversation line missing for Alice"
-    assert "[2023-11-14T22:13:21Z] assistant:" in episode_prompt, "episode conversation line missing for assistant"
+    # Conversation is rendered as pseudo-JSON objects: field names quoted, values unquoted
+    # (not strictly valid JSON but LLM-readable). Timestamps emitted in ISO 8601 via
+    # ``format_iso_timestamp`` — epoch 1700000000000 -> 2023-11-14T22:13:20+00:00.
+    assert '"timestamp": 2023-11-14T22:13:20+00:00' in episode_prompt, "episode conversation missing Alice timestamp"
+    assert '"speaker": Alice' in episode_prompt, "episode conversation missing Alice speaker"
+    assert '"timestamp": 2023-11-14T22:13:21+00:00' in episode_prompt, (
+        "episode conversation missing assistant timestamp"
+    )
+    assert '"speaker": assistant' in episode_prompt, "episode conversation missing assistant speaker"
     assert "Python async" in episode_prompt
     # EpisodeExtractor defaults to USER_EPISODE_GENERATION_PROMPT (user-centred variant).
     # The `{user_name}` placeholder is substituted with the resolved sender_name "Alice"; the raw
@@ -236,8 +242,8 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     # EverCore main `atomic_fact_extractor.py:255-262`) — the timestamp prefix anchors message-level
     # time signals into the LLM context so atomic_fact extraction can preserve when each event
     # happened (critical for LoCoMo temporal questions).
-    assert "[2023-11-14T22:13:20Z] Alice: I've been getting into Python async" in atomic_prompt
-    assert "[2023-11-14T22:13:21Z] assistant: Sure — what failure mode" in atomic_prompt
+    assert "[2023-11-14 22:13:20] Alice: I've been getting into Python async" in atomic_prompt
+    assert "[2023-11-14 22:13:21] assistant: Sure — what failure mode" in atomic_prompt
 
     # --- cluster_by_geometry (no LLM call — count stays at 5) -----------------
     mc_prior = _prior_memcell()

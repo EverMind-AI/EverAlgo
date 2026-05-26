@@ -23,7 +23,6 @@ from everalgo.boundary.chat import (
     _format_messages_with_indices,
     detect_boundaries,
 )
-from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
@@ -245,24 +244,24 @@ async def test_empty_boundaries_list_yields_no_closed_cells() -> None:
 
 
 async def test_invalid_json_response_raises_value_error() -> None:
-    """Since retries were removed, a single non-JSON response raises LLMError immediately."""
+    """Non-JSON response → ValueError immediately (fail-loud, no retry)."""
     msgs = _dialogue(2)
     bad = ChatResponse(content="not json at all", model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(LLMError):
+    with pytest.raises(ValueError, match="No JSON object found"):
         await detect_boundaries(msgs, llm=fake)
 
-    assert fake.call_count == 1  # single call — no retry
+    assert fake.call_count == 1
 
 
-async def test_boundaries_not_list_in_json_raises_type_error() -> None:
-    """``boundaries`` field present but not a list → LLMError on the single LLM call."""
+async def test_boundaries_not_list_in_json_raises_value_error() -> None:
+    """``boundaries`` field present but not a list → ValueError immediately (fail-loud, no retry)."""
     msgs = _dialogue(2)
     bad = ChatResponse(content='{"boundaries": "not-a-list", "should_wait": false}', model="fake")
     fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(LLMError):
+    with pytest.raises(ValueError, match="boundaries must be a list"):
         await detect_boundaries(msgs, llm=fake)
 
     assert fake.call_count == 1
@@ -392,8 +391,8 @@ def test_detection_result_index_access() -> None:
 
 
 def test_default_hard_limits_match_design_spec() -> None:
-    assert DEFAULT_HARD_TOKEN_LIMIT == 65536
-    assert DEFAULT_HARD_MSG_LIMIT == 500
+    assert DEFAULT_HARD_TOKEN_LIMIT == 8192
+    assert DEFAULT_HARD_MSG_LIMIT == 50
 
 
 # ===========================================================================
@@ -408,9 +407,9 @@ def test_format_messages_renders_index_timestamp_and_sender_name() -> None:
     ]
     rendered = _format_messages_with_indices(msgs)
     lines = rendered.split("\n")
-    assert lines[0].startswith("[1] [2023-11-14T22:13:20Z")
+    assert lines[0].startswith("[1] [2023-11-14 22:13:20")
     assert lines[0].endswith(" Alice: hi")
-    assert lines[1].startswith("[2] [2023-11-14T22:13:21Z")
+    assert lines[1].startswith("[2] [2023-11-14 22:13:21")
     assert lines[1].endswith(" Bot: hey")
 
 

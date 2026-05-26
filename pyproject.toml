@@ -19,6 +19,7 @@ everalgo-parser = { workspace = true }
 everalgo-user-memory = { workspace = true }
 everalgo-agent-memory = { workspace = true }
 everalgo-knowledge = { workspace = true }
+everalgo-retrieval = { workspace = true }
 everalgo-benchmarks = { workspace = true }
 
 [dependency-groups]
@@ -31,6 +32,7 @@ dev = [
   "everalgo-user-memory",
   "everalgo-agent-memory",
   "everalgo-knowledge",
+  "everalgo-retrieval",
   "everalgo-benchmarks",
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
@@ -80,7 +82,7 @@ known-first-party = ["everalgo", "tests"]
 # punctuation (RUF001 / RUF002), retain trailing whitespace + whitespace-only blank lines inside prompt
 # strings (W291 / W293), and use ``{{ }}`` braces in template examples.
 "**/prompts/zh/**/*.py" = ["RUF001", "RUF002", "W291", "W293"]
-"**/prompts/en/**/*.py" = ["RUF001", "RUF002", "W291", "W293"]
+"**/prompts/en/**/*.py" = ["RUF001", "RUF002", "W291", "W293", "D205"]
 "benchmarks/datasets/*/prompts.py" = ["RUF001", "RUF002", "W291", "W293", "E501"]
 
 [tool.ruff.lint.pydocstyle]
@@ -102,8 +104,11 @@ typeCheckingMode = "strict"
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
-include = ["packages/*/src", "packages/*/tests", "tests"]
-exclude = ["opensource", "**/__pycache__", ".venv"]
+# Tests are intentionally excluded from pyright: mock / lambda / dynamic stub patterns common in pytest
+# fixtures defeat strict inference. mypy still type-checks the tests with the relaxed `tests.*` override
+# (see `[[tool.mypy.overrides]]` below) — runtime type errors in tests will surface there or in pytest.
+include = ["packages/*/src"]
+exclude = ["opensource", "**/__pycache__", ".venv", "**/tests/**"]
 # pyright's equivalent of mypy's `mypy_path` — required for PEP 420 namespace resolution across the 8 dists.
 extraPaths = [
   "packages/everalgo-core/src",
@@ -114,6 +119,7 @@ extraPaths = [
   "packages/everalgo-user-memory/src",
   "packages/everalgo-agent-memory/src",
   "packages/everalgo-knowledge/src",
+  "packages/everalgo-retrieval/src",
 ]
 reportImplicitOverride = true
 reportOverlappingOverload = false
@@ -131,7 +137,7 @@ warn_unused_ignores = false
 # porting; it is not part of the published distributions and must not block the workspace's strict gate.
 exclude = "^opensource/"
 # Required for PEP 420 namespace resolution; also disambiguates `everalgo.types` from stdlib `types`.
-mypy_path = "packages/everalgo-core/src:packages/everalgo-boundary/src:packages/everalgo-clustering/src:packages/everalgo-rank/src:packages/everalgo-parser/src:packages/everalgo-user-memory/src:packages/everalgo-agent-memory/src:packages/everalgo-knowledge/src"
+mypy_path = "packages/everalgo-core/src:packages/everalgo-boundary/src:packages/everalgo-clustering/src:packages/everalgo-rank/src:packages/everalgo-parser/src:packages/everalgo-user-memory/src:packages/everalgo-agent-memory/src:packages/everalgo-knowledge/src:packages/everalgo-retrieval/src"
 
 # `tests.*` covers the top-level `tests/` tree; `*.tests.*` covers nested test packages such as
 # `benchmarks.tests.*` and `everalgo-<dist>.tests.*` (mypy module-spec wildcards match a single
@@ -141,3 +147,8 @@ module = ["tests.*", "*.tests.*"]
 disallow_untyped_defs = false
 disallow_untyped_calls = false
 disallow_incomplete_defs = false
+
+# tqdm ships no type stubs and we don't take the `types-tqdm` dep just to silence one import line.
+[[tool.mypy.overrides]]
+module = ["tqdm.*"]
+ignore_missing_imports = true

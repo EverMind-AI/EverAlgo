@@ -7,7 +7,7 @@ Public surface, grouped by role:
 - helpers:     image_url_part_from_bytes
 - errors:      LLMError
 - factory:     build_client
-- format/parse: Lang, format_message_timestamp, format_natural_language_time, parse_llm_json_object
+- format/parse: Lang, format_atomic_fact_time, format_iso_timestamp, format_message_timestamp, format_natural_language_time, parse_llm_json_object
 
 LLM binding is instance-only: every operator accepts ``llm: LLMClient`` at construction time.
 There is no global default, no scoped context-var override, and no per-call resolution layer.
@@ -23,7 +23,13 @@ from everalgo.llm._filters import SensitiveHeadersFilter
 from everalgo.llm.config import LLMConfig
 from everalgo.llm.errors import LLMError
 from everalgo.llm.factory import build_client
-from everalgo.llm.format import Lang, format_message_timestamp, format_natural_language_time
+from everalgo.llm.format import (
+    Lang,
+    format_atomic_fact_time,
+    format_iso_timestamp,
+    format_message_timestamp,
+    format_natural_language_time,
+)
 from everalgo.llm.parse import parse_llm_json_object
 from everalgo.llm.protocols import LLMClient
 from everalgo.llm.types import (
@@ -57,6 +63,8 @@ __all__ = [
     "TextPart",
     "Usage",
     "build_client",
+    "format_atomic_fact_time",
+    "format_iso_timestamp",
     "format_message_timestamp",
     "format_natural_language_time",
     "image_url_part_from_bytes",

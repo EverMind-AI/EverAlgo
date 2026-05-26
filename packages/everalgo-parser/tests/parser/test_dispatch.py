@@ -246,7 +246,7 @@ async def test_aparse_raises_for_unsupported_modality(monkeypatch: pytest.Monkey
     from everalgo.types import Modality
 
     # Modality.URL is valid but not handled by the dispatch switch (IMAGE/AUDIO/PDF/etc.)
-    monkeypatch.setattr(pkg, "get_modality", lambda _ext: Modality.URL)
+    monkeypatch.setattr(pkg, "get_modality", lambda _ext: Modality.URL)  # type: ignore[misc]
     with pytest.raises(ValueError, match="Unsupported modality"):
         await parser_pkg.aparse(RawFile(content=b"x", extension="mp4"), llm=_fake())
 

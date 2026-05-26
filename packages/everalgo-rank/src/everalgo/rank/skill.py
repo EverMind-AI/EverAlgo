@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from everalgo.llm.protocols import LLMClient
-    from everalgo.rank.fusion import RerankFn, RetrieveFn
     from everalgo.types import RankInput
 
 __all__ = ["SkillRanker", "arank", "averify", "rank", "verify"]
@@ -37,7 +36,7 @@ class VerifiedItem(BaseModel):
 class _VerifyResponse(BaseModel):
     """LLM verify output schema (``{"results": [...]}``)."""
 
-    results: list[VerifiedItem] = Field(default_factory=list)
+    results: list[VerifiedItem] = Field(default_factory=list[VerifiedItem])
 
 
 async def _verify_relevance(
@@ -166,8 +165,6 @@ class SkillRanker:
         config: RankConfig = DEFAULT_RANK_CONFIG,
         prompt: str | None = None,
         enable_rerank: bool = False,
-        retrieve_fn: RetrieveFn | None = None,
-        rerank_fn: RerankFn | None = None,
         rerank_top_k: int | None = None,
         enable_verify: bool = False,
         verify_threshold: float = 0.4,
@@ -180,8 +177,6 @@ class SkillRanker:
             config: Fusion mode and hyperparameters.
             prompt: Per-call rerank prompt override; ``None`` uses the built-in default.
             enable_rerank: When ``True``, run the LLM rerank stage after fusion.
-            retrieve_fn: Optional retrieval callback for the ``'agentic'`` fusion mode Round 2.
-            rerank_fn: Required for ``fusion_mode='agentic'``; cross-encoder callback for Round 1 rerank.
             rerank_top_k: When set, Phase-5 LLM rerank truncates to this count instead of
                 ``rank_input.top_k`` — lets fusion produce a wider candidate pool that the LLM
                 then narrows.
@@ -199,8 +194,6 @@ class SkillRanker:
             llm=self._llm,
             prompt=prompt,
             enable_rerank=enable_rerank,
-            retrieve_fn=retrieve_fn,
-            rerank_fn=rerank_fn,
             rerank_top_k=rerank_top_k,
         )
         if enable_verify and result.items:
@@ -224,8 +217,6 @@ async def arank(
     llm: LLMClient | None = None,
     prompt: str | None = None,
     enable_rerank: bool = False,
-    retrieve_fn: RetrieveFn | None = None,
-    rerank_fn: RerankFn | None = None,
     rerank_top_k: int | None = None,
     enable_verify: bool = False,
     verify_threshold: float = 0.4,
@@ -238,8 +229,6 @@ async def arank(
         llm=llm,
         prompt=prompt,
         enable_rerank=enable_rerank,
-        retrieve_fn=retrieve_fn,
-        rerank_fn=rerank_fn,
         rerank_top_k=rerank_top_k,
     )
     if enable_verify and result.items:

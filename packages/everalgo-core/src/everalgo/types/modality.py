@@ -3,12 +3,9 @@
 A ``Modality`` is the *kind* of content a raw file holds — independent of
 the specific MIME / extension. Parsers dispatch by modality, not by
 extension; the ``extension_to_modality`` mapping covers the well-known cases
-and ``UNKNOWN`` absorbs everything else.
-
-Schema source: ``evermemos-multimodal/src/model/modality.py``
-(prod-20260306-0331-v1). Kept here in ``everalgo-core`` so callers can
-classify a file before deciding whether to invoke ``everalgo-parser`` at all
-(``DIRECT`` content needs no parser).
+and ``UNKNOWN`` absorbs everything else. Lives in ``everalgo-core`` so callers
+can classify a file before deciding whether to invoke ``everalgo-parser`` at
+all (``DIRECT`` content needs no parser).
 """
 
 from __future__ import annotations
