@@ -1,6 +1,6 @@
 """Tests for everalgo.testing.fake_llm — CallRecord."""
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel
@@ -340,4 +340,4 @@ async def test_fake_llm_handler_path_preserves_explicit_parsed_override() -> Non
         response_format=_Tag,
     )
     assert resp.parsed is explicit_tag
-    assert resp.parsed.label == "explicit"
+    assert cast("_Tag", resp.parsed).label == "explicit"  # type: ignore[redundant-cast]

@@ -175,7 +175,7 @@ async def main() -> None:
     facts: list[AtomicFact] = await AtomicFactExtractor(llm=fake).aextract(mc, sender_id="u_alice")
     print(f"[atomic_fact] count={len(facts)}")
     for i, f in enumerate(facts):
-        print(f"  fact[{i}]: {f.fact!r}")
+        print(f"  fact[{i}]: {f.content!r}")
 
     # --- 5. cluster_by_geometry (no LLM call) --------------------------------
     mc_prior = _prior_memcell()

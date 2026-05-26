@@ -12,11 +12,10 @@ UPDATE-mode tests cover:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
@@ -131,22 +130,22 @@ async def test_aextract_summary_falls_back_to_implicit_trait_when_explicit_empty
 
 
 async def test_aextract_raises_on_payload_missing_required_keys() -> None:
-    """Payload without both explicit_info and implicit_traits → LLMError (no retry)."""
-    bad = ChatResponse(content="{}", model="fake")
-    fake = FakeLLMClient(responses=[bad])
+    """Payload without both explicit_info and implicit_traits → ValueError on first attempt (no internal retry)."""
+    bad_responses: list[str | ChatResponse] = [ChatResponse(content="{}", model="fake")]
+    fake = FakeLLMClient(responses=bad_responses)
 
-    with pytest.raises(LLMError):
+    with pytest.raises(ValueError):
         await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
 
     assert fake.call_count == 1
 
 
 async def test_aextract_raises_on_bad_json() -> None:
-    """Unparseable JSON → LLMError propagates immediately (no retry)."""
-    bad = ChatResponse(content="not json", model="fake")
-    fake = FakeLLMClient(responses=[bad])
+    """Unparseable JSON → ValueError on first attempt (no internal retry)."""
+    bad_responses: list[str | ChatResponse] = [ChatResponse(content="not json", model="fake")]
+    fake = FakeLLMClient(responses=bad_responses)
 
-    with pytest.raises(LLMError):
+    with pytest.raises(ValueError):
         await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -395,7 +394,7 @@ async def test_update_no_compact_applies_ops_and_returns_merged_profile() -> Non
 
     assert fake.call_count == 1
     assert profile.owner_id == "u_alice"
-    ei: list[dict[str, Any]] = profile.explicit_info  # type: ignore[attr-defined]
+    ei = cast("list[dict[str, Any]]", profile.explicit_info)  # type: ignore[attr-defined]
     assert len(ei) == 2
     assert ei[1]["category"] == "Location"
     assert ei[1]["description"] == "Lives in Berlin."
@@ -441,7 +440,7 @@ async def test_update_triggers_compact_when_item_count_exceeds_threshold() -> No
     )
 
     assert fake.call_count == 2  # update call + compact call
-    ei: list[dict[str, Any]] = profile.explicit_info  # type: ignore[attr-defined]
+    ei = cast("list[dict[str, Any]]", profile.explicit_info)  # type: ignore[attr-defined]
     assert len(ei) == 1
     assert ei[0]["category"] == "Merged"
 
@@ -484,8 +483,8 @@ async def test_update_merge_correctness_add_update_delete() -> None:
         old_profile=old_p,
     )
 
-    ei: list[dict[str, Any]] = profile.explicit_info  # type: ignore[attr-defined]
-    it: list[dict[str, Any]] = profile.implicit_traits  # type: ignore[attr-defined]
+    ei = cast("list[dict[str, Any]]", profile.explicit_info)  # type: ignore[attr-defined]
+    it = cast("list[dict[str, Any]]", profile.implicit_traits)  # type: ignore[attr-defined]
     # add: 3rd explicit_info item added
     assert len(ei) == 3
     assert ei[2]["category"] == "Hobby"

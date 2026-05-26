@@ -1,7 +1,5 @@
 """Image parser — multimodal LLM OCR with tall-image splitting.
 
-Mirrors ``evermemos-multimodal/src/parser/image/gemini_parser.py``:
-
 - Normal-ratio images go through a single LLM call.
 - Tall screenshots (height/width > 10) are split into overlapping slices
   via ``_utils.split_image_with_overlap``; each slice is OCR'd independently
@@ -54,10 +52,8 @@ _SVG_EXTENSIONS: frozenset[str] = frozenset({"svg"})
 
 _TALL_IMAGE_RATIO_THRESHOLD = 10.0
 
-# Token budgets — verbatim from
-# ``evermemos-multimodal/src/parser/image/gemini_parser.py``. Per-slice OCR
-# caps at 8K; the merge step gets 4x because it joins multiple OCR'd chunks
-# and the merged text is longer than any individual slice.
+# Token budgets. Per-slice OCR caps at 8K; the merge step gets 4x because it
+# joins multiple OCR'd chunks and the merged text is longer than any individual slice.
 _MAX_OCR_OUTPUT_TOKENS = 8_000
 _MAX_MERGE_OUTPUT_TOKENS = 32_000
 
@@ -137,9 +133,6 @@ async def _aparse_tall(
     client: LLMClient,
 ) -> ParsedContent:
     r"""Split-then-merge OCR for tall screenshots.
-
-    Mirrors ``evermemos-multimodal/src/parser/image/base.py:parse`` +
-    ``gemini_parser._merge_parts``:
 
     1. Split into N overlapping vertical slices.
     2. OCR each slice; **drop empty results** so the merge step sees only
@@ -223,7 +216,9 @@ async def _aparse_tall(
             merge_fallback_used = True
         last_response = merge_resp
     except Exception as exc:
-        logger.warning("LLM merge of tall-image OCR parts failed (%s); falling back to deterministic join", exc)
+        logger.warning(
+            "LLM merge of tall-image OCR parts failed (%s); falling back to deterministic join", exc, exc_info=True
+        )
         merged_text = "\n\n".join(ocr_results)
         merge_fallback_used = True
 

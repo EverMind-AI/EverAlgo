@@ -3,7 +3,6 @@
 Public surface (re-exports for ergonomic ``from everalgo.parser import ...``):
 
 - Functions: ``aparse`` / ``parse`` — dispatch entry points.
-- Submodules: ``image`` / ``audio`` / ``document`` / ``url`` / ``video``.
 - Types: ``ParsedContent`` / ``Modality`` / ``RawFile`` (re-exported from
   ``everalgo.types`` for one-stop import).
 """
@@ -16,7 +15,7 @@ from urllib.parse import urlparse
 
 from asgiref.sync import async_to_sync
 
-from everalgo.parser import audio, document, image, url, video
+from everalgo.parser import audio, document, image, url
 from everalgo.types import (
     Modality,
     ParsedContent,
@@ -34,12 +33,7 @@ __all__ = [
     "ParsedContent",
     "RawFile",
     "aparse",
-    "audio",
-    "document",
-    "image",
     "parse",
-    "url",
-    "video",
 ]
 
 logger = logging.getLogger(__name__)

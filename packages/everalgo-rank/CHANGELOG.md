@@ -20,7 +20,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `aagentic_rank(query, candidates, *, llm, config) -> RankOutput`: multi-round agentic retrieval — LLM-guided sufficiency check followed by multi-query expansion, then RRF fusion over all rounds.
 - `arerank(query, candidates, *, llm, prompt, config) -> list[Candidate]` and sync `rerank` bridge: LLM-scored pointwise reranker.
 - `RankConfig` and `AgenticConfig` pydantic models for tuning rerank and agentic retrieval parameters.
-- `FusionMode` enum: `rrf`, `lr`, `mrag`, `agentic`.
+- `FusionMode` enum: `rrf`, `lr`, `vector_anchored`.
 - `fusion.rrf(*sources, k) -> list[Candidate]`: Reciprocal Rank Fusion over multiple recall lists.
 - `fusion.lr(candidates, *, weights) -> list[Candidate]`: linear-rank combination.
 - `fusion.cosine_to_lr_score`, `fusion.score_propagation`, `fusion.expand`: score normalisation and episode-to-fact cross-memory expansion helpers.

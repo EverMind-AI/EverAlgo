@@ -1,8 +1,4 @@
-"""Audio parser prompt.
-
-Lifted verbatim from ``evermemos-multimodal/src/parser/prompts.py``
-(prod-20260306-0331-v1).
-"""
+"""Audio parser prompt."""
 
 PROMPT_FOR_AUDIO = """This is a voice message sent by a user in a chat application. Transcribe it word by word.
 

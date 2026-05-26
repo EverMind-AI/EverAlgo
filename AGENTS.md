@@ -8,12 +8,12 @@ If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboar
 
 ## 1. Project Identity
 
-**EverAlgo** is an algorithm library for memory extraction and ranking — *not* a service, not a framework.
+**EverAlgo** is an algorithm library for memory extraction and retrieval — *not* a service, not a framework.
 
 - **Algorithm-only.** All memory extraction / fusion / re-ranking strategies live here. The library is **stateless**: it does not connect to databases, does not read or write the filesystem, does not own any business state.
-- **Two axes.** Every operator belongs to one of two axes whose contracts are symmetric (stateless, in-memory I/O):
+- **Two paths.** Every operator belongs to one of two read/write paths whose contracts are symmetric (stateless, in-memory I/O):
   - **Extract** — write path. Input: structured units (e.g. `MemCell`). Output: structured memories (`Episode` / `Profile` / `Case` / `Skill` / …).
-  - **Rank** — read path. Input: multi-route recall candidates plus pre-fetched cross-memory linkage. Output: a ranked memory list. Ranker performs **no storage I/O**; cross-memory linkage (e.g. `Episode → AtomicFact`) must be pre-fetched by the caller and passed in.
+  - **Retrieve** — read path. Input: query + caller-injected `RetrieveFn` / `RerankFn` callables. Output: a ranked memory list. The `everalgo-rank` package serves as both the retrieval facade and the underlying ranking toolkit: it exposes four strategies — **hybrid** (dual-route RRF), **agentic** (LLM-guided sufficiency + multi/refined query wrapper over any base), **cluster** (cluster-based recall expansion), and **maxsim** (MaxSim nearest-neighbour reranking) — alongside the lower-level ranking primitives (rrf / lr / vector_anchored fusion, weight helpers, LLM-based rerank). Caller binds storage / model clients inside its `RetrieveFn` / `RerankFn`; algo never touches persistence.
 - **Orchestration is upstream.** When to call, in what order, with what concurrency, persistence to the markdown filesystem — all owned by **evermem**. EverAlgo does not care whether the caller is open-source or cloud commercial; both paths share this code.
 
 For the rationale and deeper background, read `docs/concepts/architecture.md`
@@ -46,7 +46,7 @@ everalgo/                              # monorepo, uv virtual workspace
 └── tests/
 ```
 
-Eight publishable distributions share the **`everalgo.*` namespace** through [PEP 420](https://peps.python.org/pep-0420/) native namespace packages: every `packages/*/src/everalgo/` directory deliberately omits `__init__.py`, while subpackages (`everalgo/<subpkg>/__init__.py`) are regular packages. This is the [PyPA-recommended layout](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages) for Py3-only + pip-installed projects, and it lets `from everalgo.user_memory import EpisodeExtractor` work even when `everalgo-user-memory` and `everalgo-boundary` are installed from different distributions. Industrial precedents: `google-cloud-*` (100+ dists sharing `google.cloud.*`) and `sphinxcontrib-*` (6 official Sphinx-extension dists sharing `sphinxcontrib.*`).
+Nine publishable distributions share the **`everalgo.*` namespace** through [PEP 420](https://peps.python.org/pep-0420/) native namespace packages: every `packages/*/src/everalgo/` directory deliberately omits `__init__.py`, while subpackages (`everalgo/<subpkg>/__init__.py`) are regular packages. This is the [PyPA-recommended layout](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages) for Py3-only + pip-installed projects, and it lets `from everalgo.user_memory import EpisodeExtractor` work even when `everalgo-user-memory` and `everalgo-boundary` are installed from different distributions. Industrial precedents: `google-cloud-*` (100+ dists sharing `google.cloud.*`) and `sphinxcontrib-*` (6 official Sphinx-extension dists sharing `sphinxcontrib.*`).
 
 The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = false` at the root, members under `packages/*`). Same shape: [Apache Airflow](https://github.com/apache/airflow) (100+ workspace members, single root lockfile) and [pydantic-ai](https://github.com/pydantic/pydantic-ai). Note these two projects are *uv-workspace* references only — Airflow's `airflow.providers.*` is pkgutil-style legacy namespace, not PEP 420; pydantic-ai uses three independent namespaces, not one shared. LangChain and LlamaIndex are referenced for the *monorepo* layout only — neither uses uv workspace itself; they keep per-package venvs and lockfiles.
 
@@ -57,11 +57,11 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
                                      ▲
        ┌────────────┬────────────┬──┴───────────┬───────────┐
        │            │            │              │           │
-   boundary    clustering        rank         parser
-       ▲            ▲                                       ▲
-       └────────────┤                                       │
-                    │                                       │
-            user-memory ── agent-memory          everalgo-knowledge
+   boundary    clustering        rank         parser       │
+       ▲            ▲            ▲                         ▲
+       └────────────┤            │                         │
+                    │            │                         │
+            user-memory ── agent-memory           everalgo-knowledge
 ```
 
 ---
@@ -73,7 +73,7 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
 git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 
-# Install all 8 packages editable into a shared venv (includes dev tools).
+# Install all 9 packages editable into a shared venv (includes dev tools).
 uv sync --all-packages --group dev
 
 # Run tests across the workspace.
@@ -140,7 +140,7 @@ uv run pre-commit autoupdate
 
 #### What's deliberately NOT in pre-commit
 
-- **`mypy` / `pyright`** — strict type-checks over the 8-package PEP 420 workspace each take several seconds per run and would make commit feel sluggish; enforced by CI instead (pydantic / sklearn / openai-python / anthropic-sdk-python do the same).
+- **`mypy` / `pyright`** — strict type-checks over the 9-package PEP 420 workspace each take several seconds per run and would make commit feel sluggish; enforced by CI instead (pydantic / sklearn / openai-python / anthropic-sdk-python do the same).
 - **`pytest`** — same reason. CI is the gate.
 
 ### Editor integration (recommended)

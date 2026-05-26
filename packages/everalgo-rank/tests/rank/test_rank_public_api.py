@@ -12,17 +12,34 @@ def test_top_level_exports_full_surface() -> None:
 
     assert sorted(__all__) == sorted(
         [
+            "AgenticDecision",
             "CaseRanker",
             "DEFAULT_RANK_CONFIG",
             "EpisodicRanker",
             "FusionMode",
+            "ParentFetchFn",
             "RankConfig",
+            "RerankFn",
+            "RetrieveFn",
             "SkillRanker",
+            "aagentic_retrieve",
+            "acluster_retrieve",
+            "agentic",
+            "agentic_retrieve",
+            "ahybrid_retrieve",
+            "amaxsim_retrieve",
             "arank",
             "case",
+            "cluster",
+            "cluster_retrieve",
             "episodic",
             "fusion",
+            "hybrid",
+            "hybrid_retrieve",
+            "maxsim",
+            "maxsim_retrieve",
             "profile",
+            "protocols",
             "rank",
             "rerank",
             "skill",
@@ -64,10 +81,6 @@ def test_fusion_tools_callable() -> None:
     assert callable(fusion.lr)
     assert callable(fusion.cosine_to_lr_score)
     assert callable(fusion.score_propagation)
-    # Hierarchical expansion lives in fusion (merged from former _mrag_expander).
-    assert callable(fusion.expand)
-    # LLM-judged ranking — the only async function in fusion.
-    assert inspect.iscoroutinefunction(fusion.aagentic_rank)
 
 
 def test_weight_tools_callable_and_export_lr_coefs() -> None:
@@ -128,32 +141,11 @@ def test_prompts_modules_export_required_constants() -> None:
         assert "{top_k}" in p
 
 
-def test_agentic_prompts_export_required_placeholders() -> None:
-    """Sufficiency uses ``{query}/{retrieved_docs}``; multi-query uses ``{original_query}/...``."""
-    from everalgo.rank.prompts.en.agentic import (
-        AGENTIC_MULTI_QUERY_PROMPT_EN,
-        AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN,
-    )
-    from everalgo.rank.prompts.zh.agentic import (
-        AGENTIC_MULTI_QUERY_PROMPT_ZH,
-        AGENTIC_SUFFICIENCY_CHECK_PROMPT_ZH,
-    )
-
-    for p in (AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN, AGENTIC_SUFFICIENCY_CHECK_PROMPT_ZH):
-        assert "{query}" in p
-        assert "{retrieved_docs}" in p
-    for p in (AGENTIC_MULTI_QUERY_PROMPT_EN, AGENTIC_MULTI_QUERY_PROMPT_ZH):
-        assert "{original_query}" in p
-        assert "{retrieved_docs}" in p
-        assert "{missing_info}" in p
-
-
 def test_rank_config_importable_and_frozen() -> None:
     from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig
 
     cfg = RankConfig()
-    # Default is "rrf" — expand (mrag) is opt-in, parallel to lr/rrf rather
-    # than the default behaviour. Matches enterprise's method=rrf default.
+    # Default is "rrf". Matches enterprise's method=rrf default.
     assert cfg.fusion_mode == "rrf"
     assert DEFAULT_RANK_CONFIG.fusion_mode == "rrf"
     # frozen → assignment raises
@@ -179,25 +171,11 @@ def test_registry_modes_table_matches_per_facade_capabilities() -> None:
     """Each registry entry declares which fusion modes the facade supports."""
     from everalgo.rank.rerank import _ALGO_REGISTRY
 
-    assert _ALGO_REGISTRY["case"].modes == ("rrf", "lr", "vector_anchored", "agentic")
-    assert _ALGO_REGISTRY["skill"].modes == ("rrf", "lr", "agentic")
-    assert _ALGO_REGISTRY["episodic"].modes == ("rrf", "lr", "mrag", "agentic")
+    assert _ALGO_REGISTRY["case"].modes == ("rrf", "lr", "vector_anchored")
+    assert _ALGO_REGISTRY["skill"].modes == ("rrf", "lr")
+    assert _ALGO_REGISTRY["episodic"].modes == ("rrf", "lr")
     # Profile does not use fusion_mode at all.
     assert _ALGO_REGISTRY["profile"].modes == ()
-
-
-async def test_invalid_fusion_mode_for_facade_raises() -> None:
-    """``mrag`` is only allowed for episodic; case/skill raise ValueError."""
-    import pytest as _pytest  # local alias to avoid clashing with outer pytest import
-
-    from everalgo.rank import RankConfig, case
-    from everalgo.types import RankInput
-
-    with _pytest.raises(ValueError, match="not supported"):
-        await case.arank(
-            RankInput(query="q", memory_type="case"),
-            config=RankConfig(fusion_mode="mrag"),
-        )
 
 
 async def test_vector_anchored_rejected_by_non_case_facades() -> None:

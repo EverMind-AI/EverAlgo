@@ -8,41 +8,27 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from asgiref.sync import async_to_sync
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from everalgo.llm.types import ChatMessage
-from everalgo.rank.fusion import AgenticConfig  # noqa: TC001  (runtime import required by pydantic field type)
 from everalgo.types import Candidate, RankInput, RankOutput, ScoredItem
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
-    from everalgo.rank.fusion import RerankFn, RetrieveFn
 
 __all__ = [
     "DEFAULT_RANK_CONFIG",
     "FusionMode",
     "RankConfig",
+    "_basic_arank",
     "arerank",
     "rerank",
 ]
 
 
-class RankedItem(BaseModel):
-    """Single ranked candidate from rerank LLM."""
-
-    id: str
-    score: float
-
-
-class RerankResponse(BaseModel):
-    """LLM rerank output schema."""
-
-    ranked: list[RankedItem] = Field(..., description="Ranked candidates with scores")
-
-
 logger = logging.getLogger(__name__)
 
-FusionMode = Literal["rrf", "lr", "mrag", "vector_anchored", "agentic"]
+FusionMode = Literal["rrf", "lr", "vector_anchored"]
 """Top-level ranking strategy — parallel to enterprise ``method`` parameter.
 """
 
@@ -60,10 +46,8 @@ class RankConfig(BaseModel):
     expand_limit: int = 3
     max_convergence_rounds: int = 10
 
-    va_saturation_k: float = 5.0
-    va_alpha: float = 0.7
-
-    agentic_config: AgenticConfig | None = None
+    va_saturation_k: float = 5.0  # vector_anchored: saturation scale for BM25 scores
+    va_alpha: float = 0.7  # vector_anchored: blend weight (1=vec-only, 0=bm25-only)
 
 
 DEFAULT_RANK_CONFIG = RankConfig()
@@ -72,6 +56,7 @@ DEFAULT_RANK_CONFIG = RankConfig()
 async def arerank(
     items: Sequence[Candidate],
     *,
+    query: str,
     prompt: str,
     top_k: int,
     llm: LLMClient,
@@ -80,6 +65,8 @@ async def arerank(
 
     Args:
         items: Candidates produced by fusion (+ optional weighting).
+        query: User query to rerank against. Substituted into the prompt's
+            ``{query}`` placeholder.
         prompt: Prompt template; must include ``{query}`` / ``{candidates_json}`` /
             ``{top_k}`` placeholders. Callers typically pass one of the modules
             in ``everalgo.rank.prompts.{en,zh}``.
@@ -100,13 +87,6 @@ async def arerank(
 
     client = llm
 
-    query = ""
-    for item in items:
-        q = item.metadata.get("__rerank_query__")
-        if isinstance(q, str):
-            query = q
-            break
-
     candidates_payload = [{"id": item.id, "score": item.score, **item.metadata} for item in items]
     rendered = prompt.format(
         query=query,
@@ -114,37 +94,71 @@ async def arerank(
         top_k=top_k,
     )
 
-    response = await client.chat(
-        messages=[ChatMessage(role="user", content=rendered)],
-        response_format=RerankResponse,
-    )
-
-    parsed = cast("RerankResponse | None", response.parsed)
-    if parsed is None:
-        raise ValueError("LLM returned no parsed structured output")
-    return _apply_rerank_scores(items, parsed, top_k)
+    ranked_items = await _call_llm_for_rerank(client, rendered)
+    return _apply_rerank_scores(items, ranked_items, top_k)
 
 
 rerank = async_to_sync(arerank)
 """Sync bridge for non-event-loop contexts (CLI / pytest). Per ADR 010."""
 
 
+def _extract_json_object(text: str) -> str:
+    """Find first balanced brace block in text (brace-balanced parser for nested JSON).
+
+    Used for rerank responses which contain ``ranked: list[{id, score}]`` — a nested structure
+    that a flat non-nested regex cannot handle.
+    """
+    start = text.find("{")
+    if start < 0:
+        raise ValueError(f"No JSON found: {text[:200]!r}")
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise ValueError(f"Unbalanced JSON: {text[:200]!r}")
+
+
+async def _call_llm_for_rerank(llm: LLMClient, rendered: str) -> list[dict[str, Any]]:
+    """Inner async function decorated with retry; separated so the decorator applies at definition time.
+
+    Uses brace-balanced extractor because RerankResponse is nested (ranked: list[{id, score}]).
+    Returns the raw ``ranked`` list as a list of dicts for score application.
+
+    Raises:
+        ValueError: If no JSON object found or the ``ranked`` field is absent/invalid.
+    """
+    response = await llm.chat(messages=[ChatMessage(role="user", content=rendered)])
+    text = response.content
+    json_str = _extract_json_object(text)
+    data = json.loads(json_str)
+    ranked = data.get("ranked")
+    if not isinstance(ranked, list):
+        raise ValueError(f"Missing or invalid 'ranked' field in rerank response: {data!r}")  # noqa: TRY004
+    return cast("list[dict[str, Any]]", ranked)
+
+
 def _apply_rerank_scores(
     items: Sequence[Candidate],
-    response: RerankResponse,
+    ranked_items: list[dict[str, Any]],
     top_k: int,
 ) -> list[Candidate]:
     """Apply LLM-assigned scores to candidates, sort, truncate."""
     by_id = {item.id: item for item in items}
     out: list[Candidate] = []
-    for ranked_item in response.ranked:
-        if ranked_item.id not in by_id:
+    for ranked_item in ranked_items:
+        item_id = ranked_item.get("id")
+        item_score = ranked_item.get("score")
+        if not isinstance(item_id, str) or item_id not in by_id:
             continue
-        original = by_id[ranked_item.id]
+        original = by_id[item_id]
         out.append(
             original.model_copy(
                 update={
-                    "score": ranked_item.score,
+                    "score": float(item_score) if item_score is not None else 0.0,
                     "metadata": {**original.metadata, "fusion_score": original.score},
                 }
             )
@@ -169,21 +183,19 @@ class _RankerSpec(NamedTuple):
 _ALGO_REGISTRY: dict[str, _RankerSpec] = {}
 
 
-async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
+async def _basic_arank(
     rank_input: RankInput,
     *,
     config: RankConfig = DEFAULT_RANK_CONFIG,
     llm: LLMClient | None = None,
     prompt: str | None = None,
     enable_rerank: bool = False,
-    retrieve_fn: RetrieveFn | None = None,
-    rerank_fn: RerankFn | None = None,
     rerank_top_k: int | None = None,
 ) -> RankOutput:
     """Unified pipeline dispatched to by all facade rankers.
 
-    Branches on ``config.fusion_mode``: ``rrf``/``lr`` run Phase 1 only; ``mrag`` adds Phase 2-4 expansion;
-    ``agentic`` runs LLM-guided multi-round. Phase 5 LLM rerank is an optional shared final step.
+    Branches on ``config.fusion_mode``: ``rrf`` and ``lr`` are the two Phase-1 fusion strategies.
+    Phase 5 LLM rerank is an optional shared final step.
 
     ``rerank_top_k`` lets the Phase-5 rerank narrow further than ``rank_input.top_k``:
     fusion produces a wider candidate pool (``top_k``), the LLM rescores all of them, and only the top
@@ -192,7 +204,7 @@ async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
 
     Raises:
         KeyError: ``rank_input.memory_type`` not in ``_ALGO_REGISTRY``.
-        ValueError: Unsupported ``fusion_mode`` for the facade, or ``agentic`` without ``rerank_fn`` / ``llm``.
+        ValueError: Unsupported ``fusion_mode`` for the facade.
     """
     spec = _ALGO_REGISTRY.get(rank_input.memory_type)
     if spec is None:
@@ -208,70 +220,26 @@ async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
     sparse, dense = rank_input.sparse_candidates, rank_input.dense_candidates
 
     scored: list[ScoredItem]
-    if config.fusion_mode == "mrag":
-        episodes, facts, meta = fusion.expand(
-            sparse,
-            dense,
-            rank_input.episode_to_facts,
-            response_top_k=rank_input.top_k,
-            config=config,
-        )
-        scored = [
-            ScoredItem(id=ep.id, score=ep.score, item_type="episode", metadata=dict(ep.metadata)) for ep in episodes
-        ]
-        scored.extend(
-            ScoredItem(
-                id=f.id,
-                score=f.score,
-                item_type="atomic_fact",
-                parent_episode_id=f.parent_episode_id,
-                metadata=dict(f.metadata),
-            )
-            for f in facts
-        )
-        scored.sort(key=lambda it: it.score, reverse=True)
-        meta = {"stage": item_type, "fusion_mode": "mrag", **meta}
-    elif config.fusion_mode == "agentic":
-        if rerank_fn is None:
-            raise ValueError("fusion_mode='agentic' requires a `rerank_fn` callback (cross-encoder)")
-        if not sparse and not dense:
-            return RankOutput(items=[], metadata={"stage": item_type, "stop_reason": "no_candidates"})
-        if llm is None:
-            raise ValueError("fusion_mode='agentic' requires llm to be provided")
-        agentic_cfg = config.agentic_config or fusion.DEFAULT_AGENTIC_CONFIG
-        reranked = await fusion.aagentic_rank(
-            rank_input.query,
-            sparse,
-            dense,
-            rerank=rerank_fn,
-            retrieve=retrieve_fn,
-            top_k=rank_input.top_k,
-            llm=llm,
-            config=agentic_cfg,
-        )
-        scored = [ScoredItem(id=c.id, score=c.score, item_type=item_type, metadata=dict(c.metadata)) for c in reranked]
-        meta = {"stage": item_type, "fusion_mode": "agentic", "round2": retrieve_fn is not None}
-    else:
-        if not sparse and not dense:
-            return RankOutput(items=[], metadata={"stage": item_type, "stop_reason": "no_candidates"})
+    if not sparse and not dense:
+        return RankOutput(items=[], metadata={"stage": item_type, "stop_reason": "no_candidates"})
 
-        fused: list[Candidate]
-        if not sparse:
-            fused = list(dense)
-        elif not dense:
-            fused = list(sparse)
-        elif config.fusion_mode == "lr":
-            fused = fusion.lr(dense, sparse)
-        elif config.fusion_mode == "vector_anchored":
-            fused = fusion.vector_anchored(dense, sparse, saturation_k=config.va_saturation_k, alpha=config.va_alpha)
-        else:  # rrf
-            fused = fusion.rrf(dense, sparse, k=config.rrf_k)
+    fused: list[Candidate]
+    if not sparse:
+        fused = list(dense)
+    elif not dense:
+        fused = list(sparse)
+    elif config.fusion_mode == "lr":
+        fused = fusion.lr(dense, sparse)
+    elif config.fusion_mode == "vector_anchored":
+        fused = fusion.vector_anchored(dense, sparse, saturation_k=config.va_saturation_k, alpha=config.va_alpha)
+    else:  # rrf
+        fused = fusion.rrf(dense, sparse, k=config.rrf_k)
 
-        fused.sort(key=lambda c: c.score, reverse=True)
-        fused = fused[: rank_input.top_k]
+    fused.sort(key=lambda c: c.score, reverse=True)
+    fused = fused[: rank_input.top_k]
 
-        scored = [ScoredItem(id=c.id, score=c.score, item_type=item_type, metadata=dict(c.metadata)) for c in fused]
-        meta = {"stage": item_type, "fusion_mode": config.fusion_mode}
+    scored = [ScoredItem(id=c.id, score=c.score, item_type=item_type, metadata=dict(c.metadata)) for c in fused]
+    meta: dict[str, Any] = {"stage": item_type, "fusion_mode": config.fusion_mode}
 
     if enable_rerank and scored:
         if llm is None:
@@ -282,7 +250,6 @@ async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
                 score=item.score,
                 metadata={
                     **item.metadata,
-                    "__rerank_query__": rank_input.query,
                     "item_type": item.item_type,
                     "parent_episode_id": item.parent_episode_id,
                 },
@@ -290,7 +257,13 @@ async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
             for item in scored
         ]
         effective_rerank_top_k = rerank_top_k if rerank_top_k is not None else rank_input.top_k
-        reranked = await arerank(with_query, prompt=prompt or rerank_prompt, top_k=effective_rerank_top_k, llm=llm)
+        reranked = await arerank(
+            with_query,
+            query=rank_input.query,
+            prompt=prompt or rerank_prompt,
+            top_k=effective_rerank_top_k,
+            llm=llm,
+        )
         by_id = {it.id: it for it in scored}
         scored = [
             by_id[c.id].model_copy(update={"score": c.score, "metadata": {**by_id[c.id].metadata, **c.metadata}})
@@ -317,4 +290,4 @@ async def _arank(rank_input: RankInput, **kwargs: Any) -> RankOutput:
 _rank = async_to_sync(_arank)
 """Sync bridge over ``_arank``; re-exported as ``rank`` from the package root. Only safe outside an event loop."""
 
-from everalgo.rank import fusion  # noqa: E402  (late import breaks the circular dependency with fusion)
+from everalgo.rank import fusion  # noqa: E402  (late import breaks the circular dependency with rank/__init__.py)

@@ -19,7 +19,7 @@ pip install everalgo-rank
 | `SkillRanker` | Class facade — agent skill ranking; LLM bound at construction |
 | `profile.rank` | Module-level sync function — profile ranking; cosine sort + dedup, no LLM |
 | `RankConfig` | Frozen pydantic config: `fusion_mode`, `rrf_k`, `alpha`, etc. |
-| `FusionMode` | Literal type: `"rrf"` / `"lr"` / `"mrag"` / `"agentic"` |
+| `FusionMode` | Literal type: `"rrf"` / `"lr"` / `"vector_anchored"` |
 | `DEFAULT_RANK_CONFIG` | `RankConfig()` with defaults (`fusion_mode="rrf"`, `rrf_k=60`) |
 | `arank` / `rank` | Top-level async / sync dispatch — routes to the registered ranker by `RankInput.memory_type` |
 | `arerank` / `rerank` | Low-level LLM rerank step; used by the ranker facades internally |

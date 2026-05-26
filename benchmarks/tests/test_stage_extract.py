@@ -20,11 +20,13 @@ import pytest
 from benchmarks.common.config import BenchmarkConfig
 from benchmarks.common.stages.extract import (
     _cluster_one_memcell,
+    _detect_all_boundaries,
     _run_clustering_pass,
     _serialize_cluster_file,
     run_extract_stage,
 )
 from benchmarks.common.stages.types import StageContext
+from everalgo.boundary import DetectionResult
 from everalgo.clustering.state import Cluster
 
 # ---------------------------------------------------------------------------
@@ -32,7 +34,7 @@ from everalgo.clustering.state import Cluster
 # ---------------------------------------------------------------------------
 
 
-def _make_embedding_client(vector: list[float] | None = None) -> MagicMock:
+def _make_embedding_client(vector: list[float] | None = None) -> MagicMock:  # pyright: ignore[reportUnusedFunction]
     """Return a mock EmbeddingClient whose embed() returns a single vector."""
     vec = vector or [0.1, 0.2, 0.3]
     client = MagicMock()
@@ -40,14 +42,24 @@ def _make_embedding_client(vector: list[float] | None = None) -> MagicMock:
     return client
 
 
-def _make_memcell(mc_id: str = "0", timestamp: int = 1_000_000, content: str = "hello world") -> dict[str, Any]:
+def _make_memcell(
+    mc_id: str = "0",
+    timestamp: int = 1_000_000,
+    content: str = "hello world",
+    content_embeddings: list[float] | None = None,
+) -> dict[str, Any]:
     """Return a minimal memcell dict matching the stage 1 output schema."""
     return {
         "id": mc_id,
         "timestamp": timestamp,
         "items": [],
-        "episode": {"subject": "test", "summary": "test", "content": content},
-        "atomic_facts": [],
+        "episode": {"subject": "test", "summary": "test", "content": content, "content_embeddings": content_embeddings},
+        "atomic_facts": {
+            "time": "",
+            "timestamp": 0,
+            "atomic_fact": [],
+            "fact_embeddings": [],
+        },
     }
 
 
@@ -114,8 +126,10 @@ async def test_extract_writes_memcell_json_for_mini_fixture(tmp_path: Path) -> N
     assert isinstance(mc["episode"], dict)
     assert "subject" in mc["episode"]
     assert "content" in mc["episode"]
-    # atomic_facts is a flat list
-    assert isinstance(mc["atomic_facts"], list)
+    # atomic_facts is a dict {"time", "timestamp", "atomic_fact": list[str], "fact_embeddings": list[list[float]]}
+    assert isinstance(mc["atomic_facts"], dict)
+    assert "atomic_fact" in mc["atomic_facts"]
+    assert isinstance(mc["atomic_facts"]["atomic_fact"], list)
 
 
 # ---------------------------------------------------------------------------
@@ -125,55 +139,47 @@ async def test_extract_writes_memcell_json_for_mini_fixture(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_cluster_one_memcell_mints_first_cluster() -> None:
-    """First memcell in an empty list must always create scene_0."""
-    client = _make_embedding_client([1.0, 0.0, 0.0])
-    mc = _make_memcell("mc0", timestamp=1000, content="first episode")
+    """First memcell in an empty list must always create cluster_0."""
+    mc = _make_memcell("mc0", timestamp=1000, content="first episode", content_embeddings=[1.0, 0.0, 0.0])
 
-    result = await _cluster_one_memcell(mc, [], client, threshold=0.70, time_window_days=7.0)
+    result = await _cluster_one_memcell(mc, [], threshold=0.70, time_window_days=7.0)
 
     assert len(result) == 1
-    assert result[0].id == "scene_0"
+    assert result[0].id == "cluster_0"
     assert result[0].members == ["mc0"]
     assert result[0].last_ts == 1000
-    client.embed.assert_awaited_once_with(["first episode"])
 
 
 @pytest.mark.asyncio
 async def test_cluster_one_memcell_merges_into_existing() -> None:
     """A memcell similar to an existing cluster must merge, not mint a new one."""
     # Both vectors are identical → cosine similarity == 1.0, well above threshold.
-    vec = [1.0, 0.0, 0.0]
-    client = _make_embedding_client(vec)
-
     existing = Cluster(
-        id="scene_0",
+        id="cluster_0",
         centroid=np.array([1.0, 0.0, 0.0], dtype=np.float32),
         count=1,
         last_ts=500,
         members=["mc0"],
         preview=["old preview"],
     )
-    mc = _make_memcell("mc1", timestamp=1000, content="similar episode")
+    mc = _make_memcell("mc1", timestamp=1000, content="similar episode", content_embeddings=[1.0, 0.0, 0.0])
 
-    result = await _cluster_one_memcell(mc, [existing], client, threshold=0.70, time_window_days=7.0)
+    result = await _cluster_one_memcell(mc, [existing], threshold=0.70, time_window_days=7.0)
 
     # Must still have exactly one cluster (merged, not appended).
     assert len(result) == 1
-    assert result[0].id == "scene_0"
+    assert result[0].id == "cluster_0"
     assert "mc1" in result[0].members
     assert result[0].count == 2
 
 
 @pytest.mark.asyncio
-async def test_cluster_one_memcell_skips_empty_episode() -> None:
-    """Empty episode body must be skipped; embedding client must not be called."""
-    client = _make_embedding_client()
-    mc = _make_memcell("mc0", content="")
+async def test_cluster_one_memcell_raises_on_missing_embeddings() -> None:
+    """MemCell with no content_embeddings must raise ValueError (fail-loud)."""
+    mc = _make_memcell("mc0", content="some episode", content_embeddings=None)
 
-    result = await _cluster_one_memcell(mc, [], client, threshold=0.70, time_window_days=7.0)
-
-    assert result == []
-    client.embed.assert_not_awaited()
+    with pytest.raises(ValueError, match="content_embeddings is missing"):
+        await _cluster_one_memcell(mc, [], threshold=0.70, time_window_days=7.0)
 
 
 @pytest.mark.asyncio
@@ -181,29 +187,27 @@ async def test_cluster_one_memcell_appends_new_cluster_when_dissimilar() -> None
     """A dissimilar memcell must mint a second cluster, not overwrite the first."""
     # Orthogonal vectors → cosine == 0.0, below threshold.
     existing = Cluster(
-        id="scene_0",
+        id="cluster_0",
         centroid=np.array([1.0, 0.0, 0.0], dtype=np.float32),
         count=1,
         last_ts=0,
         members=["mc0"],
         preview=["old"],
     )
-    # New vector is orthogonal.
-    client = _make_embedding_client([0.0, 1.0, 0.0])
-    mc = _make_memcell("mc1", timestamp=0, content="orthogonal topic")
+    mc = _make_memcell("mc1", timestamp=0, content="orthogonal topic", content_embeddings=[0.0, 1.0, 0.0])
 
-    result = await _cluster_one_memcell(mc, [existing], client, threshold=0.70, time_window_days=7.0)
+    result = await _cluster_one_memcell(mc, [existing], threshold=0.70, time_window_days=7.0)
 
     assert len(result) == 2
     ids = {c.id for c in result}
-    assert ids == {"scene_0", "scene_1"}
+    assert ids == {"cluster_0", "cluster_1"}
 
 
 def test_serialize_cluster_file_shape() -> None:
     """Output dict must have 'clusters' list and 'memcell_to_cluster' map."""
     clusters = [
         Cluster(
-            id="scene_0",
+            id="cluster_0",
             centroid=np.array([0.5, 0.5], dtype=np.float32),
             count=2,
             last_ts=2000,
@@ -217,7 +221,7 @@ def test_serialize_cluster_file_shape() -> None:
     assert "memcell_to_cluster" in out
 
     c = out["clusters"][0]
-    assert c["id"] == "scene_0"
+    assert c["id"] == "cluster_0"
     assert isinstance(c["centroid"], list)  # tolist() → plain Python floats
     assert all(isinstance(v, float) for v in c["centroid"])
     assert c["count"] == 2
@@ -225,14 +229,14 @@ def test_serialize_cluster_file_shape() -> None:
     assert c["members"] == ["a", "b"]
 
     m2c = out["memcell_to_cluster"]
-    assert m2c == {"a": "scene_0", "b": "scene_0"}
+    assert m2c == {"a": "cluster_0", "b": "cluster_0"}
 
 
 def test_serialize_cluster_file_is_json_serialisable() -> None:
     """Centroid stored as np.float32 must serialise without TypeError."""
     clusters = [
         Cluster(
-            id="scene_0",
+            id="cluster_0",
             centroid=np.array([0.1, 0.2], dtype=np.float32),
             count=1,
             last_ts=0,
@@ -243,16 +247,15 @@ def test_serialize_cluster_file_is_json_serialisable() -> None:
     out = _serialize_cluster_file(clusters)
     # Must not raise
     serialised = json.dumps(out)
-    assert "scene_0" in serialised
+    assert "cluster_0" in serialised
 
 
 @pytest.mark.asyncio
 async def test_run_clustering_pass_writes_json(tmp_path: Path) -> None:
     """Clustering pass must write clusters_conv_<i>.json with correct shape."""
-    client = _make_embedding_client([1.0, 0.0])
-    memcells = [_make_memcell("0", timestamp=1000, content="episode one")]
+    memcells = [_make_memcell("0", timestamp=1000, content="episode one", content_embeddings=[1.0, 0.0])]
 
-    await _run_clustering_pass(3, memcells, tmp_path, client, threshold=0.70, time_window_days=7.0)
+    await _run_clustering_pass(3, memcells, tmp_path, threshold=0.70, time_window_days=7.0)
 
     out_file = tmp_path / "clusters_conv_3.json"
     assert out_file.exists()
@@ -260,8 +263,8 @@ async def test_run_clustering_pass_writes_json(tmp_path: Path) -> None:
     assert "clusters" in data
     assert "memcell_to_cluster" in data
     assert len(data["clusters"]) == 1
-    assert data["clusters"][0]["id"] == "scene_0"
-    assert data["memcell_to_cluster"] == {"0": "scene_0"}
+    assert data["clusters"][0]["id"] == "cluster_0"
+    assert data["memcell_to_cluster"] == {"0": "cluster_0"}
 
 
 @pytest.mark.asyncio
@@ -296,7 +299,7 @@ async def test_clustering_skipped_when_disabled(tmp_path: Path) -> None:
             asyncio.Semaphore(1),
             asyncio.Semaphore(20),
             tmp_path,
-            boundary_batch_size=20,
+            smart_mask=True,
             max_attempts=1,
             ctx=ctx,
         )
@@ -304,3 +307,150 @@ async def test_clustering_skipped_when_disabled(tmp_path: Path) -> None:
     assert ok is True
     assert not (tmp_path / "clusters_conv_0.json").exists()
     mock_embedding.embed.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _detect_all_boundaries unit tests (incremental path)
+# ---------------------------------------------------------------------------
+
+
+def _make_chat_msg(idx: int) -> Any:
+    """Return a minimal ChatMessage-compatible MagicMock for boundary tests."""
+    from everalgo.types import ChatMessage
+
+    return ChatMessage(
+        id=f"m{idx}",
+        role="user",
+        content=f"hello {idx}",
+        timestamp=1_700_000_000_000 + idx * 30_000,
+        sender_id=f"u{idx}",
+        sender_name=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_detect_all_boundaries_empty_messages_returns_empty() -> None:
+    """Zero messages must return an empty cell list without calling adetect_step."""
+    mock_llm = AsyncMock()
+    mock_step = AsyncMock()
+    with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
+        mock_cls.return_value.adetect_step = mock_step
+        cells = await _detect_all_boundaries([], llm=mock_llm)
+    assert cells == []
+    mock_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_detect_all_boundaries_buffers_first_two_messages() -> None:
+    """Front-2 buffer: adetect_step must not be called for the first 2 messages.
+
+    With only 2 messages the loop never reaches the algo; the residual history
+    is flushed as a single final-tail MemCell.
+    """
+    mock_llm = AsyncMock()
+    mock_step = AsyncMock()
+    msgs = [_make_chat_msg(i) for i in range(2)]
+    with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
+        mock_cls.return_value.adetect_step = mock_step
+        cells = await _detect_all_boundaries(msgs, llm=mock_llm)
+    assert len(cells) == 1  # only the final-flush cell
+    assert mock_step.await_count == 0  # front-2 buffer: algo never called
+
+
+@pytest.mark.asyncio
+async def test_detect_all_boundaries_should_wait_accumulates_without_emit() -> None:
+    """When every adetect_step returns empty cells, only the final-flush cell is emitted.
+
+    Each should_wait call returns ``DetectionResult(cells=[], tail=[*history, new])``.
+    The outer loop replaces history with the returned tail.
+    """
+    mock_llm = AsyncMock()
+    msgs = [_make_chat_msg(i) for i in range(6)]
+
+    async def step_wait(history: list[Any], new: Any, **_: Any) -> DetectionResult:
+        return DetectionResult(cells=[], tail=[*history, new])
+
+    mock_step = AsyncMock(side_effect=step_wait)
+    with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
+        mock_cls.return_value.adetect_step = mock_step
+        cells = await _detect_all_boundaries(msgs, llm=mock_llm)
+    # 6 msgs: first 2 buffered, 4 algo calls all returning should_wait → 1 final flush
+    assert len(cells) == 1
+    assert mock_step.await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_detect_all_boundaries_flushes_final_tail() -> None:
+    """One closed cell from algo + remaining msgs form the final-tail flush."""
+    from typing import cast
+
+    from everalgo.types import ConversationItem, MemCell
+
+    mock_llm = AsyncMock()
+    msgs = [_make_chat_msg(i) for i in range(6)]
+    closed_cell = MemCell(items=cast("list[ConversationItem]", msgs[:3]), timestamp=msgs[2].timestamp)
+
+    # msg 2 → wait; msg 3 → cut (clean cut, tail=[msg3]); msgs 4-5 → wait.
+    side_effects = [
+        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]]),
+        DetectionResult(cells=[closed_cell], tail=[msgs[3]]),
+        DetectionResult(cells=[], tail=[msgs[3], msgs[4]]),
+        DetectionResult(cells=[], tail=[msgs[3], msgs[4], msgs[5]]),
+    ]
+    mock_step = AsyncMock(side_effect=side_effects)
+
+    with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
+        mock_cls.return_value.adetect_step = mock_step
+        cells = await _detect_all_boundaries(msgs, llm=mock_llm, smart_mask=False)
+
+    # 1 closed cell + 1 final-tail flush = 2 total
+    assert len(cells) == 2
+    assert cells[0] is closed_cell
+
+
+@pytest.mark.asyncio
+async def test_detect_all_boundaries_threads_returned_tail_into_next_call() -> None:
+    """Outer loop must feed ``DetectionResult.tail`` as the next call's history.
+
+    Records the ``history`` argument each call sees; verifies the post-cut call
+    receives the bridged tail (smart-mask path is owned by the algo, so the
+    outer loop just trusts the returned tail).
+    """
+    from typing import cast
+
+    from everalgo.types import ConversationItem, MemCell
+
+    mock_llm = AsyncMock()
+    msgs = [_make_chat_msg(i) for i in range(5)]
+    # msgs 0,1 buffered. Call sequence (history shown is what algo SHOULD see):
+    #   call0: history=[0,1],   new=2 → wait, tail=[0,1,2]
+    #   call1: history=[0,1,2], new=3 → cut, tail=[2,3]   (algo decided to bridge)
+    #   call2: history=[2,3],   new=4 → wait, tail=[2,3,4]
+    closed_cell = MemCell(items=cast("list[ConversationItem]", msgs[:3]), timestamp=msgs[2].timestamp)
+    side_effects = [
+        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]]),
+        DetectionResult(cells=[closed_cell], tail=[msgs[2], msgs[3]]),
+        DetectionResult(cells=[], tail=[msgs[2], msgs[3], msgs[4]]),
+    ]
+
+    captured_histories: list[list[Any]] = []
+    call_idx = {"i": 0}
+
+    async def recording_step(history: list[Any], new: Any, **_: Any) -> DetectionResult:
+        captured_histories.append(list(history))
+        result = side_effects[call_idx["i"]]
+        call_idx["i"] += 1
+        return result
+
+    with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
+        mock_cls.return_value.adetect_step = recording_step
+        cells = await _detect_all_boundaries(msgs, llm=mock_llm, smart_mask=True)
+
+    # Validate histories passed to algo on each call.
+    assert captured_histories[0] == [msgs[0], msgs[1]]
+    assert captured_histories[1] == [msgs[0], msgs[1], msgs[2]]
+    # After cut: call2 must see the returned tail [msgs[2], msgs[3]].
+    assert captured_histories[2] == [msgs[2], msgs[3]]
+    # 1 closed cell + 1 final-tail flush.
+    assert len(cells) == 2
+    assert cells[0] is closed_cell
