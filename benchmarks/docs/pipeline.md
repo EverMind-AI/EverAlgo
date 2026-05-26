@@ -140,7 +140,7 @@ JSON 结构是 EverAlgo 原生类型的扁平超集：
 
 ### 并发
 
-- 跨对话：`asyncio.Semaphore(max_concurrent_convs=10)` 控制并发对话数
+- 跨对话：`asyncio.Semaphore(max_concurrent_qa=30)` 控制并发对话数
 - 单对话内：跨 MemCell 用 `asyncio.gather` 并行，全局 `Semaphore(30)` 限制 LLM 并发上限
 
 ---
@@ -314,7 +314,7 @@ queries，每个聚焦不同的缺失维度。例如：
 | `hybrid_rrf_k` | 40 | RRF 融合常数 |
 | `reranker_top_n` | 20 | 最终 Top |
 | `multi_query_num` | 3 | 第 2 轮改写数 |
-| `max_concurrent_qa` | 30 | QA 并发数（stage 3/4/5）|
+| `max_concurrent_qa` | 30 | 单对话并发 QA 数 |
 
 ---
 
@@ -477,8 +477,7 @@ EverCore 评估框架：
 | Models | `embedding_model` | `Qwen/Qwen3-Embedding-4B` |
 | Models | `embedding_dimensions` | 1024（Matryoshka 截断；对齐 EverCore）|
 | Models | `reranker_model` | `Qwen/Qwen3-Reranker-4B` |
-| Concurrency | `max_concurrent_convs` | 10（stage 1/2 跨对话并发上限）|
-| Concurrency | `max_concurrent_qa` | 30（stage 3/4/5 QA 并发；main 用 50）|
+| Concurrency | `max_concurrent_qa` | 30（main 用 50；保守留 rate limit 余量）|
 
 ---
 

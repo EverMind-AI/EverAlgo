@@ -50,19 +50,19 @@ _ALGO_REGISTRY.update(
     {
         "case": _RankerSpec(
             arank=case.arank,
-            modes=("rrf", "lr", "vector_anchored"),
+            modes=("rrf", "lr", "vector_anchored", "agentic"),
             rerank_prompt=CASE_RERANK_PROMPT_EN,
             item_type="case",
         ),
         "skill": _RankerSpec(
             arank=skill.arank,
-            modes=("rrf", "lr"),
+            modes=("rrf", "lr", "agentic"),
             rerank_prompt=SKILL_RERANK_PROMPT_EN,
             item_type="skill",
         ),
         "episodic": _RankerSpec(
             arank=episodic.arank,
-            modes=("rrf", "lr", "mrag"),
+            modes=("rrf", "lr", "mrag", "agentic"),
             rerank_prompt=EPISODIC_RERANK_PROMPT_EN,
             item_type="episode",
         ),

@@ -1,4 +1,8 @@
-"""Image parser prompts."""
+"""Image parser prompts.
+
+Lifted verbatim from ``evermemos-multimodal/src/parser/prompts.py``
+(prod-20260306-0331-v1).
+"""
 
 PROMPT_FOR_PICTURE = """Read this image and return its content as if you were reading it naturally.
 

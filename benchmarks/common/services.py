@@ -2,10 +2,6 @@
 
 Thin minimal clients with exponential-backoff retry. Not production-grade --
 sized for one-shot benchmark runs.
-
-``LLMClient`` is the algo ``OpenAICompatClient`` (via ``everalgo.llm.providers.openai_compat``).
-``EmbeddingClient`` and ``RerankClient`` are benchmark-private model clients; they use the same
-DeepInfra HTTP surface and are not in the algo surface.
 """
 
 from __future__ import annotations
@@ -16,15 +12,24 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from pydantic import SecretStr
-
-from everalgo.llm.config import LLMConfig
-from everalgo.llm.providers.openai_compat import OpenAICompatClient
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from benchmarks.common.config import BenchmarkConfig
+
+
+class ChatResponse(BaseModel):
+    """Minimal chat completion response shape."""
+
+    model_config = ConfigDict(frozen=True)
+
+    content: str
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    parsed: BaseModel | None = None
 
 
 async def _retry_with_backoff[T](
@@ -54,29 +59,102 @@ async def _retry_with_backoff[T](
     raise RuntimeError(f"Retries exhausted after {max_retries} attempts") from last_exc
 
 
-def build_llm_client(cfg: BenchmarkConfig) -> OpenAICompatClient:
-    """Construct the algo OpenAI-compatible LLM client from BenchmarkConfig.
+class LLMClient:
+    """OpenRouter chat-completion client (raw httpx; no openai SDK dependency)."""
 
-    Raises RuntimeError when OPENROUTER_API_KEY is not set.
-    """
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if not key:
-        raise RuntimeError("OPENROUTER_API_KEY not set")
-    return OpenAICompatClient(
-        LLMConfig(
-            api_key=SecretStr(key),
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+        max_retries: int = 3,
+    ) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        self._model = model
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._max_retries = max_retries
+
+    @classmethod
+    def from_config(cls, cfg: BenchmarkConfig) -> LLMClient:
+        """Construct from BenchmarkConfig; raises RuntimeError if API key is missing."""
+        key = os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            raise RuntimeError("OPENROUTER_API_KEY not set")
+        return cls(
+            api_key=key,
             base_url=cfg.llm_base_url,
             model=cfg.llm_model,
             temperature=cfg.llm_temperature,
             max_tokens=cfg.llm_max_tokens,
             timeout=cfg.llm_timeout,
+            max_retries=cfg.llm_max_retries,
         )
-    )
 
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        response_format: type[BaseModel] | None = None,
+    ) -> ChatResponse:
+        """Send a chat completion request and return the assistant response.
 
-# ---------------------------------------------------------------------------
-# Benchmark-private model clients — not in the algo surface
-# ---------------------------------------------------------------------------
+        When ``response_format`` is a Pydantic ``BaseModel`` subclass, the request is sent
+        to OpenRouter with the ``json_schema`` structured-outputs format, and the response
+        content is validated and deserialized into ``ChatResponse.parsed``.
+        """
+
+        async def call() -> dict[str, Any]:
+            payload: dict[str, Any] = {
+                "model": model or self._model,
+                "messages": messages,
+                "temperature": temperature if temperature is not None else self._temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self._max_tokens,
+            }
+            if response_format is not None:
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": response_format.__name__,
+                        "strict": True,
+                        "schema": response_format.model_json_schema(),
+                    },
+                }
+            r = await self._client.post("/chat/completions", json=payload)
+            r.raise_for_status()
+            return r.json()  # type: ignore[no-any-return]
+
+        data = await _retry_with_backoff(call, max_retries=self._max_retries)
+        choice = data["choices"][0]
+        usage = data.get("usage", {})
+        content = choice["message"]["content"] or ""
+
+        parsed: BaseModel | None = None
+        if response_format is not None:
+            parsed = response_format.model_validate_json(content)
+
+        return ChatResponse(
+            content=content,
+            model=data.get("model", self._model),
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            parsed=parsed,
+        )
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
 
 
 class EmbeddingClient:
@@ -125,21 +203,17 @@ class EmbeddingClient:
 
         async def call() -> dict[str, Any]:
             # ``dimensions`` is the Matryoshka truncation knob — Qwen3-Embedding-4B's full
-            # output is 2560-dim; DeepInfra truncates server-side when ``dimensions`` is passed.
-            # ``encoding_format="float"`` is semantically a no-op (OpenAI /embeddings defaults to
-            # ``"float"`` when omitted) but kept explicit for consistent request format.
-            payload: dict[str, Any] = {
-                "input": texts,
-                "model": self._model,
-                "encoding_format": "float",
-            }
+            # output is 2560-dim; DeepInfra truncates server-side when ``dimensions`` is
+            # passed. Mirrors EverCore main ``vectorize_base.py:117-118`` which always
+            # forwards ``HybridVectorizeConfig.dimensions=1024`` to DeepInfra.
+            payload: dict[str, Any] = {"input": texts, "model": self._model}
             if self._dimensions > 0:
                 payload["dimensions"] = self._dimensions
             r = await self._client.post("/embeddings", json=payload)
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
 
-        data: dict[str, Any] = await _retry_with_backoff(call)
+        data = await _retry_with_backoff(call)
         items = sorted(data["data"], key=lambda x: x["index"])
         return [item["embedding"] for item in items]
 
@@ -161,7 +235,11 @@ _DEFAULT_RERANK_INSTRUCTION = (
 
 
 def _format_rerank_inputs(query: str, documents: list[str], instruction: str | None) -> tuple[list[str], list[str]]:
-    """Format query and documents with the Qwen3-Reranker chat template."""
+    """Format query and documents with the Qwen3-Reranker chat template.
+
+    Ported verbatim from EverCore's ``agentic_layer.rerank_deepinfra._format_rerank_texts``
+    to preserve the scoring behavior the EverCore 92.32% LoCoMo baseline depends on.
+    """
     instr = instruction or _DEFAULT_RERANK_INSTRUCTION
     formatted_query = f"{_QWEN3_PREFIX}<Instruct>: {instr}\n<Query>: {query}\n"
     formatted_docs = [f"<Document>: {doc}{_QWEN3_SUFFIX}" for doc in documents]
@@ -245,7 +323,7 @@ class RerankClient:
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
 
-        data: dict[str, Any] = await _retry_with_backoff(call)
+        data = await _retry_with_backoff(call)
         scores = _extract_scores(data, expected_len=len(documents))
         indexed = list(enumerate(scores))
         indexed.sort(key=lambda x: x[1], reverse=True)
@@ -260,7 +338,7 @@ class RerankClient:
 class Services:
     """Bundle of external service clients."""
 
-    llm: OpenAICompatClient
+    llm: LLMClient
     embedding: EmbeddingClient
     rerank: RerankClient
 
@@ -268,13 +346,7 @@ class Services:
     def from_config(cls, cfg: BenchmarkConfig) -> Services:
         """Construct all three clients from a shared BenchmarkConfig."""
         return cls(
-            llm=build_llm_client(cfg),
+            llm=LLMClient.from_config(cfg),
             embedding=EmbeddingClient.from_config(cfg),
             rerank=RerankClient.from_config(cfg),
         )
-
-    async def close(self) -> None:
-        """Close all underlying HTTP clients."""
-        await self.llm._client.close()
-        await self.embedding.close()
-        await self.rerank.close()

@@ -10,8 +10,16 @@ def test_top_level_routing_aparse_parse() -> None:
     assert callable(parse)
 
 
+def test_five_submodules_have_dual_interface() -> None:
+    from everalgo.parser import audio, document, image, url, video
+
+    for mod in (image, audio, document, video, url):
+        assert inspect.iscoroutinefunction(mod.aparse)
+        assert callable(mod.parse)
+
+
 def test_dunder_all_lists_public_symbols() -> None:
-    """``__all__`` lists only facade-level symbols; submodules are internal."""
+    """Re-exports cover the 5 submodules + dispatch fns + 3 facade types."""
     from everalgo.parser import __all__
 
     assert sorted(__all__) == sorted(
@@ -20,6 +28,11 @@ def test_dunder_all_lists_public_symbols() -> None:
             "ParsedContent",
             "RawFile",
             "aparse",
+            "audio",
+            "document",
+            "image",
             "parse",
+            "url",
+            "video",
         ]
     )

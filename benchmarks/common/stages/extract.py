@@ -21,26 +21,22 @@ import time
 import traceback
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from pydantic import SecretStr
-from tqdm import tqdm as _tqdm
 
-from benchmarks.common.dataset import AtomicFactRecord, EpisodeMemoryRecord
 from benchmarks.common.metrics import estimate_tokens
 from benchmarks.common.stages.types import StageStats
 from everalgo.clustering.algorithm import cluster_by_geometry
 from everalgo.clustering.state import Cluster
 from everalgo.llm.config import LLMConfig
-from everalgo.llm.format import format_atomic_fact_time
-from everalgo.llm.parse import retry_on_json_parse_failure
 from everalgo.llm.providers.openai_compat import OpenAICompatClient
-from everalgo.types import AtomicFact
 from everalgo.types import ChatMessage as EverAlgoMemMessage
 from everalgo.user_memory import BoundaryDetector
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.episode import EpisodeExtractor
-from everalgo.user_memory.prompts.en.atomic_fact_from_text import EVENT_LOG_PROMPT
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from benchmarks.common.dataset import Conversation
@@ -48,6 +44,33 @@ if TYPE_CHECKING:
     from benchmarks.common.stages.types import StageContext
 
 logger = logging.getLogger(__name__)
+
+
+# Retry policy for transient LLM JSON-parse failures. OpenRouter occasionally returns
+# prose-wrapped or truncated output that `parse_llm_json_object` cannot recover. The
+# retries here are scoped to that exact ValueError so unrelated bugs surface immediately.
+_JSON_PARSE_ERROR_SIGNATURE = "Failed to parse LLM response as a JSON object"
+_BACKOFF_BASE_SECONDS = 0.5
+
+
+async def _retry_on_json_parse_failure[T](
+    factory: Callable[[], Awaitable[T]],
+    *,
+    max_attempts: int,
+) -> T:
+    """Invoke ``factory()`` up to ``max_attempts`` times when JSON parsing fails."""
+    last_exc: ValueError | None = None
+    for attempt in range(max_attempts):
+        try:
+            return await factory()
+        except ValueError as exc:
+            if _JSON_PARSE_ERROR_SIGNATURE not in str(exc):
+                raise
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(_BACKOFF_BASE_SECONDS * (2**attempt))
+    assert last_exc is not None  # loop above always assigns before exhausting attempts
+    raise last_exc
 
 
 def _build_llm(ctx: StageContext) -> OpenAICompatClient:
@@ -95,16 +118,26 @@ def _conv_to_mem_messages(conv: Conversation) -> list[EverAlgoMemMessage]:
 def _serialize_memcell(
     mc_idx: int,
     mc: Any,
-    record: EpisodeMemoryRecord,
-    atomic_record: AtomicFactRecord,
+    episode: Any,
+    fact_strings: list[str],
 ) -> dict[str, Any]:
     """Build the EverAlgo-native dict for a single MemCell.
 
-    Schema is a clean superset of EverAlgo's MemCell / Episode types. ``atomic_facts``
-    is persisted as a structured dict (time, timestamp, atomic_fact, fact_embeddings)
-    matching :class:`AtomicFactRecord`; the episode embedding is stored once under
-    ``episode.content_embeddings`` and used only for Stage 1 clustering.
+    Schema is a clean superset of EverAlgo's MemCell / Episode types plus a flat
+    atomic-fact list. ``fact_strings`` are the sentences returned by
+    ``AtomicFactExtractor.aextract_from_text`` (the from-episode path); each is
+    wrapped as ``{"fact": <sentence>}`` so downstream stages see the same shape
+    as the legacy ``aextract`` output.
     """
+    # Episode.episode holds the narrative body (not .content — see memories.py).
+    episode_body: str = getattr(episode, "episode", "") or ""
+    episode_subject: str = getattr(episode, "subject", "") or ""
+    # Mirror EverCore: persist summary alongside subject/content so BM25 / embedding
+    # fallback paths (when atomic_facts is empty) have the same three-field input as
+    # EverCore's stage1 output. EverAlgo's EpisodeExtractor already populates summary
+    # (LLM output or content[:200] fallback) via pydantic extra='allow'.
+    episode_summary: str = getattr(episode, "summary", "") or (episode_body[:200] if episode_body else "")
+
     return {
         "id": str(mc_idx),
         "timestamp": mc.timestamp,
@@ -120,104 +153,65 @@ def _serialize_memcell(
             for m in mc.items
         ],
         "episode": {
-            "subject": record.subject,
-            "summary": record.summary,
-            "content": record.content,
-            "content_embeddings": record.embedding,
+            "subject": episode_subject,
+            "summary": episode_summary,
+            "content": episode_body,
         },
-        "atomic_facts": {
-            "time": atomic_record.time,
-            "timestamp": atomic_record.timestamp,
-            "atomic_fact": atomic_record.atomic_fact,
-            "fact_embeddings": atomic_record.fact_embeddings,
-        },
+        "atomic_facts": [{"fact": s} for s in fact_strings],
     }
 
 
 async def _extract_memcell_data(
     mc: Any,
     mc_idx: int,
+    conv: Conversation,
     llm: OpenAICompatClient,
-    embedding_client: EmbeddingClient,
     *,
     max_attempts: int,
 ) -> tuple[dict[str, Any], int, int]:
     """Extract episode + atomic facts for one MemCell and serialize to dict.
 
-    Pipeline:
-    1. EpisodeExtractor — compress raw MemCell into a narrative episode.
-       Raises ``ValueError`` if the episode body is empty (fail-loud; mirrors 93 stage1).
-    2. Parallel: AtomicFactExtractor + episode-body embedding.
-       Raises ``ValueError`` if no atomic facts are returned (fail-loud).
-    3. Sequential: batch-embed all atomic facts to build ``fact_embeddings``.
+    Pipeline mirrors the locomo-benchmark branch's two-hop semantic: first run
+    ``EpisodeExtractor`` to compress the raw MemCell into a narrative episode,
+    then feed the episode body (plus the MemCell's closing timestamp) into
+    ``AtomicFactExtractor.aextract_from_text`` — equivalent to the branch's
+    ``EventLogExtractor.extract_event_log(episode_text, timestamp)``. If the
+    Episode extractor returns an empty body, the from-text call is skipped and
+    ``atomic_facts`` is persisted empty so downstream BM25 / embedding paths
+    still index the MemCell via its episode subject and original messages.
+
+    ``EpisodeExtractor`` receives ``sender_id=None`` to mirror EverCore main's
+    ``stage1_memcells_extraction.py:193-194`` (generic third-person episode,
+    not user-centred).
 
     Returns:
         Tuple of (serialized memcell dict, estimated prompt tokens, estimated
-        completion tokens). Token counts are tiktoken approximations.
+        completion tokens). Token counts are tiktoken approximations covering
+        the Episode pass plus the atomic-fact-from-text pass.
     """
-
-    @retry_on_json_parse_failure(max_retries=max_attempts)
-    async def _do_extract_episode() -> Any:
-        return await EpisodeExtractor(llm=llm).aextract(mc, sender_id=None)
-
-    episode = await _do_extract_episode()
+    episode = await _retry_on_json_parse_failure(
+        lambda: EpisodeExtractor(llm=llm).aextract(mc, sender_id=None),
+        max_attempts=max_attempts,
+    )
     episode_body: str = getattr(episode, "episode", "") or ""
-    if not episode_body:
-        raise ValueError(f"EpisodeExtractor returned empty episode body (mc_idx={mc_idx})")
-
-    @retry_on_json_parse_failure(max_retries=max_attempts)
-    async def _do_extract_facts() -> list[AtomicFact]:
-        # Use EVENT_LOG_PROMPT (event_log schema key) rather than the algo default
-        # ATOMIC_FACT_FROM_TEXT_PROMPT_EN (atomic_facts schema key). Both prompts share the same
-        # inner schema; the parser tolerates either top-level key.
-        return await AtomicFactExtractor(llm=llm).aextract_from_text(
-            episode_body, timestamp=mc.timestamp, prompt=EVENT_LOG_PROMPT
+    if episode_body:
+        fact_strings = await _retry_on_json_parse_failure(
+            lambda: AtomicFactExtractor(llm=llm).aextract_from_text(episode_body, timestamp=mc.timestamp),
+            max_attempts=max_attempts,
         )
+    else:
+        fact_strings = []
+    serialized = _serialize_memcell(mc_idx, mc, episode, fact_strings)
 
-    async def _do_embed_episode() -> list[float] | None:
-        vecs = await embedding_client.embed([episode_body])
-        if not vecs:
-            raise ValueError(f"embed returned empty vector list for episode body (mc_idx={mc_idx})")
-        return list(vecs[0])
-
-    facts, embedding = await asyncio.gather(_do_extract_facts(), _do_embed_episode())
-    fact_strings = [af.content for af in facts]
-    time_str = format_atomic_fact_time(mc.timestamp)
-
-    if not fact_strings:
-        raise ValueError(f"AtomicFactExtractor returned no facts for non-empty episode body (mc_idx={mc_idx})")
-    raw_fact_vecs = await embedding_client.embed(fact_strings)
-    fact_embeddings: list[list[float]] = [list(v) for v in raw_fact_vecs]
-
-    episode_subject: str = getattr(episode, "subject", "") or ""
-    # Summary is unconditionally ``episode_body[:200] + "..."`` — no LLM-summary path. The trailing
-    # ellipsis is load-bearing: downstream BM25 / embedding indices tokenise this field.
-    episode_summary: str = episode_body[:200] + "..."
-    record = EpisodeMemoryRecord(
-        mc_id=str(mc_idx),
-        timestamp=mc.timestamp,
-        subject=episode_subject,
-        summary=episode_summary,
-        content=episode_body,
-        embedding=embedding,
-    )
-    atomic_record = AtomicFactRecord(
-        time=time_str,
-        atomic_fact=fact_strings,
-        fact_embeddings=fact_embeddings,
-        timestamp=mc.timestamp,
-    )
-    serialized = _serialize_memcell(mc_idx, mc, record, atomic_record)
-
-    # Tiktoken-based approximation
+    # Tiktoken-based approximation: input messages x 2 extractor calls
     input_tokens = sum(estimate_tokens(m["content"]) for m in serialized["items"])
-    estimated_prompt = input_tokens * 2
+    estimated_prompt = input_tokens * 2  # BoundaryDetector + EpisodeExtractor + AtomicFactExtractor ≈ 2 passes
 
     episode_dict: dict[str, Any] = serialized.get("episode") or {}
     output_tokens = estimate_tokens(str(episode_dict.get("content", ""))) + estimate_tokens(
         str(episode_dict.get("subject", ""))
     )
-    output_tokens += sum(estimate_tokens(f) for f in atomic_record.atomic_fact)
+    output_tokens += sum(estimate_tokens(f["fact"]) for f in serialized.get("atomic_facts", []))
 
     return serialized, estimated_prompt, output_tokens
 
@@ -226,132 +220,65 @@ async def _detect_all_boundaries(
     mem_messages: list[EverAlgoMemMessage],
     llm: OpenAICompatClient,
     *,
-    smart_mask: bool = True,
-    max_attempts: int = 5,
-    pbar: _tqdm[Any] | None = None,
+    batch_size: int,
+    max_attempts: int,
 ) -> list[Any]:
-    """Incremental boundary detection — thin outer loop over ``adetect_step``.
+    """Stream messages through BoundaryDetector in ``batch_size`` chunks.
 
-    Owns only the caller-side concerns that the algorithm does not encapsulate:
-    the front-2-buffer (no LLM for the first 2 messages)
-    and the final-tail flush at end-of-stream.
-
-    Smart-mask threshold gating, masking, force-split, the LLM call, and the
-    cut-and-bridge state transition are all owned by ``adetect_step`` and
-    surface here through ``DetectionResult.tail``.
-
-    LLM JSON parse retry is handled by the caller-owned ``@retry_on_json_parse_failure`` wrapper inside
-    this function (``max_attempts`` retries per step); if all retries fail, ``ValueError`` propagates up
-    and the per-conversation ``try / except`` in ``_process_conversation`` writes ``*.error.txt``.
-
-    Args:
-        mem_messages: Ordered messages for one conversation.
-        llm: LLM client bound to the BoundaryDetector instance.
-        smart_mask: Default ``True``. Forwarded to ``adetect_step``;
-            the threshold check (``len(history) > 5``) is enforced inside the algo.
-        max_attempts: Maximum number of retries for LLM JSON parse failures per detection step.
-        pbar: Optional tqdm bar to update once per message (caller owns lifecycle).
-
-    Returns:
-        Ordered list of MemCells (closed segments + final-tail flush).
+    Each call receives ``previous_tail + new_batch`` and returns ``(cells, tail)``.
+    The tail (messages the LLM could not yet close) carries forward; the final
+    batch passes ``is_final=True`` to force-flush any residual tail into a cell.
+    Smaller batches yield finer slicing at higher LLM-call count — the knob is
+    surfaced as ``BenchmarkConfig.extract_boundary_batch_size``.
     """
     detector = BoundaryDetector(llm=llm)
-
-    @retry_on_json_parse_failure(max_retries=max_attempts)
-    async def _step(
-        hist: list[EverAlgoMemMessage],
-        m: EverAlgoMemMessage,
-    ) -> Any:
-        return await detector.adetect_step(hist, m, smart_mask=smart_mask)
-
     cells: list[Any] = []
-    history: list[EverAlgoMemMessage] = []
+    tail: list[EverAlgoMemMessage] = []
+    total = len(mem_messages)
+    for batch_start in range(0, total, batch_size):
+        new_batch = mem_messages[batch_start : batch_start + batch_size]
+        batch_input = tail + new_batch
+        is_final = batch_start + batch_size >= total
 
-    for msg in mem_messages:
-        if pbar is not None:
-            pbar.update(1)
-        # Front-2 buffer: no LLM until history has >=2 msgs.
-        if len(history) < 2:
-            history.append(msg)
-            continue
+        async def _detect_batch(inp: list[EverAlgoMemMessage] = batch_input, *, fin: bool = is_final) -> Any:
+            return await detector.adetect(inp, is_final=fin)
 
-        result = await _step(history, msg)
+        result = await _retry_on_json_parse_failure(
+            _detect_batch,
+            max_attempts=max_attempts,
+        )
         cells.extend(result.cells)
-        history = list(result.tail)
-
-    # Flush remaining history as final MemCell.
-    if history:
-        cells.append(_make_final_cell(history))
-
+        tail = list(result.tail)
+    assert not tail, "is_final=True on last batch must flush remaining tail"
     return cells
-
-
-def _make_final_cell(slice_msgs: list[EverAlgoMemMessage]) -> Any:
-    """Wrap leftover messages as the final MemCell at conversation end.
-
-    Uses ``slice_msgs[-1].timestamp`` as the segment's last-message timestamp.
-    """
-    from typing import cast
-
-    from everalgo.types import ConversationItem, MemCell
-
-    return MemCell(
-        items=cast("list[ConversationItem]", slice_msgs),
-        timestamp=slice_msgs[-1].timestamp,
-    )
 
 
 async def _extract_one_conversation(
     conv: Conversation,
     llm: OpenAICompatClient,
-    embedding_client: EmbeddingClient,
     *,
     semaphore: asyncio.Semaphore,
-    smart_mask: bool,
+    boundary_batch_size: int,
     max_attempts: int,
-    conv_idx: int = 0,
-    pbar: _tqdm[Any] | None = None,
-    msg_limit: int | None = None,
 ) -> tuple[list[dict[str, Any]], int, int]:
     """Run boundary detection + episode + atomic-fact extraction on one conversation.
 
-    BoundaryDetector walks messages one-by-one via ``adetect_step`` (incremental
-    per-message boundary detection). All MemCell extractors then run in
-    parallel via asyncio.gather, bounded by the shared semaphore.
-
-    Args:
-        conv: Conversation to process.
-        llm: LLM client shared across all extractors.
-        embedding_client: Embedding client used to compute episode-body vectors concurrently with atomic-fact extraction.
-        semaphore: Shared semaphore bounding total concurrent MemCell LLM calls.
-        smart_mask: Passed to ``_detect_all_boundaries``; mirrors 93 default ``True``.
-        max_attempts: JSON-parse retry budget for EpisodeExtractor / AtomicFactExtractor.
-        conv_idx: Conversation index forwarded to pbar description.
-        pbar: Optional tqdm bar to update during boundary detection (caller owns lifecycle).
-        msg_limit: Truncate mem_messages to this many entries before processing (smoke mode).
+    BoundaryDetector streams messages in batches of ``boundary_batch_size`` with
+    tail-carry between calls (mirror EverCore main). All MemCell extractors then
+    run in parallel via asyncio.gather, bounded by the shared semaphore.
 
     Returns:
         Tuple of (memcell list, total estimated prompt tokens, total estimated
         completion tokens) for this conversation.
     """
     mem_messages = _conv_to_mem_messages(conv)
-    if msg_limit is not None:
-        mem_messages = mem_messages[:msg_limit]
     boundary_cells = await _detect_all_boundaries(
-        mem_messages, llm, smart_mask=smart_mask, max_attempts=max_attempts, pbar=pbar
+        mem_messages, llm, batch_size=boundary_batch_size, max_attempts=max_attempts
     )
-
-    n_cells = len(boundary_cells)
-    if pbar is not None:
-        pbar.reset(total=n_cells)
-        pbar.set_description(f"conv {conv_idx:02d} | {n_cells} cells")
 
     async def _gated(mc: Any, idx: int) -> tuple[dict[str, Any], int, int]:
         async with semaphore:
-            result = await _extract_memcell_data(mc, idx, llm, embedding_client, max_attempts=max_attempts)
-            if pbar is not None:
-                pbar.update(1)
-            return result
+            return await _extract_memcell_data(mc, idx, conv, llm, max_attempts=max_attempts)
 
     results = list(await asyncio.gather(*(_gated(mc, idx) for idx, mc in enumerate(boundary_cells))))
     memcells = [r[0] for r in results]
@@ -363,6 +290,7 @@ async def _extract_one_conversation(
 async def _cluster_one_memcell(
     mc: dict[str, Any],
     existing_clusters: list[Cluster],
+    embedding_client: EmbeddingClient,
     *,
     threshold: float,
     time_window_days: float,
@@ -376,20 +304,19 @@ async def _cluster_one_memcell(
     Skips clustering with a warning when ``episode.content`` is empty — an empty
     embedding is meaningless and would pollute the centroid of any nearby cluster.
     """
-    episode: dict[str, Any] = mc.get("episode") or {}
-    episode_body: str = episode.get("content") or ""
-    raw_vec = episode.get("content_embeddings")
-    if raw_vec is None:
-        raise ValueError(f"_cluster_one_memcell: mc_id={mc.get('id')} — content_embeddings is missing")
+    episode_body: str = mc.get("episode", {}).get("content", "") or ""
+    if not episode_body:
+        logger.warning("memcell id=%s has empty episode body; skipping cluster assignment", mc.get("id"))
+        return existing_clusters
 
-    import numpy as np  # local import to avoid top-level dep on benchmarks side
+    vectors = await embedding_client.embed([episode_body])
+    vec = np.asarray(vectors[0], dtype=np.float32)
 
-    vec = np.asarray(raw_vec, dtype=np.float32)
     new_cluster = Cluster(
         centroid=vec,
         last_ts=int(mc["timestamp"]),
         members=[str(mc["id"])],
-        preview=[episode_body],
+        preview=[episode_body[:200]],
     )
     merged = await cluster_by_geometry(
         new_cluster,
@@ -398,7 +325,7 @@ async def _cluster_one_memcell(
         time_window_days=time_window_days,
     )
     if merged is None:
-        new_id = f"cluster_{len(existing_clusters)}"
+        new_id = f"scene_{len(existing_clusters)}"
         existing_clusters = [*existing_clusters, new_cluster.model_copy(update={"id": new_id})]
     else:
         existing_clusters = [merged if c.id == merged.id else c for c in existing_clusters]
@@ -436,10 +363,11 @@ async def _run_clustering_pass(
     conv_idx: int,
     memcells: list[dict[str, Any]],
     output_dir: Path,
+    embedding_client: EmbeddingClient,
     *,
     threshold: float,
     time_window_days: float,
-) -> int:
+) -> None:
     """Embed each MemCell and assign to a geometric cluster; persist result.
 
     Runs sequentially (one embed call per MemCell) — correctness over throughput,
@@ -448,15 +376,13 @@ async def _run_clustering_pass(
 
     On any failure the error is written to ``clusters_conv_<i>.error.txt`` and
     re-raised so ``_process_conversation`` can mark the conversation as failed.
-
-    Returns:
-        Number of clusters produced.
     """
     clusters: list[Cluster] = []
     for mc in memcells:
         clusters = await _cluster_one_memcell(
             mc,
             clusters,
+            embedding_client,
             threshold=threshold,
             time_window_days=time_window_days,
         )
@@ -464,39 +390,6 @@ async def _run_clustering_pass(
     cluster_data = _serialize_cluster_file(clusters)
     out = output_dir / f"clusters_conv_{conv_idx}.json"
     out.write_text(json.dumps(cluster_data, ensure_ascii=False, indent=2))
-    return len(clusters)
-
-
-def _write_conv_stats(
-    conv_idx: int,
-    memcells: list[dict[str, Any]],
-    output_dir: Path,
-    prompt_tokens: int,
-    completion_tokens: int,
-    *,
-    n_clusters: int | None,
-) -> None:
-    """Write per-conversation stats to ``stats_conv_{conv_idx}.json``.
-
-    Args:
-        conv_idx: Conversation index.
-        memcells: Extracted MemCell list (used for count).
-        output_dir: Stage output directory.
-        prompt_tokens: Prompt tokens consumed for this conversation.
-        completion_tokens: Completion tokens consumed for this conversation.
-        n_clusters: Number of clusters produced, or None if clustering is disabled/failed.
-    """
-    stats: dict[str, Any] = {
-        "conv_idx": conv_idx,
-        "memcells": len(memcells),
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "clustering_enabled": n_clusters is not None,
-    }
-    if n_clusters is not None:
-        stats["clustering"] = {"total_memcells": len(memcells), "new_clusters": n_clusters}
-    out = output_dir / f"stats_conv_{conv_idx}.json"
-    out.write_text(json.dumps(stats, ensure_ascii=False, indent=2))
 
 
 async def _process_conversation(
@@ -507,11 +400,9 @@ async def _process_conversation(
     mc_sem: asyncio.Semaphore,
     output_dir: Any,
     *,
-    smart_mask: bool,
+    boundary_batch_size: int,
     max_attempts: int,
     ctx: StageContext,
-    inner_pbar: _tqdm[Any] | None = None,
-    msg_limit: int | None = None,
 ) -> tuple[bool, int, int]:
     """Process one conversation under the conv semaphore.
 
@@ -523,37 +414,36 @@ async def _process_conversation(
     """
     async with conv_sem:
         try:
-            memcells, prompt_tokens, completion_tokens = await _extract_one_conversation(
+            payload, prompt_tokens, completion_tokens = await _extract_one_conversation(
                 conv,
                 llm,
-                ctx.services.embedding,
                 semaphore=mc_sem,
-                smart_mask=smart_mask,
+                boundary_batch_size=boundary_batch_size,
                 max_attempts=max_attempts,
-                conv_idx=idx,
-                pbar=inner_pbar,
-                msg_limit=msg_limit,
             )
         except Exception:  # per-conv isolation; errors written to .error.txt
             err_path = output_dir / f"memcells_conv_{idx}.error.txt"
             err_path.write_text(traceback.format_exc())
-            logger.exception("conv_%d extraction failed; full traceback in %s", idx, err_path)
             return False, 0, 0
 
         out = output_dir / f"memcells_conv_{idx}.json"
-        out.write_text(json.dumps(memcells, ensure_ascii=False, indent=2))
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
 
-        n_clusters: int | None = None
         if ctx.config.enable_clustering:
-            n_clusters = await _run_clustering_pass(
-                idx,
-                memcells,
-                output_dir,
-                threshold=ctx.config.cluster_similarity_threshold,
-                time_window_days=ctx.config.cluster_max_time_gap_days,
-            )
+            try:
+                await _run_clustering_pass(
+                    idx,
+                    payload,
+                    output_dir,
+                    ctx.services.embedding,
+                    threshold=ctx.config.cluster_similarity_threshold,
+                    time_window_days=ctx.config.cluster_max_time_gap_days,
+                )
+            except Exception:  # per-conv isolation; extract output already written
+                err_path = output_dir / f"clusters_conv_{idx}.error.txt"
+                err_path.write_text(traceback.format_exc())
+                return False, prompt_tokens, completion_tokens
 
-        _write_conv_stats(idx, memcells, output_dir, prompt_tokens, completion_tokens, n_clusters=n_clusters)
         return True, prompt_tokens, completion_tokens
 
 
@@ -582,62 +472,33 @@ async def run_extract_stage(ctx: StageContext) -> StageStats:
         conversations = conversations[: ctx.smoke_conv_limit]
 
     # conv_sem: bound simultaneous conversations; mc_sem: bound total MemCell LLM calls.
-    conv_sem = asyncio.Semaphore(ctx.config.max_concurrent_convs)
-    mc_sem = asyncio.Semaphore(20)  # bound total concurrent MemCell LLM calls
+    conv_sem = asyncio.Semaphore(ctx.config.max_concurrent_qa)
+    mc_sem = asyncio.Semaphore(20)  # mirrors EverCore's Semaphore(20)
 
-    smart_mask = ctx.config.extract_smart_mask
+    from tqdm.asyncio import tqdm as async_tqdm  # type: ignore[import-untyped]
+
+    boundary_batch_size = ctx.config.extract_boundary_batch_size
     max_attempts = ctx.config.llm_max_retries
-    n_convs = len(conversations)
 
-    # Position pool: outer bar at position 0, inner per-conv bars at positions 1..max_slots.
-    # Slots are capped so the terminal doesn't overflow with too many bars at once.
-    max_slots = min(n_convs, ctx.config.max_concurrent_convs)
-    position_pool: asyncio.Queue[int] = asyncio.Queue()
-    for _p in range(1, max_slots + 1):
-        position_pool.put_nowait(_p)
-
-    outer_pbar = _tqdm(total=n_convs, desc="extract", unit="conv", position=0, leave=True, dynamic_ncols=True)
-
-    smoke_msg_limit = ctx.smoke_msg_limit if ctx.smoke else None
-
-    async def _run_one(i: int, conv: Conversation) -> tuple[bool, int, int]:
-        eligible = [m for m in conv.messages if m.role in ("user", "assistant")]
-        if smoke_msg_limit is not None:
-            eligible = eligible[:smoke_msg_limit]
-        n_msgs = len(eligible)
-        pos = await position_pool.get()
-        inner_pbar = _tqdm(
-            total=n_msgs,
-            desc=f"conv {i:02d}",
-            unit="msg",
-            position=pos,
-            leave=False,
-            dynamic_ncols=True,
-        )
-        try:
-            result = await _process_conversation(
+    results: list[tuple[bool, int, int]] = await async_tqdm.gather(  # type: ignore[attr-defined]
+        *[
+            _process_conversation(
                 i,
                 conv,
                 llm,
                 conv_sem,
                 mc_sem,
                 ctx.output_dir,
-                smart_mask=smart_mask,
+                boundary_batch_size=boundary_batch_size,
                 max_attempts=max_attempts,
                 ctx=ctx,
-                inner_pbar=inner_pbar,
-                msg_limit=smoke_msg_limit,
             )
-            outer_pbar.update(1)
-            return result
-        finally:
-            inner_pbar.close()
-            position_pool.put_nowait(pos)
-
-    results: list[tuple[bool, int, int]] = list(
-        await asyncio.gather(*[_run_one(i, conv) for i, conv in enumerate(conversations)])
+            for i, conv in enumerate(conversations)
+        ],
+        desc="extract",
+        unit="conv",
+        dynamic_ncols=True,
     )
-    outer_pbar.close()
 
     stats.success = sum(1 for ok, _, _ in results if ok)
     stats.failed = sum(1 for ok, _, _ in results if not ok)

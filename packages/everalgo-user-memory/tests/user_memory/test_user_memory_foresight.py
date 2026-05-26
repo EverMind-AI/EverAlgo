@@ -106,11 +106,12 @@ async def test_aextract_returns_empty_list_when_llm_returns_empty_foresights() -
 
 
 async def test_aextract_raises_on_bad_json() -> None:
-    """Unparseable JSON → ValueError on first attempt (no internal retry)."""
-    bad_responses: list[str | ChatResponse] = [ChatResponse(content="not json", model="fake")]
-    fake = FakeLLMClient(responses=bad_responses)
+    """Unparseable JSON → LLMError propagates immediately."""
+    from everalgo.llm.errors import LLMError
 
-    with pytest.raises(ValueError):
+    fake = FakeLLMClient(responses=[ChatResponse(content="not json", model="fake")])
+
+    with pytest.raises(LLMError):
         await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1

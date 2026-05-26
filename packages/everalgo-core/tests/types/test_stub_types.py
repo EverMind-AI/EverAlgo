@@ -21,7 +21,7 @@ def test_atomic_fact_importable_with_required_fields() -> None:
 
     af = AtomicFact(
         owner_id="u1",
-        content="x",
+        fact="x",
         timestamp=1,
     )
     assert af.owner_id == "u1"

@@ -8,7 +8,6 @@ dependencies = [
     "everalgo-boundary",
     "everalgo-user-memory",
     "everalgo-rank",
-    "everalgo-retrieval",
     "httpx>=0.27",
     "rank-bm25>=0.2.2",
     "tiktoken>=0.8",
@@ -27,4 +26,3 @@ everalgo-core = { workspace = true }
 everalgo-boundary = { workspace = true }
 everalgo-user-memory = { workspace = true }
 everalgo-rank = { workspace = true }
-everalgo-retrieval = { workspace = true }

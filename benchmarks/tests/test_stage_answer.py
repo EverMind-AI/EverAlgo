@@ -83,16 +83,15 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
 
-    # Mock LLM to return a structured response with FINAL ANSWER.
-    # answer.py reads response.usage.prompt_tokens — mock must expose .usage.
-    mock_usage = MagicMock(prompt_tokens=100, completion_tokens=20)
+    # Mock LLM to return a structured response with FINAL ANSWER
     monkeypatch.setattr(
         services.llm,
         "chat",
         AsyncMock(
             return_value=MagicMock(
                 content="## FINAL ANSWER:\nAlice greeted Bob first.\n",
-                usage=mock_usage,
+                prompt_tokens=100,
+                completion_tokens=20,
             )
         ),
     )
@@ -117,12 +116,7 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
             "subject": "greeting",
             "content": "Alice said hi to Bob first",
         },
-        "atomic_facts": {
-            "time": "T",
-            "timestamp": 0,
-            "atomic_fact": ["Alice greeted Bob first"],
-            "fact_embeddings": [],
-        },
+        "atomic_facts": [{"fact": "Alice greeted Bob first"}],
     }
     (stage1_dir / "memcells_conv_0.json").write_text(json.dumps([memcell]))
 
@@ -134,7 +128,7 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
             {
                 "question_id": "locomo_exp_user_0_qa0",
                 "query": "Who greeted whom first?",
-                "members": ["0"],
+                "memcell_ids": ["0"],
                 "original_qa": {
                     "question_id": "locomo_exp_user_0_qa0",
                     "conv_id": "locomo_exp_user_0",
@@ -184,12 +178,8 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """Fail-loud: persistent LLM exceptions exhaust retries and abort the stage.
-
-    Global principle — silent per-question fallback is forbidden so the operator
-    sees real failures instead of inflated "wrong" counts in stage 5.
-    """
+async def test_run_answer_stage_handles_llm_error_per_question(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """When LLM raises, the stage writes error item but continues."""
     from benchmarks.common.config import BenchmarkConfig
     from benchmarks.common.services import Services
     from benchmarks.common.stages.types import StageContext
@@ -197,8 +187,6 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
-    # Collapse the retry backoff so the test doesn't actually wait 1+2+4+8 = 15 s.
-    monkeypatch.setattr("benchmarks.common.stages.answer.asyncio.sleep", AsyncMock())
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
@@ -215,12 +203,7 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
                     "timestamp": 0,
                     "items": [],
                     "episode": {"subject": "x", "content": "y"},
-                    "atomic_facts": {
-                        "time": "",
-                        "timestamp": 0,
-                        "atomic_fact": [],
-                        "fact_embeddings": [],
-                    },
+                    "atomic_facts": [],
                 }
             ]
         )
@@ -235,7 +218,7 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
                     {
                         "question_id": "q1",
                         "query": "?",
-                        "members": ["0"],
+                        "memcell_ids": ["0"],
                         "original_qa": {
                             "question_id": "q1",
                             "conv_id": "locomo_exp_user_0",
@@ -258,7 +241,7 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
         input_dir=stage3_dir,
         output_dir=tmp_path / "stage4_answer",
     )
-    with pytest.raises(RuntimeError, match="LLM down"):
-        await run_answer_stage(ctx)
-    # No answers.json written — failure aborts before the final dump.
-    assert not (tmp_path / "stage4_answer" / "answers.json").exists()
+    stats = await run_answer_stage(ctx)
+    assert stats.failed >= 1
+    result_data: list[dict[str, Any]] = json.loads((tmp_path / "stage4_answer" / "answers.json").read_text())
+    assert result_data[0].get("error") is True

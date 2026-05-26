@@ -45,7 +45,7 @@ class AtomicFact(BaseModel):
     """
 
     owner_id: str | None
-    content: str
+    fact: str
     timestamp: int  # Unix epoch milliseconds
 
     model_config = ConfigDict(extra="allow")

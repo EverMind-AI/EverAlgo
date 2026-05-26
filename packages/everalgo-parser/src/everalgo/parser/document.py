@@ -4,7 +4,8 @@ Per ``AGENTS.md`` and the engineering alignment for the parser migration, the
 ``document`` submodule covers every non-image / non-audio file shape:
 
 - ``Modality.PDF`` — sent as a single ``application/pdf`` data URI to the
-  multimodal LLM.
+  multimodal LLM (mirrors the path used in
+  ``evermemos-multimodal/src/parser/pdf/gemini_parser.py``).
 - ``Modality.HTML`` — bs4-cleaned (``_utils.clean_html_for_llm``) before
   sending the structured HTML to the LLM with the HTML prompt.
 - ``Modality.EMAIL`` — pure-python ``email`` stdlib parsing; when inline
@@ -49,7 +50,8 @@ _PDF_MIME = "application/pdf"
 _HTML_MAX_INPUT_CHARS = 1_000_000
 _MACOS_SOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
 
-# Inline image OCR caps at 8K tokens (single-image scope, no need for the
+# Verbatim from ``evermemos-multimodal/src/parser/email/eml_parser.py``:
+# inline image OCR caps at 8K tokens (single-image scope, no need for the
 # 32K merge budget used by the long-image stitcher).
 _INLINE_OCR_MAX_TOKENS = 8_000
 _INLINE_IMAGE_MIMETYPES = frozenset(
@@ -158,6 +160,8 @@ async def _aparse_html(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
 async def _aparse_email(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     """EML → ``ParsedContent`` via stdlib ``email`` + inline-image OCR.
 
+    Mirrors evermemos-multimodal/src/parser/email/eml_parser.py:
+
     1. Extract headers.
     2. Collect inline images (Content-ID → bytes).
     3. Extract body: prefer ``text/plain`` when there are no cid images
@@ -257,7 +261,7 @@ async def _aparse_office(
 
 
 def _extract_email_headers(msg: EmailMessage) -> str:
-    lines: list[str] = []
+    lines = []
     for field in ("Subject", "From", "To", "Cc", "Date"):
         value = msg.get(field)
         if value:
@@ -363,7 +367,7 @@ async def _ocr_inline_images(
         except Exception as exc:
             # Best-effort per-image: a single OCR failure should not abort the
             # whole email parse — log and continue with a placeholder marker.
-            logger.warning("OCR failed for inline image %s: %s", filename, exc, exc_info=True)
+            logger.warning("OCR failed for inline image %s: %s", filename, exc)
             results[idx] = f"[image: {filename}, OCR failed]"
     return results
 

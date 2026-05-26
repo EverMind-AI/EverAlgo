@@ -1,4 +1,9 @@
-"""Document parser prompts (PDF / Office / HTML)."""
+"""Document parser prompts (PDF / Office / HTML).
+
+Lifted verbatim from ``evermemos-multimodal/src/parser/prompts.py``
+(prod-20260306-0331-v1) where these strings have been iterated on against
+real customer documents.
+"""
 
 PROMPT_FOR_FILE = """Read this document and return its content as if you were reading it naturally.
 

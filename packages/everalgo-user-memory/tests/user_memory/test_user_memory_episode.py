@@ -99,16 +99,18 @@ async def test_aextract_llm_error_propagates_immediately() -> None:
 
 
 # ==========================================================================
-# (3) JSON parse failure: ValueError on first attempt (no internal retry)
+# (3) JSON parse failure propagates immediately (no retry)
 # ==========================================================================
 
 
-async def test_aextract_invalid_json_raises_value_error() -> None:
-    """Unparseable LLM response raises ValueError immediately; retry is caller's job."""
-    bad_responses: list[str | ChatResponse] = [ChatResponse(content="not json at all", model="fake")]
-    fake = FakeLLMClient(responses=bad_responses)
+async def test_aextract_invalid_json_propagates_immediately() -> None:
+    """Unparseable LLM response raises LLMError (via FakeLLMClient schema validation) after a single call."""
+    from everalgo.llm.errors import LLMError
 
-    with pytest.raises(ValueError):
+    bad = ChatResponse(content="not json at all", model="fake")
+    fake = FakeLLMClient(responses=[bad])
+
+    with pytest.raises(LLMError):
         await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -133,9 +135,7 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
     await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice", prompt=custom)
 
     assert captured["content"].startswith("CUSTOM EPISODE")
-    # pseudo-JSON format: speaker and content are unquoted values
-    assert "Alice" in captured["content"]
-    assert "Schedule a meeting" in captured["content"]
+    assert "Alice: Schedule a meeting" in captured["content"]
 
 
 # ==========================================================================
@@ -274,7 +274,7 @@ async def test_aextract_two_owner_ids_produce_independent_episodes() -> None:
 
 
 def test_render_conversation_skips_empty_content() -> None:
-    """Messages with empty content are silently dropped; pseudo-JSON format used."""
+    """Messages with empty content are silently dropped."""
     cell = MemCell(
         items=[
             ChatMessage(
@@ -287,9 +287,7 @@ def test_render_conversation_skips_empty_content() -> None:
         timestamp=1700000001000,
     )
     rendered = _render_conversation(cell)
-    # pseudo-JSON format: "speaker": Alice (unquoted value) and "content": hi (unquoted value)
-    assert "Alice" in rendered
-    assert "hi" in rendered
+    assert "Alice: hi" in rendered
     assert "Bob" not in rendered
 
 

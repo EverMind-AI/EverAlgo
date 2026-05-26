@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from benchmarks.common.stages.search import (
+    _fuse_with_algo_rrf,
     _tokenize,
     compute_maxsim_score,
     search_with_bm25_index,
@@ -135,13 +136,8 @@ async def test_search_with_emb_index_maxsim_strategy():
 
 
 @pytest.mark.asyncio
-async def test_search_with_emb_index_atomic_facts_short_circuit():
-    """atomic_facts non-empty → field embeddings are NOT included (short-circuit path C).
-
-    When ``atomic_facts`` is present and non-empty, ``_score_emb_item`` returns
-    MaxSim over those facts only — ``subject`` / ``summary`` / ``episode`` are excluded.
-    Score = max cosine over [orthogonal fact] = 0.0 (not boosted by the perfect-match subject).
-    """
+async def test_search_with_emb_index_uses_subject_alongside_facts():
+    """No short-circuit: subject embedding participates in MaxSim even when atomic_facts exist."""
     embedding_client = AsyncMock()
     embedding_client.embed = AsyncMock(return_value=[[1.0, 0.0]])
 
@@ -152,20 +148,19 @@ async def test_search_with_emb_index_atomic_facts_short_circuit():
                 "atomic_facts": [
                     np.array([0.0, 1.0], dtype=np.float32),  # orthogonal, sim=0
                 ],
-                # subject perfectly matches the query, but is excluded by the short-circuit.
+                # subject perfectly matches the query — must win over the orthogonal fact.
                 "subject": np.array([1.0, 0.0], dtype=np.float32),
             },
         }
     ]
     results = await search_with_emb_index("q", emb_index, top_n=1, embedding_client=embedding_client)
     assert len(results) == 1
-    # atomic_facts short-circuit: only the orthogonal fact is scored → MaxSim = 0.0
-    assert results[0][1] == 0.0
+    assert results[0][1] > 0.9
 
 
 @pytest.mark.asyncio
 async def test_search_with_emb_index_falls_back_to_field_embeddings():
-    """When no atomic_facts, scores against subject/summary/episode fields."""
+    """When no atomic_facts, scores against subject/summary/content fields."""
     embedding_client = AsyncMock()
     embedding_client.embed = AsyncMock(return_value=[[1.0, 0.0]])
 
@@ -174,10 +169,45 @@ async def test_search_with_emb_index_falls_back_to_field_embeddings():
             "doc": {"id": "0"},
             "embeddings": {
                 "subject": np.array([1.0, 0.0], dtype=np.float32),
-                "episode": np.array([0.0, 1.0], dtype=np.float32),
+                "content": np.array([0.0, 1.0], dtype=np.float32),
             },
         }
     ]
     results = await search_with_emb_index("q", emb_index, top_n=1, embedding_client=embedding_client)
     assert len(results) == 1
     assert results[0][1] > 0.9  # high sim via subject
+
+
+def test_fuse_with_algo_rrf_combines_lists():
+    """Algo-rrf adapter combines emb + bm25 ranked lists and preserves doc refs."""
+    doc_a = {"id": "0"}
+    doc_b = {"id": "1"}
+    doc_c = {"id": "2"}
+    emb_results = [(doc_a, 0.9), (doc_b, 0.7)]
+    bm25_results = [(doc_b, 15.0), (doc_c, 10.0)]
+    fused = _fuse_with_algo_rrf([emb_results, bm25_results], k=60)
+    # doc_b appears in both → highest RRF.
+    assert fused[0][0]["id"] == "1"
+    # All 3 documents appear in the fused list.
+    assert {d["id"] for d, _ in fused} == {"0", "1", "2"}
+
+
+def test_fuse_with_algo_rrf_multiple_sources():
+    """N-source fusion: doc ranked highly across many sources accumulates the highest score."""
+    doc_a = {"id": "0"}
+    doc_b = {"id": "1"}
+    doc_c = {"id": "2"}
+    sources = [
+        [(doc_a, 0.9), (doc_b, 0.7)],
+        [(doc_b, 0.88), (doc_c, 0.5)],
+        [(doc_a, 0.92), (doc_b, 0.6)],
+    ]
+    fused = _fuse_with_algo_rrf(sources, k=60)
+    ids = [d["id"] for d, _ in fused]
+    # b appears 3x, a appears 2x, c appears 1x → b should be top
+    assert ids[0] == "1"
+
+
+def test_fuse_with_algo_rrf_empty_inputs():
+    """All-empty sources fuse to an empty list."""
+    assert _fuse_with_algo_rrf([[], []], k=60) == []

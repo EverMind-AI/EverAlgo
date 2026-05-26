@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Final, override
+from typing import Final
 
 __all__ = ["SensitiveHeadersFilter"]
 
@@ -29,7 +29,6 @@ class SensitiveHeadersFilter(logging.Filter):
     Does not scan request/response bodies (body PII is out of scope for a header filter).
     """
 
-    @override
     def filter(self, record: logging.LogRecord) -> bool:
         """Redact sensitive entries from ``record.args`` in place; always returns ``True``."""
         if isinstance(record.args, dict):

@@ -37,11 +37,11 @@ def assert_atomic_fact_shape(value: dict[str, Any] | AtomicFact) -> AtomicFact:
     """Assert ``value`` satisfies :class:`AtomicFact` minimal business invariants and return the validated instance.
 
     Raises:
-        AssertionError: If ``content`` is empty or ``timestamp <= 0``.
+        AssertionError: If ``fact`` is empty or ``timestamp <= 0``.
         pydantic.ValidationError: If type-level validation fails.
     """
     fact = value if isinstance(value, AtomicFact) else AtomicFact.model_validate(value)
-    assert fact.content, "AtomicFact.content is empty"
+    assert fact.fact, "AtomicFact.fact is empty"
     assert fact.timestamp > 0, f"AtomicFact.timestamp must be positive (Unix epoch ms), got {fact.timestamp}"
     return fact
 
