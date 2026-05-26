@@ -1,22 +1,17 @@
-"""Chinese prompt for ``rank.case.arank`` LLM rerank."""
+"""Chinese prompt for ``rank.case.arank`` LLM rerank.
 
-CASE_RERANK_PROMPT_ZH = """你是相关性裁判。给定一个用户查询和一组检索到的 agent 执行案例（case）候选，给每个 case 打分，衡量它的过往经验对当前查询的参考价值。
+Derived in the same style as ``SKILL_RERANK_PROMPT_ZH`` and ``EPISODIC_RERANK_PROMPT_ZH``
+(single-instruction framing). Case has no cross-encoder rerank stage in the enterprise
+hybrid path (it uses ``vector_anchored`` fusion instead), so this prompt is a parallel
+extrapolation rather than a port of an existing instruction.
+"""
 
-如果一个 case **非常有用**（分数接近 1.0），通常满足：
-- 它的 `task_intent` 与查询想要完成的任务对齐
-- 它的 `approach`（或解题轨迹）适用于查询面对的问题
-- 它的 `quality_score` 表明该 case 最终是好结果（经验越被验证，分数越高）
-- 阅读该 case 能切实指导 agent 如何处理这次查询
-
-如果一个 case **没用**（分数接近 0.0），通常是因为：
-- 仅在关键词上与查询有交集，但实际解决的是另一类问题
-- 它的 `quality_score` 偏低（案例失败或无定论），且没有可借鉴的失败模式
-- 它所解决的任务与查询所问的不相关
+CASE_RERANK_PROMPT_ZH = """判断每个 agent 执行案例（case）的任务和方法是否对回答用户查询有用，优先选择 `quality_score` 高、经过验证成功的方法且直接适用于查询问题的 case。按 0.0（没有可迁移的经验）到 1.0（任务模式相同且方法已被验证成功）给每个 case 打分。
 
 用户查询：
 {query}
 
-候选列表（JSON 数组；每项含 `id`、`score`，以及元数据如 `task_intent` / `approach` / `quality_score`）：
+候选列表（JSON 数组；每项含 `id`、`score`，以及元数据如 `task_intent` / `approach` / `quality_score` / `key_insight`）：
 {candidates_json}
 
 最多返回 {top_k} 项，按 score 降序排列。分数接近 0 的候选直接丢弃。

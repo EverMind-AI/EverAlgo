@@ -1,22 +1,17 @@
-"""English prompt for ``rank.case.arank`` LLM rerank."""
+"""English prompt for ``rank.case.arank`` LLM rerank.
 
-CASE_RERANK_PROMPT_EN = """You are a relevance judge. Given a user query and a list of retrieved agent execution cases, score each case on how useful its experience is for addressing the query.
+Derived in the same style as ``SKILL_RERANK_PROMPT_EN`` and ``EPISODIC_RERANK_PROMPT_EN``
+(single-instruction framing). Case has no cross-encoder rerank stage in the enterprise
+hybrid path (it uses ``vector_anchored`` fusion instead), so this prompt is a parallel
+extrapolation rather than a port of an existing instruction.
+"""
 
-A case is highly useful (score close to 1.0) if:
-- Its `task_intent` aligns with what the query is trying to accomplish
-- Its `approach` (or solution trace) is applicable to the query's problem
-- Its `quality_score` indicates the case ended in a good outcome (the more verified the experience, the higher the score)
-- Reading this case would meaningfully inform how to handle the query
-
-A case is NOT useful (score close to 0.0) if:
-- It only shares keywords with the query but solves a different problem
-- Its `quality_score` is low (the case failed or was inconclusive) and there is no useful pitfall pattern to learn
-- The task it solves is unrelated to what the query is asking
+CASE_RERANK_PROMPT_EN = """Determine whether each agent execution case's task and approach are useful for addressing the user query, preferring cases whose verified successful approach (high `quality_score`) directly applies to the query's problem. Score each case from 0.0 (no transferable experience) to 1.0 (same task pattern with a verified successful approach).
 
 User query:
 {query}
 
-Candidates (JSON array; each item has `id`, `score`, plus metadata like `task_intent`, `approach`, `quality_score`):
+Candidates (JSON array; each item has `id`, `score`, plus metadata like `task_intent`, `approach`, `quality_score`, `key_insight`):
 {candidates_json}
 
 Return at most {top_k} items, sorted by score descending. Drop candidates whose score would be near 0.

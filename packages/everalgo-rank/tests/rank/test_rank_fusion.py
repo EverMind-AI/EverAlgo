@@ -167,6 +167,118 @@ def test_score_propagation_alpha_zero_uses_parent_only() -> None:
     assert math.isclose(out[0].score, 0.2)
 
 
+# ─── vector_anchored ────────────────────────────────────────────────────────
+
+
+def test_vector_anchored_overlap_uses_actual_scores() -> None:
+    """For a doc present in both sources, score = alpha·cosine + (1-alpha)·(raw/(raw+k))."""
+    dense = [Candidate(id="a", score=0.9)]
+    sparse = [Candidate(id="a", score=10.0)]
+
+    out = fusion.vector_anchored(dense, sparse, saturation_k=5.0, alpha=0.7)
+
+    expected = 0.7 * 0.9 + 0.3 * (10.0 / (10.0 + 5.0))
+    assert len(out) == 1
+    assert out[0].id == "a"
+    assert math.isclose(out[0].score, expected)
+
+
+def test_vector_anchored_alpha_one_uses_vec_only() -> None:
+    dense = [Candidate(id="a", score=0.9)]
+    sparse = [Candidate(id="a", score=10.0)]
+
+    out = fusion.vector_anchored(dense, sparse, alpha=1.0)
+
+    assert math.isclose(out[0].score, 0.9)
+
+
+def test_vector_anchored_alpha_zero_uses_sat_bm25_only() -> None:
+    dense = [Candidate(id="a", score=0.9)]
+    sparse = [Candidate(id="a", score=10.0)]
+
+    out = fusion.vector_anchored(dense, sparse, saturation_k=5.0, alpha=0.0)
+
+    assert math.isclose(out[0].score, 10.0 / 15.0)
+
+
+def test_vector_anchored_saturation_compresses_bm25_into_unit_interval() -> None:
+    """Saturation maps any positive BM25 raw into ``[0, 1)``; raw=k maps to ~0.5."""
+    dense: list[Candidate] = []
+    sparse = [
+        Candidate(id="lo", score=1.0),  # 1/6 ≈ 0.167
+        Candidate(id="mid", score=5.0),  # 5/10 = 0.5
+        Candidate(id="hi", score=100.0),  # 100/105 ≈ 0.952
+    ]
+
+    out = fusion.vector_anchored(dense, sparse, saturation_k=5.0, alpha=0.0)
+
+    by_id = {c.id: c.score for c in out}
+    assert math.isclose(by_id["lo"], 1.0 / 6.0)
+    assert math.isclose(by_id["mid"], 0.5)
+    assert math.isclose(by_id["hi"], 100.0 / 105.0)
+    assert all(0.0 < s < 1.0 for s in by_id.values())
+
+
+def test_vector_anchored_missing_dense_uses_vec_floor() -> None:
+    """Doc only in sparse → its imputed cosine = min of dense scores ("not recalled" != "not relevant")."""
+    dense = [Candidate(id="a", score=0.9), Candidate(id="b", score=0.5)]  # vec_floor = 0.5
+    sparse = [Candidate(id="c", score=10.0)]
+
+    # alpha=1 isolates the imputation effect: c's score should equal vec_floor exactly.
+    out = fusion.vector_anchored(dense, sparse, saturation_k=5.0, alpha=1.0)
+
+    by_id = {c.id: c.score for c in out}
+    assert math.isclose(by_id["c"], 0.5)
+
+
+def test_vector_anchored_missing_sparse_uses_kw_floor() -> None:
+    """Doc only in dense → its imputed sat_bm25 = min of sat-mapped sparse scores."""
+    dense = [Candidate(id="a", score=0.9)]
+    sparse = [Candidate(id="b", score=10.0), Candidate(id="c", score=2.0)]
+    # kw_floor = min(10/15, 2/7) = 2/7
+    expected_kw_floor = 2.0 / 7.0
+
+    # alpha=0 isolates the imputation effect: a's score should equal kw_floor exactly.
+    out = fusion.vector_anchored(dense, sparse, saturation_k=5.0, alpha=0.0)
+
+    by_id = {c.id: c.score for c in out}
+    assert math.isclose(by_id["a"], expected_kw_floor)
+
+
+def test_vector_anchored_sorted_descending() -> None:
+    dense = [Candidate(id="a", score=0.95), Candidate(id="b", score=0.50)]
+    sparse = [Candidate(id="a", score=12.0), Candidate(id="c", score=3.0)]
+
+    out = fusion.vector_anchored(dense, sparse, saturation_k=5.0, alpha=0.7)
+
+    scores = [c.score for c in out]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_vector_anchored_preserves_dense_metadata_over_sparse() -> None:
+    """When a doc appears in both, metadata is taken from the dense entry."""
+    dense = [Candidate(id="a", score=0.9, metadata={"side": "dense", "extra": 1})]
+    sparse = [Candidate(id="a", score=10.0, metadata={"side": "sparse"})]
+
+    out = fusion.vector_anchored(dense, sparse)
+
+    assert out[0].metadata["side"] == "dense"
+    assert out[0].metadata["extra"] == 1
+
+
+def test_vector_anchored_empty_returns_empty() -> None:
+    assert fusion.vector_anchored([], []) == []
+
+
+def test_vector_anchored_drops_doc_with_empty_id() -> None:
+    dense = [Candidate(id="", score=0.9), Candidate(id="ok", score=0.5)]
+    sparse = [Candidate(id="", score=10.0), Candidate(id="ok", score=4.0)]
+
+    out = fusion.vector_anchored(dense, sparse)
+
+    assert [c.id for c in out] == ["ok"]
+
+
 # ─── aagentic_rank ────────────────────────────────────────────────────────
 
 

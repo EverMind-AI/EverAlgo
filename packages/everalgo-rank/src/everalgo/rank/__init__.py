@@ -50,7 +50,7 @@ _ALGO_REGISTRY.update(
     {
         "case": _RankerSpec(
             arank=case.arank,
-            modes=("rrf", "lr", "agentic"),
+            modes=("rrf", "lr", "vector_anchored", "agentic"),
             rerank_prompt=CASE_RERANK_PROMPT_EN,
             item_type="case",
         ),

@@ -34,6 +34,7 @@ class CaseRanker:
         enable_rerank: bool = False,
         retrieve_fn: RetrieveFn | None = None,
         rerank_fn: RerankFn | None = None,
+        rerank_top_k: int | None = None,
     ) -> RankOutput:
         """Case ranker — see ``rerank._basic_arank`` for the pipeline body.
 
@@ -44,6 +45,9 @@ class CaseRanker:
             enable_rerank: When ``True``, run the LLM rerank stage after fusion.
             retrieve_fn: Optional retrieval callback for the ``'agentic'`` fusion mode Round 2.
             rerank_fn: Required for ``fusion_mode='agentic'``; cross-encoder callback for Round 1 rerank.
+            rerank_top_k: When set, Phase-5 LLM rerank truncates to this count instead of
+                ``rank_input.top_k`` — lets fusion produce a wider candidate pool that the LLM
+                then narrows.
 
         Returns:
             Ranked and optionally LLM-reranked case items.
@@ -56,6 +60,7 @@ class CaseRanker:
             enable_rerank=enable_rerank,
             retrieve_fn=retrieve_fn,
             rerank_fn=rerank_fn,
+            rerank_top_k=rerank_top_k,
         )
 
     rank = async_to_sync(arank)
@@ -71,6 +76,7 @@ async def arank(
     enable_rerank: bool = False,
     retrieve_fn: RetrieveFn | None = None,
     rerank_fn: RerankFn | None = None,
+    rerank_top_k: int | None = None,
 ) -> RankOutput:
     """Case module-level ranker — delegates to ``rerank._basic_arank``."""
     return await _basic_arank(
@@ -81,6 +87,7 @@ async def arank(
         enable_rerank=enable_rerank,
         retrieve_fn=retrieve_fn,
         rerank_fn=rerank_fn,
+        rerank_top_k=rerank_top_k,
     )
 
 

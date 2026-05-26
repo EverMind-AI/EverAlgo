@@ -42,7 +42,7 @@ class RerankResponse(BaseModel):
 
 logger = logging.getLogger(__name__)
 
-FusionMode = Literal["rrf", "lr", "mrag", "agentic"]
+FusionMode = Literal["rrf", "lr", "mrag", "vector_anchored", "agentic"]
 """Top-level ranking strategy — parallel to enterprise ``method`` parameter.
 """
 
@@ -59,6 +59,9 @@ class RankConfig(BaseModel):
 
     expand_limit: int = 3
     max_convergence_rounds: int = 10
+
+    va_saturation_k: float = 5.0
+    va_alpha: float = 0.7
 
     agentic_config: AgenticConfig | None = None
 
@@ -175,11 +178,17 @@ async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
     enable_rerank: bool = False,
     retrieve_fn: RetrieveFn | None = None,
     rerank_fn: RerankFn | None = None,
+    rerank_top_k: int | None = None,
 ) -> RankOutput:
     """Unified pipeline dispatched to by all facade rankers.
 
     Branches on ``config.fusion_mode``: ``rrf``/``lr`` run Phase 1 only; ``mrag`` adds Phase 2-4 expansion;
     ``agentic`` runs LLM-guided multi-round. Phase 5 LLM rerank is an optional shared final step.
+
+    ``rerank_top_k`` lets the Phase-5 rerank narrow further than ``rank_input.top_k``:
+    fusion produces a wider candidate pool (``top_k``), the LLM rescores all of them, and only the top
+    ``rerank_top_k`` items survive. When ``None`` (default), rerank keeps ``rank_input.top_k`` items — the
+    historical behaviour.
 
     Raises:
         KeyError: ``rank_input.memory_type`` not in ``_ALGO_REGISTRY``.
@@ -253,6 +262,8 @@ async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
             fused = list(sparse)
         elif config.fusion_mode == "lr":
             fused = fusion.lr(dense, sparse)
+        elif config.fusion_mode == "vector_anchored":
+            fused = fusion.vector_anchored(dense, sparse, saturation_k=config.va_saturation_k, alpha=config.va_alpha)
         else:  # rrf
             fused = fusion.rrf(dense, sparse, k=config.rrf_k)
 
@@ -278,14 +289,15 @@ async def _basic_arank(  # noqa: C901  # pyright: ignore[reportUnusedFunction]
             )
             for item in scored
         ]
-        reranked = await arerank(with_query, prompt=prompt or rerank_prompt, top_k=rank_input.top_k, llm=llm)
+        effective_rerank_top_k = rerank_top_k if rerank_top_k is not None else rank_input.top_k
+        reranked = await arerank(with_query, prompt=prompt or rerank_prompt, top_k=effective_rerank_top_k, llm=llm)
         by_id = {it.id: it for it in scored}
         scored = [
             by_id[c.id].model_copy(update={"score": c.score, "metadata": {**by_id[c.id].metadata, **c.metadata}})
             for c in reranked
             if c.id in by_id
         ]
-        meta = {**meta, "reranked": True}
+        meta = {**meta, "reranked": True, "rerank_top_k": effective_rerank_top_k}
 
     return RankOutput(items=scored, metadata=meta)
 

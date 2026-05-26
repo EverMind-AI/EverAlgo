@@ -77,3 +77,60 @@ def test_sync_bridge_is_callable(
 ) -> None:
     out = case.rank(_mk(sparse_candidates, dense_candidates, top_k=3))
     assert len(out.items) <= 3
+
+
+async def test_arank_vector_anchored_mode_returns_sorted_case_items(
+    dense_candidates: list[Candidate],
+    sparse_candidates: list[Candidate],
+) -> None:
+    """Case is the only facade that accepts ``vector_anchored``; end-to-end pipeline runs cleanly."""
+    out = await case.arank(
+        _mk(sparse_candidates, dense_candidates, top_k=4),
+        config=RankConfig(fusion_mode="vector_anchored"),
+    )
+
+    assert all(it.item_type == "case" for it in out.items)
+    assert out.metadata.get("fusion_mode") == "vector_anchored"
+    scores = [it.score for it in out.items]
+    assert scores == sorted(scores, reverse=True)
+    # Overlap doc ``d1`` (in both lists) should rank first under default alpha=0.7.
+    assert out.items[0].id == "d1"
+
+
+async def test_arank_vector_anchored_dense_only_skips_fusion(
+    dense_candidates: list[Candidate],
+) -> None:
+    """``_basic_arank`` short-circuits to ``list(dense)`` when sparse is empty — fusion is not invoked."""
+    out = await case.arank(
+        _mk([], dense_candidates, top_k=3),
+        config=RankConfig(fusion_mode="vector_anchored"),
+    )
+
+    # Dense passes through unchanged (scaled neither by saturation nor by alpha).
+    assert [it.id for it in out.items] == ["d1", "d2", "d3"]
+    assert out.items[0].score == 0.95
+
+
+async def test_arank_vector_anchored_empty_short_circuits() -> None:
+    out = await case.arank(
+        _mk([], []),
+        config=RankConfig(fusion_mode="vector_anchored"),
+    )
+
+    assert out.items == []
+    assert out.metadata.get("stop_reason") == "no_candidates"
+
+
+async def test_arank_vector_anchored_honors_va_alpha_zero(
+    dense_candidates: list[Candidate],
+    sparse_candidates: list[Candidate],
+) -> None:
+    """``va_alpha=0`` makes ranking depend purely on BM25-saturated scores."""
+    out = await case.arank(
+        _mk(sparse_candidates, dense_candidates, top_k=5),
+        config=RankConfig(fusion_mode="vector_anchored", va_alpha=0.0, va_saturation_k=5.0),
+    )
+
+    # With alpha=0, d1 (BM25=12.5 → sat ≈ 0.714) should outrank d6 (BM25=10.0 → sat ≈ 0.667).
+    ids = [it.id for it in out.items]
+    assert ids.index("d1") < ids.index("d6")

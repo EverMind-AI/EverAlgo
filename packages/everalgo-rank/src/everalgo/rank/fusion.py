@@ -35,6 +35,7 @@ __all__ = [
     "lr",
     "rrf",
     "score_propagation",
+    "vector_anchored",
 ]
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,37 @@ def lr(
         {"emb": list(emb_results), "bm25": list(bm25_results)},
         coefs=coefs,
     )
+
+
+def vector_anchored(
+    dense: Sequence[Candidate],
+    sparse: Sequence[Candidate],
+    *,
+    saturation_k: float = 5.0,
+    alpha: float = 0.7,
+) -> list[Candidate]:
+    """Vector-anchored fusion of dense (cosine) + sparse (BM25) candidates."""
+    vec_score_map: dict[str, float] = {c.id: c.score for c in dense if c.id}
+    kw_sat_map: dict[str, float] = {
+        c.id: (c.score / (c.score + saturation_k) if c.score > 0 else 0.0) for c in sparse if c.id
+    }
+
+    vec_floor = min(vec_score_map.values()) if vec_score_map else 0.0
+    kw_floor = min(kw_sat_map.values()) if kw_sat_map else 0.0
+
+    doc_map: dict[str, Candidate] = {c.id: c for c in dense if c.id}
+    for c in sparse:
+        if c.id and c.id not in doc_map:
+            doc_map[c.id] = c
+
+    out: list[Candidate] = []
+    for doc_id, doc in doc_map.items():
+        vs = vec_score_map.get(doc_id, vec_floor)
+        ks = kw_sat_map.get(doc_id, kw_floor)
+        out.append(doc.model_copy(update={"score": alpha * vs + (1.0 - alpha) * ks}))
+
+    out.sort(key=lambda c: c.score, reverse=True)
+    return out
 
 
 def cosine_to_lr_score(

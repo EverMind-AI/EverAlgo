@@ -1,16 +1,12 @@
-"""English prompt for ``rank.episodic.arank`` LLM rerank."""
+"""English prompt for ``rank.episodic.arank`` LLM rerank.
 
-EPISODIC_RERANK_PROMPT_EN = """You are a relevance judge. Given a user query and a list of retrieved episodic memories (or atomic facts extracted from them), score each candidate on how directly it answers or evidences the query.
+Anchors on the enterprise default cross-encoder ``instruction`` used by
+``rerank_deepinfra``/``rerank_vllm`` when no per-call instruction is supplied —
+``_search_episodic_memory`` does not pass an ``instruction``, so episodic hybrid
+rerank inherits this generic relevance check.
+"""
 
-A candidate is highly relevant (score close to 1.0) if:
-- It captures the event, time period, participants, or decision the query asks about
-- Its episode text (or atomic_fact text) explicitly mentions the entities or actions in the query
-- Reading this memory would let the agent answer or react to the query without further lookup
-
-A candidate is NOT relevant (score close to 0.0) if:
-- It only shares keywords with the query but describes a different event
-- Its time window or participants are unrelated to what the query is about
-- It is too generic to support any specific answer to the query
+EPISODIC_RERANK_PROMPT_EN = """Given the user query and a list of retrieved episodic memories (or atomic facts extracted from them), determine whether each candidate contains information relevant to answering the query. Score each candidate from 0.0 (no relevant information) to 1.0 (directly answers the query).
 
 User query:
 {query}
