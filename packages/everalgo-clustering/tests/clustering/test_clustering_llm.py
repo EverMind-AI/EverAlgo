@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from everalgo.clustering import Cluster, cluster_by_llm
+from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage, ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 
@@ -82,24 +83,24 @@ async def test_llm_returns_out_of_range_idx_creates_new() -> None:
 
 
 async def test_bad_llm_response_raises_value_error() -> None:
-    """Non-JSON response from LLM → ValueError immediately (fail-loud, no retry)."""
+    """Non-JSON response from LLM → LLMError propagates (no retry, no fallback)."""
     existing = _two_clusters()
     new_c = _c([0.7, 0.7])
     llm = FakeLLMClient(responses=["not json"])
 
-    with pytest.raises(ValueError, match="No JSON object found"):
+    with pytest.raises(LLMError):
         await cluster_by_llm(new_c, existing, llm=llm)
 
     assert llm.call_count == 1
 
 
 async def test_llm_missing_idx_field_raises_value_error() -> None:
-    """Valid JSON but missing 'idx' field → ValueError immediately (fail-loud, no retry)."""
+    """Valid JSON but missing 'idx' field → LLMError propagates (Pydantic validation)."""
     existing = _two_clusters()
     new_c = _c([0.7, 0.7])
     llm = FakeLLMClient(responses=['{"reason": "x"}'])
 
-    with pytest.raises(ValueError, match="Missing 'idx' field"):
+    with pytest.raises(LLMError):
         await cluster_by_llm(new_c, existing, llm=llm)
 
     assert llm.call_count == 1

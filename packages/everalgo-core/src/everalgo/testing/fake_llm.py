@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,7 +40,7 @@ class FakeLLMClient:
 
     def __init__(
         self,
-        responses: Sequence[str | ChatResponse] | None = None,
+        responses: list[str | ChatResponse] | None = None,
         *,
         handler: _Handler | None = None,
     ) -> None:
@@ -94,7 +94,11 @@ class FakeLLMClient:
                 response_format=response_format,
                 **extra,
             )
-            if inspect.isclass(response_format) and base_response.parsed is None:
+            if (
+                inspect.isclass(response_format)
+                and issubclass(response_format, BaseModel)
+                and base_response.parsed is None
+            ):
                 return _attach_parsed(base_response, response_format)
             return base_response
         # scripted-list mode
@@ -106,7 +110,7 @@ class FakeLLMClient:
                 f"{self._initial_response_count} responses)"
             )
         base_response = self._responses.pop(0)
-        if inspect.isclass(response_format):
+        if inspect.isclass(response_format) and issubclass(response_format, BaseModel):
             return _attach_parsed(base_response, response_format)
         return base_response
 
@@ -115,7 +119,7 @@ def _coerce_response(value: str | ChatResponse) -> ChatResponse:
     """Wrap raw str into a default ChatResponse; pass ChatResponse through."""
     if isinstance(value, ChatResponse):
         return value
-    if isinstance(value, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+    if isinstance(value, str):
         return ChatResponse(
             content=value,
             model="fake",
@@ -135,7 +139,7 @@ async def _invoke_handler(
     result = handler(messages, **kwargs)
     if inspect.isawaitable(result):
         result = await result
-    if not isinstance(result, ChatResponse):  # pyright: ignore[reportUnnecessaryIsInstance]
+    if not isinstance(result, ChatResponse):
         raise TypeError(
             f"FakeLLMClient handler must return ChatResponse or Awaitable[ChatResponse], got {type(result).__name__}"
         )

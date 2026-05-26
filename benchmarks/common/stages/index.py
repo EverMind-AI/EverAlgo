@@ -7,21 +7,21 @@ For each ``memcells_conv_<i>.json`` produced by Stage 1:
   is tokenized into its own BM25 document; ``fact_to_doc_idx`` maps the
   fact-level row back to its parent memcell. At search time the caller takes
   the max BM25 score across the doc's facts (MaxSim aggregation).
-  See ``stage2_index_building.py:240-293`` for the original reference implementation.
+  Mirrors locomo-benchmark ``build_bm25_index`` (``stage2_index_building.py:240-293``).
 
 - **Embedding** (``emb_conv_<i>.pkl``): per-memcell dict
   ``{"doc": memcell, "embeddings": {"atomic_facts": [vec, ...], "subject": vec,
   "summary": vec}}``. ``subject`` / ``summary`` embeddings are persisted
-  even when atomic_facts are non-empty (``build_emb_index`` 332-379) so the
-  MaxSim retrieval also covers topic-level signals.
+  even when atomic_facts are non-empty (mirror locomo-benchmark
+  ``build_emb_index`` 332-379) so the MaxSim retrieval also covers
+  topic-level signals.
 
-- **Cluster index** (``cluster_index_conv_<i>.pkl``): when upstream clustering is
-  enabled (``config.enable_cluster_retrieval=True``) and Stage 1 emits a
+- **Scene index** (``scene_index_conv_<i>.pkl``): when upstream clustering is
+  enabled (``config.enable_scene_retrieval=True``) and Stage 1 emits a
   ``clusters_conv_<i>.json``, this stage reshapes those cluster assignments
-  into a cluster-index dict consumed by Stage 3's 2-level retrieval path.
-  A missing cluster file raises ``FileNotFoundError`` and terminates the stage
-  (fast-fail) rather than silently falling back, which would corrupt Stage 3
-  metrics.
+  into a scene-index dict consumed by Stage 3's 2-level retrieval path.
+  Missing cluster files produce a warning and a graceful skip; Stage 3 falls
+  back to flat hybrid retrieval when the scene index is absent.
 """
 
 from __future__ import annotations
@@ -43,7 +43,6 @@ from rank_bm25 import BM25Okapi  # type: ignore[import-untyped]
 
 from benchmarks.common.metrics import estimate_tokens
 from benchmarks.common.stages.types import StageStats
-from everalgo.clustering import Cluster
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -74,10 +73,11 @@ def _tokenize(text: str, stemmer: Any, stop_words: set[str]) -> list[str]:
     return [str(stemmer.stem(t)) for t in tokens if t.isalpha() and len(t) >= 2 and t not in stop_words]
 
 
-# ``build_emb_index`` 343-350 strips these prefixes off summaries before embedding so the leading
-# "in this conversation, ..." boilerplate does not dilute the vector. In this pipeline summary is
-# unconditionally ``episode_body[:200] + "..."`` (see ``extract.py:_extract_memcell_data``), so
-# the prefixes only hit when Episode content itself opens with one — rare but harmless to apply.
+# Locomo-benchmark ``build_emb_index`` 343-350 strips these prefixes off summaries
+# before embedding so the leading "in this conversation, ..." boilerplate does not
+# dilute the vector. In our pipeline summary is the LLM-fallback ``content[:200]``
+# truncation (Episode prompt does not emit summary), so the prefixes only hit when
+# Episode content itself opens with one — rare but harmless to apply.
 _SUMMARY_PREFIX_NOISE: tuple[str, ...] = (
     "In this conversation,",
     "The conversation is about",
@@ -87,7 +87,7 @@ _SUMMARY_PREFIX_NOISE: tuple[str, ...] = (
 
 
 def _clean_summary(text: str) -> str:
-    """Strip known summary-prefix noise (case-sensitive, single pass)."""
+    """Strip locomo-benchmark's known summary-prefix noise (case-sensitive, single pass)."""
     if not text:
         return ""
     for prefix in _SUMMARY_PREFIX_NOISE:
@@ -97,44 +97,28 @@ def _clean_summary(text: str) -> str:
 
 
 def _extract_atomic_strings(mc: dict[str, Any]) -> list[str]:
-    """Return non-empty fact strings from a memcell's ``atomic_facts`` field.
-
-    Stage 1 emits ``atomic_facts`` as a dict ``{"time", "timestamp",
-    "atomic_fact": list[str], "fact_embeddings": list[list[float]]}`` — this is
-    the only supported shape (see ``benchmarks/common/stages/extract.py:127``).
-    """
-    raw = mc.get("atomic_facts")
-    if not isinstance(raw, dict):
-        return []
-    raw_dict: dict[str, Any] = cast("dict[str, Any]", raw)
-    raw_facts: list[Any] = cast("list[Any]", raw_dict.get("atomic_fact") or [])
-    return [f.strip() for f in raw_facts if isinstance(f, str) and f.strip()]
-
-
-def _has_precomputed_fact_embeddings(mc: dict[str, Any]) -> bool:
-    """Return True when Stage 1 already embedded atomic facts for this cell.
-
-    Validates length parity between ``atomic_fact`` and ``fact_embeddings`` so a
-    partially-failed Stage 1 run does not silently produce a misaligned index.
-    """
-    af = mc.get("atomic_facts")
-    if not isinstance(af, dict):
-        return False
-    af_dict: dict[str, Any] = cast("dict[str, Any]", af)
-    fact_embs: list[Any] = cast("list[Any]", af_dict.get("fact_embeddings") or [])
-    atomic_fact_list: list[Any] = cast("list[Any]", af_dict.get("atomic_fact") or [])
-    return bool(fact_embs) and len(fact_embs) == len(atomic_fact_list)
+    """Return non-empty fact strings from a memcell's flat ``atomic_facts`` list."""
+    results: list[str] = []
+    raw_facts: list[Any] = list(mc.get("atomic_facts") or [])
+    for f in raw_facts:
+        if isinstance(f, dict):
+            fact: str = cast("str", cast("dict[str, Any]", f).get("fact") or "")
+        else:
+            fact = str(f) if f else ""
+        if fact and fact.strip():
+            results.append(fact)
+    return results
 
 
 def extract_searchable_units(mc: dict[str, Any]) -> list[str]:
     """Return the list of strings to index for one memcell (fact-level granularity).
 
-    Implements the logic of ``extract_atomic_facts`` (``stage2_index_building.py:129-165``):
+    Mirror of locomo-benchmark ``extract_atomic_facts``
+    (``stage2_index_building.py:129-165``):
 
     1. Every atomic_fact string (one per row in the BM25 corpus).
     2. ``episode.subject`` (topic-level signal — added once, not replicated).
-    3. ``episode.summary`` (raw — 93 ``extract_atomic_facts`` uses ``doc["summary"]``
-       literal without prefix cleaning; only the embedding path strips prefixes).
+    3. ``episode.summary`` (cleaned of known LLM-narrated prefix noise).
     4. Fallback: if none of the above produced any text, return ``[episode.content]``
        as a single row so the memcell is at least represented.
     """
@@ -142,7 +126,7 @@ def extract_searchable_units(mc: dict[str, Any]) -> list[str]:
 
     episode: dict[str, Any] = mc.get("episode") or {}
     subject = cast("str", episode.get("subject") or "")
-    summary = cast("str", episode.get("summary") or "")
+    summary = _clean_summary(cast("str", episode.get("summary") or ""))
     content = cast("str", episode.get("content") or "")
 
     if subject:
@@ -156,21 +140,16 @@ def extract_searchable_units(mc: dict[str, Any]) -> list[str]:
     return units
 
 
-def _build_bm25_fact_level(memcells: list[dict[str, Any]]) -> tuple[Any, list[int]] | None:
+def _build_bm25_fact_level(
+    memcells: list[dict[str, Any]],
+    stemmer: Any,
+    stop_words: set[str],
+) -> tuple[Any, list[int]] | None:
     """Build a fact-level BM25 corpus + ``fact_to_doc_idx`` parent mapping.
-
-    NLTK dependency (data download + stemmer + stopwords) is fully private to
-    BM25 indexing; callers don't need to know about it. ``_ensure_nltk`` is
-    idempotent and cheap when data is already present (3 ``nltk.data.find``
-    calls per invocation, ~ms). Implements the ``build_bm25_index`` logic
-    (``stage2_index_building.py:240-293``).
 
     Returns ``(BM25Okapi, fact_to_doc_idx)`` or ``None`` if no memcell produced
     any tokenizable searchable unit (entire conv would be a degenerate index).
     """
-    _ensure_nltk()
-    stemmer: Any = PorterStemmer()
-    stop_words: set[str] = set(cast("list[str]", stopwords.words("english")))  # type: ignore[no-untyped-call]
     fact_corpus: list[list[str]] = []
     fact_to_doc_idx: list[int] = []
     for doc_idx, mc in enumerate(memcells):
@@ -192,19 +171,12 @@ def _flatten_conv_texts(
     Returns ``(texts_to_embed, doc_field_map)`` where ``doc_field_map[k]`` is
     ``(doc_idx, field_name)`` for ``texts_to_embed[k]``.
 
-    Selection rules (``build_emb_index`` 332-386):
-    - ``subject`` and cleaned ``summary`` are always embedded when present
-      (independent of whether ``atomic_facts`` exists).
-    - ``atomic_facts`` is embedded fact-by-fact when present; when Stage 1
-      precomputed matching-length ``fact_embeddings``, skip re-embedding and
-      let ``_inject_precomputed_fact_embeddings`` fill them in afterwards.
-    - **Fallback** to ``episode.content`` (use ``doc["episode"]``) **only when atomic_facts is missing** (i.e.
-      no ``atomic_strs`` and no precomputed fact embeddings). ``subject`` /
-      ``summary`` being already queued does NOT suppress this fallback.
-
-    Order: atomic_facts → subject → summary → episode-fallback. Different from
-    93's subject → summary → atomic_facts → episode-fallback, but algorithmically
-    equivalent (embedding API is deterministic: same text → same vector).
+    Selection rules (mirror locomo-benchmark ``build_emb_index`` 332-386):
+    - If ``atomic_facts`` is non-empty: embed each fact individually +
+      ``subject`` (if present) + cleaned ``summary`` (if present). No content.
+    - If ``atomic_facts`` is empty: embed ``subject`` + cleaned ``summary``
+      (if either present). Fall back to ``content`` **only** when nothing else
+      was queued for that cell.
     """
     texts: list[str] = []
     mapping: list[tuple[int, str]] = []
@@ -216,9 +188,9 @@ def _flatten_conv_texts(
         summary = _clean_summary(cast("str", episode_dict.get("summary") or ""))
         content = cast("str", episode_dict.get("content") or "")
 
-        has_precomputed = _has_precomputed_fact_embeddings(mc)
+        cell_start = len(texts)
 
-        if atomic_strs and not has_precomputed:
+        if atomic_strs:
             for fact_idx, fact in enumerate(atomic_strs):
                 texts.append(fact)
                 mapping.append((doc_idx, f"atomic_fact_{fact_idx}"))
@@ -231,11 +203,10 @@ def _flatten_conv_texts(
             texts.append(summary)
             mapping.append((doc_idx, "summary"))
 
-        # Fallback: episode.content (under "episode" field) only when atomic_facts
-        # is missing. Subject/summary already queued do NOT suppress this fallback.
-        if not atomic_strs and not has_precomputed and content:
+        # Fallback: content only when nothing else was queued for this cell.
+        if len(texts) == cell_start and content:
             texts.append(content)
-            mapping.append((doc_idx, "episode"))
+            mapping.append((doc_idx, "content"))
 
     return texts, mapping
 
@@ -264,44 +235,17 @@ def _reassemble_embeddings(
     return doc_embeddings
 
 
-def _inject_precomputed_fact_embeddings(
-    doc_embeddings: list[dict[str, Any]],
-    memcells: list[dict[str, Any]],
-) -> None:
-    """Fill ``atomic_facts`` embeddings from Stage 1 ``fact_embeddings`` for cells that skipped re-embedding.
-
-    Called after ``_reassemble_embeddings``. For each cell where ``atomic_facts``
-    is not yet populated (because ``_flatten_conv_texts`` skipped it), load the
-    pre-computed vectors from ``atomic_facts.fact_embeddings`` and convert to
-    ``np.ndarray``.  Cells already populated by the live embedding step are skipped.
-
-    Args:
-        doc_embeddings: Output of ``_reassemble_embeddings`` — mutated in place.
-        memcells: Original memcell dicts aligned with ``doc_embeddings``.
-    """
-    for doc_entry, mc in zip(doc_embeddings, memcells, strict=True):
-        emb_dict: dict[str, Any] = doc_entry["embeddings"]
-        if "atomic_facts" in emb_dict:
-            continue  # Already filled by the live embedding step
-        af = mc.get("atomic_facts")
-        if not isinstance(af, dict):
-            continue
-        af_dict: dict[str, Any] = cast("dict[str, Any]", af)
-        fact_embs: list[Any] = cast("list[Any]", af_dict.get("fact_embeddings") or [])
-        if fact_embs:
-            emb_dict["atomic_facts"] = [np.array(v, dtype=np.float32) for v in fact_embs]
-
-
 async def _embed_batched(
     texts: list[str],
     ctx: StageContext,
 ) -> list[Any]:
     """Embed *all* texts using fixed-size batches with bounded group concurrency.
 
-    Implements the ``build_emb_index`` batching loop (lines 428-450): batches are grouped into sets
-    of ``embedding_concurrent_batches``; each group is awaited with ``asyncio.gather`` before the
-    next group starts. A 1-second sleep is inserted between groups when ``MAX_CONCURRENT_BATCHES > 1``
-    and there is at least one more group pending.
+    Mirrors locomo-benchmark ``build_emb_index`` batching loop (lines 428-450):
+    batches are grouped into sets of ``embedding_concurrent_batches``; each group
+    is awaited with ``asyncio.gather`` before the next group starts.  A 1-second
+    sleep is inserted between groups when ``MAX_CONCURRENT_BATCHES > 1`` and
+    there is at least one more group pending.
 
     Returns the flat list of raw embedding vectors aligned with ``texts``.
     """
@@ -338,79 +282,40 @@ async def _embed_batched(
     return all_vectors
 
 
-def _build_cluster_index(clusters_data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Reshape a Stage 1 cluster JSON into ``list[Cluster.model_dump()]`` for Stage 3.
-
-    Aligns the cluster pkl schema with the algo ``Cluster`` type
-    (``everalgo.clustering.state.Cluster``): same field names (``id`` / ``count`` /
-    ``last_ts`` / ``members`` / ``centroid`` / ``preview``), no reverse map (the algo
-    operator builds it on demand), no total counters (caller does not consume them).
+def _build_scene_index(clusters_data: dict[str, Any]) -> dict[str, Any]:
+    """Reshape a Stage 1 cluster JSON into the scene-index dict Stage 3 consumes.
 
     Args:
-        clusters_data: Parsed content of ``clusters_conv_<i>.json`` from Stage 1.
-            Expected to carry a top-level ``"clusters"`` list whose dicts match the
-            algo ``Cluster`` field names already. ``centroid`` values may arrive as
-            plain ``list[float]`` (JSON-serialized); they are converted to ``np.ndarray``
-            before ``Cluster.model_validate`` is called (pydantic v2 ``arbitrary_types_allowed``
-            does not coerce list → ndarray automatically).
+        clusters_data: Parsed content of ``clusters_conv_<i>.json`` as produced
+            by EverAlgo Stage 1. Expected keys: ``"clusters"`` (list of cluster
+            dicts) and ``"memcell_to_cluster"`` (mc_id -> scene_id mapping).
 
     Returns:
-        A list of ``Cluster.model_dump()`` dicts. Stage 3 wraps via ``Cluster.model_validate``.
+        Scene-index dict with keys ``"scenes"``, ``"memcell_to_scene"``,
+        ``"total_scenes"``, and ``"total_memcells"``.  Centroids are kept as
+        plain ``list[float]`` (JSON-native shape); Stage 3 converts to numpy
+        when it needs cosine similarity.
     """
     raw_clusters: list[dict[str, Any]] = list(clusters_data.get("clusters") or [])
-    return [Cluster.model_validate({**c, "centroid": np.array(c["centroid"])}).model_dump() for c in raw_clusters]
+    memcell_to_cluster: dict[str, str] = dict(clusters_data.get("memcell_to_cluster") or {})
 
+    scenes: list[dict[str, Any]] = [
+        {
+            "scene_id": cluster["id"],
+            "centroid": list(cluster["centroid"]),
+            "memcell_ids": list(cluster["members"]),
+            "memcell_count": len(cluster["members"]),
+            "last_timestamp": cluster["last_ts"],
+        }
+        for cluster in raw_clusters
+    ]
 
-def _build_and_write_bm25_index(
-    conv_idx: int,
-    memcells: list[dict[str, Any]],
-    output_dir: Path,
-) -> bool:
-    """Build fact-level BM25 corpus and persist it to ``bm25_conv_<i>.pkl``.
-
-    Returns ``False`` if the corpus is degenerate (no tokenizable searchable
-    unit in any memcell) — caller treats this as a legitimate skip, not an error.
-    """
-    bm25_built = _build_bm25_fact_level(memcells)
-    if bm25_built is None:
-        return False
-    bm25_obj, fact_to_doc_idx = bm25_built
-    payload = {
-        "bm25": bm25_obj,
-        "docs": memcells,
-        "fact_to_doc_idx": fact_to_doc_idx,
-        "index_type": "maxsim",
+    return {
+        "scenes": scenes,
+        "memcell_to_scene": memcell_to_cluster,
+        "total_scenes": len(scenes),
+        "total_memcells": len(memcell_to_cluster),
     }
-    out = output_dir / f"bm25_conv_{conv_idx}.pkl"
-    with out.open("wb") as fh:
-        pickle.dump(payload, fh)
-    return True
-
-
-async def _build_and_write_emb_index(
-    conv_idx: int,
-    memcells: list[dict[str, Any]],
-    output_dir: Path,
-    ctx: StageContext,
-) -> int:
-    """Build embedding index and persist it to ``emb_conv_<i>.pkl``.
-
-    Returns estimated prompt tokens consumed by the embedding API.
-    """
-    texts_to_embed, doc_field_map = _flatten_conv_texts(memcells)
-    conv_tokens = sum(estimate_tokens(t) for t in texts_to_embed)
-
-    if texts_to_embed:
-        all_vectors = await _embed_batched(texts_to_embed, ctx)
-        emb_index = _reassemble_embeddings(memcells, all_vectors, doc_field_map)
-    else:
-        emb_index = [{"doc": mc, "embeddings": {}} for mc in memcells]
-    _inject_precomputed_fact_embeddings(emb_index, memcells)
-
-    out = output_dir / f"emb_conv_{conv_idx}.pkl"
-    with out.open("wb") as fh:
-        pickle.dump(emb_index, fh)
-    return conv_tokens
 
 
 async def _process_one_conversation(
@@ -418,20 +323,19 @@ async def _process_one_conversation(
     input_path: Path,
     output_dir: Path,
     ctx: StageContext,
+    stemmer: Any,
+    stop_words: set[str],
     conv_sem: asyncio.Semaphore,
 ) -> tuple[bool, int]:
-    """Build BM25 + embedding + cluster indices for one conversation file.
+    """Build BM25 + embedding indices for one conversation file.
 
-    Three steps fan out sequentially: BM25 → embedding → cluster (gated by
-    ``config.enable_cluster_retrieval``). All three are fast-fail: any uncaught
-    exception writes ``index_conv_<i>.error.txt`` and re-raises so ``asyncio.gather``
-    terminates the entire stage. We do not soft-skip on errors here, because a
-    partial stage 2 output would silently corrupt Stage 3 metrics.
+    All memcells are flattened into a single ``texts_to_embed`` list, then
+    embedded in fixed-size batches with at most ``embedding_concurrent_batches``
+    in-flight at once (locomo-benchmark ``build_emb_index`` strategy).
 
     Returns:
-        Tuple of (success, estimated_prompt_tokens). ``success=False`` only on
-        legitimate empty / degenerate inputs (no memcells, or no tokenizable
-        searchable units), not on real errors — those raise instead.
+        Tuple of (success, estimated_prompt_tokens).  Embedding has no
+        completion side, so only prompt tokens are counted.
     """
     async with conv_sem:
         try:
@@ -439,37 +343,78 @@ async def _process_one_conversation(
             if not memcells:
                 return False, 0
 
-            if not _build_and_write_bm25_index(conv_idx, memcells, output_dir):
+            bm25_built = _build_bm25_fact_level(memcells, stemmer, stop_words)
+            if bm25_built is None:
                 return False, 0
-            conv_tokens = await _build_and_write_emb_index(conv_idx, memcells, output_dir, ctx)
-            if ctx.config.enable_cluster_retrieval:
-                _build_and_write_cluster_index(conv_idx, output_dir, ctx)
+            bm25_obj, fact_to_doc_idx = bm25_built
+            bm25_payload = {
+                "bm25": bm25_obj,
+                "docs": memcells,
+                "fact_to_doc_idx": fact_to_doc_idx,
+                "index_type": "maxsim",
+            }
+
+            texts_to_embed, doc_field_map = _flatten_conv_texts(memcells)
+            conv_tokens = sum(estimate_tokens(t) for t in texts_to_embed)
+
+            if texts_to_embed:
+                all_vectors = await _embed_batched(texts_to_embed, ctx)
+                emb_index = _reassemble_embeddings(memcells, all_vectors, doc_field_map)
+            else:
+                emb_index = [{"doc": mc, "embeddings": {}} for mc in memcells]
+
+            bm25_out = output_dir / f"bm25_conv_{conv_idx}.pkl"
+            with bm25_out.open("wb") as fh:
+                pickle.dump(bm25_payload, fh)
+
+            emb_out = output_dir / f"emb_conv_{conv_idx}.pkl"
+            with emb_out.open("wb") as fh:
+                pickle.dump(emb_index, fh)
+
+            if ctx.config.enable_scene_retrieval:
+                _write_scene_index(conv_idx, output_dir, ctx)
+
         except Exception:
             err_path = output_dir / f"index_conv_{conv_idx}.error.txt"
             err_path.write_text(traceback.format_exc())
-            _log.exception("conv_%d index build failed; full traceback in %s", conv_idx, err_path)
-            raise
+            return False, 0
 
     return True, conv_tokens
 
 
-def _build_and_write_cluster_index(conv_idx: int, output_dir: Path, ctx: StageContext) -> None:
-    """Build and persist the cluster index for one conversation.
+def _write_scene_index(conv_idx: int, output_dir: Path, ctx: StageContext) -> None:
+    """Build and persist the scene index for one conversation.
 
-    Failure propagates to the caller — cluster index errors terminate the stage
-    rather than silently falling back to flat hybrid retrieval in Stage 3.
+    Isolated so that a scene-index failure does not roll back the already-written
+    BM25 + embedding pickles.  On failure an ``.error.txt`` sidecar is written and
+    a warning is logged; the conversation is NOT marked as failed.
     """
     cluster_path = ctx.input_dir / f"clusters_conv_{conv_idx}.json"
     if not cluster_path.exists():
-        raise FileNotFoundError(
-            f"enable_cluster_retrieval=True but cluster file missing for conv_{conv_idx}; expected: {cluster_path}"
+        _log.warning(
+            "enable_scene_retrieval=True but cluster file missing for conv_%d; "
+            "skipping scene index (Stage 3 will fall back to flat hybrid). "
+            "Expected: %s",
+            conv_idx,
+            cluster_path,
         )
+        return
 
-    clusters_data: dict[str, Any] = json.loads(cluster_path.read_text(encoding="utf-8"))
-    cluster_index = _build_cluster_index(clusters_data)
-    cluster_out = output_dir / f"cluster_index_conv_{conv_idx}.pkl"
-    with cluster_out.open("wb") as fh:
-        pickle.dump(cluster_index, fh)
+    try:
+        clusters_data: dict[str, Any] = json.loads(cluster_path.read_text(encoding="utf-8"))
+        scene_index = _build_scene_index(clusters_data)
+        scene_out = output_dir / f"scene_index_conv_{conv_idx}.pkl"
+        with scene_out.open("wb") as fh:
+            pickle.dump(scene_index, fh)
+    except Exception:
+        err_path = output_dir / f"scene_index_conv_{conv_idx}.error.txt"
+        err_path.write_text(traceback.format_exc())
+        _log.warning(
+            "Scene index build failed for conv_%d (soft warning — BM25/emb already written). "
+            "Stage 3 will fall back to flat hybrid. See: %s",
+            conv_idx,
+            err_path,
+        )
 
 
 async def run_index_stage(ctx: StageContext) -> StageStats:
@@ -477,26 +422,38 @@ async def run_index_stage(ctx: StageContext) -> StageStats:
 
     Concurrency is two-tiered:
     - ``conv_sem``: limits how many conversations are processed in parallel
-      (bound by ``max_concurrent_convs`` from config, shared with Stage 1).
+      (bound by ``max_concurrent_qa`` from config, same as other stages).
     - Within each conversation the embedding fan-out is bounded by
       ``embedding_concurrent_batches`` (batch-group strategy); no global
       ``emb_sem`` is needed.
     """
+    _ensure_nltk()
+
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     stats = StageStats(stage_name="index")
     started = time.monotonic()
 
+    stemmer: Any = PorterStemmer()
+    raw_stop: list[str] = stopwords.words("english")  # type: ignore[no-untyped-call]
+    stop_words: set[str] = set(raw_stop)
+
     input_files = sorted(ctx.input_dir.glob("memcells_conv_*.json"))
 
-    conv_sem = asyncio.Semaphore(ctx.config.max_concurrent_convs)
+    conv_sem = asyncio.Semaphore(ctx.config.max_concurrent_qa)
 
     coros = [
-        _process_one_conversation(int(p.stem.rsplit("_", 1)[-1]), p, ctx.output_dir, ctx, conv_sem) for p in input_files
+        _process_one_conversation(int(p.stem.rsplit("_", 1)[-1]), p, ctx.output_dir, ctx, stemmer, stop_words, conv_sem)
+        for p in input_files
     ]
 
-    from benchmarks.common._progress import gather_with_progress
+    from tqdm.asyncio import tqdm as async_tqdm  # type: ignore[import-untyped]
 
-    results = await gather_with_progress(*coros, desc="index", unit="conv")
+    results: list[tuple[bool, int]] = await async_tqdm.gather(  # type: ignore[attr-defined]
+        *coros,
+        desc="index",
+        unit="conv",
+        dynamic_ncols=True,
+    )
 
     stats.success = sum(1 for ok, _ in results if ok)
     stats.failed = sum(1 for ok, _ in results if not ok)

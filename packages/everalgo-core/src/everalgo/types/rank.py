@@ -63,8 +63,8 @@ class RankInput(BaseModel):
     query: str
     memory_type: Literal["episodic", "profile", "case", "skill"]
 
-    sparse_candidates: list[Candidate] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
-    dense_candidates: list[Candidate] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    sparse_candidates: list[Candidate] = Field(default_factory=list)
+    dense_candidates: list[Candidate] = Field(default_factory=list)
 
     episode_to_facts: dict[str, list[FactCandidate]] = Field(default_factory=dict)
 
@@ -94,5 +94,5 @@ class RankOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[ScoredItem] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    items: list[ScoredItem] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

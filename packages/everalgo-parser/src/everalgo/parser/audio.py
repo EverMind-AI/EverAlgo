@@ -1,6 +1,7 @@
 """Audio parser — ASR via multimodal LLM.
 
-Sends the audio bytes as a single ``image_url`` data URI (OpenRouter / Gemini accepts
+Mirrors ``evermemos-multimodal/src/parser/audio/gemini_parser.py``: send the
+audio bytes as a single ``image_url`` data URI (OpenRouter / Gemini accepts
 audio MIMEs through the same content-part shape) and the LLM transcribes.
 """
 

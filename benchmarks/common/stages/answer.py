@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
+import traceback
 from typing import TYPE_CHECKING, Any
 
 from benchmarks.common.stages.types import StageStats
-from everalgo.llm.parse import extract_final_answer as _algo_extract_final_answer
-from everalgo.llm.types import ChatMessage
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,35 +21,35 @@ if TYPE_CHECKING:
     from benchmarks.common.stages.types import StageContext
 
 
-logger = logging.getLogger(__name__)
+_CONTEXT_TEMPLATE = "Episodes memories for conversation between {speaker_a} and {speaker_b}:\n\n{episodes}"
 
-
-_CONTEXT_TEMPLATE = """Episodes memories for conversation between {speaker_a} and {speaker_b}:
-
-    {episodes}
-"""
-
+# Mirror locomo-benchmark stage4_response.py: max_retries=5.
 _ANSWER_RETRIES = 5
 
 
 def _extract_final_answer(raw: str) -> str:
-    """LoCoMo-specific marker fallback chain (3 markers in priority order).
+    """Extract the final answer from an LLM response using rsplit on the last marker.
 
-    Delegates per-marker extraction to ``everalgo.llm.parse.extract_final_answer`` which uses
-    ``rsplit`` to take the LAST occurrence (handles marker appearing in reasoning prose before the
-    actual answer). Supported markers in priority order:
+    Mirrors locomo-benchmark ``stage4_response.py:154-170``: uses ``rsplit`` to
+    take the LAST occurrence of each marker (handles cases where "FINAL ANSWER"
+    appears in reasoning text before the actual answer section). Supports three
+    marker formats in priority order:
       1. ``## STEP 7: FINAL ANSWER`` (prompt STEP 7 section header)
-      2. ``FINAL ANSWER:`` (colon-suffixed)
-      3. ``FINAL ANSWER`` (bare — leading colon stripped if present)
+      2. ``FINAL ANSWER:`` (standard colon-suffixed format)
+      3. ``FINAL ANSWER`` (bare, colon stripped if present)
+    No truncation at ``##`` headings or blank lines — the new prompt's STEP 7
+    IS the final answer (single section), so trailing markdown does not appear.
     """
     result = raw.strip()
-    for marker in ("## STEP 7: FINAL ANSWER", "FINAL ANSWER:", "FINAL ANSWER"):
-        if marker in result:
-            extracted = _algo_extract_final_answer(result, marker=marker)
-            # Bare "FINAL ANSWER" may have a leading ":" — strip it
-            if marker == "FINAL ANSWER" and extracted.startswith(":"):
-                extracted = extracted[1:].strip()
-            return extracted
+    if "## STEP 7: FINAL ANSWER" in result:
+        result = result.rsplit("## STEP 7: FINAL ANSWER", 1)[1].strip()
+    elif "FINAL ANSWER:" in result:
+        result = result.rsplit("FINAL ANSWER:", 1)[1].strip()
+    elif "FINAL ANSWER" in result:
+        candidate = result.rsplit("FINAL ANSWER", 1)[1].strip()
+        if candidate.startswith(":"):
+            candidate = candidate[1:].strip()
+        result = candidate
     return result
 
 
@@ -61,15 +59,18 @@ def _build_context(
 ) -> str:
     r"""Build the context string from pre-selected memcells.
 
-    Each memcell renders as ``{subject}: {content}\n---`` and entries are joined by ``\n\n``. The
-    ``\n---`` suffix plus double-newline separator give the LLM clear per-memory block boundaries for
-    STEP 1 (RELEVANT MEMORIES EXTRACTION) in the answer prompt. ``subject``/``content`` are read from
-    the nested EverAlgo schema; the raw-ms ``timestamp`` field is intentionally omitted (LLMs cannot
-    parse ms epochs and any temporal cues are already inside ``content`` in natural language).
+    Mirrors EverCore main ``stage4_response.py:94-100``: each memcell renders as
+    ``{subject}: {content}\n---`` and entries are joined by ``\n\n``. The
+    ``\n---`` suffix plus double-newline separator give the LLM clear per-memory
+    block boundaries for STEP 1 (RELEVANT MEMORIES EXTRACTION) in the answer
+    prompt. ``subject``/``content`` are read from the nested EverAlgo schema; the
+    raw-ms ``timestamp`` field is intentionally omitted (LLMs cannot parse ms
+    epochs and any temporal cues are already inside ``content`` in natural
+    language).
     """
     speaker_a, speaker_b = speakers if speakers else ("A", "B")
     episode_lines = [
-        f"{mc.get('episode', {}).get('subject', 'N/A')}: {mc.get('episode', {}).get('content', 'N/A')}\n---"
+        f"{mc.get('episode', {}).get('subject', '')}: {mc.get('episode', {}).get('content', '')}\n---"
         for mc in selected_memcells
     ]
     return _CONTEXT_TEMPLATE.format(
@@ -111,44 +112,28 @@ async def _answer_one_question(
     conv_id = qa.get("conv_id", item.get("conversation_id", ""))
     speakers = speakers_lookup.get(conv_id)
     session_memcells = memcells_map.get(conv_id, {})
-    mc_ids = item.get("members", [])
+    mc_ids = item.get("memcell_ids", [])
     selected = [session_memcells[mc_id] for mc_id in mc_ids[: ctx.config.response_top_k] if mc_id in session_memcells]
     context = _build_context(selected, speakers)
     prompt = ctx.dataset.answer_prompt().format(context=context, question=qa["question"])
-    # try/except inside the retry loop so both empty completions (OpenRouter timeout / streaming
-    # truncation) and exceptions (network blips, transient 429 / 503) trigger another attempt.
-    # Fail-loud on exhaustion.
+    # Mirror EverCore: answer stage uses temperature=0 (``stage4_response.py:131``).
+    # Without this, ctx.services.llm.chat would fall back to BenchmarkConfig.llm_temperature=0.3
+    # and introduce non-determinism that hurts factual QA accuracy.
+    # Retry on empty answer mirrors EverCore ``stage4_response.py:129-147``: the LLM
+    # occasionally returns an empty completion (OpenRouter timeout / streaming truncation)
+    # and a retry usually recovers it.
     answer = ""
     response = None
-    for attempt in range(_ANSWER_RETRIES):
-        try:
-            response = await ctx.services.llm.chat(
-                [ChatMessage(role="user", content=prompt)],
-                temperature=0.0,
-                max_tokens=32768,
-            )
-            answer = _extract_final_answer(response.content)
-            if answer:
-                break
-        except Exception:
-            if attempt == _ANSWER_RETRIES - 1:
-                raise
-            logger.warning(
-                "answer attempt %d/%d failed for question_id=%s; retrying",
-                attempt + 1,
-                _ANSWER_RETRIES,
-                qa["question_id"],
-                exc_info=True,
-            )
-            await asyncio.sleep(1.0 * (2**attempt))
-            continue
-        # Empty-answer path: retry with backoff.
-        if attempt < _ANSWER_RETRIES - 1:
-            await asyncio.sleep(1.0 * (2**attempt))
-    if not answer or response is None:
-        raise RuntimeError(f"answer empty after {_ANSWER_RETRIES} retries (question_id={qa['question_id']})")
-    pt = (response.usage.prompt_tokens or 0) if response.usage is not None else 0
-    ct = (response.usage.completion_tokens or 0) if response.usage is not None else 0
+    for _attempt in range(_ANSWER_RETRIES):
+        response = await ctx.services.llm.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=32768,  # Mirror locomo-benchmark stage4_response.py:142
+        )
+        answer = _extract_final_answer(response.content)
+        if answer:
+            break
+    assert response is not None  # loop runs ≥1 iteration
     return {
         "question_id": qa["question_id"],
         "question": qa["question"],
@@ -158,8 +143,27 @@ async def _answer_one_question(
         "conversation_id": conv_id,
         "formatted_context": context,
         "raw_response": response.content,
-        "prompt_tokens": pt,
-        "completion_tokens": ct,
+        "prompt_tokens": response.prompt_tokens,
+        "completion_tokens": response.completion_tokens,
+    }
+
+
+def _make_error_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Build a placeholder output item for a failed question."""
+    qa = item.get("original_qa", {})
+    return {
+        "question_id": qa.get("question_id", ""),
+        "question": qa.get("question", ""),
+        "answer": "Error: failed to generate answer",
+        "golden_answer": qa.get("golden_answer", ""),
+        "category": qa.get("category", ""),
+        "conversation_id": item.get("conversation_id", ""),
+        "formatted_context": "",
+        "raw_response": "",
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "error": True,
+        "traceback": traceback.format_exc(),
     }
 
 
@@ -204,23 +208,26 @@ async def run_answer_stage(ctx: StageContext) -> StageStats:
 
     async def _process(item: dict[str, Any]) -> dict[str, Any]:
         async with sem:
-            result = await _answer_one_question(item, memcells_map, speakers_lookup, ctx)
-            stats.prompt_tokens += result["prompt_tokens"]
-            stats.completion_tokens += result["completion_tokens"]
-            return result
+            try:
+                result = await _answer_one_question(item, memcells_map, speakers_lookup, ctx)
+            except Exception:  # broad catch is intentional — isolate per-question failures
+                return _make_error_item(item)
+            else:
+                stats.prompt_tokens += result["prompt_tokens"]
+                stats.completion_tokens += result["completion_tokens"]
+                return result
 
-    from benchmarks.common._progress import gather_with_progress
+    from tqdm.asyncio import tqdm as async_tqdm  # type: ignore[import-untyped]
 
-    results = await gather_with_progress(
+    results: list[dict[str, Any]] = await async_tqdm.gather(  # type: ignore[attr-defined]
         *(_process(item) for item in all_items),
         desc="answer",
         unit="q",
+        dynamic_ncols=True,
     )
 
-    # Fail-loud: any per-question exception aborts the stage, so every item in
-    # ``results`` is a successful answer.
-    stats.success = len(results)
-    stats.failed = 0
+    stats.success = sum(1 for r in results if not r.get("error"))
+    stats.failed = sum(1 for r in results if r.get("error"))
     stats.duration_seconds = time.monotonic() - started
 
     (ctx.output_dir / "answers.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))

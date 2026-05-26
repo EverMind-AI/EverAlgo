@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from everalgo.clustering.prompts.en.cluster import CLUSTER_LLM_ASSIGN_PROMPT
 from everalgo.clustering.state import Cluster
@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 
 _MS_PER_DAY = 86_400_000
 _NORM_EPSILON = 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Structured outputs schema for cluster assignment.
+# ---------------------------------------------------------------------------
+
+
+class _ClusterAssignmentLLMResponse(BaseModel):
+    """Structured outputs schema for LLM-based cluster assignment."""
+
+    idx: int = Field(..., description="Target cluster index, or -1 for a new cluster")
+    reason: str = Field(..., description="Short reasoning for the assignment decision")
 
 
 async def cluster_by_geometry(
@@ -115,30 +127,18 @@ async def cluster_by_llm(
         memcell_text=query_text,
         clusters_json=clusters_json,
     )
-    chosen_idx = await _call_llm_for_cluster_assignment(llm, rendered)
+    response = await llm.chat(
+        messages=[LLMChatMessage(role="user", content=rendered)],
+        response_format=_ClusterAssignmentLLMResponse,
+    )
+    parsed = cast("_ClusterAssignmentLLMResponse | None", response.parsed)
+    if parsed is None:
+        raise ValueError("LLM returned no parsed structured output")
+
+    chosen_idx = parsed.idx
     if 0 <= chosen_idx < len(existing_clusters):
         return _merge(existing_clusters[chosen_idx], new_cluster, preview_cap=preview_cap)
     return None
-
-
-async def _call_llm_for_cluster_assignment(llm: LLMClient, rendered: str) -> int:
-    """Inner async function decorated with retry; separated so the decorator applies at definition time.
-
-    Matches flat JSON only (no nested objects). ``idx`` is int and ``reason`` is str — flat fields.
-    Returns the chosen cluster index, or -1 for a new cluster.
-
-    Raises:
-        ValueError: If no JSON object found or 'idx' field is missing.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON object found in cluster LLM response: {text[:200]!r}")
-    data = json.loads(match.group())
-    if "idx" not in data:
-        raise ValueError(f"Missing 'idx' field in cluster LLM response: {data!r}")
-    return int(data["idx"])
 
 
 # --- private helpers --------------------------------------------------------

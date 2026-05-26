@@ -7,7 +7,7 @@ from benchmarks.common.config import BenchmarkConfig
 
 
 def test_default_values_match_locomo_benchmark():
-    """Defaults match the runtime values used to generate the reference baseline."""
+    """Defaults must mirror locomo-benchmark branch's runtime values."""
     c = BenchmarkConfig()
     # Retrieval
     assert c.retrieval_mode == "agentic"
@@ -19,11 +19,12 @@ def test_default_values_match_locomo_benchmark():
     assert c.reranker_top_n == 20
     assert c.hybrid_emb_candidates == 50
     assert c.hybrid_bm25_candidates == 50
-    assert c.hybrid_rrf_k == 40
+    # 60 mirrors retrieval_utils.py hardcoded k=60 (not the dead config value 40)
+    assert c.hybrid_rrf_k == 60
     assert c.response_top_k == 10
     # LLM
     assert c.llm_model == "openai/gpt-4.1-mini"
-    assert c.llm_temperature == 0.3
+    assert c.llm_temperature == 0.3  # aligns with locomo-benchmark answer LLM temperature
     assert c.judge_model == "openai/gpt-4o-mini"
     assert c.judge_temperature == 0.0
     assert c.judge_runs == 3

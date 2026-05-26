@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field
 
-from everalgo.llm.format import format_iso_timestamp, format_natural_language_time
+from everalgo.llm.format import format_message_timestamp, format_natural_language_time
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
@@ -20,6 +20,22 @@ from everalgo.user_memory.prompts.en.episode import (
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+
+
+# ---------------------------------------------------------------------------
+# Structured outputs schema for episode LLM extraction.
+# ---------------------------------------------------------------------------
+
+
+class _EpisodeLLMResponse(BaseModel):
+    """Structured outputs schema for episode LLM extraction."""
+
+    title: str = Field(..., description="A short, descriptive title for the episode")
+    content: str = Field(..., description="The full episode body, in narrative form")
+    summary: str | None = Field(
+        default=None,
+        description="Optional 1-2 sentence summary; if absent, caller may derive from content",
+    )
 
 
 class EpisodeExtractor:
@@ -76,46 +92,16 @@ class EpisodeExtractor:
                 user_name=user_name,
             )
 
-        data = await _call_llm_for_episode(self._llm, rendered)
-        return _build_episode(data, sender_id=sender_id, memcell=memcell)
+        response = await self._llm.chat(
+            messages=[LLMChatMessage(role="user", content=rendered)],
+            response_format=_EpisodeLLMResponse,
+        )
+        parsed = cast("_EpisodeLLMResponse | None", response.parsed)
+        if parsed is None:
+            raise ValueError("LLM returned no parsed structured output")
+        return _build_episode(_parsed_to_dict(parsed), sender_id=sender_id, memcell=memcell)
 
     extract = async_to_sync(aextract)
-
-
-# ---------------------------------------------------------------------------
-# LLM callsite — regex JSON extraction + 5-retry (mirror b150b32 boundary pattern).
-# ---------------------------------------------------------------------------
-
-
-async def _call_llm_for_episode(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM and return validated episode dict.
-
-    Uses brace-balanced extraction because the ``summary`` field may contain nested strings with
-    punctuation. Raises ``ValueError`` on missing JSON or missing required keys.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    data: dict[str, Any] = json.loads(json_str)
-    if "title" not in data or "content" not in data:
-        raise ValueError(f"Episode LLM response missing required keys: {data!r}")
-    return data
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested/complex JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in episode LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in episode LLM response: {text[:200]!r}")
 
 
 # Module-level helpers.
@@ -131,8 +117,8 @@ def _resolve_user_name(memcell: MemCell, sender_id: str) -> str:
 
 def _build_episode(data: dict[str, Any], *, sender_id: str | None, memcell: MemCell) -> Episode:
     """Assemble an :class:`Episode` from the parsed LLM payload and memcell metadata."""
-    title = str(data["title"])
-    content = str(data["content"])
+    title = cast("str", data["title"])
+    content = cast("str", data["content"])
     summary_raw = data.get("summary")
     summary = summary_raw if isinstance(summary_raw, str) and summary_raw.strip() else content[:200]
     return Episode.model_validate(
@@ -152,34 +138,18 @@ def _format_conversation_start_time(timestamp_ms: int) -> str:
 
 
 def _render_conversation(memcell: MemCell) -> str:
-    """Render ChatMessage items as pseudo-JSON per message.
-
-    Each message becomes a pseudo-JSON object with ~16-space indent — field names quoted,
-    values unquoted (the LLM tolerates the not-strictly-JSON syntax). The no-timestamp
-    branch is retained for callers that omit timestamps.
-    """
+    """Render ChatMessage items as ``[YYYY-MM-DDTHH:MM:SSZ] speaker: content`` lines."""
     lines: list[str] = []
     for m in chat_messages(memcell):
         text = render_content(m.content)
         if not text:
             continue
         speaker = m.sender_name or m.sender_id
-        timestamp = m.timestamp
-        if timestamp:
-            lines.append(
-                f"""
-                {{
-                    "timestamp": {format_iso_timestamp(timestamp)},
-                    "speaker": {speaker},
-                    "content": {text}
-                }}"""
-            )
-        else:
-            lines.append(
-                f"""
-                {{
-                    "speaker": {speaker},
-                    "content": {text}
-                }}"""
-            )
+        time_str = format_message_timestamp(m.timestamp)
+        lines.append(f"[{time_str}] {speaker}: {text}")
     return "\n".join(lines)
+
+
+def _parsed_to_dict(parsed: _EpisodeLLMResponse) -> dict[str, Any]:
+    """Serialise a validated ``_EpisodeLLMResponse`` to a plain dict for ``_build_episode``."""
+    return parsed.model_dump(exclude_none=False)

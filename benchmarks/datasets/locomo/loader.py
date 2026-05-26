@@ -7,7 +7,7 @@ are reported via ``filter_categories`` for the scoring layer to exclude.
 
 import json
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Final
 
@@ -38,28 +38,25 @@ class LocomoDataset:
         for i, entry in enumerate(self._raw):
             conv = entry["conversation"]
             speakers = (conv.get("speaker_a", "A"), conv.get("speaker_b", "B"))
-            conv_id = f"locomo_exp_user_{i}"
 
             messages: list[Message] = []
-            session_keys = sorted(
-                [k for k in conv if k.startswith("session_") and not k.endswith("_date_time")],
-                key=_session_index,
-            )
-            # Pre-parse all session timestamps so #3c can look ahead to next session.
-            session_timestamps = [_parse_timestamp(conv.get(f"{key}_date_time")) for key in session_keys]
-
-            for session_idx, key in enumerate(session_keys):
+            msg_idx = 0
+            session_keys = [k for k in conv if k.startswith("session_") and not k.endswith("_date_time")]
+            for key in sorted(session_keys, key=_session_index):
                 session_msgs = conv[key]
-                if not session_msgs:
-                    continue
-                current_session_ts = session_timestamps[session_idx]
-                next_ts = session_timestamps[session_idx + 1] if session_idx + 1 < len(session_keys) else None
-                time_interval = _compute_msg_interval_ms(len(session_msgs), current_session_ts, next_ts)
-
+                ts_str = conv.get(f"{key}_date_time")
+                ts_ms = _parse_timestamp(ts_str)
+                # LoCoMo raw data has no per-message timestamp — only ``<session>_date_time``.
+                # Mirror EverCore main's stage1_memcells_extraction.py:114-123 which
+                # synthesises ``session_time + i*30s`` per message so BoundaryDetector
+                # sees monotonically advancing timestamps (otherwise every message in a
+                # session shares the same ts, which the LLM interprets as concurrent
+                # speech and consistently under-segments).
                 for i_in_session, msg in enumerate(session_msgs):
                     speaker = msg.get("speaker", "")
                     content = msg.get("text", "")
-                    # Prepend image caption when a message carries ``img_url`` so the
+                    # Mirror EverCore main's ``stage1_memcells_extraction.py:134-140``:
+                    # prepend image caption when a message carries ``img_url`` so the
                     # downstream LLMs (BoundaryDetector / Episode / AtomicFact) see the
                     # visual cue. ~15.5% of LoCoMo messages have ``img_url``; dropping
                     # them loses real signal for retrieval and answer generation.
@@ -68,27 +65,20 @@ class LocomoDataset:
                         content = f"[{speaker} shared an image: {blip_caption}] {content}"
                     messages.append(
                         Message(
-                            id=msg["dia_id"],
+                            id=msg.get("dia_id") or f"msg_{i}_{msg_idx}",
                             role="user",  # LoCoMo has no system/assistant distinction
                             content=content,
-                            timestamp=int(current_session_ts + i_in_session * time_interval),
-                            # 93 alignment #4: suffix is conv_id string, not raw list index.
-                            # ``f"{speaker.lower().replace(' ','_')}_{conv_id}"``.
-                            sender_id=f"{speaker.lower().replace(' ', '_')}_{conv_id}",
+                            timestamp=ts_ms + i_in_session * 30_000,
+                            # Mirror EverCore ``unique_id = f"{name.lower().replace(' ','_')}_{con_id}"``
+                            # so each speaker has conv-scoped disambiguation.
+                            sender_id=f"{speaker.lower().replace(' ', '_')}_{i}",
                             sender_name=speaker,
-                            # 93 alignment #6: preserve session / img / blip / timestamp_source.
-                            # dia_id is already stored as Message.id; not duplicated here.
-                            metadata={
-                                "session": key,
-                                "img_url": msg.get("img_url"),
-                                "blip_caption": msg.get("blip_caption"),
-                                "timestamp_source": "session_level",
-                            },
                         )
                     )
+                    msg_idx += 1
 
             yield Conversation(
-                id=conv_id,
+                id=f"locomo_exp_user_{i}",
                 speakers=speakers,
                 messages=tuple(messages),
             )
@@ -140,45 +130,15 @@ class LocomoDataset:
     def judge_system_prompt(self) -> str:
         """System-role message sent before the judge user prompt.
 
-        Splitting system from user gives the judge consistent role framing.
+        Mirrors EverCore ``locomo_grader.system_prompt``
+        (``stage5_eval.py:29-31``). Splitting system from user gives the judge
+        the same role framing EverCore uses.
         """
         return JUDGE_SYSTEM_PROMPT
 
     def answer_prompt(self) -> str:
         """Answer-generation prompt template for this dataset."""
         return ANSWER_PROMPT
-
-
-def _compute_msg_interval_ms(num_messages: int, current_ts: int, next_ts: int | None) -> float:
-    """Compute per-message time interval in milliseconds for a session.
-
-    Strategy: prefer 30 s (30_000 ms) between messages; compress only when the
-    default would spill into the next session.  A 10 % buffer is kept so the
-    last message of the current session never lands right on the start of the
-    next one.
-
-    Args:
-        num_messages: Number of messages in the current session.
-        current_ts: Current session start timestamp in milliseconds since epoch.
-        next_ts: Next session start timestamp in milliseconds since epoch,
-            or ``None`` when this is the last session.
-
-    Returns:
-        Interval in milliseconds (possibly fractional) to add per message index.
-        Zero when ``num_messages <= 1``.
-    """
-    default_interval_ms: float = 30_000.0
-    if num_messages <= 1:
-        return 0.0
-    required_duration = (num_messages - 1) * default_interval_ms
-    if next_ts is None:
-        return default_interval_ms
-    available_duration = float(next_ts - current_ts)
-    if available_duration <= 0:
-        return default_interval_ms
-    if required_duration > available_duration * 0.9:
-        return (available_duration * 0.9) / (num_messages - 1)
-    return default_interval_ms
 
 
 def _session_index(key: str) -> int:
@@ -195,6 +155,6 @@ def _parse_timestamp(text: str | None) -> int:
         return 0
     try:
         dt = datetime.strptime(text, "%I:%M %p on %d %B, %Y")
-        return int(dt.replace(tzinfo=UTC).timestamp() * 1000)
+        return int(dt.timestamp() * 1000)
     except ValueError:
         return 0

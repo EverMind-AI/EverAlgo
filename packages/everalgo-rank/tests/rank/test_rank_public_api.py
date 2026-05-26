@@ -64,6 +64,10 @@ def test_fusion_tools_callable() -> None:
     assert callable(fusion.lr)
     assert callable(fusion.cosine_to_lr_score)
     assert callable(fusion.score_propagation)
+    # Hierarchical expansion lives in fusion (merged from former _mrag_expander).
+    assert callable(fusion.expand)
+    # LLM-judged ranking — the only async function in fusion.
+    assert inspect.iscoroutinefunction(fusion.aagentic_rank)
 
 
 def test_weight_tools_callable_and_export_lr_coefs() -> None:
@@ -124,6 +128,26 @@ def test_prompts_modules_export_required_constants() -> None:
         assert "{top_k}" in p
 
 
+def test_agentic_prompts_export_required_placeholders() -> None:
+    """Sufficiency uses ``{query}/{retrieved_docs}``; multi-query uses ``{original_query}/...``."""
+    from everalgo.rank.prompts.en.agentic import (
+        AGENTIC_MULTI_QUERY_PROMPT_EN,
+        AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN,
+    )
+    from everalgo.rank.prompts.zh.agentic import (
+        AGENTIC_MULTI_QUERY_PROMPT_ZH,
+        AGENTIC_SUFFICIENCY_CHECK_PROMPT_ZH,
+    )
+
+    for p in (AGENTIC_SUFFICIENCY_CHECK_PROMPT_EN, AGENTIC_SUFFICIENCY_CHECK_PROMPT_ZH):
+        assert "{query}" in p
+        assert "{retrieved_docs}" in p
+    for p in (AGENTIC_MULTI_QUERY_PROMPT_EN, AGENTIC_MULTI_QUERY_PROMPT_ZH):
+        assert "{original_query}" in p
+        assert "{retrieved_docs}" in p
+        assert "{missing_info}" in p
+
+
 def test_rank_config_importable_and_frozen() -> None:
     from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig
 
@@ -155,9 +179,9 @@ def test_registry_modes_table_matches_per_facade_capabilities() -> None:
     """Each registry entry declares which fusion modes the facade supports."""
     from everalgo.rank.rerank import _ALGO_REGISTRY
 
-    assert _ALGO_REGISTRY["case"].modes == ("rrf", "lr", "vector_anchored")
-    assert _ALGO_REGISTRY["skill"].modes == ("rrf", "lr")
-    assert _ALGO_REGISTRY["episodic"].modes == ("rrf", "lr", "mrag")
+    assert _ALGO_REGISTRY["case"].modes == ("rrf", "lr", "vector_anchored", "agentic")
+    assert _ALGO_REGISTRY["skill"].modes == ("rrf", "lr", "agentic")
+    assert _ALGO_REGISTRY["episodic"].modes == ("rrf", "lr", "mrag", "agentic")
     # Profile does not use fusion_mode at all.
     assert _ALGO_REGISTRY["profile"].modes == ()
 

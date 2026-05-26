@@ -41,7 +41,7 @@ def _make_candidates() -> list[Candidate]:
         Candidate(
             id="ep_a",
             score=0.9,
-            metadata={"episode": "Alice asked about retries."},
+            metadata={"__rerank_query__": "Python async retry patterns", "episode": "Alice asked about retries."},
         ),
         Candidate(
             id="ep_b",
@@ -68,7 +68,6 @@ async def main() -> None:
 
     reranked: list[Candidate] = await arerank(
         candidates,
-        query="Python async retry patterns",
         prompt=EPISODIC_RERANK_PROMPT_EN,
         top_k=2,
         llm=fake,

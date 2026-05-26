@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
@@ -50,8 +51,9 @@ async def test_aextract_splits_atomic_facts_list_into_entities() -> None:
     facts = await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert len(facts) == 2
-    assert facts[0].content.startswith("Alice scheduled")
-    assert facts[1].content == "The meeting is on the calendar."
+    assert facts[0].fact.startswith("Alice scheduled")
+    assert facts[1].fact == "The meeting is on the calendar."
+    assert facts[0].time_label == "March 14, 2024(Thursday) at 3:00 PM UTC"  # type: ignore[attr-defined]
 
 
 async def test_aextract_owner_id_equals_sender_id() -> None:
@@ -75,11 +77,11 @@ async def test_aextract_owner_id_equals_custom_sender_id() -> None:
 
 
 async def test_aextract_raises_when_atomic_facts_missing() -> None:
-    """No atomic_facts key → ValueError on first attempt (no internal retry)."""
-    bad_responses: list[str | ChatResponse] = [ChatResponse(content='{"unrelated": []}', model="fake")]
-    fake = FakeLLMClient(responses=bad_responses)
+    """No atomic_facts key → LLMError propagates immediately (no retry)."""
+    bad = ChatResponse(content='{"unrelated": []}', model="fake")
+    fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(ValueError, match="atomic_facts"):
+    with pytest.raises(LLMError, match="atomic_facts"):
         await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -106,11 +108,11 @@ async def test_aextract_accepts_empty_atomic_fact_list() -> None:
 
 
 async def test_aextract_raises_on_bad_json() -> None:
-    """Unparseable JSON → ValueError on first attempt (no internal retry)."""
-    bad_responses: list[str | ChatResponse] = [ChatResponse(content="not json", model="fake")]
-    fake = FakeLLMClient(responses=bad_responses)
+    """Unparseable JSON → LLMError propagates immediately."""
+    bad = ChatResponse(content="not json", model="fake")
+    fake = FakeLLMClient(responses=[bad])
 
-    with pytest.raises(ValueError):
+    with pytest.raises(LLMError):
         await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
@@ -122,17 +124,11 @@ async def test_aextract_skips_non_string_or_empty_atomic_fact_items() -> None:
 
     facts = await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
-    assert [f.content for f in facts] == ["good", "also good"]
+    assert [f.fact for f in facts] == ["good", "also good"]
 
 
-async def test_aextract_per_call_prompt_override_renders_single_brace_placeholders() -> None:
-    """Per-call ``prompt=`` goes through ``render_prompt`` with ``{INPUT_TEXT}`` / ``{TIME}``.
-
-    The ``aextract`` path uses :func:`render_prompt` (not raw ``.replace``), so caller-supplied
-    overrides must use single-brace placeholders — the same form as the default
-    ``ATOMIC_FACT_PROMPT`` template at ``prompts/en/atomic_fact.py``. Doubled ``{{...}}`` would be
-    collapsed by render_prompt's brace-escape pass before substitution and never match a kwarg.
-    """
+async def test_aextract_per_call_prompt_overrides_default_uses_double_brace_replace() -> None:
+    """Per-call prompt= goes through .replace() with double-brace placeholders."""
     captured: dict[str, Any] = {}
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
@@ -143,14 +139,14 @@ async def test_aextract_per_call_prompt_override_renders_single_brace_placeholde
         )
 
     fake = FakeLLMClient(handler=handler)
-    custom = "CUSTOM ATOMIC INPUT={INPUT_TEXT} TIME={TIME}"
+    custom = "CUSTOM ATOMIC INPUT={{INPUT_TEXT}} TIME={{TIME}}"
 
     await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice", prompt=custom)
 
     assert captured["content"].startswith("CUSTOM ATOMIC")
     assert "Alice: Alice scheduled" in captured["content"]
-    assert "{INPUT_TEXT}" not in captured["content"]
-    assert "{TIME}" not in captured["content"]
+    assert "{{INPUT_TEXT}}" not in captured["content"]
+    assert "{{TIME}}" not in captured["content"]
 
 
 # ==========================================================================
@@ -228,7 +224,7 @@ async def test_aextract_silently_skips_non_chat_items() -> None:
     facts_mixed = await AtomicFactExtractor(llm=fake_mixed).aextract(mixed_cell, sender_id="u_alice")
 
     assert len(facts_chat) == len(facts_mixed) == 1
-    assert facts_chat[0].content == facts_mixed[0].content
+    assert facts_chat[0].fact == facts_mixed[0].fact
     assert facts_chat[0].owner_id == facts_mixed[0].owner_id
 
 

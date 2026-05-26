@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
+from pydantic import BaseModel, Field
 
 from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
@@ -21,6 +21,27 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# Pydantic schemas for structured outputs (json_schema mode)
+# ------------------------------------------------------------------
+
+
+class _ForesightItem(BaseModel):
+    """Single foresight item from LLM response."""
+
+    content: str
+    evidence: str
+    start_time: str
+    end_time: str | None = Field(default=None)
+    duration_days: int | None = Field(default=None)
+
+
+class _ForesightGenerationResponse(BaseModel):
+    """Response schema for FORESIGHT_GENERATION_PROMPT."""
+
+    foresights: list[_ForesightItem]
 
 
 _FORESIGHT_TEMPERATURE = 0.3
@@ -66,9 +87,16 @@ class ForesightExtractor:
 
         start_time_fallback = _format_start_time_from_timestamp(memcell.timestamp)
 
-        foresight_items = await _call_llm_for_foresight(self._llm, rendered, temperature=_FORESIGHT_TEMPERATURE)
-        foresights = _build_foresights_from_items(
-            foresight_items,
+        response = await self._llm.chat(
+            messages=[LLMChatMessage(role="user", content=rendered)],
+            response_format=_ForesightGenerationResponse,
+            temperature=_FORESIGHT_TEMPERATURE,
+        )
+        parsed = response.parsed
+        if not isinstance(parsed, _ForesightGenerationResponse):
+            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
+        foresights = _build_foresights_from_parsed(
+            parsed,
             memcell=memcell,
             sender_id=sender_id,
             start_time_fallback=start_time_fallback,
@@ -80,49 +108,6 @@ class ForesightExtractor:
         return foresights
 
     extract = async_to_sync(aextract)
-
-
-# ---------------------------------------------------------------------------
-# LLM callsite — brace-balanced JSON extraction + 5-retry (mirror b150b32).
-# ---------------------------------------------------------------------------
-
-
-async def _call_llm_for_foresight(
-    llm: LLMClient, rendered: str, *, temperature: float | None = None
-) -> list[dict[str, Any]]:
-    """Call LLM and return validated foresights list.
-
-    Uses brace-balanced extraction because ``foresights`` is nested (list of dicts).
-
-    Raises:
-        ValueError: If no JSON found or ``foresights`` key is missing/not a list.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)], temperature=temperature)
-    text = response.content
-    json_str = _extract_json_object(text)
-    data = json.loads(json_str)
-    if "foresights" not in data:
-        raise ValueError(f"foresights key missing from LLM response: {data!r}")
-    items = data["foresights"]
-    if not isinstance(items, list):
-        raise ValueError(f"foresights must be a list, got {type(items).__name__}: {items!r}")  # noqa: TRY004
-    return cast("list[dict[str, Any]]", items)
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in foresight LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in foresight LLM response: {text[:200]!r}")
 
 
 # Module-level helpers.
@@ -189,28 +174,24 @@ def _calculate_duration_days(start_time: str, end_time: str) -> int | None:
     return (end_date - start_date).days
 
 
-def _build_foresights_from_items(
-    items: list[dict[str, Any]],
+def _build_foresights_from_parsed(
+    parsed: _ForesightGenerationResponse,
     *,
     memcell: MemCell,
     sender_id: str,
     start_time_fallback: str,
 ) -> list[Foresight]:
-    """Build Foresight entities from LLM response item list; apply date cleaning + mutual time computation."""
+    """Build Foresight entities from parsed LLM response; apply date cleaning + mutual time computation."""
     out: list[Foresight] = []
-    for item in items:
-        if not isinstance(item, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-            continue
-        content = str(item.get("content") or "").strip()
+    for item in parsed.foresights:
+        content = item.content.strip()
         if not content:
             continue
-        evidence = str(item.get("evidence") or "")
+        evidence = item.evidence or ""
 
-        item_start_time = _clean_date_string(item.get("start_time")) or start_time_fallback
-        raw_end_time = item.get("end_time")
-        item_end_time = _clean_date_string(raw_end_time) if raw_end_time else None
-        raw_duration = item.get("duration_days")
-        item_duration_days = int(raw_duration) if isinstance(raw_duration, (int, float)) else None
+        item_start_time = _clean_date_string(item.start_time) or start_time_fallback
+        item_end_time = _clean_date_string(item.end_time) if item.end_time else None
+        item_duration_days = item.duration_days
 
         # Mutual time computation
         if item_start_time:

@@ -7,7 +7,9 @@ import logging
 import re
 import uuid
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from pydantic import BaseModel, Field
 
 from everalgo.agent_memory._text import json_default, truncate_text
 from everalgo.agent_memory.prompts.skill_maturity import AGENT_SKILL_MATURITY_SCORE_PROMPT
@@ -22,6 +24,16 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+class MaturityScoreResponse(BaseModel):
+    """LLM maturity evaluation response schema."""
+
+    completeness: int = Field(..., ge=1, le=5, description="Completeness score 1-5")
+    executability: int = Field(..., ge=1, le=5, description="Executability score 1-5")
+    evidence: int = Field(..., ge=1, le=5, description="Evidence score 1-5")
+    clarity: int = Field(..., ge=1, le=5, description="Clarity score 1-5")
+    reason: str = Field(..., description="Brief justification for the scores")
 
 
 __all__ = [
@@ -40,7 +52,7 @@ def _op_data(op: dict[str, Any]) -> dict[str, Any]:
     """Pull the ``data`` field off an LLM-emitted op dict, defaulting to ``{}``."""
     raw = op.get("data")
     if isinstance(raw, dict):
-        return raw  # type: ignore[return-value]
+        return cast("dict[str, Any]", raw)
     return {}
 
 
@@ -156,44 +168,6 @@ def _is_hypothesis_promotion(old_content: str, new_content: str) -> bool:
     return old_has_potential and new_has_steps and not new_has_potential
 
 
-# ── LLM callsite — brace-balanced JSON extraction + 5-retry ────────────────────────────────────────
-
-
-async def _call_llm_for_maturity(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM for maturity scoring and return validated dict with dimension scores.
-
-    MaturityScoreResponse is nominally flat (completeness/executability/evidence/clarity/reason),
-    but uses brace-balanced extraction for safety in case ``reason`` contains nested braces.
-
-    Raises:
-        ValueError: If no JSON found or required dimension keys are missing.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    data: dict[str, Any] = json.loads(json_str)
-    missing = [d for d in _MATURITY_DIMENSIONS if d not in data]
-    if missing:
-        raise ValueError(f"Maturity response missing dimension keys {missing!r}: {data!r}")
-    return data
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested/complex JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in maturity LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in maturity LLM response: {text[:200]!r}")
-
-
 # ── Maturity scoring ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -233,8 +207,16 @@ async def _evaluate_maturity(
         content=content or "",
         confidence=confidence,
     )
-    maturity_data = await _call_llm_for_maturity(client, rendered)
-    raw_total = sum(int(maturity_data.get(d, 0)) for d in _MATURITY_DIMENSIONS)
+    response = await client.chat(
+        messages=[LLMChatMessage(role="user", content=rendered)],
+        response_format=MaturityScoreResponse,
+    )
+    llm_response = cast("MaturityScoreResponse | None", response.parsed)
+    if llm_response is None:
+        raise ValueError("LLM returned no parsed structured output")
+
+    raw_total = sum(getattr(llm_response, d) for d in _MATURITY_DIMENSIONS)
+
     score: float = max(0.0, min(1.0, raw_total / 20.0))
     logger.info(
         "maturity evaluation: name=%r, raw=%.1f, score=%.2f, threshold=%.2f, ready=%s",
@@ -309,7 +291,7 @@ async def _apply_add(
     )
 
 
-async def _apply_update(  # noqa: C901
+async def _apply_update(  # noqa: C901  — branches mirror the upstream algorithm
     op: dict[str, Any],
     existing_list: Sequence[AgentSkill],
     source_case_ids: Sequence[str],

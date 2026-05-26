@@ -28,9 +28,8 @@ class StageContext:
     input_dir: Path
     output_dir: Path
     smoke: bool = False
-    smoke_conv_limit: int = 1
+    smoke_conv_limit: int = 3
     smoke_qa_limit: int = 10
-    smoke_msg_limit: int = 50
 
 
 @dataclass

@@ -1,7 +1,7 @@
 """OpenAI-compatible provider — wraps openai.AsyncOpenAI."""
 
 import inspect
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal
 
 import openai
 from pydantic import BaseModel
@@ -9,9 +9,6 @@ from pydantic import BaseModel
 from everalgo.llm.config import LLMConfig
 from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage, ChatResponse, Usage
-
-if TYPE_CHECKING:
-    from openai.types.chat import ChatCompletion
 
 
 class OpenAICompatClient:
@@ -54,7 +51,7 @@ class OpenAICompatClient:
             extra=extra,
         )
 
-        if inspect.isclass(response_format):
+        if inspect.isclass(response_format) and issubclass(response_format, BaseModel):
             return await self._chat_parse(request_kwargs, response_format)
         return await self._chat_create(request_kwargs)
 
@@ -99,7 +96,7 @@ class OpenAICompatClient:
     async def _chat_create(self, request_kwargs: dict[str, Any]) -> ChatResponse:
         """Route to ``client.chat.completions.create`` for standard / legacy calls."""
         try:
-            completion = cast("ChatCompletion", await self._client.chat.completions.create(**request_kwargs))
+            completion = await self._client.chat.completions.create(**request_kwargs)
         except openai.OpenAIError as exc:
             raise LLMError(str(exc)) from exc
 

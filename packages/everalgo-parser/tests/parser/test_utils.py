@@ -27,26 +27,26 @@ def _png_bytes(width: int, height: int) -> bytes:
 def test_check_aspect_ratio_normal_image_not_tall() -> None:
     needs_split, ratio = check_aspect_ratio(_png_bytes(100, 200))
     assert needs_split is False
-    assert ratio == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
+    assert ratio == pytest.approx(2.0)
 
 
 def test_check_aspect_ratio_tall_image_needs_split() -> None:
     needs_split, ratio = check_aspect_ratio(_png_bytes(100, 2000))
     assert needs_split is True
-    assert ratio == pytest.approx(20.0)  # pyright: ignore[reportUnknownMemberType]
+    assert ratio == pytest.approx(20.0)
 
 
 def test_check_aspect_ratio_custom_max_ratio() -> None:
     # 200 / 100 = 2.0; with max_ratio=1.5 it should need split
     needs_split, ratio = check_aspect_ratio(_png_bytes(100, 200), max_ratio=1.5)
     assert needs_split is True
-    assert ratio == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
+    assert ratio == pytest.approx(2.0)
 
 
 def test_check_aspect_ratio_square_image() -> None:
     needs_split, ratio = check_aspect_ratio(_png_bytes(100, 100))
     assert needs_split is False
-    assert ratio == pytest.approx(1.0)  # pyright: ignore[reportUnknownMemberType]
+    assert ratio == pytest.approx(1.0)
 
 
 # ---- split_image_with_overlap ----
