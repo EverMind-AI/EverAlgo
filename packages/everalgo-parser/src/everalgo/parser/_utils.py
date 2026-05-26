@@ -1,8 +1,5 @@
 """Internal parser helpers.
 
-Migrated (with English docstrings) from
-``evermemos-multimodal/src/parser/utils.py`` (prod-20260306-0331-v1):
-
 - ``decode_bytes`` — multi-encoding decoder for unknown-charset bytes.
 - ``check_aspect_ratio`` / ``split_image_with_overlap`` — long-image (tall
   screenshot) handling for the image parser.

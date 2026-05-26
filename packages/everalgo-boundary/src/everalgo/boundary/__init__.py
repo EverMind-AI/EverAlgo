@@ -11,12 +11,14 @@ everalgo-agent-memory respectively; see Stage 3-4 of the refactor.
 
 import logging
 
-from everalgo.boundary.chat import DetectionResult, detect_boundaries
+from everalgo.boundary.chat import BoundaryDecision, DetectionResult, adetect_boundary_step, detect_boundaries
 from everalgo.boundary.workspace import WorkspaceMemCellExtractor
 
 __all__ = [
+    "BoundaryDecision",
     "DetectionResult",
     "WorkspaceMemCellExtractor",
+    "adetect_boundary_step",
     "detect_boundaries",
 ]
 

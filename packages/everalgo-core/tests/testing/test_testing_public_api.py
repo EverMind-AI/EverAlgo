@@ -1,6 +1,6 @@
 """Tests for everalgo.testing package-level public API.
 
-Verifies the 3 documented public symbols (per AGENTS.md §7 step 6 and §9 plus spec §3) are exported at the
+Verifies the documented public symbols (per AGENTS.md §7 step 6 and §9 plus spec §3) are exported at the
 top-level package.
 """
 
@@ -15,6 +15,8 @@ def test_public_symbols_exposed_at_top_level() -> None:
     assert hasattr(everalgo.testing, "assert_foresight_shape")
     assert hasattr(everalgo.testing, "assert_atomic_fact_shape")
     assert hasattr(everalgo.testing, "assert_profile_shape")
+    assert hasattr(everalgo.testing, "JudgeResult")
+    assert hasattr(everalgo.testing, "allm_judge")
 
 
 def test_dunder_all_lists_exact_public_surface() -> None:
@@ -23,6 +25,8 @@ def test_dunder_all_lists_exact_public_surface() -> None:
         [
             "CallRecord",
             "FakeLLMClient",
+            "JudgeResult",
+            "allm_judge",
             "assert_atomic_fact_shape",
             "assert_episode_shape",
             "assert_foresight_shape",
@@ -36,6 +40,8 @@ def test_top_level_import_works() -> None:
     from everalgo.testing import (
         CallRecord,
         FakeLLMClient,
+        JudgeResult,
+        allm_judge,
         assert_atomic_fact_shape,
         assert_episode_shape,
         assert_foresight_shape,
@@ -51,3 +57,6 @@ def test_top_level_import_works() -> None:
     assert callable(assert_foresight_shape)
     assert callable(assert_atomic_fact_shape)
     assert callable(assert_profile_shape)
+    assert callable(allm_judge)
+    result = JudgeResult(is_correct=True)
+    assert result.is_correct is True

@@ -13,7 +13,6 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
-from pydantic import BaseModel, Field
 
 from everalgo.agent_memory._text import count_tokens, json_default, truncate_text
 from everalgo.agent_memory.prompts.case_compress import AGENT_CASE_COMPRESS_PROMPT
@@ -30,30 +29,6 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
-
-
-class ToolPreCompressResponse(BaseModel):
-    """LLM tool message pre-compression response schema."""
-
-    compressed_messages: list[Any] = Field(..., description="Compressed messages in same order as input")
-
-
-class CaseFilterResponse(BaseModel):
-    """LLM case filtering response schema."""
-
-    worth_extracting: bool | None = Field(
-        default=None, description="Whether case is worth extracting (defaults to True if missing)"
-    )
-    reason: str = Field(default="", description="Reason for the decision")
-
-
-class CaseCompressResponse(BaseModel):
-    """LLM case compression response schema."""
-
-    task_intent: str = Field(..., description="Specific task as self-contained statement")
-    approach: str = Field(..., description="Compressed problem-solving approach")
-    key_insight: str = Field(..., description="Pivotal decision or knowledge application")
-    quality_score: float = Field(..., ge=0.0, le=1.0, description="Task completion quality 0-1")
 
 
 __all__ = [
@@ -481,14 +456,7 @@ async def _compress_tool_chunk(
         messages_json=_dump_messages(messages),
         new_count=len(messages),
     )
-    response = await client.chat(
-        messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format=ToolPreCompressResponse,
-    )
-    llm_response = cast("ToolPreCompressResponse | None", response.parsed)
-    if llm_response is None:
-        raise ValueError("LLM returned no parsed structured output")
-    compressed_list = llm_response.compressed_messages
+    compressed_list = await _call_llm_for_tool_pre_compress(client, rendered)
 
     if len(compressed_list) != len(messages):
         logger.warning("tool pre-compress invalid shape (got %d, want %d)", len(compressed_list), len(messages))
@@ -499,14 +467,14 @@ async def _compress_tool_chunk(
         if not isinstance(comp, dict):
             logger.warning("tool pre-compress non-dict message in compressed list")
             return None
-        comp_dict = cast("dict[str, Any]", comp)
+        # isinstance(comp, dict) is asserted above; cast to restore key/value types for dict spread.
         # LLM-compressed messages carry no timestamp; preserve the original message's timestamp so the
         # rebuilt ConversationItem validates and downstream ordering / logging stays meaningful.
-        merged = {**comp_dict, "timestamp": orig.timestamp}
+        merged: dict[str, Any] = {**cast("dict[str, Any]", comp), "timestamp": orig.timestamp}
         try:
             rebuilt.append(_openai_dict_to_agent_item(merged, orig.timestamp))
         except (ValueError, KeyError) as exc:
-            logger.warning("tool pre-compress message validation failed: %s", exc)
+            logger.warning("tool pre-compress message validation failed: %s", exc, exc_info=True)
             return None
     return rebuilt
 
@@ -556,18 +524,13 @@ async def _is_worth_extracting(
         json.JSONDecodeError: If the LLM response is not valid JSON.
     """
     rendered = render_prompt(AGENT_CASE_FILTER_PROMPT, prompt, messages=messages_json)
-    response = await client.chat(
-        messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format=CaseFilterResponse,
-    )
-    llm_response = cast("CaseFilterResponse | None", response.parsed)
-    if llm_response is None:
-        raise ValueError("LLM returned no parsed structured output")
-
-    worth = llm_response.worth_extracting if llm_response.worth_extracting is not None else True
+    filter_data = await _call_llm_for_case_filter(client, rendered)
+    worth = filter_data.get("worth_extracting")
+    if worth is None:
+        worth = True
     if not worth:
-        logger.info("filtered out by LLM: %s", llm_response.reason)
-    return worth
+        logger.info("filtered out by LLM: %s", filter_data.get("reason", ""))
+    return bool(worth)
 
 
 async def _compress_experience(
@@ -586,21 +549,80 @@ async def _compress_experience(
         json.JSONDecodeError: If the LLM response is not valid JSON.
     """
     rendered = render_prompt(AGENT_CASE_COMPRESS_PROMPT, prompt, messages=messages_json)
-    response = await client.chat(
-        messages=[LLMChatMessage(role="user", content=rendered)],
-        response_format=CaseCompressResponse,
-    )
-    llm_response = cast("CaseCompressResponse | None", response.parsed)
-    if llm_response is None:
-        raise ValueError("LLM returned no parsed structured output")
-
-    if not llm_response.task_intent:
+    compress_data = await _call_llm_for_case_compress(client, rendered)
+    if not compress_data.get("task_intent"):
         logger.info("LLM returned empty 'task_intent', skipping")
         return None
-    if not llm_response.approach:
+    if not compress_data.get("approach"):
         logger.warning("LLM returned empty 'approach', skipping")
         return None
-    return llm_response.model_dump()
+    return compress_data
+
+
+# ---------------------------------------------------------------------------
+# LLM callsites — brace-balanced JSON extraction + 5-retry (mirror b150b32).
+# ---------------------------------------------------------------------------
+
+
+async def _call_llm_for_tool_pre_compress(llm: LLMClient, rendered: str) -> list[Any]:
+    """Call LLM for tool pre-compression and return validated compressed_messages list.
+
+    Uses brace-balanced extraction because ``compressed_messages`` is nested (list of dicts).
+
+    Raises:
+        ValueError: If no JSON found or ``compressed_messages`` key missing / not a list.
+    """
+    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
+    text = response.content
+    json_str = _extract_json_object(text)
+    data = json.loads(json_str)
+    if "compressed_messages" not in data:
+        raise ValueError(f"Tool pre-compress response missing 'compressed_messages': {list(data.keys())!r}")
+    compressed = data["compressed_messages"]
+    if not isinstance(compressed, list):
+        raise ValueError(f"compressed_messages must be a list, got {type(compressed).__name__}: {compressed!r}")  # noqa: TRY004
+    return cast("list[Any]", compressed)  # type: ignore[redundant-cast]
+
+
+async def _call_llm_for_case_filter(llm: LLMClient, rendered: str) -> dict[str, Any]:
+    """Call LLM for case filtering and return validated dict with worth_extracting + reason.
+
+    CaseFilterResponse is nominally flat but uses brace-balanced extraction for safety.
+    """
+    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
+    text = response.content
+    json_str = _extract_json_object(text)
+    result: dict[str, Any] = json.loads(json_str)
+    return result
+
+
+async def _call_llm_for_case_compress(llm: LLMClient, rendered: str) -> dict[str, Any]:
+    """Call LLM for case compression and return validated dict with task_intent + approach + quality_score.
+
+    Raises:
+        ValueError: If no JSON found.
+    """
+    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
+    text = response.content
+    json_str = _extract_json_object(text)
+    result: dict[str, Any] = json.loads(json_str)
+    return result
+
+
+def _extract_json_object(text: str) -> str:
+    """First balanced {{...}} block in text (brace-balanced parser for nested JSON)."""
+    start = text.find("{")
+    if start < 0:
+        raise ValueError(f"No JSON object found in case LLM response: {text[:200]!r}")
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise ValueError(f"Unbalanced JSON in case LLM response: {text[:200]!r}")
 
 
 def _clamp_quality_score(value: Any) -> float:

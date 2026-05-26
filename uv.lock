@@ -16,6 +16,7 @@ members = [
     "everalgo-knowledge",
     "everalgo-parser",
     "everalgo-rank",
+    "everalgo-retrieval",
     "everalgo-user-memory",
     "everalgo-workspace",
 ]
@@ -456,6 +457,7 @@ dependencies = [
     { name = "everalgo-boundary" },
     { name = "everalgo-core" },
     { name = "everalgo-rank" },
+    { name = "everalgo-retrieval" },
     { name = "everalgo-user-memory" },
     { name = "httpx" },
     { name = "nltk" },
@@ -472,6 +474,7 @@ requires-dist = [
     { name = "everalgo-boundary", editable = "packages/everalgo-boundary" },
     { name = "everalgo-core", editable = "packages/everalgo-core" },
     { name = "everalgo-rank", editable = "packages/everalgo-rank" },
+    { name = "everalgo-retrieval", editable = "packages/everalgo-retrieval" },
     { name = "everalgo-user-memory", editable = "packages/everalgo-user-memory" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "nltk", specifier = ">=3.9" },
@@ -589,6 +592,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "everalgo-retrieval"
+version = "0.1.0"
+source = { editable = "packages/everalgo-retrieval" }
+dependencies = [
+    { name = "asgiref" },
+    { name = "everalgo-core" },
+    { name = "everalgo-rank" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asgiref", specifier = ">=3.0" },
+    { name = "everalgo-core", editable = "packages/everalgo-core" },
+    { name = "everalgo-rank", editable = "packages/everalgo-rank" },
+]
+
+[[package]]
 name = "everalgo-user-memory"
 version = "0.1.0"
 source = { editable = "packages/everalgo-user-memory" }
@@ -621,6 +641,7 @@ dev = [
     { name = "everalgo-knowledge" },
     { name = "everalgo-parser" },
     { name = "everalgo-rank" },
+    { name = "everalgo-retrieval" },
     { name = "everalgo-user-memory" },
     { name = "git-cliff" },
     { name = "mypy" },
@@ -647,6 +668,7 @@ dev = [
     { name = "everalgo-knowledge", editable = "packages/everalgo-knowledge" },
     { name = "everalgo-parser", editable = "packages/everalgo-parser" },
     { name = "everalgo-rank", editable = "packages/everalgo-rank" },
+    { name = "everalgo-retrieval", editable = "packages/everalgo-retrieval" },
     { name = "everalgo-user-memory", editable = "packages/everalgo-user-memory" },
     { name = "git-cliff", specifier = ">=2.6" },
     { name = "mypy", specifier = ">=1.10" },

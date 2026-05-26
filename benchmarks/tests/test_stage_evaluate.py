@@ -32,15 +32,16 @@ async def test_run_evaluate_stage_writes_eval_results_json(tmp_path: Path, monke
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
-    # Mock judge LLM to always say correct
+    # Mock judge LLM to always say correct.
+    # allm_judge reads resp.usage.prompt_tokens — mock must expose .usage with the right shape.
+    mock_usage = MagicMock(prompt_tokens=10, completion_tokens=5)
     monkeypatch.setattr(
         services.llm,
         "chat",
         AsyncMock(
             return_value=MagicMock(
-                content='{"is_correct": true, "reasoning": "ok"}',
-                prompt_tokens=10,
-                completion_tokens=5,
+                content='{"label": "CORRECT", "reasoning": "ok"}',
+                usage=mock_usage,
             )
         ),
     )
@@ -115,7 +116,12 @@ async def test_run_evaluate_stage_writes_eval_results_json(tmp_path: Path, monke
 
 
 @pytest.mark.asyncio
-async def test_run_evaluate_stage_handles_judge_error(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+async def test_run_evaluate_stage_raises_when_judge_keeps_failing(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Fail-loud: persistent judge LLM exceptions exhaust retries and abort the stage.
+
+    Silent ``is_correct=False`` placeholders would poison the headline accuracy
+    with judge outages; the new contract surfaces the failure instead.
+    """
     from benchmarks.common.config import BenchmarkConfig
     from benchmarks.common.services import Services
     from benchmarks.common.stages.types import StageContext
@@ -123,6 +129,8 @@ async def test_run_evaluate_stage_handles_judge_error(tmp_path: Path, monkeypatc
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
+    # Collapse the per-attempt backoff so the test does not wait 1+2+4+8 = 15 s.
+    monkeypatch.setattr("everalgo.testing.judge.asyncio.sleep", AsyncMock())
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
@@ -155,11 +163,6 @@ async def test_run_evaluate_stage_handles_judge_error(tmp_path: Path, monkeypatc
         input_dir=stage4_dir,
         output_dir=tmp_path / "stage5_evaluate",
     )
-    stats = await run_evaluate_stage(ctx)
-    # Despite LLM error, stage completes
-    assert stats.stage_name == "evaluate"
-    data: dict[str, Any] = json.loads((tmp_path / "stage5_evaluate" / "eval_results.json").read_text())
-    assert data["total_questions"] == 1
-    # Failed judge → is_correct=False
-    assert data["correct"] == 0
-    assert data["detailed_results"][0]["is_correct"] is False
+    with pytest.raises(RuntimeError, match="judge LLM down"):
+        await run_evaluate_stage(ctx)
+    assert not (tmp_path / "stage5_evaluate" / "eval_results.json").exists()

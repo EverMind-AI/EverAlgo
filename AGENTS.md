@@ -8,12 +8,12 @@ If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboar
 
 ## 1. Project Identity
 
-**EverAlgo** is an algorithm library for memory extraction and ranking — *not* a service, not a framework.
+**EverAlgo** is an algorithm library for memory extraction and retrieval — *not* a service, not a framework.
 
 - **Algorithm-only.** All memory extraction / fusion / re-ranking strategies live here. The library is **stateless**: it does not connect to databases, does not read or write the filesystem, does not own any business state.
-- **Two axes.** Every operator belongs to one of two axes whose contracts are symmetric (stateless, in-memory I/O):
+- **Two paths.** Every operator belongs to one of two read/write paths whose contracts are symmetric (stateless, in-memory I/O):
   - **Extract** — write path. Input: structured units (e.g. `MemCell`). Output: structured memories (`Episode` / `Profile` / `Case` / `Skill` / …).
-  - **Rank** — read path. Input: multi-route recall candidates plus pre-fetched cross-memory linkage. Output: a ranked memory list. Ranker performs **no storage I/O**; cross-memory linkage (e.g. `Episode → AtomicFact`) must be pre-fetched by the caller and passed in.
+  - **Retrieve** — read path. Input: query + caller-injected `RetrieveFn` / `RerankFn` callables. Output: a ranked memory list. The `everalgo-retrieval` facade exposes three strategies: **hybrid** (dual-route RRF), **agentic** (LLM-guided sufficiency + multi/refined query wrapper over any base), and **hierarchical** (parent-child expansion with LR fusion). `everalgo-rank` (rrf / lr / weight / cosine-to-LR + LLM-based rerank algorithms) is a sub-capability used inside retrieval — not a top-level path. Caller binds storage / model clients inside its `RetrieveFn` / `RerankFn`; algo never touches persistence.
 - **Orchestration is upstream.** When to call, in what order, with what concurrency, persistence to the markdown filesystem — all owned by **evermem**. EverAlgo does not care whether the caller is open-source or cloud commercial; both paths share this code.
 
 For the rationale and deeper background, read `docs/concepts/architecture.md`
@@ -42,11 +42,12 @@ everalgo/                              # monorepo, uv virtual workspace
 │   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (EXPERIMENTAL stub)
 │   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile
 │   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill
-│   └── everalgo-knowledge/            # KnowledgeMemory extractor (EXPERIMENTAL stub)
+│   ├── everalgo-knowledge/            # KnowledgeMemory extractor (EXPERIMENTAL stub)
+│   └── everalgo-retrieval/            # ahybrid_retrieve / aagentic_retrieve / ahierarchical_retrieve over caller RetrieveFn / RerankFn
 └── tests/
 ```
 
-Eight publishable distributions share the **`everalgo.*` namespace** through [PEP 420](https://peps.python.org/pep-0420/) native namespace packages: every `packages/*/src/everalgo/` directory deliberately omits `__init__.py`, while subpackages (`everalgo/<subpkg>/__init__.py`) are regular packages. This is the [PyPA-recommended layout](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages) for Py3-only + pip-installed projects, and it lets `from everalgo.user_memory import EpisodeExtractor` work even when `everalgo-user-memory` and `everalgo-boundary` are installed from different distributions. Industrial precedents: `google-cloud-*` (100+ dists sharing `google.cloud.*`) and `sphinxcontrib-*` (6 official Sphinx-extension dists sharing `sphinxcontrib.*`).
+Nine publishable distributions share the **`everalgo.*` namespace** through [PEP 420](https://peps.python.org/pep-0420/) native namespace packages: every `packages/*/src/everalgo/` directory deliberately omits `__init__.py`, while subpackages (`everalgo/<subpkg>/__init__.py`) are regular packages. This is the [PyPA-recommended layout](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages) for Py3-only + pip-installed projects, and it lets `from everalgo.user_memory import EpisodeExtractor` work even when `everalgo-user-memory` and `everalgo-boundary` are installed from different distributions. Industrial precedents: `google-cloud-*` (100+ dists sharing `google.cloud.*`) and `sphinxcontrib-*` (6 official Sphinx-extension dists sharing `sphinxcontrib.*`).
 
 The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = false` at the root, members under `packages/*`). Same shape: [Apache Airflow](https://github.com/apache/airflow) (100+ workspace members, single root lockfile) and [pydantic-ai](https://github.com/pydantic/pydantic-ai). Note these two projects are *uv-workspace* references only — Airflow's `airflow.providers.*` is pkgutil-style legacy namespace, not PEP 420; pydantic-ai uses three independent namespaces, not one shared. LangChain and LlamaIndex are referenced for the *monorepo* layout only — neither uses uv workspace itself; they keep per-package venvs and lockfiles.
 
@@ -58,10 +59,10 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
        ┌────────────┬────────────┬──┴───────────┬───────────┐
        │            │            │              │           │
    boundary    clustering        rank         parser
-       ▲            ▲                                       ▲
-       └────────────┤                                       │
-                    │                                       │
-            user-memory ── agent-memory          everalgo-knowledge
+       ▲            ▲            ▲  ▲                       ▲
+       └────────────┤            │  └──────────┐            │
+                    │            │             │            │
+            user-memory ── agent-memory    retrieval   everalgo-knowledge
 ```
 
 ---
@@ -73,7 +74,7 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
 git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 
-# Install all 8 packages editable into a shared venv (includes dev tools).
+# Install all 9 packages editable into a shared venv (includes dev tools).
 uv sync --all-packages --group dev
 
 # Run tests across the workspace.
@@ -140,7 +141,7 @@ uv run pre-commit autoupdate
 
 #### What's deliberately NOT in pre-commit
 
-- **`mypy` / `pyright`** — strict type-checks over the 8-package PEP 420 workspace each take several seconds per run and would make commit feel sluggish; enforced by CI instead (pydantic / sklearn / openai-python / anthropic-sdk-python do the same).
+- **`mypy` / `pyright`** — strict type-checks over the 9-package PEP 420 workspace each take several seconds per run and would make commit feel sluggish; enforced by CI instead (pydantic / sklearn / openai-python / anthropic-sdk-python do the same).
 - **`pytest`** — same reason. CI is the gate.
 
 ### Editor integration (recommended)
@@ -215,7 +216,7 @@ Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `bu
 
 **MR title is load-bearing.** GitLab is configured (Settings → Merge Requests → Squash commit template = `%{title}`) so the MR title lands verbatim as the squash commit on `main`. MR titles must match the format above, because the release-notes generator (`git cliff`, see `cliff.toml` + `README.md` "Cutting a release") parses these messages to assemble per-distribution CHANGELOGs.
 
-**Scope = distribution name without the `everalgo-` prefix.** Use `clustering` / `rank` / `core` / `boundary` / `parser` / `user-memory` / `agent-memory` / `knowledge`. For cross-cutting changes (CI, monorepo tooling, root docs), use `ci` / `release` / `repo` / `design` / `docs` as the scope or omit the scope entirely.
+**Scope = distribution name without the `everalgo-` prefix.** Use `clustering` / `rank` / `retrieval` / `core` / `boundary` / `parser` / `user-memory` / `agent-memory` / `knowledge`. For cross-cutting changes (CI, monorepo tooling, root docs), use `ci` / `release` / `repo` / `design` / `docs` as the scope or omit the scope entirely.
 
 **Squashing matters for per-distribution filtering.** `git cliff --include-path 'packages/everalgo-<name>/**'` filters commits by changed paths. Squash merges keep one commit = one MR = one scoped Conventional-Commit message, which is the unit git-cliff groups by.
 
@@ -225,7 +226,7 @@ Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `bu
 
 Follow this checklist when introducing a new extractor / ranker / clusterer:
 
-1. **Pick the subpackage.** Decide which `packages/everalgo-<dist>/src/everalgo/<subpkg>/` the operator lives in based on its product axis (user_memory / agent_memory / knowledge) or tool axis (boundary / clustering / rank / parser). When in doubt, read `docs/concepts/architecture.md`
+1. **Pick the subpackage.** Decide which `packages/everalgo-<dist>/src/everalgo/<subpkg>/` the operator lives in based on its product axis (user_memory / agent_memory / knowledge) or tool axis (boundary / clustering / rank / retrieval / parser). When in doubt, read `docs/concepts/architecture.md`
 2. **Create the module.** `<subpkg>/<operator>.py` — module-level functions or one stateless class implementing the relevant Protocol from `everalgo.protocols`.
 3. **Write the prompt(s).** If the operator calls an LLM, drop prompt strings as module-level constants in `<subpkg>/prompts/en/<operator>.py` (and `zh/<operator>.py` for the Chinese variant when applicable).
 4. **Re-export the public surface.** If the operator is part of the public API of its facade subpackage, add it to `<subpkg>/__init__.py`'s re-export block and `__all__`. See `docs/concepts/architecture.md` for the re-export pattern.

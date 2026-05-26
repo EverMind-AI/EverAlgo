@@ -1,37 +1,37 @@
-"""Tests for hybrid retrieval + reranker orchestration."""
+"""Tests for reranker orchestration (hybrid_search_with_rrf was deleted; ported to algo tests)."""
 
 from __future__ import annotations
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import numpy as np
 import pytest
-from rank_bm25 import BM25Okapi  # type: ignore[import-untyped]
 
 from benchmarks.common.stages.search import (
     _format_doc_for_rerank,
-    hybrid_search_with_rrf,
     reranker_search,
 )
 
 
 def test_format_doc_prefers_episode_content():
-    """Mirror locomo-benchmark generic fallback: episode body is the first match."""
+    """Generic fallback: episode body is the first match."""
     doc = {
         "episode": {"subject": "birthday", "content": "Alice's birthday party"},
-        "atomic_facts": [{"fact": "Alice ate cake"}],
+        "atomic_facts": {"atomic_fact": ["Alice ate cake"]},
     }
     assert _format_doc_for_rerank(doc) == "Alice's birthday party"
 
 
 def test_format_doc_falls_back_to_first_atomic_fact():
-    """Episode content empty -> step to atomic_facts; only the first fact is returned."""
+    """Episode content empty -> step to atomic_facts; only the first fact is returned.
+
+    Stage 1 emits ``atomic_facts`` as a dict
+    ``{"time", "timestamp", "atomic_fact": list[str], "fact_embeddings": ...}``.
+    """
     doc = {
-        "atomic_facts": [
-            {"fact": "Alice ate cake"},
-            {"fact": "It was chocolate"},
-        ],
+        "atomic_facts": {
+            "atomic_fact": ["Alice ate cake", "It was chocolate"],
+        },
     }
     assert _format_doc_for_rerank(doc) == "Alice ate cake"
 
@@ -45,72 +45,13 @@ def test_format_doc_falls_back_to_summary_then_subject():
 def test_format_doc_returns_none_when_empty():
     """All probe fields absent -> None."""
     assert _format_doc_for_rerank({}) is None
-    assert _format_doc_for_rerank({"atomic_facts": []}) is None
+    assert _format_doc_for_rerank({"atomic_facts": {"atomic_fact": []}}) is None
     assert _format_doc_for_rerank({"episode": {"subject": "", "content": ""}}) is None
 
 
 def test_format_doc_accepts_legacy_string_episode():
     """Tolerate the legacy schema where episode was a plain string."""
     assert _format_doc_for_rerank({"episode": "raw episode body"}) == "raw episode body"
-
-
-def _build_bm25_index(
-    docs: list[dict[str, Any]], fact_corpus: list[list[str]], fact_to_doc_idx: list[int]
-) -> dict[str, Any]:
-    """Helper: assemble a stage-2-shaped fact-level BM25 payload for the tests."""
-    return {
-        "bm25": BM25Okapi(fact_corpus),
-        "docs": docs,
-        "fact_to_doc_idx": fact_to_doc_idx,
-        "index_type": "maxsim",
-    }
-
-
-@pytest.mark.asyncio
-async def test_hybrid_search_runs_emb_and_bm25_in_parallel():
-    """Verify both branches called, results fused."""
-    embedding_client = AsyncMock()
-    embedding_client.embed = AsyncMock(return_value=[[1.0, 0.0]])
-
-    emb_index = [
-        {
-            "doc": {"id": "0"},
-            "embeddings": {"subject": np.array([1.0, 0.0], dtype=np.float32)},
-        }
-    ]
-    docs = [{"id": "0"}, {"id": "1"}]
-    bm25_index = _build_bm25_index(docs, [["alice"], ["bob"]], [0, 1])
-
-    out = await hybrid_search_with_rrf(
-        "alice",
-        emb_index=emb_index,
-        bm25_index=bm25_index,
-        embedding_client=embedding_client,
-        top_n=10,
-        rrf_k=60,
-    )
-    assert len(out) >= 1
-    # doc "0" should rank highest (in both emb and bm25 top results)
-    assert out[0][0]["id"] == "0"
-
-
-@pytest.mark.asyncio
-async def test_hybrid_search_empty_emb_falls_back_to_bm25():
-    embedding_client = AsyncMock()
-    embedding_client.embed = AsyncMock(return_value=[[0.0, 1.0]])
-
-    emb_index: list[dict[str, Any]] = []
-    docs = [{"id": "0"}, {"id": "1"}]
-    bm25_index = _build_bm25_index(docs, [["alice"], ["bob"]], [0, 1])
-
-    out = await hybrid_search_with_rrf(
-        "alice",
-        emb_index=emb_index,
-        bm25_index=bm25_index,
-        embedding_client=embedding_client,
-        top_n=10,
-    )
-    assert len(out) >= 1
 
 
 @pytest.mark.asyncio
@@ -138,8 +79,13 @@ async def test_reranker_search_returns_top_n_by_rerank_score():
 
 
 @pytest.mark.asyncio
-async def test_reranker_search_all_failures_fallback_to_original():
-    """When all batches fail, return original ranking top-n."""
+async def test_reranker_search_raises_when_all_batches_fail():
+    """Fail-loud: when every rerank batch fails, raise instead of silently degrading.
+
+    Silent fallback to ``results[:top_n]`` would degenerate to dict-insertion order
+    on the cluster path (acluster_retrieve returns ``score=0.0`` candidates), masking
+    real reranker outages.
+    """
     rerank_client = MagicMock()
     rerank_client.rerank = AsyncMock(side_effect=RuntimeError("API down"))
 
@@ -147,18 +93,17 @@ async def test_reranker_search_all_failures_fallback_to_original():
         ({"id": "0", "episode": {"subject": "x", "content": "x body"}}, 0.5),
         ({"id": "1", "episode": {"subject": "y", "content": "y body"}}, 0.4),
     ]
-    out = await reranker_search(
-        "q",
-        results=docs,
-        rerank_client=rerank_client,
-        top_n=2,
-        batch_size=10,
-        concurrent_batches=1,
-        max_retries=1,
-        retry_delay=0.001,
-    )
-    # Fallback to original order
-    assert out == docs[:2]
+    with pytest.raises(RuntimeError, match="reranker batch success rate"):
+        await reranker_search(
+            "q",
+            results=docs,
+            rerank_client=rerank_client,
+            top_n=2,
+            batch_size=10,
+            concurrent_batches=1,
+            max_retries=1,
+            retry_delay=0.001,
+        )
 
 
 @pytest.mark.asyncio

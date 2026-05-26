@@ -130,7 +130,7 @@ async def test_aparse_html_empty_after_clean_returns_empty_parsed_content(monkey
     import everalgo.parser.document as doc_mod
 
     # Monkeypatch clean_html_for_llm to return "" so the empty-after-cleanup branch fires
-    monkeypatch.setattr(doc_mod, "clean_html_for_llm", lambda _: "")
+    monkeypatch.setattr(doc_mod, "clean_html_for_llm", lambda _: "")  # type: ignore[misc]
 
     fake = _make_fake()
     html = b"<html><body><p>some content</p></body></html>"
