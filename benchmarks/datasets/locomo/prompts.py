@@ -1,11 +1,4 @@
-"""LoCoMo answer + judge prompts.
-
-Mirror locomo-benchmark branch's evermemos/prompts/answer_prompts.py — DO NOT
-edit phrasing without coordinated baseline rerun.
-
-Source:
-    /tmp/evercore-locomo-benchmark/evaluation/src/adapters/evermemos/prompts/answer_prompts.py
-"""
+"""LoCoMo answer + judge prompts."""
 
 ANSWER_PROMPT = """
 You are an intelligent memory assistant tasked with retrieving accurate information from episodic memories.
@@ -79,10 +72,7 @@ Now, follow the Chain-of-Thought process above to answer the question:
 """
 
 JUDGE_SYSTEM_PROMPT = "You are an expert grader that determines if answers to questions match a gold standard answer"
-"""System role message for the LoCoMo judge. Verbatim port from EverCore
-``stage5_eval.py:29-31`` (``locomo_grader.system_prompt``). Sent as a separate
-``system`` message before the user-role JUDGE_PROMPT so the judge model has the
-same role framing as EverCore's run."""
+"""System role message for the LoCoMo judge. Sent as a separate ``system`` message before the user-role JUDGE_PROMPT."""
 
 
 JUDGE_PROMPT = """

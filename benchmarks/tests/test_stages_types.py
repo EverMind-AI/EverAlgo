@@ -65,5 +65,5 @@ def test_stage_context_smoke_defaults():
         output_dir=Path("/tmp/out"),
     )
     assert ctx.smoke is False
-    assert ctx.smoke_conv_limit == 3
+    assert ctx.smoke_conv_limit == 1
     assert ctx.smoke_qa_limit == 10

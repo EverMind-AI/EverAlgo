@@ -71,7 +71,8 @@ async def test_openai_compat_client_uses_config_defaults(
         route = router.post("/chat/completions").mock(return_value=httpx.Response(200, json=chat_completion_payload))
         await client.chat([ChatMessage(role="user", content="hi")])
 
-    sent_body = json.loads(route.calls[0].request.content)
+    request = cast("httpx.Request", route.calls[0].request)  # pyright: ignore[reportUnknownMemberType]
+    sent_body = json.loads(request.content)
     assert sent_body["model"] == "gpt-4o-mini"
     assert sent_body["temperature"] == 0.5
     assert sent_body["max_tokens"] == 128
@@ -92,7 +93,8 @@ async def test_openai_compat_client_per_call_overrides_take_precedence(
             max_tokens=64,
         )
 
-    sent_body = json.loads(route.calls[0].request.content)
+    request = cast("httpx.Request", route.calls[0].request)  # pyright: ignore[reportUnknownMemberType]
+    sent_body = json.loads(request.content)
     assert sent_body["model"] == "gpt-4o"
     assert sent_body["temperature"] == 0.0
     assert sent_body["max_tokens"] == 64

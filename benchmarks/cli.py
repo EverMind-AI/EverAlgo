@@ -6,8 +6,9 @@ T7 establishes the argparse surface. The runner wiring lands in T21.
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -57,6 +58,52 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+class _NoTracebackFormatter(logging.Formatter):
+    """Stderr-only formatter: render the message line and drop ``exc_info`` traceback.
+
+    A 152-frame retry storm with full tracebacks is unreadable on stderr; we still
+    want the tracebacks for post-mortem in ``run.log`` (see file handler below).
+    Override ``format`` entirely instead of returning ``""`` from
+    ``formatException``, because ``logging.Formatter`` caches the result on
+    ``record.exc_text`` and would leak the empty cache into other handlers that
+    share the same ``LogRecord``.
+    """
+
+    @override
+    def format(self, record: logging.LogRecord) -> str:
+        record.message = record.getMessage()
+        if self.usesTime():
+            record.asctime = self.formatTime(record, self.datefmt)
+        return self.formatMessage(record)
+
+
+def _setup_logging(output_dir: Path) -> None:
+    """Configure root logger to emit WARNING+ to stderr (message-only) and to ``run.log`` (full traceback).
+
+    Captures all relevant scenarios:
+    - LLM JSON parse retry failures  (everalgo.llm.parse)
+    - Clustering skip / missing embeddings  (benchmarks.common.stages.extract)
+    - Cluster index build failures  (benchmarks.common.stages.index)
+    - Provider-layer HTTP errors  (everalgo.llm.providers.*)
+    - Any other WARNING/ERROR in the benchmarks or everalgo namespaces
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fmt_text = "%(asctime)s %(levelname)-8s %(name)s  %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    stderr_handler = logging.StreamHandler()
+    stderr_handler.setFormatter(_NoTracebackFormatter(fmt=fmt_text, datefmt=datefmt))
+
+    log_file = output_dir / "run.log"
+    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter(fmt=fmt_text, datefmt=datefmt))
+
+    root = logging.getLogger()
+    root.setLevel(logging.WARNING)
+    root.addHandler(stderr_handler)
+    root.addHandler(file_handler)
+
+
 def main() -> int:
     """Entry point — load env, build pipeline request, run."""
     import asyncio
@@ -83,6 +130,9 @@ def main() -> int:
         print(f"Error: data file not found at {data_path}. Run the dataset download script or pass --data-path.")
         return 2
 
+    output_dir = args.output_dir or (Path("benchmarks/results") / f"{args.dataset}-{args.run_name}")
+    _setup_logging(output_dir)
+
     req = PipelineRequest(
         dataset_name=args.dataset,
         run_name=args.run_name,
@@ -90,7 +140,7 @@ def main() -> int:
         stages=list(args.stages),
         smoke=args.smoke,
         data_path=data_path,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
     )
     result = asyncio.run(run_pipeline(req))
     print(f"Done. Results: {result['output_dir']}")

@@ -4,21 +4,20 @@ from __future__ import annotations
 
 import pytest
 
-from everalgo.llm.errors import LLMError
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.prompts.en.atomic_fact_from_text import ATOMIC_FACT_FROM_TEXT_PROMPT_EN
 
-# Unix epoch ms for 2024-03-10 Sunday 14:00:00 UTC  →  "March 10, 2024 (Sunday) at 2:00 PM UTC"
+# Unix epoch ms for 2024-03-10 Sunday 14:00:00 UTC  →  "March 10, 2024(Sunday) at 02:00 PM"  (evercore EventLog format)
 _MARCH_10_2024_14H_UTC_MS: int = 1710079200000
-_EXPECTED_TIME_STR: str = "March 10, 2024 (Sunday) at 2:00 PM UTC"
+_EXPECTED_TIME_STR: str = "March 10, 2024(Sunday) at 02:00 PM"
 
-_NESTED_HAPPY = (
-    '{"atomic_facts": {"time": "March 10, 2024 (Sunday) at 2:00 PM UTC", "atomic_fact": ["fact 1", "fact 2"]}}'
-)
-_NESTED_EMPTY = '{"atomic_facts": {"time": "March 10, 2024 (Sunday) at 2:00 PM UTC", "atomic_fact": []}}'
+_NESTED_HAPPY = '{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": ["fact 1", "fact 2"]}}'
+_NESTED_EMPTY = '{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": []}}'
+# evercore EventLog schema — same inner shape as ``atomic_facts``, only top-level key differs.
+_EVENT_LOG_HAPPY = '{"event_log": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": ["fact A", "fact B"]}}'
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +29,7 @@ async def test_returns_atomic_fact_list_on_happy_path() -> None:
     """FakeLLM returns two facts inside nested schema; result equals that list."""
     fake = FakeLLMClient(responses=[_NESTED_HAPPY])
     result = await AtomicFactExtractor(llm=fake).aextract_from_text("some text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-    assert result == ["fact 1", "fact 2"]
+    assert [af.content for af in result] == ["fact 1", "fact 2"]
 
 
 async def test_empty_atomic_fact_list_returns_empty() -> None:
@@ -47,40 +46,56 @@ async def test_empty_atomic_fact_list_returns_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
+async def test_event_log_top_level_key_accepted() -> None:
+    """LLM response with evercore ``event_log`` top-level key is parsed identically to ``atomic_facts``.
+
+    Uses ``EVENT_LOG_PROMPT`` which instructs the LLM to emit
+    ``{"event_log": {...}}`` and the parser must accept it as an alias of the legacy schema.
+    """
+    fake = FakeLLMClient(responses=[_EVENT_LOG_HAPPY])
+    result = await AtomicFactExtractor(llm=fake).aextract_from_text("some text", timestamp=_MARCH_10_2024_14H_UTC_MS)
+    assert [af.content for af in result] == ["fact A", "fact B"]
+
+
 async def test_missing_atomic_facts_key_raises_value_error() -> None:
-    """FakeLLM returns a dict without 'atomic_facts' key → LLMError."""
-    fake = FakeLLMClient(responses=['{"foo": "bar"}'])
-    with pytest.raises(LLMError):
+    """FakeLLM returns a dict with neither ``atomic_facts`` nor ``event_log`` → ValueError after 5 retries."""
+    bad_responses: list[str | ChatResponse] = ['{"foo": "bar"}'] * 5
+    fake = FakeLLMClient(responses=bad_responses)
+    with pytest.raises(ValueError, match="event_log/atomic_facts"):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
 async def test_missing_inner_atomic_fact_key_raises_value_error() -> None:
-    """FakeLLM returns 'atomic_facts' dict without inner 'atomic_fact' key → LLMError."""
-    fake = FakeLLMClient(responses=['{"atomic_facts": {"time": "March 10, 2024 (Sunday) at 2:00 PM UTC"}}'])
-    with pytest.raises(LLMError):
-        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
+    """FakeLLM returns 'atomic_facts' dict without inner 'atomic_fact' key → empty list (defaults to [])."""
+    # atomic_fact key missing → block.get("atomic_fact", []) returns [] → empty list, no error
+    fake = FakeLLMClient(responses=['{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM"}}'])
+    result = await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
+    assert result == []
 
 
 async def test_atomic_facts_not_a_dict_raises_type_error() -> None:
-    """FakeLLM returns 'atomic_facts' as a string → LLMError."""
-    fake = FakeLLMClient(responses=['{"atomic_facts": "not a dict"}'])
-    with pytest.raises(LLMError):
+    """FakeLLM returns 'atomic_facts' as a string → ValueError after 5 retries."""
+    bad_responses: list[str | ChatResponse] = ['{"atomic_facts": "not a dict"}'] * 5
+    fake = FakeLLMClient(responses=bad_responses)
+    with pytest.raises(ValueError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
 async def test_atomic_fact_not_a_list_raises_type_error() -> None:
-    """FakeLLM returns 'atomic_fact' as a string inside atomic_facts → LLMError."""
-    fake = FakeLLMClient(
-        responses=['{"atomic_facts": {"time": "March 10, 2024 (Sunday) at 2:00 PM UTC", "atomic_fact": "not a list"}}']
-    )
-    with pytest.raises(LLMError):
+    """FakeLLM returns 'atomic_fact' as a string inside atomic_facts → ValueError after 5 retries."""
+    bad_responses: list[str | ChatResponse] = [
+        '{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": "not a list"}}'
+    ] * 5
+    fake = FakeLLMClient(responses=bad_responses)
+    with pytest.raises(ValueError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
 async def test_invalid_json_raises_value_error() -> None:
-    """FakeLLM returns non-JSON → LLMError."""
-    fake = FakeLLMClient(responses=["not json at all"])
-    with pytest.raises(LLMError):
+    """FakeLLM returns non-JSON → ValueError after 5 retries."""
+    bad_responses: list[str | ChatResponse] = ["not json at all"] * 5
+    fake = FakeLLMClient(responses=bad_responses)
+    with pytest.raises(ValueError):
         await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
 
 
@@ -143,10 +158,15 @@ async def test_default_prompt_is_atomic_fact_from_text_prompt_en() -> None:
     fake = FakeLLMClient(handler=handler)
     marker = "MARKER_DEFAULT_PROMPT_CHECK"
     await AtomicFactExtractor(llm=fake).aextract_from_text(marker, timestamp=_MARCH_10_2024_14H_UTC_MS, prompt=None)
-    expected_body = ATOMIC_FACT_FROM_TEXT_PROMPT_EN.replace("{{TEXT}}", marker).replace("{{TIME}}", _EXPECTED_TIME_STR)
+    # Default prompt uses {{EPISODE_TEXT}} placeholder (current) or {{TEXT}} (legacy fallback).
+    expected_body = (
+        ATOMIC_FACT_FROM_TEXT_PROMPT_EN.replace("{{EPISODE_TEXT}}", marker)
+        .replace("{{TEXT}}", marker)
+        .replace("{{TIME}}", _EXPECTED_TIME_STR)
+    )
     assert captured[0] == expected_body
     # Sanity: no un-substituted placeholders remain
-    assert "{{TEXT}}" not in captured[0]
+    assert "{{EPISODE_TEXT}}" not in captured[0]
     assert "{{TIME}}" not in captured[0]
 
 
@@ -158,7 +178,7 @@ async def test_default_prompt_is_atomic_fact_from_text_prompt_en() -> None:
 def test_sync_bridge_extract_from_text_works() -> None:
     """extract_from_text (sync bridge) called outside event loop returns valid list."""
     fake = FakeLLMClient(
-        responses=['{"atomic_facts": {"time": "March 10, 2024 (Sunday) at 2:00 PM UTC", "atomic_fact": ["sync fact"]}}']
+        responses=['{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": ["sync fact"]}}']
     )
     result = AtomicFactExtractor(llm=fake).extract_from_text("some text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-    assert result == ["sync fact"]
+    assert [af.content for af in result] == ["sync fact"]

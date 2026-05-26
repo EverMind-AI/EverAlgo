@@ -2,21 +2,25 @@
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 from benchmarks.common.report import generate_reports
 
 
 def test_generate_reports_writes_both_formats(tmp_path: Path):
-    eval_results = {
-        "total_questions": 1540,
-        "correct": 1391,
-        "accuracy": 0.9032,
-        "per_category": {
-            "1": {"label": "single-hop", "correct": 271, "total": 282, "accuracy": 0.9634},
-            "4": {"label": "multi-hop", "correct": 774, "total": 841, "accuracy": 0.9203},
+    eval_results: dict[str, Any] = cast(
+        "dict[str, Any]",
+        {
+            "total_questions": 1540,
+            "correct": 1391,
+            "accuracy": 0.9032,
+            "per_category": {
+                "1": {"label": "single-hop", "correct": 271, "total": 282, "accuracy": 0.9634},
+                "4": {"label": "multi-hop", "correct": 774, "total": 841, "accuracy": 0.9203},
+            },
+            "detailed_results": [],
         },
-        "detailed_results": [],
-    }
+    )
     stage_summary_data = {
         "extract": {"duration_seconds": 100.0, "prompt_tokens": 1000, "completion_tokens": 200},
         "answer": {"duration_seconds": 5.0, "prompt_tokens": 500, "completion_tokens": 50},

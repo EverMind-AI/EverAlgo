@@ -17,11 +17,13 @@ from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_dunder_all_lists_exact_public_surface() -> None:
-    """__all__ exposes the three documented symbols — no more, no less."""
+    """__all__ exposes the five documented symbols — no more, no less."""
     assert sorted(everalgo.boundary.__all__) == sorted(
         [
+            "BoundaryDecision",
             "DetectionResult",
             "WorkspaceMemCellExtractor",
+            "adetect_boundary_step",
             "detect_boundaries",
         ]
     )

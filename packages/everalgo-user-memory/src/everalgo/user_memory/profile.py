@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
-from pydantic import BaseModel, Field
 
 from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
@@ -26,60 +25,6 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
-
-
-# ------------------------------------------------------------------
-# Pydantic schemas for structured outputs (json_schema mode)
-# ------------------------------------------------------------------
-
-
-class _ExplicitInfoItem(BaseModel):
-    """Single explicit_info item from profile extraction."""
-
-    category: str
-    description: str
-    evidence: str
-
-
-class _ImplicitTraitItem(BaseModel):
-    """Single implicit_traits item from profile extraction."""
-
-    trait: str
-    description: str
-    basis: str
-    evidence: str
-
-
-class _ProfileInitialExtractionResponse(BaseModel):
-    """Response schema for PROFILE_INITIAL_EXTRACTION_PROMPT."""
-
-    explicit_info: list[_ExplicitInfoItem]
-    implicit_traits: list[_ImplicitTraitItem]
-
-
-class _ProfileOperation(BaseModel):
-    """Single operation for profile update."""
-
-    action: str
-    type: str | None = Field(default=None)
-    index: int | None = Field(default=None)
-    data: dict[str, Any] | None = Field(default=None)
-    reason: str | None = Field(default=None)
-
-
-class _ProfileUpdateResponse(BaseModel):
-    """Response schema for PROFILE_UPDATE_PROMPT."""
-
-    operations: list[_ProfileOperation]
-    update_note: str
-
-
-class _ProfileCompactResponse(BaseModel):
-    """Response schema for PROFILE_COMPACT_PROMPT."""
-
-    explicit_info: list[_ExplicitInfoItem]
-    implicit_traits: list[_ImplicitTraitItem]
-    compact_note: str
 
 
 _PROFILE_MAX_ITEMS = 30
@@ -149,16 +94,9 @@ class ProfileExtractor:
         conversation_text = _render_conversation(memcells)
         rendered = render_prompt(PROFILE_INITIAL_EXTRACTION_PROMPT, prompt, conversation_text=conversation_text)
 
-        response = await self._llm.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format=_ProfileInitialExtractionResponse,
-        )
-        parsed = response.parsed
-        if not isinstance(parsed, _ProfileInitialExtractionResponse):
-            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
-
-        explicit_info = [item.model_dump() for item in parsed.explicit_info]
-        implicit_traits = [item.model_dump() for item in parsed.implicit_traits]
+        data = await _call_llm_for_profile_init(self._llm, rendered)
+        explicit_info = data["explicit_info"]
+        implicit_traits = data["implicit_traits"]
         summary = _build_summary(explicit_info, implicit_traits)
         return Profile.model_validate(
             {
@@ -191,14 +129,8 @@ class ProfileExtractor:
             conversations=conversation_text,
         )
 
-        response = await self._llm.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format=_ProfileUpdateResponse,
-        )
-        parsed = response.parsed
-        if not isinstance(parsed, _ProfileUpdateResponse):
-            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
-        ops_payload = [op.model_dump(exclude_none=True) for op in parsed.operations]
+        data = await _call_llm_for_profile_update(self._llm, rendered)
+        ops_payload = data["operations"]
         merged_profile = _apply_ops(old_profile, ops_payload, timestamp=memcells[-1].timestamp)
 
         explicit_info: list[Any] = list(getattr(merged_profile, "explicit_info", []) or [])
@@ -225,15 +157,9 @@ class ProfileExtractor:
             profile_text=profile_text,
         )
 
-        response = await self._llm.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format=_ProfileCompactResponse,
-        )
-        parsed = response.parsed
-        if not isinstance(parsed, _ProfileCompactResponse):
-            raise TypeError(f"LLM returned unexpected parsed type: {type(parsed)}")
-        new_explicit = [item.model_dump() for item in parsed.explicit_info]
-        new_implicit = [item.model_dump() for item in parsed.implicit_traits]
+        data = await _call_llm_for_profile_compact(self._llm, rendered)
+        new_explicit = data["explicit_info"]
+        new_implicit = data["implicit_traits"]
         summary = _build_summary(new_explicit, new_implicit)
         return Profile.model_validate(
             {
@@ -244,6 +170,66 @@ class ProfileExtractor:
                 "implicit_traits": new_implicit,
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# LLM callsites — brace-balanced JSON extraction + 5-retry (mirror b150b32).
+# ---------------------------------------------------------------------------
+
+
+async def _call_llm_for_profile_init(llm: LLMClient, rendered: str) -> dict[str, Any]:
+    """Call LLM for profile initial extraction; return validated dict with explicit_info + implicit_traits lists."""
+    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
+    text = response.content
+    json_str = _extract_json_object(text)
+    data: dict[str, Any] = json.loads(json_str)
+    if "explicit_info" not in data or "implicit_traits" not in data:
+        raise ValueError(f"Profile init response missing required keys: {list(data.keys())!r}")
+    if not isinstance(data["explicit_info"], list) or not isinstance(data["implicit_traits"], list):
+        raise ValueError(f"explicit_info and implicit_traits must be lists: {data!r}")  # noqa: TRY004
+    return data
+
+
+async def _call_llm_for_profile_update(llm: LLMClient, rendered: str) -> dict[str, Any]:
+    """Call LLM for profile update; return validated dict with operations list."""
+    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
+    text = response.content
+    json_str = _extract_json_object(text)
+    data: dict[str, Any] = json.loads(json_str)
+    if "operations" not in data:
+        raise ValueError(f"Profile update response missing 'operations' key: {list(data.keys())!r}")
+    if not isinstance(data["operations"], list):
+        raise ValueError(f"operations must be a list: {data!r}")  # noqa: TRY004
+    return data
+
+
+async def _call_llm_for_profile_compact(llm: LLMClient, rendered: str) -> dict[str, Any]:
+    """Call LLM for profile compact; return validated dict with explicit_info + implicit_traits lists."""
+    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
+    text = response.content
+    json_str = _extract_json_object(text)
+    data: dict[str, Any] = json.loads(json_str)
+    if "explicit_info" not in data or "implicit_traits" not in data:
+        raise ValueError(f"Profile compact response missing required keys: {list(data.keys())!r}")
+    if not isinstance(data["explicit_info"], list) or not isinstance(data["implicit_traits"], list):
+        raise ValueError(f"explicit_info and implicit_traits must be lists: {data!r}")  # noqa: TRY004
+    return data
+
+
+def _extract_json_object(text: str) -> str:
+    """First balanced {{...}} block in text (brace-balanced parser for nested JSON)."""
+    start = text.find("{")
+    if start < 0:
+        raise ValueError(f"No JSON object found in profile LLM response: {text[:200]!r}")
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise ValueError(f"Unbalanced JSON in profile LLM response: {text[:200]!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -281,9 +267,9 @@ def _render_profile_for_update(profile: Profile) -> str:
     return "\n".join(parts)
 
 
-def _to_list(value: object) -> list[Any]:
+def _to_list(value: object) -> list[Any]:  # pyright: ignore[reportUnusedFunction]
     """Coerce to list[Any]; returns [] for non-list values."""
-    return value if isinstance(value, list) else []
+    return cast("list[Any]", value) if isinstance(value, list) else []  # type: ignore[redundant-cast]
 
 
 def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: int) -> Profile:
@@ -307,7 +293,7 @@ def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: in
             data = op.get("data")
             if isinstance(idx, int) and isinstance(data, dict) and 0 <= idx < len(target):
                 merged = dict(target[idx])
-                merged.update(data)
+                merged.update(cast("dict[str, Any]", data))
                 target[idx] = merged
         elif action == "delete":
             idx = op.get("index")

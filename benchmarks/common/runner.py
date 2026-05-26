@@ -32,6 +32,8 @@ class PipelineRequest:
     config: BenchmarkConfig
     stages: list[int] = field(default_factory=lambda: [1, 2, 3, 4, 5])
     smoke: bool = False
+    smoke_conv_limit: int = 1
+    smoke_msg_limit: int = 50
     data_path: Path | None = None
     output_dir: Path | None = None
 
@@ -155,6 +157,8 @@ async def _run_stages(
             input_dir=prev_output,
             output_dir=stage_out,
             smoke=req.smoke,
+            smoke_conv_limit=req.smoke_conv_limit,
+            smoke_msg_limit=req.smoke_msg_limit,
         )
         stats = await runner(ctx)
         all_stats.append(stats)

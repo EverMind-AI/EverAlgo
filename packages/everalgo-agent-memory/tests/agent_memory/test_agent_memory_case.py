@@ -407,11 +407,10 @@ class TestIsWorthExtracting:
         assert await _is_worth_extracting("[]", fake) is False
 
     async def test_malformed_json_raises(self) -> None:
-        """Malformed JSON from LLM → LLMError propagates (schema validation)."""
-        from everalgo.llm.errors import LLMError
-
-        fake = FakeLLMClient(responses=["not valid json {{"])
-        with pytest.raises(LLMError):
+        """Malformed JSON from LLM → ValueError after 5 retries."""
+        bad_responses: list[str | ChatResponse] = ["not valid json {{"] * 5
+        fake = FakeLLMClient(responses=bad_responses)
+        with pytest.raises(ValueError):
             await _is_worth_extracting("[]", fake)
 
     async def test_missing_field_defaults_to_true(self) -> None:
@@ -799,10 +798,12 @@ class TestPreCompressToList:
             await _pre_compress_to_list(msgs, fake)
 
     async def test_compression_returns_none_raises_value_error(self) -> None:
-        """LLM returns malformed JSON → _compress_tool_chunk raises LLMError."""
-        from everalgo.llm.errors import LLMError
+        """LLM returns malformed JSON → ValueError after 5 retries (handler always bad so asyncio.gather covers 2 groups)."""
 
-        fake = FakeLLMClient(responses=[ChatResponse(content="not valid json {{", model="fake")])
+        def _bad_handler(messages: object, **_: object) -> ChatResponse:
+            return ChatResponse(content="not valid json {{", model="fake")
+
+        fake = FakeLLMClient(handler=_bad_handler)
         big = _huge_text(60_000)
         msgs: list[ConversationItem] = [
             _user_msg("hi"),
@@ -812,7 +813,7 @@ class TestPreCompressToList:
             _tool_response_msg(big, call_id="call_2", ts=1700000000400),
             _assistant_msg("done", ts=1700000000500),
         ]
-        with pytest.raises(LLMError):
+        with pytest.raises(ValueError):
             await _pre_compress_to_list(msgs, fake)
 
     async def test_compressed_count_mismatch_raises_value_error(self) -> None:
@@ -874,12 +875,11 @@ class TestCompressToolChunk:
         assert result[1].timestamp == msgs[1].timestamp
 
     async def test_json_decode_failure_raises(self) -> None:
-        """Malformed JSON from LLM → LLMError propagates (schema validation)."""
-        from everalgo.llm.errors import LLMError
-
+        """Malformed JSON from LLM → ValueError after 5 retries."""
         msgs: list[ConversationItem] = [_tool_response_msg("x")]
-        fake = FakeLLMClient(responses=[ChatResponse(content="not json {{", model="fake")])
-        with pytest.raises(LLMError):
+        bad_responses: list[str | ChatResponse] = [ChatResponse(content="not json {{", model="fake")] * 5
+        fake = FakeLLMClient(responses=bad_responses)
+        with pytest.raises(ValueError):
             await _compress_tool_chunk(msgs, fake)
 
     async def test_compressed_list_wrong_length_returns_none(self) -> None:
@@ -947,11 +947,10 @@ class TestCompressExperience:
         assert await _compress_experience("[]", fake) is None
 
     async def test_json_decode_failure_raises(self) -> None:
-        """Malformed JSON from LLM → LLMError propagates (schema validation)."""
-        from everalgo.llm.errors import LLMError
-
-        fake = FakeLLMClient(responses=[ChatResponse(content="not json {{", model="fake")])
-        with pytest.raises(LLMError):
+        """Malformed JSON from LLM → ValueError after 5 retries."""
+        bad_responses: list[str | ChatResponse] = [ChatResponse(content="not json {{", model="fake")] * 5
+        fake = FakeLLMClient(responses=bad_responses)
+        with pytest.raises(ValueError):
             await _compress_experience("[]", fake)
 
 
