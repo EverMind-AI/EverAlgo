@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-27
+
+> First archived changelog. Entries below accumulated since the initial `0.1.0` PyPI release (published manually, without a git tag or per-package changelog), so this `0.2.0` section also consolidates the previously-unarchived `0.1.0` surface.
+
 ### Added
 
 - `AgentBoundaryDetector`: facade class that filters a `list[ConversationItem]` to only tool-call-carrying turns, calls `everalgo.boundary.detect_boundaries` on the result, then remaps indices back to the original sequence.
@@ -23,4 +27,5 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.2.0...HEAD
+[0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-agent-memory/v0.2.0

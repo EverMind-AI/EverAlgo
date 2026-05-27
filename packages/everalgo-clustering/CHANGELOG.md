@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-27
+
+> First archived changelog. Entries below accumulated since the initial `0.1.0` PyPI release (published manually, without a git tag or per-package changelog), so this `0.2.0` section also consolidates the previously-unarchived `0.1.0` surface.
+
 ### Added
 
 - `cluster_by_geometry(new_cluster: Cluster, existing_clusters: list[Cluster], *, threshold=0.65, time_window_days=7.0, preview_cap=5) -> Cluster | None`: cosine similarity + time-window incremental assignment; no LLM; **sync pure-compute**. Returns the merged `Cluster` (weighted centroid + preview concat + members append) when a match is found within the window, else `None`.
@@ -23,4 +27,5 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - Geometric fallback path inside `cluster_by_llm`: the function raises on LLM failure rather than silently falling back to geometry.
 - 3-retry loop in `cluster_by_llm`: the function raises `ValueError` immediately on bad LLM JSON.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.2.0...HEAD
+[0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-clustering/v0.2.0

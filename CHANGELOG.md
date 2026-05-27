@@ -9,19 +9,36 @@ Per-distribution changelogs are the source of truth. This file is a navigation i
 
 ## Distribution status
 
-All distributions have been published to PyPI. The table below tracks the latest released version
-declared in each `packages/everalgo-*/pyproject.toml`.
+The table tracks the current version declared in each `packages/everalgo-*/pyproject.toml`. Seven
+distributions release on the `0.2.0` line; `everalgo-knowledge` is a placeholder and is **not published**.
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.1.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.1.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
-| `everalgo-clustering` | 0.1.0 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.1.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.1.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.1.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
-| `everalgo-parser` | 0.1.0 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.1.0 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-core` | 0.2.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.2.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-clustering` | 0.2.0 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
+| `everalgo-rank` | 0.2.0 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.2.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.2.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-parser` | 0.2.0 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
+| `everalgo-knowledge` | — (not published) | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [0.2.0] - 2026-05-27
+
+Coordinated release-readiness baseline across the seven published distributions. Per-distribution detail lives in each package's CHANGELOG; highlights:
+
+### Changed (breaking)
+
+- `everalgo-clustering`: `cluster_by_geometry` is now synchronous (pure compute, no I/O).
+- `everalgo-boundary` / `everalgo-user-memory`: the unimplemented `WorkspaceMemCellExtractor` stub is removed from the public API (reachable only via explicit submodule import).
+- `everalgo-core`: the empty `everalgo.protocols` placeholder is removed.
+
+### Changed
+
+- Packaging metadata enriched across all distributions (keywords, full classifiers, author email).
+- Coverage gate centralised in `pyproject.toml`; CI now tests Python 3.12 / 3.13 / 3.14; tag-triggered PyPI publish via Trusted Publishing added.
+- Community health files added (`SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `CITATION.cff`).
+- `everalgo-knowledge` marked not-for-publish (`Private :: Do Not Upload`); namespace reserved only.
 
 ## [0.1.0] - 2026-05-17
 
@@ -63,4 +80,5 @@ declared in each `packages/everalgo-*/pyproject.toml`.
 - **`TextMessage` type** — merged into `ChatMessage` with multimodal `content: str | list[ContentBlock]`.
 - **Dead `_conversation_item_adapter`** from `agent_memory/case.py`.
 
+[0.2.0]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
 [0.1.0]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

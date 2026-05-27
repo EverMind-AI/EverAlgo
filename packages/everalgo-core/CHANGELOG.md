@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-27
+
+> First archived changelog. Entries below accumulated since the initial `0.1.0` PyPI release (published manually, without a git tag or per-package changelog), so this `0.2.0` section also consolidates the previously-unarchived `0.1.0` surface.
+
 ### Added
 
 - `MemCell` pydantic model: ordered `items: list[ConversationItem]` slice produced by boundary detection, plus `timestamp` (Unix epoch ms of the closing item).
@@ -31,4 +35,5 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - LLM binding simplified to instance-only injection: `build_client` / constructor `llm=` parameter is the sole binding path. The prior 4-layer resolution (configure / use / current / resolve) was removed in favour of the pattern used by `openai-python`, `anthropic-sdk-python`, LangChain, and Instructor.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.2.0...HEAD
+[0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-core/v0.2.0
