@@ -3,16 +3,16 @@ results/*
 !results/.gitkeep
 
 # Whitelist the canonical reference run committed for reviewers.
-# 2026-05-20 full LoCoMo run, mean-of-runs 91.58%. Only the top-level
-# summary (report.txt / report.json + profile.json) and the reproduction
-# note (REPRODUCTION.md) are committed. Everything else stays gitignored —
-# re-run from source to regenerate (eval_results.json + stage 1-4 outputs).
-!results/locomo-scene-retrieval-full
-results/locomo-scene-retrieval-full/*
-!results/locomo-scene-retrieval-full/report.txt
-!results/locomo-scene-retrieval-full/report.json
-!results/locomo-scene-retrieval-full/profile.json
-!results/locomo-scene-retrieval-full/REPRODUCTION.md
+# 2026-05-27 full LoCoMo run, tag v6-2-92.55, agentic retrieval, 92.55% (1425/1540).
+# Only the top-level summary (report.txt / report.json + profile.json) and the
+# reproduction note (REPRODUCTION.md) are committed. Everything else stays
+# gitignored — re-run from source to regenerate (eval_results.json + stage 1-4 outputs).
+!results/locomo-92.55
+results/locomo-92.55/*
+!results/locomo-92.55/report.txt
+!results/locomo-92.55/report.json
+!results/locomo-92.55/profile.json
+!results/locomo-92.55/REPRODUCTION.md
 
 __pycache__/
 *.pyc
