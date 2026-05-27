@@ -18,7 +18,7 @@ Pipeline stages:
 
 The 5 LLM calls share one ``FakeLLMClient``; its handler routes by call-count (the pipeline's
 call order is deterministic) and captures every prompt for later inspection.
-``cluster_by_geometry`` is sync-on-LLM (no LLM call), so the total LLM call count stays at 5.
+``cluster_by_geometry`` makes no LLM call (and is a sync function), so the total LLM call count stays at 5.
 """
 
 from __future__ import annotations
@@ -256,12 +256,12 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     mc_current_id = "mc_current"
 
     new_c_prior = Cluster(id="cid_0", centroid=vec_prior, last_ts=mc_prior.timestamp, members=[mc_prior_id])
-    result_prior = await cluster_by_geometry(new_c_prior, clusters)
+    result_prior = cluster_by_geometry(new_c_prior, clusters)
     assert result_prior is None
     clusters.append(new_c_prior)
 
     new_c_current = Cluster(centroid=vec_current, last_ts=mc.timestamp, members=[mc_current_id])
-    result_current = await cluster_by_geometry(new_c_current, clusters)
+    result_current = cluster_by_geometry(new_c_current, clusters)
     assert result_current is not None, "expected merged Cluster, got None"
     assert result_current.id == "cid_0", f"expected id passthrough, got {result_current.id!r}"
     clusters[0] = result_current

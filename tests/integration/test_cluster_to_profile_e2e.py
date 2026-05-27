@@ -70,7 +70,7 @@ async def test_two_similar_memcells_cluster_then_profile_sees_prior() -> None:
         (mc_cooking, vec_cooking, "mc_003"),
     ]:
         new_c = Cluster(centroid=vec, last_ts=memcell.timestamp, members=[entity_id])
-        result = await cluster_by_geometry(new_c, list(cluster_store.values()))
+        result = cluster_by_geometry(new_c, list(cluster_store.values()))
         if result is None:
             cid = f"cid_{next_id}"
             next_id += 1
@@ -151,7 +151,7 @@ async def test_state_persistence_roundtrip_keeps_pipeline_consistent() -> None:
 
     clusters: list[Cluster] = []
     new_c1 = Cluster(id="cid_0", centroid=vec_1, last_ts=mc_1.timestamp)
-    result_1 = await cluster_by_geometry(new_c1, clusters)
+    result_1 = cluster_by_geometry(new_c1, clusters)
     assert result_1 is None
     clusters.append(new_c1)
 
@@ -161,7 +161,7 @@ async def test_state_persistence_roundtrip_keeps_pipeline_consistent() -> None:
 
     # Continue from restored clusters list.
     new_c2 = Cluster(centroid=vec_2, last_ts=mc_2.timestamp)
-    result_2 = await cluster_by_geometry(new_c2, restored)
+    result_2 = cluster_by_geometry(new_c2, restored)
 
     assert result_1 is None  # first was a new cluster (appended)
     assert result_2 is not None  # second merges into restored[0]

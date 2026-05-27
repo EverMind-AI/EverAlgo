@@ -99,13 +99,13 @@ async def main() -> None:
     )
     existing: list[Cluster] = []
     c_prior = Cluster(centroid=np.array([1.0, 0.0, 0.0], dtype=np.float32), last_ts=prior_mc.timestamp)
-    merged = await cluster_by_geometry(c_prior, existing)
+    merged = cluster_by_geometry(c_prior, existing)
     if merged is None:
         c_prior = c_prior.model_copy(update={"id": "cid_001"})
         existing.append(c_prior)
 
     c_current = Cluster(centroid=np.array([0.98, 0.02, 0.0], dtype=np.float32), last_ts=mc.timestamp)
-    merged = await cluster_by_geometry(c_current, existing)
+    merged = cluster_by_geometry(c_current, existing)
     if merged is not None:
         idx = next(i for i, c in enumerate(existing) if c.id == merged.id)
         existing[idx] = merged

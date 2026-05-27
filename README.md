@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
+[![PyPI - everalgo-core](https://img.shields.io/pypi/v/everalgo-core)](https://pypi.org/project/everalgo-core/)
 
 EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, storage-free, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in evermem.
 
@@ -15,18 +16,18 @@ The full architecture lives in [`docs/concepts/architecture.md`](docs/concepts/a
 
 ## Repository layout
 
-This repo is a **monorepo** of 8 publishable distributions sharing the `everalgo.*` namespace via [PEP 420](https://peps.python.org/pep-0420/), managed with [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/):
+This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespace via [PEP 420](https://peps.python.org/pep-0420/), managed with [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) (seven published to PyPI; `everalgo-knowledge` is namespace-reserved and not yet published — see [Status & known limitations](#status--known-limitations)):
 
 | Distribution | What it provides |
 |---|---|
 | [`everalgo-core`](packages/everalgo-core/) | Types, LLM client + providers, prompt helpers, testing utilities |
-| [`everalgo-boundary`](packages/everalgo-boundary/) | `detect_boundaries` + `DetectionResult` + `WorkspaceMemCellExtractor` stub |
+| [`everalgo-boundary`](packages/everalgo-boundary/) | `detect_boundaries` + `DetectionResult` + token helpers |
 | [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
 | [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank toolkit |
 | [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (EXPERIMENTAL — stub) |
 | [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
 | [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCase` / `AgentSkill` extractors |
-| [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeMemory` extractor (EXPERIMENTAL — stub) |
+| [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeMemory` extractor (NOT YET IMPLEMENTED — not published) |
 
 ## 60-second quickstart
 
@@ -100,7 +101,7 @@ async def main() -> None:
     vector = np.random.rand(2560).astype(np.float32)
     existing: list[Cluster] = []
     new_cluster = Cluster(centroid=vector, last_ts=mc.timestamp)
-    merged = await cluster_by_geometry(new_cluster, existing)
+    merged = cluster_by_geometry(new_cluster, existing)
     if merged is None:
         existing.append(new_cluster.model_copy(update={"id": "cid_001"}))
 
@@ -125,11 +126,23 @@ pip install everalgo-rank           # pulls core
 pip install everalgo-clustering     # pulls core
 ```
 
+## Status & known limitations
+
+Seven of the eight distributions are published on PyPI at `0.1.x`; `everalgo-knowledge` is intentionally **not published** (namespace reserved only). Three operators are **unimplemented placeholders that raise `NotImplementedError`** — they are deliberately kept out of the public `__all__` (import the submodule directly if you want the reserved stub) and must not be relied on yet:
+
+| Placeholder | Reachable at | Status |
+|---|---|---|
+| `WorkspaceMemCellExtractor` | `everalgo.boundary.workspace` | Jira / Email / Confluence slicing — not implemented |
+| `KnowledgeExtractor` | `everalgo.knowledge` | whole `everalgo-knowledge` distribution unpublished |
+| video parsing | `everalgo.parser.video` | deferred pending an ADR (Gemini Video vs Whisper + frame sampling) |
+
+Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile), and the agent-memory extractors (Case / Skill).
+
 ## Releasing
 
 Every distribution is released **independently**: each `packages/everalgo-*/pyproject.toml` carries its own `version = "..."` and follows its own SemVer cadence. There is no umbrella version — bumping `everalgo-rank` does not require bumping anything else.
 
-The repo uses a **two-tier CHANGELOG** (HuggingFace transformers / accelerate pattern):
+The repo uses a **two-tier CHANGELOG**:
 - [`CHANGELOG.md`](CHANGELOG.md) at the root — current-version overview table.
 - `packages/everalgo-<dist>/CHANGELOG.md` per distribution — full history; ships inside the wheel.
 
@@ -190,7 +203,7 @@ Read [`AGENTS.md`](AGENTS.md) — the single source of truth for assistant conte
 - [`docs/api/`](docs/api/) — per-package API reference
 - [`docs/version-policy.md`](docs/version-policy.md) — SemVer + supported Python versions
 - [`docs/contributing.md`](docs/contributing.md) — how to contribute
-- [`examples/`](examples/) — runnable quickstart scripts (01 through 06)
+- [`examples/`](examples/) — runnable quickstart scripts (01 through 07)
 - [`AGENTS.md`](AGENTS.md) — onboarding for AI assistants + contributors
 
 ## License

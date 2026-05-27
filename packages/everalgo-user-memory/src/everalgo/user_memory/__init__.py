@@ -1,4 +1,4 @@
-"""User-side memory extractors — 4 Extractors + boundary facade + boundary re-exports.
+"""User-side memory extractors — 4 Extractors + boundary facade + DetectionResult re-export.
 
 The user-scenario boundary facade (:class:`BoundaryDetector`) lives here; agent-trajectory
 boundary detection will be added to ``everalgo.agent_memory`` in Stage 4.
@@ -7,7 +7,6 @@ boundary detection will be added to ``everalgo.agent_memory`` in Stage 4.
 import logging
 
 from everalgo.boundary import DetectionResult
-from everalgo.boundary.workspace import WorkspaceMemCellExtractor
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.boundary import BoundaryDetector
 from everalgo.user_memory.episode import EpisodeExtractor
@@ -21,7 +20,6 @@ __all__ = [
     "EpisodeExtractor",
     "ForesightExtractor",
     "ProfileExtractor",
-    "WorkspaceMemCellExtractor",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

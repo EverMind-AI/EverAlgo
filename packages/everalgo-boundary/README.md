@@ -18,7 +18,6 @@ For the user-scenario class facade, install [`everalgo-user-memory`](../everalgo
 |---|---|
 | `detect_boundaries` | Low-level async function: `(list[ChatMessage], *, llm, is_final, ...) → DetectionResult` |
 | `DetectionResult` | `NamedTuple(cells: list[MemCell], tail: list[ChatMessage])` |
-| `WorkspaceMemCellExtractor` | Placeholder stub for Jira / Email / Confluence (raises `NotImplementedError`) |
 
 The class-style facades (`BoundaryDetector` for user-scenario chat, `AgentBoundaryDetector` for agent trajectories with tool calls) live in [`everalgo-user-memory`](../everalgo-user-memory/) and [`everalgo-agent-memory`](../everalgo-agent-memory/) respectively.
 
@@ -85,7 +84,7 @@ await persist(final.cells)
 
 ## Stubs
 
-`WorkspaceMemCellExtractor` (Jira / Email / Confluence) is a placeholder in `v0.x` — all methods raise `NotImplementedError`. Implementation lands in a future minor bump when the `RawData` contract is finalised.
+`WorkspaceMemCellExtractor` (Jira / Email / Confluence) is a placeholder in `v0.x` — all methods raise `NotImplementedError`. It is deliberately excluded from `everalgo.boundary.__all__`; import it from `everalgo.boundary.workspace` directly if you need the reserved name. Implementation lands in a future minor bump when the `RawData` contract is finalised.
 
 ## Related distributions
 

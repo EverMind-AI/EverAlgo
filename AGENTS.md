@@ -33,7 +33,7 @@ everalgo/                              # monorepo, uv virtual workspace
 ├── docs/
 │   ├── concepts/                      # high-level architecture notes
 │   └── reference/                     # API reference (per-distribution)
-├── examples/                          # runnable quickstart scripts (01–06, use FakeLLMClient)
+├── examples/                          # runnable quickstart scripts (01–07, use FakeLLMClient)
 ├── packages/
 │   ├── everalgo-core/                 # types, llm (+ providers), prompts, testing
 │   ├── everalgo-boundary/             # detect_boundaries + DetectionResult + workspace stub
@@ -42,11 +42,12 @@ everalgo/                              # monorepo, uv virtual workspace
 │   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (EXPERIMENTAL stub)
 │   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile
 │   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill
-│   └── everalgo-knowledge/            # KnowledgeMemory extractor (EXPERIMENTAL stub)
+│   └── everalgo-knowledge/            # KnowledgeMemory extractor (NOT YET IMPLEMENTED — not published)
+├── benchmarks/                        # internal LoCoMo benchmark suite ([tool.uv] package = false, not published)
 └── tests/
 ```
 
-Nine publishable distributions share the **`everalgo.*` namespace** through [PEP 420](https://peps.python.org/pep-0420/) native namespace packages: every `packages/*/src/everalgo/` directory deliberately omits `__init__.py`, while subpackages (`everalgo/<subpkg>/__init__.py`) are regular packages. This is the [PyPA-recommended layout](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages) for Py3-only + pip-installed projects, and it lets `from everalgo.user_memory import EpisodeExtractor` work even when `everalgo-user-memory` and `everalgo-boundary` are installed from different distributions. Industrial precedents: `google-cloud-*` (100+ dists sharing `google.cloud.*`) and `sphinxcontrib-*` (6 official Sphinx-extension dists sharing `sphinxcontrib.*`).
+Eight distributions share the **`everalgo.*` namespace** through [PEP 420](https://peps.python.org/pep-0420/) native namespace packages: every `packages/*/src/everalgo/` directory deliberately omits `__init__.py`, while subpackages (`everalgo/<subpkg>/__init__.py`) are regular packages. This is the [PyPA-recommended layout](https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages) for Py3-only + pip-installed projects, and it lets `from everalgo.user_memory import EpisodeExtractor` work even when `everalgo-user-memory` and `everalgo-boundary` are installed from different distributions. Industrial precedents: `google-cloud-*` (100+ dists sharing `google.cloud.*`) and `sphinxcontrib-*` (6 official Sphinx-extension dists sharing `sphinxcontrib.*`).
 
 The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = false` at the root, members under `packages/*`). Same shape: [Apache Airflow](https://github.com/apache/airflow) (100+ workspace members, single root lockfile) and [pydantic-ai](https://github.com/pydantic/pydantic-ai). Note these two projects are *uv-workspace* references only — Airflow's `airflow.providers.*` is pkgutil-style legacy namespace, not PEP 420; pydantic-ai uses three independent namespaces, not one shared. LangChain and LlamaIndex are referenced for the *monorepo* layout only — neither uses uv workspace itself; they keep per-package venvs and lockfiles.
 
@@ -55,13 +56,17 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
 ```
                                 everalgo-core
                                      ▲
-       ┌────────────┬────────────┬──┴───────────┬───────────┐
-       │            │            │              │           │
-   boundary    clustering        rank         parser       │
-       ▲            ▲            ▲                         ▲
-       └────────────┤            │                         │
-                    │            │                         │
-            user-memory ── agent-memory           everalgo-knowledge
+       ┌────────────┬────────────┬──┴───────────┐
+       │            │            │              │
+   boundary    clustering        rank         parser
+       ▲            ▲                            ▲
+       │            │                            │
+   user-memory  agent-memory                 knowledge
+
+Edges (arrow → dependency; every package also depends on core):
+  user-memory  → boundary
+  agent-memory → boundary, clustering
+  knowledge    → parser
 ```
 
 ---
@@ -73,7 +78,7 @@ The dev workflow is built on a **uv virtual workspace** (`[tool.uv] package = fa
 git clone git@github.com:EverMind-AI/EverAlgo.git
 cd everalgo
 
-# Install all 9 packages editable into a shared venv (includes dev tools).
+# Install all workspace packages editable into a shared venv (includes dev tools).
 uv sync --all-packages --group dev
 
 # Run tests across the workspace.
@@ -140,7 +145,7 @@ uv run pre-commit autoupdate
 
 #### What's deliberately NOT in pre-commit
 
-- **`mypy` / `pyright`** — strict type-checks over the 9-package PEP 420 workspace each take several seconds per run and would make commit feel sluggish; enforced by CI instead (pydantic / sklearn / openai-python / anthropic-sdk-python do the same).
+- **`mypy` / `pyright`** — strict type-checks over the 8-package PEP 420 workspace each take several seconds per run and would make commit feel sluggish; enforced by CI instead (pydantic / sklearn / openai-python / anthropic-sdk-python do the same).
 - **`pytest`** — same reason. CI is the gate.
 
 ### Editor integration (recommended)
@@ -178,7 +183,7 @@ Reference: [uv workspace documentation](https://docs.astral.sh/uv/concepts/proje
 
 The full rationale lives in `docs/concepts/architecture.md`. Hard rules:
 
-- **Naming contract — `a` prefix means async.** Methods named `aextract` / `arank` / `adetect` / `aparse` are **native async** (do real I/O — LLM, network, …); call them with `await`. Methods without the `a` prefix (`rank`, `extract`, `count_tokens`, `rrf`, …) are **sync** (pure compute, no I/O); call them directly. Same convention as `dspy.acall` / `litellm.acompletion` / `instructor.AsyncInstructor`.
+- **Naming contract — `a` prefix means async.** Methods named `aextract` / `arank` / `adetect` / `aparse` are **native async** (do real I/O — LLM, network, …); call them with `await`. Methods without the `a` prefix (`rank`, `extract`, `count_tokens`, `rrf`, …) are **sync** (pure compute, no I/O); call them directly. Same convention as `dspy.acall` / `litellm.acompletion` / `instructor.AsyncInstructor`. The one exception is `LLMClient.chat` (a caller-injected client Protocol, not an operator): it is async without the `a` prefix, mirroring the OpenAI SDK client interface.
 - **I/O operators: async-first + sync bridge.** Native async via `asyncio`; sync version is derived through `asgiref.async_to_sync` for non-event-loop callers (CLI scripts, plain unit tests). Never call the sync bridge from inside a running event loop.
 - **Pure-compute operators: sync only.** No async wrapper for `fusion.rrf`, `_tokenize.count_tokens`, clustering distances, etc. Mirrors numpy / scipy / sklearn / pandas conventions.
 - **Prompts as Python string modules.** Concrete prompt strings live in `<subpkg>/prompts/{en,zh}/<name>.py` as module-level constants. Editing a prompt = editing a `.py` file. No external `.md` / `.yaml` / `.toml` prompt stores. Caller customisation: per-call `prompt=` argument (fine-grained) or monkey-patching the module constant at startup (coarse-grained).
@@ -198,7 +203,7 @@ The full rationale lives in `docs/concepts/architecture.md`. Hard rules:
 
 - `main` is the only long-lived branch. It is **GitLab-protected** (Settings → Repository → Protected branches): direct push is denied for everyone; the only path to land changes on `main` is via Merge Request.
 - Feature work happens on short-lived branches: `feat/<topic>`, `fix/<bug>`, `docs/<topic>`, `refactor/<topic>`. Open an MR → squash-merge into `main`.
-- Release = tag on `main` using SemVer per distribution: `everalgo-clustering/v0.2.0`. Each distribution has its own version cadence (HuggingFace pattern; see `docs/concepts/architecture.md` and `README.md` "Cutting a release").
+- Release = tag on `main` using SemVer per distribution: `everalgo-clustering/v0.2.0`. Each distribution has its own version cadence — the independent-versioning model used by `google-cloud-python` (many distributions sharing `google.cloud.*`, each on its own tag) and Apache Airflow providers; see `docs/concepts/architecture.md` and `README.md` "Cutting a release".
 - Maintenance branches (`0.1.X-fixes`) are introduced **only when** a published version needs back-ports; not by default.
 
 **Commit messages: Gitmoji + Conventional Commits.** Format: `<emoji> <type>(<scope>): <description>`.
@@ -226,7 +231,7 @@ Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `bu
 Follow this checklist when introducing a new extractor / ranker / clusterer:
 
 1. **Pick the subpackage.** Decide which `packages/everalgo-<dist>/src/everalgo/<subpkg>/` the operator lives in based on its product axis (user_memory / agent_memory / knowledge) or tool axis (boundary / clustering / rank / parser). When in doubt, read `docs/concepts/architecture.md`
-2. **Create the module.** `<subpkg>/<operator>.py` — module-level functions or one stateless class implementing the relevant Protocol from `everalgo.protocols`.
+2. **Create the module.** `<subpkg>/<operator>.py` — module-level functions or one stateless class. Operators need not subclass anything; if an operator consumes an injected client, type it against the relevant Protocol where that Protocol is defined (e.g. `everalgo.llm.protocols.LLMClient`, `everalgo.rank.protocols`).
 3. **Write the prompt(s).** If the operator calls an LLM, drop prompt strings as module-level constants in `<subpkg>/prompts/en/<operator>.py` (and `zh/<operator>.py` for the Chinese variant when applicable).
 4. **Re-export the public surface.** If the operator is part of the public API of its facade subpackage, add it to `<subpkg>/__init__.py`'s re-export block and `__all__`. See `docs/concepts/architecture.md` for the re-export pattern.
 5. **Wire dependencies.** If the new code requires a new third-party library, add it via `uv add --package everalgo-<dist> <library>`, which updates the right `pyproject.toml`.
@@ -240,8 +245,8 @@ Follow this checklist when introducing a new extractor / ranker / clusterer:
 Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (per ADR 004 — providers are *nested* in `llm`, not a separate distribution; the convention follows litellm / instructor / dspy / llama-index).
 
 1. Create `everalgo/llm/providers/<provider>/__init__.py` and `client.py`.
-2. Implement the `LLMClient` Protocol from `everalgo.protocols` (sync + async chat / stream).
-3. Register provider auto-detection in `everalgo/llm/routing.py` (URL or env-based detection — match the existing pattern).
+2. Implement the `LLMClient` Protocol from `everalgo.llm.protocols` — a single `async def chat(...) -> ChatResponse` method (no sync variant, no streaming).
+3. Wire the provider into `everalgo/llm/factory.py::build_client` (it currently constructs `OpenAICompatClient` directly; add provider selection there — there is no separate `routing.py`).
 4. Map provider-native exceptions onto the canonical `LLMError` subclass tree.
 5. Add per-provider prompts only if the provider needs special formatting (rare — most providers are OpenAI-compatible).
 6. Add tests under `packages/everalgo-core/tests/llm/providers/<provider>/`. **No mocks at the HTTP layer** when a real key is available in CI; otherwise use `respx` to record fixtures.

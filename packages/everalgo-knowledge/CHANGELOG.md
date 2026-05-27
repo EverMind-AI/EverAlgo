@@ -8,6 +8,6 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `KnowledgeExtractor` stub; public API surface is frozen, implementation is pending.
+- `KnowledgeExtractor` stub; the public API surface is frozen, implementation is pending. This distribution is **not published to PyPI** while unimplemented — `pyproject.toml` carries the `Private :: Do Not Upload` classifier so any upload is rejected, and the `everalgo.knowledge` namespace is reserved only.
 
 [Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD

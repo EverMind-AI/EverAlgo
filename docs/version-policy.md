@@ -18,7 +18,7 @@ During the **`0.x` series** (pre-stable), any release may include breaking chang
 Each distribution has its own version number and its own release timeline.
 Upgrading `everalgo-rank` does not require touching `everalgo-user-memory`.
 
-Dependencies between distributions use **loose constraints** following the HuggingFace pattern:
+Dependencies between distributions use **loose constraints** (a lower bound plus a next-major upper bound), the same independent-versioning approach as other namespace monorepos such as [`google-cloud-python`](https://github.com/googleapis/google-cloud-python) (many distributions sharing `google.cloud.*`, each on its own version) and Apache Airflow providers:
 
 ```toml
 # In everalgo-user-memory/pyproject.toml

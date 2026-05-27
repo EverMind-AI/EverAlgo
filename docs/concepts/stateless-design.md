@@ -51,7 +51,7 @@ Operators do not know:
 The clustering operators follow a caller-wrap pattern. The caller owns the `list[Cluster]`; EverAlgo's operators take the list as input and return a merged `Cluster | None` without mutating the original:
 
 ```python
-merged = await cluster_by_geometry(new_cluster, existing_clusters)
+merged = cluster_by_geometry(new_cluster, existing_clusters)
 # existing_clusters is never mutated; caller decides whether to update its list
 ```
 

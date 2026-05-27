@@ -9,19 +9,19 @@ Per-distribution changelogs are the source of truth. This file is a navigation i
 
 ## Distribution status
 
-No distribution has been published to PyPI yet. The table below tracks the in-development version
+All distributions have been published to PyPI. The table below tracks the latest released version
 declared in each `packages/everalgo-*/pyproject.toml`.
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.1.0 (unreleased) | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.1.0 (unreleased) | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
-| `everalgo-clustering` | 0.1.0 (unreleased) | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
+| `everalgo-core` | 0.1.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.1.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-clustering` | 0.1.0 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.1.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.1.0 (unreleased) | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.1.0 (unreleased) | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
-| `everalgo-parser` | 0.1.0 (unreleased) | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.1.0 (unreleased) | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.1.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.1.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-parser` | 0.1.0 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.1.0 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
 
 ## [0.1.0] - 2026-05-17
 

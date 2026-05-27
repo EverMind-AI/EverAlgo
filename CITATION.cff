@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use EverAlgo in your research or software, please cite it as below."
+title: "EverAlgo: a stateless algorithm library for memory extraction and ranking"
+abstract: >-
+  EverAlgo is the algorithm library behind EverMind's memory system. It provides stateless,
+  storage-free operators for two symmetric paths — Extract (structured units to structured
+  memories) and Rank (multi-route recall candidates to a ranked memory list) — distributed as
+  eight packages sharing the everalgo.* namespace.
+type: software
+authors:
+  - name: "EverMind"
+    email: "Evermind@shanda.com"
+license: MIT
+repository-code: "https://github.com/EverMind-AI/EverAlgo"
+url: "https://github.com/EverMind-AI/EverAlgo"
+keywords:
+  - llm
+  - memory
+  - algorithm
+  - extraction
+  - ranking
+  - retrieval

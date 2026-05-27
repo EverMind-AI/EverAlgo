@@ -433,7 +433,7 @@ wheels = [
 
 [[package]]
 name = "everalgo-agent-memory"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/everalgo-agent-memory" }
 dependencies = [
     { name = "everalgo-boundary" },
@@ -485,7 +485,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-boundary"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/everalgo-boundary" }
 dependencies = [
     { name = "asgiref" },
@@ -500,7 +500,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-clustering"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/everalgo-clustering" }
 dependencies = [
     { name = "everalgo-core" },
@@ -515,7 +515,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/everalgo-core" }
 dependencies = [
     { name = "openai" },
@@ -532,7 +532,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-knowledge"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/everalgo-knowledge" }
 dependencies = [
     { name = "everalgo-core" },
@@ -547,7 +547,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-parser"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/everalgo-parser" }
 dependencies = [
     { name = "asgiref" },
@@ -575,7 +575,7 @@ provides-extras = ["svg"]
 
 [[package]]
 name = "everalgo-rank"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "packages/everalgo-rank" }
 dependencies = [
     { name = "asgiref" },
@@ -590,7 +590,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/everalgo-user-memory" }
 dependencies = [
     { name = "asgiref" },

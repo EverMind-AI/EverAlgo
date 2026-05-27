@@ -17,7 +17,7 @@ def _c(vec: list[float], ts: int = _BASE_TS_MS, count: int = 1, cid: str | None 
 async def test_empty_existing_returns_none() -> None:
     new_c = _c([1.0, 0.0])
 
-    result = await cluster_by_geometry(new_c, [])
+    result = cluster_by_geometry(new_c, [])
 
     assert result is None
 
@@ -27,7 +27,7 @@ async def test_above_threshold_returns_merged_cluster() -> None:
     # cosine([0.99, 0.01], [1,0]) ≈ 0.9999 > 0.65 threshold.
     new_c = _c([0.99, 0.01], ts=_BASE_TS_MS + 1000)
 
-    result = await cluster_by_geometry(new_c, existing)
+    result = cluster_by_geometry(new_c, existing)
 
     assert result is not None
     assert result.id == "cid_0"
@@ -40,7 +40,7 @@ async def test_below_threshold_returns_none() -> None:
     # cosine([1,0], [0,1]) = 0 < 0.65 threshold → new cluster.
     new_c = _c([0.0, 1.0], ts=_BASE_TS_MS + 1000)
 
-    result = await cluster_by_geometry(new_c, existing)
+    result = cluster_by_geometry(new_c, existing)
 
     assert result is None
 
@@ -51,7 +51,7 @@ async def test_time_window_excludes_old_clusters() -> None:
     # Cosine match would be perfect, but time window kicks the candidate out → new cluster.
     new_c = _c([1.0, 0.0])
 
-    result = await cluster_by_geometry(new_c, existing)
+    result = cluster_by_geometry(new_c, existing)
 
     assert result is None
 
@@ -62,7 +62,7 @@ async def test_centroid_merges_via_weighted_average() -> None:
     new_vec = np.array([0.95, 0.05], dtype=np.float32)
     new_c = Cluster(centroid=new_vec, last_ts=_BASE_TS_MS, count=1)
 
-    result = await cluster_by_geometry(new_c, existing)
+    result = cluster_by_geometry(new_c, existing)
 
     assert result is not None
     expected = (np.array([1.0, 0.0], dtype=np.float32) * 2 + new_vec) / 3
@@ -75,7 +75,7 @@ async def test_existing_unchanged_after_call() -> None:
     original_centroid = existing[0].centroid.copy()
     new_c = _c([0.99, 0.01], ts=_BASE_TS_MS + 1)
 
-    await cluster_by_geometry(new_c, existing)
+    cluster_by_geometry(new_c, existing)
 
     # existing list itself and Cluster inside must be unchanged (frozen).
     np.testing.assert_array_equal(existing[0].centroid, original_centroid)
@@ -88,7 +88,7 @@ async def test_last_ts_uses_max() -> None:
     existing = [_c([1.0, 0.0], ts=later_ts)]
     new_c = _c([0.99, 0.01], ts=_BASE_TS_MS)  # older timestamp
 
-    result = await cluster_by_geometry(new_c, existing)
+    result = cluster_by_geometry(new_c, existing)
 
     assert result is not None
     assert result.last_ts == later_ts
@@ -100,7 +100,7 @@ async def test_preview_is_merged_and_capped() -> None:
         centroid=np.array([0.99, 0.01], dtype=np.float32), last_ts=_BASE_TS_MS + 1, count=1, preview=["new"]
     )
 
-    result = await cluster_by_geometry(new_c, existing, preview_cap=5)
+    result = cluster_by_geometry(new_c, existing, preview_cap=5)
 
     assert result is not None
     assert result.preview == ["old", "new"]
@@ -113,7 +113,7 @@ async def test_pick_best_among_multiple_existing() -> None:
     ]
     new_c = _c([0.9, 0.1], ts=_BASE_TS_MS + 1)
 
-    result = await cluster_by_geometry(new_c, existing)
+    result = cluster_by_geometry(new_c, existing)
 
     assert result is not None
     assert result.id == "cid_0"  # best match
@@ -134,7 +134,7 @@ async def test_merge_appends_members() -> None:
         members=["c"],
     )
 
-    result = await cluster_by_geometry(new_c, existing)
+    result = cluster_by_geometry(new_c, existing)
 
     assert result is not None
     assert result.members == ["a", "b", "c"]
@@ -148,7 +148,7 @@ async def test_none_path_preserves_new_members() -> None:
         members=["entity_x"],
     )
 
-    result = await cluster_by_geometry(new_c, [])
+    result = cluster_by_geometry(new_c, [])
 
     assert result is None
     assert new_c.members == ["entity_x"]

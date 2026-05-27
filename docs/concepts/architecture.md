@@ -77,9 +77,13 @@ Dependency topology (arrows point to the dependency):
        │           │                  │          │
    boundary    clustering           rank       parser
        ▲           ▲                               ▲
-       └─────┬─────┘                               │
-             │                                     │
-       user-memory   agent-memory          knowledge
+       │           │                               │
+   user-memory  agent-memory                 knowledge
+
+Edges (arrow → dependency; every package also depends on core):
+  user-memory  → boundary
+  agent-memory → boundary, clustering
+  knowledge    → parser
 ```
 
 Each distribution has its own `pyproject.toml` with an independent version number.
@@ -145,7 +149,7 @@ If you change the boundary algorithm, import whichever path is natural for your 
 | Async methods | `a` prefix | `aextract`, `adetect`, `arank`, `aparse` |
 | Sync methods (pure compute) | no prefix | `rrf`, `count_tokens` |
 
-The `a` prefix is a strict convention: a method named `aextract` always performs real I/O and must be `await`-ed; a method without the prefix is always synchronous pure compute.
+The `a` prefix is a strict convention for EverAlgo operator methods: a method named `aextract` always performs real I/O and must be `await`-ed; a method without the prefix is always synchronous pure compute. (One deliberate exception: `LLMClient.chat` — a caller-injected client Protocol, not an EverAlgo operator — is async without the `a` prefix, mirroring the OpenAI SDK client interface.)
 See [Async–sync bridge](async-sync-bridge.md) for the full contract.
 
 ---
@@ -180,7 +184,7 @@ existing: list[Cluster] = await my_store.load(user_id) or []
 
 vector = np.array([0.9, 0.1, 0.0], dtype=np.float32)  # caller computes embedding
 new_cluster = Cluster(centroid=vector, last_ts=event_ts_ms)
-merged = await cluster_by_geometry(new_cluster, existing)
+merged = cluster_by_geometry(new_cluster, existing)
 
 if merged is not None:
     # Update the matching entry in place (caller finds it by merged.id).

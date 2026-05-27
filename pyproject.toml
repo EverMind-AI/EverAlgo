@@ -149,3 +149,23 @@ disallow_incomplete_defs = false
 [[tool.mypy.overrides]]
 module = ["tqdm.*"]
 ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["everalgo"]
+
+[tool.coverage.report]
+# Single source of truth for coverage gating (CI passes no --cov-fail-under; it reads this).
+# `exclude_also` *adds* to coverage.py's built-in defaults; the pattern set is the recommended example
+# from the coverage.py docs — unreachable / untestable lines (defensive raises, abstract methods,
+# TYPE_CHECKING-only imports, Protocol bodies) are excluded so the percentage reflects code that
+# should be tested, not stubs masquerading as covered. https://coverage.readthedocs.io/en/latest/excluding.html
+exclude_also = [
+  "def __repr__",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "class .*\\bProtocol\\):",
+  "@(abc\\.)?abstractmethod",
+]
+fail_under = 90

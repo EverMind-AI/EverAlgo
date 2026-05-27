@@ -16,7 +16,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `AgentCase`, `AgentSkill` agent-memory output types; `ToolCall`, `ToolCallFunction`, `ToolCallRequest`, `ToolCallResult` agent-trajectory wire types.
 - `Candidate`, `FactCandidate`, `ScoredItem`, `RankInput`, `RankOutput` ranking I/O types.
 - `ParsedContent`, `RawData`, `RawFile`, `KnowledgeMemory` types reserved for the parser and knowledge distributions.
-- `LLMClient` Protocol (async-first: `achat` / `achat_stream`; sync bridge via `asgiref.async_to_sync`).
+- `LLMClient` Protocol — a single async method `chat(messages, *, model, temperature, max_tokens, response_format, **extra) -> ChatResponse` (PEP 544 structural contract). No `a` prefix (mirrors the OpenAI SDK client interface; callers implement it and inject it, EverAlgo never wraps it in a sync bridge). No streaming method.
 - `ChatMessage` (LLM-layer), `ChatResponse`, `Usage` wire types for the LLM facade.
 - `LLMConfig` pydantic model carrying model name, base URL, API key, and per-call timeout.
 - `LLMError` base exception with provider-neutral subclass hierarchy.
