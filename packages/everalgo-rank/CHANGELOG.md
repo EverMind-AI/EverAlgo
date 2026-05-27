@@ -4,13 +4,11 @@ All notable changes to this package are documented here. Format follows
 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - 2026-05-19
-
-### Fixed
-
-- `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as evermem's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
-
 ## [Unreleased]
+
+## [0.2.0] - 2026-05-27
+
+> First archived changelog. Entries below accumulated since the initial `0.1.0` PyPI release (published manually, without a git tag or per-package changelog), so this `0.2.0` section also consolidates the previously-unarchived `0.1.0` surface. (`0.1.1` below was a hotfix released 2026-05-19.)
 
 ### Added
 
@@ -30,4 +28,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - Silent fallback in `_apply_rerank_scores`: the function raises `ValueError` when the LLM response cannot be parsed into a valid score list.
 - Outer `try/except` block in `aagentic_retrieve`: errors from sub-steps propagate to the caller unchanged.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
+## [0.1.1] - 2026-05-19
+
+### Fixed
+
+- `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as evermem's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
+
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.2.0...HEAD
+[0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.2.0
+[0.1.1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.1.1
