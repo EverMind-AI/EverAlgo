@@ -41,7 +41,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="Smoke mode: 3 convs x 10 qa each. Under 5 minutes.",
+        help="Smoke mode: 1 conversation x 10 QA (~10 questions). Quick end-to-end sanity check, not a scored run.",
     )
     parser.add_argument(
         "--data-path",

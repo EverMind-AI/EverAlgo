@@ -4,19 +4,23 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-parser"
-version = "0.1.0"
+version = "0.2.0"
 description = "EverAlgo parser: multimodal raw-file parsing (image / audio / document / video / url) into ParsedContent."
 requires-python = ">=3.12"
 license = "MIT"
 readme = "README.md"
-authors = [{ name = "EverMind" }]
+authors = [{ name = "EverMind", email = "Evermind@shanda.com" }]
+keywords = ["llm", "multimodal", "parsing", "everalgo"]
 classifiers = [
   "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-  "everalgo-core>=0.1.0,<2.0.0",
+  "everalgo-core>=0.2.0,<2.0.0",
   "asgiref>=3.8.0",
   "pillow>=10.0.0",
   "beautifulsoup4>=4.12.0",

@@ -14,8 +14,6 @@ Run:
 
 from __future__ import annotations
 
-import asyncio
-
 import numpy as np
 
 from everalgo.clustering import Cluster, cluster_by_geometry
@@ -39,20 +37,20 @@ def _mint_cluster(vec: np.ndarray, ts: int, cid: str, entity_id: str) -> Cluster
     return Cluster(id=cid, centroid=vec, last_ts=ts, members=[entity_id])
 
 
-async def main() -> None:
+def main() -> None:
     """Cluster three vectors geometrically and print cluster assignments and snapshots."""
     clusters: list[Cluster] = []
     next_id = 0
 
     new_a = Cluster(centroid=_VEC_A, last_ts=_TS_A, members=["entity_0"])
-    result_a = await cluster_by_geometry(new_a, clusters)
+    result_a = cluster_by_geometry(new_a, clusters)
     assert result_a is None
     cid_a = f"cid_{next_id}"
     next_id += 1
     clusters.append(_mint_cluster(_VEC_A, _TS_A, cid_a, "entity_0"))
 
     new_b = Cluster(centroid=_VEC_B, last_ts=_TS_B, members=["entity_1"])
-    result_b = await cluster_by_geometry(new_b, clusters)
+    result_b = cluster_by_geometry(new_b, clusters)
     if result_b is None:
         cid_b = f"cid_{next_id}"
         next_id += 1
@@ -64,7 +62,7 @@ async def main() -> None:
         clusters[idx_b] = result_b
 
     new_c = Cluster(centroid=_VEC_C, last_ts=_TS_C, members=["entity_2"])
-    result_c = await cluster_by_geometry(new_c, clusters)
+    result_c = cluster_by_geometry(new_c, clusters)
     if result_c is None:
         cid_c = f"cid_{next_id}"
         next_id += 1
@@ -89,4 +87,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

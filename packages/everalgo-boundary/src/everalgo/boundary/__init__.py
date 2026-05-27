@@ -3,7 +3,10 @@
 Public surface:
 - detect_boundaries — async function: split chat messages into MemCells
 - DetectionResult    — ``(cells, tail)`` NamedTuple returned by detect_boundaries
-- WorkspaceMemCellExtractor — Jira / Email / Confluence stub (unchanged)
+
+``WorkspaceMemCellExtractor`` (Jira / Email / Confluence) is NOT YET IMPLEMENTED and is
+deliberately omitted from the public API — its methods raise ``NotImplementedError``. Import it
+directly from ``everalgo.boundary.workspace`` if you need the reserved placeholder.
 
 Facade classes (BoundaryDetector / AgentBoundaryDetector) live in everalgo-user-memory and
 everalgo-agent-memory respectively; see Stage 3-4 of the refactor.
@@ -12,12 +15,10 @@ everalgo-agent-memory respectively; see Stage 3-4 of the refactor.
 import logging
 
 from everalgo.boundary.chat import BoundaryDecision, DetectionResult, adetect_boundary_step, detect_boundaries
-from everalgo.boundary.workspace import WorkspaceMemCellExtractor
 
 __all__ = [
     "BoundaryDecision",
     "DetectionResult",
-    "WorkspaceMemCellExtractor",
     "adetect_boundary_step",
     "detect_boundaries",
 ]

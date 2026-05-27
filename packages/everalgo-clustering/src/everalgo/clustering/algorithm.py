@@ -1,6 +1,7 @@
 """Cluster operators — geometry and LLM-refined paths over a list[Cluster] state.
 
-Both operators are async and stateless: accept a new_cluster + existing_clusters list, return
+``cluster_by_geometry`` is sync pure-compute (cosine + time-window, no I/O); ``cluster_by_llm`` is
+async (it calls an LLM). Both are stateless: accept a new_cluster + existing_clusters list, return
 a merged Cluster or None without mutating any input. The caller owns persistence and concurrency control.
 """
 
@@ -29,7 +30,7 @@ _MS_PER_DAY = 86_400_000
 _NORM_EPSILON = 1e-9
 
 
-async def cluster_by_geometry(
+def cluster_by_geometry(
     new_cluster: Cluster,
     existing_clusters: list[Cluster],
     *,

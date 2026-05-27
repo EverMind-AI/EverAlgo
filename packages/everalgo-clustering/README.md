@@ -1,6 +1,6 @@
 # everalgo-clustering
 
-Online incremental clustering for EverAlgo — two async functions (`cluster_by_geometry` / `cluster_by_llm`) operating on caller-owned `list[Cluster]` state.
+Online incremental clustering for EverAlgo — `cluster_by_geometry` (sync) and `cluster_by_llm` (async, LLM-refined) operating on caller-owned `list[Cluster]` state.
 
 Stateless: the package never embeds, never queries storage, never holds a lock. The caller owns embedding computation, persistence (`list[Cluster]` serialisation), and read-modify-write coordination across concurrent writers.
 
@@ -17,7 +17,7 @@ pip install everalgo-clustering
 | Symbol | Role |
 |---|---|
 | `Cluster` | Frozen Pydantic value object — one cluster snapshot. Caller-supplied `id` / `members`; algorithm supplies merged `centroid`, `count`, `last_ts`, `preview`. |
-| `cluster_by_geometry` | Cosine similarity + time-window filter + threshold; no LLM; async |
+| `cluster_by_geometry` | Cosine similarity + time-window filter + threshold; no LLM; sync |
 | `cluster_by_llm` | Top-K geometric recall → fast-path skip → LLM semantic ranking; raises on LLM failure; async |
 
 ## Cluster type
@@ -38,33 +38,29 @@ Both functions return `Cluster | None`: a merged snapshot when the item is assig
 ## Quick start
 
 ```python
-import asyncio
 import numpy as np
 from everalgo.clustering import Cluster, cluster_by_geometry
 
-async def main() -> None:
-    existing: list[Cluster] = []  # caller loads from storage; empty on first run
-    vector = np.random.rand(2560).astype(np.float32)
-    timestamp_ms = 1_700_000_000_000
+existing: list[Cluster] = []  # caller loads from storage; empty on first run
+vector = np.random.rand(2560).astype(np.float32)
+timestamp_ms = 1_700_000_000_000
 
-    new_cluster = Cluster(centroid=vector, last_ts=timestamp_ms)
-    merged = await cluster_by_geometry(
-        new_cluster,
-        existing,
-        threshold=0.65,        # cosine similarity floor
-        time_window_days=7.0,  # ignore clusters older than this window
-    )
+new_cluster = Cluster(centroid=vector, last_ts=timestamp_ms)
+merged = cluster_by_geometry(  # sync — no await
+    new_cluster,
+    existing,
+    threshold=0.65,        # cosine similarity floor
+    time_window_days=7.0,  # ignore clusters older than this window
+)
 
-    if merged is not None:
-        # item assigned to an existing cluster; caller updates the matching entry
-        print(f"merged into cluster id={merged.id!r}, new count={merged.count}")
-    else:
-        # no match — caller appends new_cluster and stamps its own id
-        new_cluster_with_id = new_cluster.model_copy(update={"id": "cid_001"})
-        existing.append(new_cluster_with_id)
-        print("created new cluster")
-
-asyncio.run(main())
+if merged is not None:
+    # item assigned to an existing cluster; caller updates the matching entry
+    print(f"merged into cluster id={merged.id!r}, new count={merged.count}")
+else:
+    # no match — caller appends new_cluster and stamps its own id
+    new_cluster_with_id = new_cluster.model_copy(update={"id": "cid_001"})
+    existing.append(new_cluster_with_id)
+    print("created new cluster")
 ```
 
 ## LLM-refined clustering
@@ -113,7 +109,7 @@ raw_list = await store.load(user_id) or []
 clusters = [Cluster.model_validate(r) for r in raw_list]
 
 async with caller.lock(f"cluster:{user_id}"):
-    merged = await cluster_by_geometry(new_cluster, clusters)
+    merged = cluster_by_geometry(new_cluster, clusters)
     if merged is not None:
         idx = next(i for i, c in enumerate(clusters) if c.id == merged.id)
         clusters[idx] = merged
@@ -126,7 +122,7 @@ async with caller.lock(f"cluster:{user_id}"):
 ## API reference
 
 ```python
-async def cluster_by_geometry(
+def cluster_by_geometry(
     new_cluster: Cluster,
     existing_clusters: list[Cluster],
     *,

@@ -188,12 +188,12 @@ async def main() -> None:
     mc_current_id = "mc_current"
 
     new_c_prior = Cluster(id="cid_0", centroid=vec_prior, last_ts=mc_prior.timestamp, members=[mc_prior_id])
-    result_prior = await cluster_by_geometry(new_c_prior, clusters)
+    result_prior = cluster_by_geometry(new_c_prior, clusters)
     assert result_prior is None
     clusters.append(new_c_prior)
 
     new_c_current = Cluster(centroid=vec_current, last_ts=mc.timestamp, members=[mc_current_id])
-    result_current = await cluster_by_geometry(new_c_current, clusters)
+    result_current = cluster_by_geometry(new_c_current, clusters)
     assert result_current is not None
     assert result_current.id == "cid_0"
     clusters[0] = result_current

@@ -10,12 +10,15 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - `detect_boundaries(messages, *, llm, tail) -> DetectionResult`: async public entry point that splits a `list[ChatMessage]` into `MemCell` slices using a single LLM call; no retry.
 - `DetectionResult` `NamedTuple`: `(cells: list[MemCell], tail: list[ChatMessage])` where `tail` is the unconsumed carry-forward window.
-- `WorkspaceMemCellExtractor`: stub extractor for Jira / Email / Confluence inputs (EXPERIMENTAL; implementation pending).
 - `count_tokens(text: str) -> int`: token count using OpenAI `o200k_base` encoding via `tiktoken`.
 - `force_split(text: str, *, max_tokens: int) -> list[str]`: token-bounded chunking for caller-side prompt fitting.
 - English and Chinese boundary detection prompts under `boundary/prompts/{en,zh}/`.
 - `BoundaryDetector` (in `everalgo-user-memory`) and `AgentBoundaryDetector` (in `everalgo-agent-memory`) are the facade classes; `detect_boundaries` is this package's low-level public primitive.
 - 81 unit tests across `test_chat.py` (boundary logic), `test_boundary_public_api.py` (public contract), and `test_tokenize.py` (token helpers).
+
+### Changed
+
+- `WorkspaceMemCellExtractor` is no longer exported from `everalgo.boundary` (`__all__`). It is an unimplemented stub whose methods raise `NotImplementedError`; keeping it off the public surface removes the import-then-crash trap. It stays importable from `everalgo.boundary.workspace` as a forward reference. Re-adding it to the public API once implemented is a non-breaking addition.
 
 ### Removed
 

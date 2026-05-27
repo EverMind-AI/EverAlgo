@@ -8,19 +8,18 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `cluster_by_geometry(embedding, state, *, threshold, time_window_days) -> tuple[int, ClusterState]`: cosine similarity + time-window incremental assignment; no LLM; pure-sync function.
-- `cluster_by_llm(embedding, state, cluster_previews, *, llm, threshold, time_window_days, k_candidates, llm_skip_threshold) -> tuple[int, ClusterState]`: embedding top-K recall + cosine fast-path skip + LLM ranking; async; raises on LLM failure or malformed JSON.
-- `ClusterState` frozen pydantic model with four fields: `centroids: dict[int, list[float]]`, `counts: dict[int, int]`, `last_ts: dict[int, int]` (ms-epoch int), `next_idx: int`. Provides `empty()`, `to_dict()`, `from_dict()`, and a private `_assign()` mutation method.
+- `cluster_by_geometry(new_cluster: Cluster, existing_clusters: list[Cluster], *, threshold=0.65, time_window_days=7.0, preview_cap=5) -> Cluster | None`: cosine similarity + time-window incremental assignment; no LLM; **sync pure-compute**. Returns the merged `Cluster` (weighted centroid + preview concat + members append) when a match is found within the window, else `None`.
+- `cluster_by_llm(new_cluster: Cluster, existing_clusters: list[Cluster], *, llm, k_candidates=30, llm_skip_threshold=0.85, prompt=None, preview_cap=5) -> Cluster | None`: top-K geometric recall + cosine fast-path skip (top-1 >= `llm_skip_threshold`) + LLM ranking when the fast path misses; async; raises on LLM failure or malformed JSON (no geometric fallback).
+- `Cluster` frozen pydantic model (`arbitrary_types_allowed=True` for the numpy centroid): `id: str | None = None` (caller-stamped), `centroid: np.ndarray`, `count: int = 1`, `last_ts: int` (ms epoch), `preview: list[str] = []`, `members: list[str] = []` (caller-supplied entity ids; the algorithm appends on merge, never inspects semantics).
 - English clustering prompt `CLUSTER_LLM_ASSIGN_PROMPT` in `prompts/en/cluster.py`; Chinese variant re-exports the English prompt (the template is language-neutral; responses adapt to the corpus language).
 
 ### Changed
 
-- `ClusterState.last_ts` stores millisecond epoch integers instead of float seconds, aligning with `MemCell.timestamp` and `Episode.timestamp` conventions across EverAlgo.
-- `ClusterState` tracks `next_idx` as an explicit field instead of deriving cluster numbering from `max(centroids.keys()) + 1`, which was a footgun when cluster IDs were deleted.
+- `cluster_by_geometry` is now **synchronous** (`def`, no `await`) — it is pure geometry (cosine + time-window) with no I/O, following the sync-for-pure-compute convention used by `fusion.rrf` / `count_tokens`. `cluster_by_llm` stays async (it calls an LLM). Callers must drop the `await`.
 
 ### Removed
 
-- `ClusterConfig` dataclass: threshold, time-window, and candidate-count parameters are now keyword arguments on each function, allowing callers to pass only what they use.
+- `ClusterState` value object and `ClusterConfig` dataclass: replaced by caller-owned `list[Cluster]` plus per-function keyword arguments. The caller owns the cluster list, stamps cluster IDs, and serialises; the algorithm owns only the merge transition.
 - Geometric fallback path inside `cluster_by_llm`: the function raises on LLM failure rather than silently falling back to geometry.
 - 3-retry loop in `cluster_by_llm`: the function raises `ValueError` immediately on bad LLM JSON.
 

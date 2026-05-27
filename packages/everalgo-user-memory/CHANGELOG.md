@@ -14,11 +14,11 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `AtomicFactExtractor`: single `MemCell` → `list[AtomicFact]`; async with sync bridge.
 - `ProfileExtractor`: chronological `list[MemCell]` (last element = most recent) → single `Profile`; single-shot LLM snapshot.
 - English and Chinese prompts for all four extractors under `user_memory/prompts/{en,zh}/`.
-- `WorkspaceMemCellExtractor` re-export from `everalgo.boundary` for callers that import from one place.
 - `DetectionResult` re-export from `everalgo.boundary`.
 
 ### Changed
 
+- `WorkspaceMemCellExtractor` is no longer re-exported from `everalgo.user_memory` (`__all__`). It was an unimplemented stub that raised `NotImplementedError`; it now lives only in `everalgo.boundary.workspace`. Re-adding it once implemented is a non-breaking addition.
 - `BoundaryDetector` renamed from `UserBoundaryDetector` (which was itself renamed from `ChatBoundaryDetector`) to match the no-prefix naming convention used across the package.
 - `EpisodeExtractor.aextract` parameter `owner_id` renamed to `sender_id` to align with `ChatMessage.sender_id`.
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.

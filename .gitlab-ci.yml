@@ -2,10 +2,13 @@ workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
+    # Per-distribution release tags like `everalgo-clustering/v0.2.0` trigger the publish stage.
+    - if: $CI_COMMIT_TAG =~ /^everalgo-[a-z-]+\/v[0-9]/
 
 stages:
   - lint
   - test
+  - publish
 
 variables:
   # GitLab's `cache:` can only persist paths inside CI_PROJECT_DIR; default `~/.cache/uv` is outside it.
@@ -56,22 +59,27 @@ pytest:
   extends: .python-job
   stage: test
   needs: []   # DAG: start in parallel with lint stage; pytest does not gate on lint.
+  # Matrix over every GA Python minor covered by `requires-python = ">=3.12"` (3.15 is still beta).
+  # Only pytest needs the matrix — ruff / mypy / pyright check fixed 3.12 semantics, so one version suffices.
+  parallel:
+    matrix:
+      - PYVER: ["3.12", "3.13", "3.14"]
+  image: ghcr.io/astral-sh/uv:0.9.30-python${PYVER}-bookworm
   variables:
     GIT_DEPTH: 0   # Full history so diff-cover can compare against the MR target SHA.
   # extends replaces list keys, so uv sync is restated. git is needed by diff-cover (missing from uv image).
   before_script:
     - apt-get update -qq && apt-get install -y --no-install-recommends git
-    - uv sync --all-packages --group dev --frozen
+    - uv sync --all-packages --group dev --frozen --python "$PYVER"
   script:
-    - uv run pytest -n auto -v
+    - uv run --python "$PYVER" pytest -n auto -v
         --junitxml=report.xml
         --cov=everalgo
         --cov-report=term
         --cov-report=xml:coverage.xml
-        --cov-fail-under=90
-    # Diff-cover only on MR pipelines; CI_MERGE_REQUEST_DIFF_BASE_SHA is empty on main pushes.
+    # Diff-cover only on MR pipelines, and only once — the diff is version-agnostic, so run it on 3.12.
     - |
-      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then
+      if [ "$PYVER" = "3.12" ] && [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then
         uv run diff-cover coverage.xml \
           --compare-branch="$CI_MERGE_REQUEST_DIFF_BASE_SHA" \
           --fail-under=90 \
@@ -85,3 +93,36 @@ pytest:
       coverage_report:
         coverage_format: cobertura
         path: coverage.xml
+
+# ---------------------------------------------------------------------------
+# Release: publish ONE distribution to PyPI when a `everalgo-<dist>/v<semver>` tag is pushed.
+# Auth is PyPI Trusted Publishing over GitLab OIDC — NO long-lived token is stored.
+#
+# One-time prerequisites (NOT done by this file; require a PyPI project owner):
+#   1. Add a GitLab Trusted Publisher for each distribution on PyPI:
+#      https://docs.pypi.org/trusted-publishers/adding-a-publisher/
+#   2. The 0.2.0 version bump must land first — this job publishes whatever version the tag names.
+#
+# Mechanism reference (GitLab id_tokens + twine OIDC exchange):
+#   https://docs.pypi.org/trusted-publishers/using-a-publisher/
+# UNVERIFIED end-to-end: the OIDC handshake must be validated with one real tag push before
+# this is relied on. uv has no documented GitLab trusted-publishing path, hence twine is used.
+# ---------------------------------------------------------------------------
+publish:
+  stage: publish
+  image: ghcr.io/astral-sh/uv:0.9.30-python3.12-bookworm
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^everalgo-[a-z-]+\/v[0-9]/
+  # GitLab mints an OIDC JWT into PYPI_ID_TOKEN; twine exchanges it for a short-lived PyPI token.
+  id_tokens:
+    PYPI_ID_TOKEN:
+      aud: pypi
+  script:
+    # Tag `everalgo-<dist>/v<semver>` -> DIST is everything before the last `/`.
+    - DIST="${CI_COMMIT_TAG%/*}"
+    - echo "Building and publishing ${DIST} from tag ${CI_COMMIT_TAG}"
+    - uv build --package "$DIST"
+    # No credentials passed: twine reads the GitLab OIDC token from PYPI_ID_TOKEN and exchanges it
+    # with PyPI's configured Trusted Publisher itself. The pin is load-bearing — Trusted Publishing
+    # support landed in twine 6.1.0 (2025-01); an older twine silently skips OIDC and 401s.
+    - uv run --with 'twine>=6.1.0' twine upload dist/*

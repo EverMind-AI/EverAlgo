@@ -391,7 +391,7 @@ async def _cluster_one_memcell(
         members=[str(mc["id"])],
         preview=[episode_body],
     )
-    merged = await cluster_by_geometry(
+    merged = cluster_by_geometry(
         new_cluster,
         existing_clusters,
         threshold=threshold,

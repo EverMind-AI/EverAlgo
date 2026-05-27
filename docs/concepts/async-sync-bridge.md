@@ -15,15 +15,17 @@ They are pure-compute (no I/O) and must be called without `await`.
 ```python
 # ✅ Correct — async I/O method, use await
 episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alice")
-merged  = await cluster_by_geometry(new_cluster, existing_clusters)
 
 # ✅ Correct — sync pure-compute method, no await
+merged  = cluster_by_geometry(new_cluster, existing_clusters)
 score   = rank.fusion.rrf(vec_hits, keyword_hits)
 n       = boundary._tokenize.count_tokens(text)
 ```
 
 Reading the method name tells you its calling convention immediately — no need to look up documentation.
 This is the same convention used by `dspy.acall` / `dspy.aforward`, `litellm.acompletion`, and `instructor.AsyncInstructor`.
+
+**Exception — `LLMClient`.** The `a`-prefix rule governs EverAlgo *operator* methods. The `LLMClient` Protocol (`everalgo.llm.protocols`) is a caller-injected client interface, not an operator; its single method is `async def chat(...)` — async but without the `a` prefix — to mirror the OpenAI SDK client surface. EverAlgo operators call it internally via `await self._llm.chat(...)`.
 
 ---
 
@@ -74,7 +76,7 @@ Calling the sync bridge from within a running event loop will raise a `RuntimeEr
 | `EpisodeExtractor` | `extract` | sync bridge | `extractor.extract(mc, sender_id=...)` — non-event-loop only |
 | `BoundaryDetector` | `adetect` | async I/O | `await detector.adetect(messages, is_final=True)` |
 | `BoundaryDetector` | `detect` | sync bridge | `detector.detect(messages, is_final=True)` — non-event-loop only |
-| `cluster_by_geometry` | `cluster_by_geometry` | async I/O | `await cluster_by_geometry(new_cluster, existing_clusters)` |
+| `cluster_by_geometry` | `cluster_by_geometry` | sync pure-compute | `cluster_by_geometry(new_cluster, existing_clusters)` |
 | `rank.episodic.arank` | `arank` | async I/O | `await rank.episodic.arank(rank_input)` |
 | `rank.profile.rank` | `rank` | sync pure-compute | `rank.profile.rank(rank_input)` |
 | `rank.fusion.rrf` | `rrf` | sync pure-compute | `rank.fusion.rrf(hits_a, hits_b)` |
@@ -90,9 +92,9 @@ A typical pipeline has both kinds of calls:
 result   = await BoundaryDetector(llm=llm).adetect(messages, is_final=True)
 mc       = result.cells[0]
 episode  = await EpisodeExtractor(llm=llm).aextract(mc, sender_id="u_alice")
-merged   = await cluster_by_geometry(new_cluster, existing_clusters)
 
 # Pure-compute — no await
+merged   = cluster_by_geometry(new_cluster, existing_clusters)
 fused    = rank.fusion.rrf(vec_hits, keyword_hits)
 n_tokens = boundary._tokenize.count_tokens(text)
 ```

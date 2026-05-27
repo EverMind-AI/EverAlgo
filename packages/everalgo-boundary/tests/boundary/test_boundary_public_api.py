@@ -4,6 +4,7 @@ Verifies:
 - __all__ contains exactly the documented exported symbols
 - each symbol is importable and has the expected kind (async-coroutinefunction / class)
 - detect_boundaries is natively async (not an asgiref sync bridge)
+- WorkspaceMemCellExtractor is NOT part of the public API (unimplemented stub)
 """
 
 from __future__ import annotations
@@ -11,18 +12,19 @@ from __future__ import annotations
 import asyncio
 import inspect
 
+import pytest
+
 import everalgo.boundary
-from everalgo.boundary import DetectionResult, WorkspaceMemCellExtractor, detect_boundaries
+from everalgo.boundary import DetectionResult, detect_boundaries
 from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_dunder_all_lists_exact_public_surface() -> None:
-    """__all__ exposes the five documented symbols — no more, no less."""
+    """__all__ exposes the four documented symbols — no more, no less."""
     assert sorted(everalgo.boundary.__all__) == sorted(
         [
             "BoundaryDecision",
             "DetectionResult",
-            "WorkspaceMemCellExtractor",
             "adetect_boundary_step",
             "detect_boundaries",
         ]
@@ -51,13 +53,18 @@ def test_detection_result_is_named_tuple_subclass() -> None:
     assert r._fields == ("cells", "tail")
 
 
-def test_workspace_mem_cell_extractor_is_importable_as_top_level_symbol() -> None:
-    assert hasattr(everalgo.boundary, "WorkspaceMemCellExtractor")
-    assert everalgo.boundary.WorkspaceMemCellExtractor is WorkspaceMemCellExtractor
+def test_workspace_extractor_is_not_in_public_api() -> None:
+    """The unimplemented stub must not leak into the package's public surface (it raises on use)."""
+    assert "WorkspaceMemCellExtractor" not in everalgo.boundary.__all__
+    assert not hasattr(everalgo.boundary, "WorkspaceMemCellExtractor")
 
 
-def test_workspace_mem_cell_extractor_is_class() -> None:
-    assert inspect.isclass(WorkspaceMemCellExtractor)
+def test_workspace_extractor_stub_raises_when_called() -> None:
+    """Reachable only via explicit submodule import; calling it fails fast with NotImplementedError."""
+    from everalgo.boundary.workspace import WorkspaceMemCellExtractor
+
+    with pytest.raises(NotImplementedError):
+        WorkspaceMemCellExtractor().detect(raw_data=None)  # type: ignore[arg-type]
 
 
 def test_detect_boundaries_coroutine_is_awaitable() -> None:

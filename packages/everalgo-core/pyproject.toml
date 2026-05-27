@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "EverAlgo foundation: types, LLM client + providers, prompt validators, testing helpers."
 requires-python = ">=3.12"
 license = "MIT"
 readme = "README.md"
-authors = [{ name = "EverMind" }]
+authors = [{ name = "EverMind", email = "Evermind@shanda.com" }]
 keywords = ["llm", "memory", "algorithm", "everalgo"]
 classifiers = [
   "Development Status :: 3 - Alpha",

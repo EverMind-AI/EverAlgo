@@ -27,8 +27,9 @@ def test_cluster_instantiates_with_required_fields() -> None:
     assert c.preview == []
 
 
-def test_cluster_functions_are_async() -> None:
+def test_cluster_function_async_contract() -> None:
     from everalgo.clustering import cluster_by_geometry, cluster_by_llm
 
-    assert inspect.iscoroutinefunction(cluster_by_geometry)
+    # cluster_by_geometry is sync pure-compute (no I/O); cluster_by_llm is async (calls an LLM).
+    assert not inspect.iscoroutinefunction(cluster_by_geometry)
     assert inspect.iscoroutinefunction(cluster_by_llm)
