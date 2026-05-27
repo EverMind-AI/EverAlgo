@@ -22,6 +22,11 @@ default:
 
 # `--frozen` makes uv error on lockfile drift rather than silently updating it. Bump the image tag to upgrade uv.
 .python-job:
+  # Release-tag pipelines only run `publish`; lint / test run on MR and main pipelines, not on tags.
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
   cache:
     key:
       files:
