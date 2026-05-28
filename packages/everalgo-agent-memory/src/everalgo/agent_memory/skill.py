@@ -57,7 +57,6 @@ class _SkillCfg:
     maturity_threshold: float = 0.6  # only consulted when skip_maturity_scoring=False
     retire_confidence: float = 0.1
     failure_quality_threshold: float = 0.5
-    max_case_history: int = 9
     max_description_tokens: int = 400
     max_content_tokens: int = 5000
     # Below: change-ratio bands for maturity re-eval; inert when skip_maturity_scoring=True.
@@ -88,7 +87,6 @@ class AgentSkillExtractor:
         maturity_threshold: float = 0.6,
         retire_confidence: float = 0.1,
         failure_quality_threshold: float = 0.5,
-        max_case_history: int = 9,
         max_description_tokens: int = 400,
         max_content_tokens: int = 5000,
         maturity_trivial_change_ratio: float = 0.2,
@@ -110,7 +108,6 @@ class AgentSkillExtractor:
             maturity_threshold: Minimum score to mark a skill as mature (consulted when not skipping).
             retire_confidence: Confidence below which a skill is marked for retirement.
             failure_quality_threshold: Quality score below which the failure prompt branch is used.
-            max_case_history: Maximum number of supporting cases rendered per existing skill.
             max_description_tokens: Token budget for skill description in the prompt.
             max_content_tokens: Token budget for skill content in the prompt.
             maturity_trivial_change_ratio: Change ratio below which maturity re-eval is skipped.
@@ -127,7 +124,6 @@ class AgentSkillExtractor:
             maturity_threshold=maturity_threshold,
             retire_confidence=retire_confidence,
             failure_quality_threshold=failure_quality_threshold,
-            max_case_history=max_case_history,
             max_description_tokens=max_description_tokens,
             max_content_tokens=max_content_tokens,
             maturity_trivial_change_ratio=maturity_trivial_change_ratio,

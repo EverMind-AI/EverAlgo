@@ -52,6 +52,14 @@ MAX_TASK_INTENT_TOKENS = 300  # head-only truncation after LLM extraction
 FILTER_NO_TOOL_MAX_MESSAGES = 4
 FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS = 200
 
+# Filter-only view caps. The worth-extracting signals (exploration / correction) are driven by user
+# messages and the assistant's action trajectory — which tools, with what args — not by tool-result
+# bodies. So the filter sees an aggressively slimmed view (tool outputs shrink to a head just large
+# enough to reveal error-vs-success); the fuller `messages_json` still feeds the compress step.
+FILTER_TOOL_OUTPUT_TOKENS = 80
+FILTER_TOOL_ARGS_TOKENS = 120
+FILTER_ASSISTANT_TOKENS = 600
+
 
 class AgentCaseExtractor:
     """Distil one agent-trajectory MemCell into at most one AgentCase.
@@ -59,8 +67,27 @@ class AgentCaseExtractor:
     Returns a list of length 0 (filtered out) or 1 (successful extraction).
     """
 
-    def __init__(self, *, llm: LLMClient) -> None:
+    def __init__(
+        self,
+        *,
+        llm: LLMClient,
+        min_tool_call_rounds: int = 3,
+        complex_task_tool_call_round_threshold: int = 20,
+    ) -> None:
+        """Construct the extractor.
+
+        Args:
+            llm: LLM client used for the pre-compress / filter / compress steps.
+            min_tool_call_rounds: When ``> 0``, trajectories whose tool-call round count is
+                strictly below this value are rejected as too simple before any LLM call. Default
+                ``3``; set to ``0`` to disable this gate.
+            complex_task_tool_call_round_threshold: Tool-call rounds strictly greater than this
+                value mark the trajectory as a complex task and fast-pass the LLM filter step.
+                Default ``20``.
+        """
         self._llm = llm
+        self._min_tool_call_rounds = min_tool_call_rounds
+        self._complex_task_round_threshold = complex_task_tool_call_round_threshold
 
     async def aextract(
         self,
@@ -89,6 +116,17 @@ class AgentCaseExtractor:
             logger.info("skipping memcell (n_items=%d): %s", len(memcell.items), reason)
             return []
 
+        # Step 3b: minimum-rounds gate — drop trajectories that are too simple to be worth learning
+        if self._min_tool_call_rounds > 0:
+            rounds = _count_tool_call_rounds(msgs)
+            if rounds < self._min_tool_call_rounds:
+                logger.info(
+                    "skipping memcell — only %d tool-call rounds < min %d",
+                    rounds,
+                    self._min_tool_call_rounds,
+                )
+                return []
+
         # Step 4: heuristic trim (with scale_trigger adaptation)
         msgs, total_tokens = _heuristic_trim(msgs)
         logger.info(
@@ -112,9 +150,11 @@ class AgentCaseExtractor:
         msgs = await _pre_compress_to_list(msgs, client, prompt=prompt_tool_pre_compress)
         messages_json = _dump_messages(msgs)
 
-        # Step 7: LLM filter — only for trajectories with ≤ 1 tool-call round
-        if _count_tool_call_rounds(msgs) <= 1 and not await _is_worth_extracting(
-            messages_json, client, prompt=prompt_filter
+        # Step 7: LLM filter — many tool-call rounds auto-passes as complex task; else judge signals
+        # on a slimmed view (tool-result bodies shrunk) to cut prompt tokens. `and` short-circuits, so
+        # the slim view is built only when the trajectory actually reaches the LLM filter.
+        if _count_tool_call_rounds(msgs) <= self._complex_task_round_threshold and not await _is_worth_extracting(
+            _dump_messages_for_filter(msgs), _count_user_messages(msgs), client, prompt=prompt_filter
         ):
             return []
 
@@ -132,9 +172,6 @@ class AgentCaseExtractor:
                 MAX_TASK_INTENT_TOKENS,
             )
 
-        # Step 10: ❌ embedding moved to caller — AgentCase emitted without vector.
-
-        # Step 11: construct
         case = AgentCase(
             id=uuid.uuid4().hex,
             timestamp=memcell.timestamp,
@@ -175,6 +212,24 @@ def _dump_messages(messages: Sequence[ConversationItem]) -> str:
     return json.dumps(_to_openai_dicts(messages), ensure_ascii=False, default=json_default)
 
 
+def _dump_messages_for_filter(messages: Sequence[ConversationItem]) -> str:
+    """Slim JSON view for the worth-extracting filter (step 7).
+
+    Keeps user messages whole and preserves the assistant's action trajectory (tool names + short
+    args), but shrinks tool-result bodies to a short head — they barely inform the exploration /
+    correction signals, so dropping them cuts filter-prompt tokens sharply on tool-heavy
+    trajectories. The compress step still uses the fuller ``messages_json``.
+    """
+    slim = _apply_truncation(
+        messages,
+        FILTER_TOOL_OUTPUT_TOKENS,
+        FILTER_TOOL_ARGS_TOKENS,
+        FILTER_ASSISTANT_TOKENS,
+        head_ratio=1.0,
+    )
+    return _dump_messages(slim)
+
+
 # ── Module-level helpers ────────────────────────────────────────────────────────────────────────────
 
 
@@ -192,8 +247,13 @@ def _has_tool_calls(messages: Sequence[ConversationItem]) -> bool:
 
 
 def _count_tool_call_rounds(messages: Sequence[ConversationItem]) -> int:
-    """Count ToolCallRequest messages (= tool-call rounds)."""
+    """Count ToolCallRequest messages (= tool-call rounds; parallel calls within one request count once)."""
     return sum(1 for msg in messages if isinstance(msg, ToolCallRequest))
+
+
+def _count_user_messages(messages: Sequence[ConversationItem]) -> int:
+    """Count user-role ChatMessage entries in the trajectory."""
+    return sum(1 for msg in messages if isinstance(msg, ChatMessage) and msg.role == "user")
 
 
 def _should_skip(messages: Sequence[ConversationItem]) -> str | None:
@@ -510,14 +570,21 @@ def _openai_dict_to_agent_item(d: dict[str, Any], timestamp: int) -> Conversatio
 
 async def _is_worth_extracting(
     messages_json: str,
+    user_message_count: int,
     client: LLMClient,
     *,
     prompt: str | None = None,
 ) -> bool:
-    """LLM filter: return ``True`` if the trajectory should proceed to compression.
+    """LLM filter: ``True`` only if at least one signal (exploration / user correction) is True.
 
-    Used only when ``_count_tool_call_rounds <= 1``. When the LLM omits ``worth_extracting``,
-    defaults to ``True`` (schema permissiveness — not a fallback).
+    Used only when the tool-call round count is at or below the extractor's configured threshold;
+    higher-volume trajectories pass automatically as complex tasks (handled upstream, not here).
+    Missing or None signal fields are treated as False — precision over recall, skip when uncertain.
+
+    ``has_user_correction`` is additionally validated against ``user_message_count``: a real
+    correction requires at least two user messages (initial request + corrective follow-up). If the
+    LLM claims a correction on a single-user-message trajectory, the signal is rejected as
+    hallucination.
 
     Raises:
         LLMError: Propagated from the underlying LLM client call.
@@ -525,12 +592,17 @@ async def _is_worth_extracting(
     """
     rendered = render_prompt(AGENT_CASE_FILTER_PROMPT, prompt, messages=messages_json)
     filter_data = await _call_llm_for_case_filter(client, rendered)
-    worth = filter_data.get("worth_extracting")
-    if worth is None:
-        worth = True
+    has_exploration = filter_data.get("has_exploration") is True
+    has_user_correction = filter_data.get("has_user_correction") is True and user_message_count >= 2
+    if filter_data.get("has_user_correction") is True and user_message_count < 2:
+        logger.info(
+            "rejecting has_user_correction=True on single-user-message trajectory (likely hallucination): %s",
+            filter_data.get("reason", ""),
+        )
+    worth = has_exploration or has_user_correction
     if not worth:
         logger.info("filtered out by LLM: %s", filter_data.get("reason", ""))
-    return bool(worth)
+    return worth
 
 
 async def _compress_experience(
@@ -585,9 +657,9 @@ async def _call_llm_for_tool_pre_compress(llm: LLMClient, rendered: str) -> list
 
 
 async def _call_llm_for_case_filter(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM for case filtering and return validated dict with worth_extracting + reason.
+    """Call LLM for case filtering and return the parsed dict (has_exploration / has_user_correction / reason).
 
-    CaseFilterResponse is nominally flat but uses brace-balanced extraction for safety.
+    The response is nominally flat but uses brace-balanced extraction for safety.
     """
     response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
     text = response.content

@@ -27,6 +27,7 @@ from everalgo.agent_memory.case import (
     _compress_experience,
     _compress_tool_chunk,
     _count_tool_call_rounds,
+    _count_user_messages,
     _dump_messages,
     _has_tool_calls,
     _heuristic_trim,
@@ -82,6 +83,20 @@ def _tool_call_msg(
 
 def _tool_response_msg(content: str = "result", call_id: str = "call_1", ts: int = 1700000000600) -> ToolCallResult:
     return ToolCallResult(tool_call_id=call_id, content=content, timestamp=ts)
+
+
+def _high_volume_tool_msgs(n: int = 21, base_ts: int = 1700000000100) -> list[ConversationItem]:
+    """Build ``n`` paired (ToolCallRequest, ToolCallResult) messages — enough to trigger fast-pass.
+
+    Each ToolCallRequest counts as one round, so ``n > the default complex-task threshold`` flags
+    the trajectory as a complex task and skips the LLM filter (see case.py step 7).
+    """
+    msgs: list[ConversationItem] = []
+    for i in range(n):
+        call_id = f"call_{i}"
+        msgs.append(_tool_call_msg(content="thinking", call_id=call_id, ts=base_ts + i * 2))
+        msgs.append(_tool_response_msg("ok", call_id=call_id, ts=base_ts + i * 2 + 1))
+    return msgs
 
 
 # ── _should_skip ────────────────────────────────────────────────────────────────────────────────────
@@ -190,6 +205,42 @@ class TestToolCallHelpers:
 
     def test_count_tool_call_rounds_zero(self) -> None:
         assert _count_tool_call_rounds([_user_msg("hi"), _assistant_msg("hi")]) == 0
+
+    def test_count_tool_call_rounds_parallel_calls_count_as_one_round(self) -> None:
+        """A single ToolCallRequest with multiple parallel tool_calls is still one round."""
+        msg = ToolCallRequest(
+            tool_calls=[
+                ToolCall(id="c1", function=ToolCallFunction(name="f1", arguments="{}")),
+                ToolCall(id="c2", function=ToolCallFunction(name="f2", arguments="{}")),
+                ToolCall(id="c3", function=ToolCallFunction(name="f3", arguments="{}")),
+            ],
+            content=None,
+            timestamp=1,
+            sender_id="assistant",
+        )
+        assert _count_tool_call_rounds([_user_msg("x"), msg, _assistant_msg("done")]) == 1
+
+    def test_count_user_messages_basic(self) -> None:
+        msgs: list[ConversationItem] = [
+            _user_msg("first", ts=1),
+            _assistant_msg("a", ts=2),
+            _user_msg("second", ts=3),
+            _assistant_msg("b", ts=4),
+        ]
+        assert _count_user_messages(msgs) == 2
+
+    def test_count_user_messages_ignores_tool_messages(self) -> None:
+        """ToolCallRequest / ToolCallResult must not be counted as user messages."""
+        msgs: list[ConversationItem] = [
+            _user_msg("only user", ts=1),
+            _tool_call_msg(ts=2),
+            _tool_response_msg(ts=3),
+            _assistant_msg("done", ts=4),
+        ]
+        assert _count_user_messages(msgs) == 1
+
+    def test_count_user_messages_empty(self) -> None:
+        assert _count_user_messages([]) == 0
 
 
 # ── _calc_tool_content_size ─────────────────────────────────────────────────────────────────────────
@@ -398,24 +449,50 @@ class TestToOpenaiDicts:
 
 
 class TestIsWorthExtracting:
-    async def test_worth_extracting_true(self) -> None:
-        fake = FakeLLMClient(responses=['{"worth_extracting": true}'])
-        assert await _is_worth_extracting("[]", fake) is True
+    async def test_exploration_signal_extracts(self) -> None:
+        fake = FakeLLMClient(responses=['{"has_exploration": true, "has_user_correction": false}'])
+        assert await _is_worth_extracting("[]", 2, fake) is True
 
-    async def test_worth_extracting_false(self) -> None:
-        fake = FakeLLMClient(responses=['{"worth_extracting": false, "reason": "trivial"}'])
-        assert await _is_worth_extracting("[]", fake) is False
+    async def test_user_correction_signal_extracts_with_enough_user_messages(self) -> None:
+        fake = FakeLLMClient(responses=['{"has_exploration": false, "has_user_correction": true}'])
+        assert await _is_worth_extracting("[]", 2, fake) is True
+
+    async def test_user_correction_rejected_on_single_user_message(self) -> None:
+        """``has_user_correction=True`` with only 1 user message → treat as hallucination → False."""
+        fake = FakeLLMClient(responses=['{"has_exploration": false, "has_user_correction": true}'])
+        assert await _is_worth_extracting("[]", 1, fake) is False
+
+    async def test_user_correction_rejected_still_lets_exploration_pass(self) -> None:
+        """User-correction validation does not affect the exploration signal."""
+        fake = FakeLLMClient(responses=['{"has_exploration": true, "has_user_correction": true}'])
+        assert await _is_worth_extracting("[]", 1, fake) is True
+
+    async def test_all_signals_false_filtered_out(self) -> None:
+        fake = FakeLLMClient(
+            responses=['{"has_exploration": false, "has_user_correction": false, "reason": "trivial"}']
+        )
+        assert await _is_worth_extracting("[]", 2, fake) is False
+
+    async def test_partial_signals_treats_missing_as_false(self) -> None:
+        """One signal field provided as False, the other missing → missing treated as False → skip."""
+        fake = FakeLLMClient(responses=['{"has_exploration": false}'])
+        assert await _is_worth_extracting("[]", 2, fake) is False
+
+    async def test_partial_signals_with_one_true_extracts(self) -> None:
+        """One signal field provided as True, the other missing → extract."""
+        fake = FakeLLMClient(responses=['{"has_exploration": true}'])
+        assert await _is_worth_extracting("[]", 2, fake) is True
 
     async def test_malformed_json_raises(self) -> None:
-        """Malformed JSON from LLM → ValueError after 5 retries."""
-        bad_responses: list[str | ChatResponse] = ["not valid json {{"] * 5
-        fake = FakeLLMClient(responses=bad_responses)
+        """Malformed JSON from LLM → ValueError (brace-balanced extraction fails)."""
+        fake = FakeLLMClient(responses=["not valid json {{"])
         with pytest.raises(ValueError):
-            await _is_worth_extracting("[]", fake)
+            await _is_worth_extracting("[]", 2, fake)
 
-    async def test_missing_field_defaults_to_true(self) -> None:
+    async def test_all_signal_fields_missing_defaults_to_false(self) -> None:
+        """No signal fields at all → default False (precision over recall — skip when uncertain)."""
         fake = FakeLLMClient(responses=['{"some_other_field": true}'])
-        assert await _is_worth_extracting("[]", fake) is True
+        assert await _is_worth_extracting("[]", 2, fake) is False
 
 
 # ── End-to-end AgentCaseExtractor.aextract ──────────────────────────────────────────────────────────
@@ -440,8 +517,8 @@ class TestAgentCaseExtractorAExtract:
         assert cases == []
         assert fake.call_count == 0
 
-    async def test_multi_round_tools_skip_filter_go_to_compress(self) -> None:
-        """tool_rounds > 1 skips _is_worth_extracting; only one LLM call (compress)."""
+    async def test_high_tool_call_volume_fast_pass_to_compress(self) -> None:
+        """tool_calls > the default complex-task threshold → fast-pass as complex task; only the compress LLM call."""
         compress_response = json.dumps(
             {
                 "task_intent": "Build API",
@@ -451,14 +528,8 @@ class TestAgentCaseExtractorAExtract:
             }
         )
         fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
-        msgs: list[ConversationItem] = [
-            _user_msg("build an API"),
-            _tool_call_msg(content="searching", arguments='{"q":"api"}', ts=1700000000100),
-            _tool_response_msg("found frameworks", ts=1700000000200),
-            _tool_call_msg(content="creating", arguments='{"name":"api"}', call_id="call_2", ts=1700000000300),
-            _tool_response_msg("created project", call_id="call_2", ts=1700000000400),
-            _assistant_msg("Done! I built the API.", ts=1700000000500),
-        ]
+        msgs: list[ConversationItem] = [_user_msg("build an API"), *_high_volume_tool_msgs()]
+        msgs.append(_assistant_msg("Done! I built the API.", ts=1700000099999))
         cases = await AgentCaseExtractor(llm=fake).aextract(self._memcell(msgs))
         assert len(cases) == 1
         case = cases[0]
@@ -470,11 +541,11 @@ class TestAgentCaseExtractorAExtract:
         assert case.model_dump().get("vector") is None
         # parent_id / parent_type removed from AgentCase schema
         assert not hasattr(case, "parent_id") or case.model_dump().get("parent_id") is None
-        # Exactly one LLM call — the compress; filter was bypassed (tool_rounds=2)
+        # Exactly one LLM call — the compress; filter was bypassed via fast-pass
         assert fake.call_count == 1
 
     async def test_single_round_tool_runs_filter_then_compress(self) -> None:
-        """tool_rounds == 1 triggers filter; passing filter then runs compress."""
+        """Low tool-call volume triggers filter; any True signal then runs compress."""
         compress_response = json.dumps(
             {
                 "task_intent": "search",
@@ -485,7 +556,10 @@ class TestAgentCaseExtractorAExtract:
         )
         fake = FakeLLMClient(
             responses=[
-                ChatResponse(content='{"worth_extracting": true}', model="fake"),
+                ChatResponse(
+                    content='{"has_exploration": true, "has_user_correction": false}',
+                    model="fake",
+                ),
                 ChatResponse(content=compress_response, model="fake"),
             ]
         )
@@ -495,20 +569,27 @@ class TestAgentCaseExtractorAExtract:
             _tool_response_msg("hit"),
             _assistant_msg("Here is X."),
         ]
-        cases = await AgentCaseExtractor(llm=fake).aextract(self._memcell(msgs))
+        cases = await AgentCaseExtractor(llm=fake, min_tool_call_rounds=0).aextract(self._memcell(msgs))
         assert len(cases) == 1
         assert fake.call_count == 2
 
     async def test_filter_rejects_short_circuits_extraction(self) -> None:
-        """LLM filter says not worth extracting → no compress call, no AgentCase."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"worth_extracting": false}', model="fake")])
+        """All three signals False → no compress call, no AgentCase."""
+        fake = FakeLLMClient(
+            responses=[
+                ChatResponse(
+                    content='{"has_exploration": false, "has_user_correction": false, "reason": "trivial"}',
+                    model="fake",
+                )
+            ]
+        )
         msgs: list[ConversationItem] = [
             _user_msg("hi"),
             _tool_call_msg(content="search"),
             _tool_response_msg("nothing useful"),
             _assistant_msg("got nothing"),
         ]
-        cases = await AgentCaseExtractor(llm=fake).aextract(self._memcell(msgs))
+        cases = await AgentCaseExtractor(llm=fake, min_tool_call_rounds=0).aextract(self._memcell(msgs))
         assert cases == []
         assert fake.call_count == 1  # only the filter call
 
@@ -517,7 +598,10 @@ class TestAgentCaseExtractorAExtract:
         compress_response = json.dumps({"task_intent": "", "approach": "x", "key_insight": "", "quality_score": 0.5})
         fake = FakeLLMClient(
             responses=[
-                ChatResponse(content='{"worth_extracting": true}', model="fake"),
+                ChatResponse(
+                    content='{"has_exploration": true, "has_user_correction": false}',
+                    model="fake",
+                ),
                 ChatResponse(content=compress_response, model="fake"),
             ]
         )
@@ -531,32 +615,33 @@ class TestAgentCaseExtractorAExtract:
         assert cases == []
 
     async def test_per_call_prompt_compress_override(self) -> None:
-        """``prompt_compress=`` overrides the built-in compress prompt for this call only."""
+        """``prompt_compress=`` overrides the built-in compress prompt for this call only.
+
+        Uses a fast-pass-eligible trajectory (>the default complex-task threshold tool calls) so the
+        first LLM call is the compress, not the filter.
+        """
         custom_prompt = "PER_CALL_COMPRESS__{messages}__END"
         compress_response = json.dumps(
             {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.6}
         )
         fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
-        msgs: list[ConversationItem] = [
-            _user_msg("solve X"),
-            _tool_call_msg(content="thinking"),
-            _tool_response_msg("data"),
-            _tool_call_msg(content="more thinking", call_id="call_2", ts=1700000000700),
-            _tool_response_msg("more data", call_id="call_2", ts=1700000000800),
-            _assistant_msg("Done.", ts=1700000000900),
-        ]
+        msgs: list[ConversationItem] = [_user_msg("solve X"), *_high_volume_tool_msgs()]
+        msgs.append(_assistant_msg("Done.", ts=1700000099999))
         await AgentCaseExtractor(llm=fake).aextract(self._memcell(msgs), prompt_compress=custom_prompt)
         assert "PER_CALL_COMPRESS__" in fake.calls[0].messages[0].content
 
     async def test_per_call_prompt_filter_override(self) -> None:
-        """``prompt_filter=`` overrides the filter prompt for single-round-tool trajectories."""
+        """``prompt_filter=`` overrides the filter prompt for low-tool-volume trajectories."""
         custom_filter = "PER_CALL_FILTER__{messages}__END"
         compress_response = json.dumps(
             {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.6}
         )
         fake = FakeLLMClient(
             responses=[
-                ChatResponse(content='{"worth_extracting": true}', model="fake"),
+                ChatResponse(
+                    content='{"has_exploration": true, "has_user_correction": false}',
+                    model="fake",
+                ),
                 ChatResponse(content=compress_response, model="fake"),
             ]
         )
@@ -566,7 +651,9 @@ class TestAgentCaseExtractorAExtract:
             _tool_response_msg("hit"),
             _assistant_msg("Here is X."),
         ]
-        await AgentCaseExtractor(llm=fake).aextract(self._memcell(msgs), prompt_filter=custom_filter)
+        await AgentCaseExtractor(llm=fake, min_tool_call_rounds=0).aextract(
+            self._memcell(msgs), prompt_filter=custom_filter
+        )
         # First LLM call is the filter; second is compress
         assert "PER_CALL_FILTER__" in fake.calls[0].messages[0].content
 
@@ -581,14 +668,8 @@ class TestAgentCaseExtractorAExtract:
                 {"task_intent": "T", "approach": "A", "key_insight": "key", "quality_score": 0.6}
             )
             fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
-            msgs: list[ConversationItem] = [
-                _user_msg("solve X"),
-                _tool_call_msg(content="thinking"),
-                _tool_response_msg("data"),
-                _tool_call_msg(content="more thinking", call_id="call_2", ts=1700000000700),
-                _tool_response_msg("more data", call_id="call_2", ts=1700000000800),
-                _assistant_msg("Done.", ts=1700000000900),
-            ]
+            msgs: list[ConversationItem] = [_user_msg("solve X"), *_high_volume_tool_msgs()]
+            msgs.append(_assistant_msg("Done.", ts=1700000099999))
             await AgentCaseExtractor(llm=fake).aextract(self._memcell(msgs))
             assert "MONKEY_PATCH_COMPRESS__" in fake.calls[0].messages[0].content
         finally:
@@ -609,11 +690,8 @@ class TestAgentCaseExtractorAExtract:
                 sender_id="user_42",
                 sender_name="Alice",
             ),
-            _tool_call_msg(content="thinking", ts=1700000000100),
-            _tool_response_msg("data", ts=1700000000200),
-            _tool_call_msg(content="more thinking", call_id="call_2", ts=1700000000300),
-            _tool_response_msg("more data", call_id="call_2", ts=1700000000400),
-            _assistant_msg("Done.", ts=1700000000500),
+            *_high_volume_tool_msgs(),
+            _assistant_msg("Done.", ts=1700000099999),
         ]
         await AgentCaseExtractor(llm=fake).aextract(self._memcell(msgs))
         prompt_text = fake.calls[0].messages[0].content
@@ -965,15 +1043,9 @@ class TestAgentCaseExtractorTruncationLogging:
             {"task_intent": big_intent, "approach": "1. do thing", "key_insight": "key", "quality_score": 0.7}
         )
         fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
-        msgs: list[ConversationItem] = [
-            _user_msg("solve"),
-            _tool_call_msg(content="think", ts=1700000000100),
-            _tool_response_msg("ok", ts=1700000000200),
-            _tool_call_msg(content="think2", call_id="call_2", ts=1700000000700),
-            _tool_response_msg("ok2", call_id="call_2", ts=1700000000800),
-            _assistant_msg("Done.", ts=1700000000900),
-        ]
-        cases = await AgentCaseExtractor(llm=fake).aextract(MemCell(items=msgs, timestamp=1700000000900))
+        msgs: list[ConversationItem] = [_user_msg("solve"), *_high_volume_tool_msgs()]
+        msgs.append(_assistant_msg("Done.", ts=1700000099999))
+        cases = await AgentCaseExtractor(llm=fake).aextract(MemCell(items=msgs, timestamp=1700000099999))
         assert len(cases) == 1
         assert len(cases[0].task_intent) < len(big_intent)
 
@@ -1053,11 +1125,8 @@ class TestAgentCaseExtractorBetweenThresholds:
         for i in range(12):
             msgs.append(_user_msg(user_chunk, ts=1700000000000 + i * 10))
             msgs.append(_assistant_msg("ack", ts=1700000000000 + i * 10 + 1))
-        # Use 2 tool rounds to bypass the LLM filter (tool_rounds > 1 skips _is_worth_extracting)
-        msgs.append(_tool_call_msg(content="think 1", ts=1700000099000))
-        msgs.append(_tool_response_msg("ok 1", ts=1700000099001))
-        msgs.append(_tool_call_msg(content="think 2", call_id="call_2", ts=1700000099100))
-        msgs.append(_tool_response_msg("ok 2", call_id="call_2", ts=1700000099101))
+        # High tool-call volume → fast-pass, skip LLM filter (only compress is called).
+        msgs.extend(_high_volume_tool_msgs(base_ts=1700000099000))
         msgs.append(_assistant_msg("Done.", ts=1700000099999))
 
         compress_response = json.dumps(
@@ -1090,16 +1159,10 @@ class TestAgentCaseExtractorPostTrimBail:
 
 
 def _minimal_multi_round_memcell() -> MemCell:
-    """Minimal agent trajectory that passes all pre-filters (2 tool rounds) for instance-llm tests."""
-    msgs: list[Any] = [
-        _user_msg("do the task"),
-        _tool_call_msg(content="searching", ts=1700000000100),
-        _tool_response_msg("result", ts=1700000000200),
-        _tool_call_msg(content="creating", call_id="call_2", ts=1700000000300),
-        _tool_response_msg("created", call_id="call_2", ts=1700000000400),
-        _assistant_msg("Done.", ts=1700000000500),
-    ]
-    return MemCell(items=msgs, timestamp=1700000000500)
+    """Minimal agent trajectory eligible for fast-pass (>the default complex-task threshold tool calls)."""
+    msgs: list[Any] = [_user_msg("do the task"), *_high_volume_tool_msgs()]
+    msgs.append(_assistant_msg("Done.", ts=1700000099999))
+    return MemCell(items=msgs, timestamp=1700000099999)
 
 
 async def test_aextract_uses_instance_llm_when_per_call_omitted() -> None:
@@ -1113,3 +1176,114 @@ async def test_aextract_uses_instance_llm_when_per_call_omitted() -> None:
     assert len(cases) == 1
     assert cases[0].task_intent == "Instance task"
     assert instance_fake.call_count == 1
+
+
+# ── min_tool_call_rounds gate ───────────────────────────────────────────────────────────────────────
+
+
+class TestMinToolCallRoundsGate:
+    async def test_default_three_short_circuits_single_round(self) -> None:
+        """Default ``min_tool_call_rounds=3`` rejects a single-round trajectory before any LLM call."""
+        fake = FakeLLMClient(responses=[])  # must NEVER be called
+        msgs: list[ConversationItem] = [
+            _user_msg("look up X"),
+            _tool_call_msg(content="searching"),
+            _tool_response_msg("hit"),
+            _assistant_msg("Here is X."),
+        ]
+        cases = await AgentCaseExtractor(llm=fake).aextract(MemCell(items=msgs, timestamp=1700000000500))
+        assert cases == []
+        assert fake.call_count == 0
+
+    async def test_explicit_zero_disables_gate(self) -> None:
+        """``min_tool_call_rounds=0`` lets a single-round trajectory through to the LLM filter."""
+        fake = FakeLLMClient(
+            responses=[ChatResponse(content='{"has_exploration": false, "has_user_correction": false}', model="fake")]
+        )
+        msgs: list[ConversationItem] = [
+            _user_msg("look up X"),
+            _tool_call_msg(content="searching"),
+            _tool_response_msg("hit"),
+            _assistant_msg("Here is X."),
+        ]
+        cases = await AgentCaseExtractor(llm=fake, min_tool_call_rounds=0).aextract(
+            MemCell(items=msgs, timestamp=1700000000500)
+        )
+        # filter rejects (all signals false), but the LLM call happened — gate did not short-circuit
+        assert cases == []
+        assert fake.call_count == 1
+
+    async def test_below_threshold_returns_empty_without_llm_call(self) -> None:
+        """``min_tool_call_rounds=3`` on a 1-round trajectory short-circuits before any LLM call."""
+        fake = FakeLLMClient(responses=[])  # must NEVER be called
+        msgs: list[ConversationItem] = [
+            _user_msg("look up X"),
+            _tool_call_msg(content="searching"),
+            _tool_response_msg("hit"),
+            _assistant_msg("Here is X."),
+        ]
+        extractor = AgentCaseExtractor(llm=fake, min_tool_call_rounds=3)
+        cases = await extractor.aextract(MemCell(items=msgs, timestamp=1700000000500))
+        assert cases == []
+        assert fake.call_count == 0
+
+    async def test_at_threshold_passes_gate(self) -> None:
+        """``rounds == min_tool_call_rounds`` is allowed (strict ``<`` comparison)."""
+        compress_response = json.dumps({"task_intent": "T", "approach": "A", "key_insight": "k", "quality_score": 0.7})
+        fake = FakeLLMClient(
+            responses=[
+                ChatResponse(content='{"has_exploration": true, "has_user_correction": false}', model="fake"),
+                ChatResponse(content=compress_response, model="fake"),
+            ]
+        )
+        # 2 rounds, threshold 2 → 2 < 2 is False → gate passes → filter + compress run.
+        msgs: list[ConversationItem] = [
+            _user_msg("solve"),
+            _tool_call_msg(content="step 1", ts=1700000000100),
+            _tool_response_msg("ok 1", ts=1700000000200),
+            _tool_call_msg(content="step 2", call_id="call_2", ts=1700000000300),
+            _tool_response_msg("ok 2", call_id="call_2", ts=1700000000400),
+            _assistant_msg("Done.", ts=1700000000500),
+        ]
+        extractor = AgentCaseExtractor(llm=fake, min_tool_call_rounds=2)
+        cases = await extractor.aextract(MemCell(items=msgs, timestamp=1700000000500))
+        assert len(cases) == 1
+        assert fake.call_count == 2
+
+
+# ── complex_task_tool_call_round_threshold parameter ────────────────────────────────────────────────
+
+
+class TestComplexTaskRoundThresholdParam:
+    async def test_custom_threshold_triggers_fast_pass_below_default(self) -> None:
+        """Custom threshold ``= 2`` fast-passes a 3-round trajectory that would normally run the filter."""
+        compress_response = json.dumps({"task_intent": "T", "approach": "A", "key_insight": "k", "quality_score": 0.7})
+        fake = FakeLLMClient(responses=[ChatResponse(content=compress_response, model="fake")])
+        # 3 rounds > custom threshold 2 → fast-pass, skip filter, only compress is called.
+        msgs: list[ConversationItem] = [
+            _user_msg("solve"),
+            _tool_call_msg(content="step 1", ts=1700000000100),
+            _tool_response_msg("ok 1", ts=1700000000200),
+            _tool_call_msg(content="step 2", call_id="call_2", ts=1700000000300),
+            _tool_response_msg("ok 2", call_id="call_2", ts=1700000000400),
+            _tool_call_msg(content="step 3", call_id="call_3", ts=1700000000500),
+            _tool_response_msg("ok 3", call_id="call_3", ts=1700000000600),
+            _assistant_msg("Done.", ts=1700000000700),
+        ]
+        extractor = AgentCaseExtractor(llm=fake, complex_task_tool_call_round_threshold=2)
+        cases = await extractor.aextract(MemCell(items=msgs, timestamp=1700000000700))
+        assert len(cases) == 1
+        assert fake.call_count == 1  # compress only, filter bypassed
+
+    async def test_high_custom_threshold_forces_filter(self) -> None:
+        """High threshold prevents fast-pass; even a 21-round trajectory runs the LLM filter."""
+        fake = FakeLLMClient(
+            responses=[ChatResponse(content='{"has_exploration": false, "has_user_correction": false}', model="fake")]
+        )
+        msgs: list[ConversationItem] = [_user_msg("solve"), *_high_volume_tool_msgs()]
+        msgs.append(_assistant_msg("Done.", ts=1700000099999))
+        extractor = AgentCaseExtractor(llm=fake, complex_task_tool_call_round_threshold=100)
+        cases = await extractor.aextract(MemCell(items=msgs, timestamp=1700000099999))
+        # Filter rejects (all signals false) — but the LLM filter call happened because rounds < 100.
+        assert cases == []
+        assert fake.call_count == 1

@@ -52,8 +52,11 @@ _STAGE_ORDER = ("boundary", "case_filter", "case_compress", "skill_extract", "sk
 
 _BOUNDARY_JSON = '{"reasoning": "single coherent task", "boundaries": [], "should_wait": false}'
 
-# case_filter: only "worth_extracting" is consumed; extra fields are ignored.
-_CASE_FILTER_JSON = '{"worth_extracting": true, "reason": "agent resolved a production issue via tool use"}'
+# case_filter: has_exploration / has_user_correction drive the worth-extracting decision; either True passes.
+_CASE_FILTER_JSON = (
+    '{"has_exploration": true, "has_user_correction": false,'
+    ' "reason": "agent diagnosed a production issue via tool use"}'
+)
 
 # case_compress: quality_score >= 0.5 (failure_quality_threshold) to force success-branch in skill.
 _CASE_COMPRESS_JSON = (
@@ -198,7 +201,9 @@ async def test_agent_memory_full_pipeline_e2e() -> None:
     assert "call_abc123" not in boundary_prompt, "boundary LLM must not see tool call ids"
 
     # --- 2. Case extraction ------------------------------------------------
-    cases = await AgentCaseExtractor(llm=fake).aextract(mc)
+    # min_tool_call_rounds=1 so this single-round trajectory reaches the LLM filter (1 <= 20 so the
+    # complex-task fast-pass does not fire either) — the test's purpose is to exercise filter + compress.
+    cases = await AgentCaseExtractor(llm=fake, min_tool_call_rounds=1).aextract(mc)
     assert len(cases) == 1, "expected exactly one AgentCase for a successful trajectory"
     case = cases[0]
     assert isinstance(case, AgentCase), "aextract must return AgentCase instances"
