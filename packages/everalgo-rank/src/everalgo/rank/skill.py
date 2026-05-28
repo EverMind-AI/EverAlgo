@@ -1,152 +1,46 @@
-"""Skill ranker facade — thin wrapper over ``rerank._basic_arank`` plus a skill-only post-rerank LLM verify stage."""
+"""Skill ranker facade — thin wrapper over ``rerank._basic_arank`` plus a skill-only relevance gate.
+
+Skill relevance grading (the 0.0-1.0 quality bands once handled by a separate post-rerank verify
+stage) is now folded into the single rerank prompt ``SKILL_RERANK_PROMPT_{EN,ZH}``. A skill-only
+hard threshold (``min_rerank_score``, default 0.4) then drops candidates the LLM scored as
+irrelevant — better to inject nothing than an off-target skill. The gate only fires when the rerank
+stage ran, because raw fusion scores (e.g. RRF ~1/k) are not on a 0-1 relevance scale.
+"""
 
 from __future__ import annotations
 
-import json
-import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
-from pydantic import BaseModel, Field
 
-from everalgo.llm.types import ChatMessage
-from everalgo.rank.prompts.en.skill_verify import SKILL_VERIFY_PROMPT_EN
 from everalgo.rank.rerank import DEFAULT_RANK_CONFIG, RankConfig, _basic_arank
-from everalgo.types import RankOutput, ScoredItem
+from everalgo.types import RankOutput
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from everalgo.llm.protocols import LLMClient
     from everalgo.types import RankInput
 
-__all__ = ["SkillRanker", "arank", "averify", "rank", "verify"]
-
-logger = logging.getLogger(__name__)
+__all__ = ["SkillRanker", "arank", "rank"]
 
 
-class VerifiedItem(BaseModel):
-    """One skill's LLM-assigned relevance verdict — mirrors the enterprise JSON schema."""
+def _apply_relevance_gate(result: RankOutput, min_rerank_score: float) -> RankOutput:
+    """Skill-only post-rerank hard threshold — drop LLM-scored items below ``min_rerank_score``.
 
-    index: int
-    score: float
-    reason: str = ""
-
-
-class _VerifyResponse(BaseModel):
-    """LLM verify output schema (``{"results": [...]}``)."""
-
-    results: list[VerifiedItem] = Field(default_factory=list[VerifiedItem])
-
-
-async def _verify_relevance(
-    items: Sequence[ScoredItem],
-    *,
-    query: str,
-    llm: LLMClient,
-    threshold: float,
-    prompt: str,
-) -> list[ScoredItem]:
-    """Inner verify implementation: LLM-score → hard-filter → sort.
-
-    Pulls ``name`` / ``description`` / ``content`` out of each item's metadata to build
-    the prompt payload (the same three fields the enterprise pipeline serialises).
-    On any LLM exception the input list is returned unchanged.
+    Only meaningful after the LLM rerank stage, where ``item.score`` is a 0-1 relevance score.
+    No-op when rerank did not run (fusion scores live on a different scale) or the gate is disabled.
     """
-    if not items:
-        return list(items)
+    if not result.metadata.get("reranked") or min_rerank_score <= 0.0:
+        return result
 
-    skills_for_prompt = [
-        {
-            "index": i,
-            "name": item.metadata.get("name", ""),
-            "description": item.metadata.get("description", ""),
-            "content": item.metadata.get("content", ""),
-        }
-        for i, item in enumerate(items)
-    ]
-    rendered = prompt.format(
-        query=query,
-        skills_json=json.dumps(skills_for_prompt, ensure_ascii=False, default=str),
-    )
-
-    try:
-        response = await llm.chat(
-            messages=[ChatMessage(role="user", content=rendered)],
-            temperature=0.0,
-            response_format=_VerifyResponse,
-        )
-        parsed = cast("_VerifyResponse | None", response.parsed)
-    except Exception:
-        logger.warning("Skill verify failed, returning all results", exc_info=True)
-        return list(items)
-    if parsed is None:
-        logger.warning("Skill verify returned no parsed structured output, returning all results")
-        return list(items)
-
-    score_map = {r.index: r.score for r in parsed.results}
-    survivors: list[ScoredItem] = []
-    for i, item in enumerate(items):
-        relevance = score_map.get(i, 0.0)
-        if relevance < threshold:
-            continue
-        survivors.append(
-            item.model_copy(
-                update={
-                    "score": relevance,
-                    "metadata": {
-                        **item.metadata,
-                        "pre_verify_score": item.score,
-                    },
-                }
-            )
-        )
-
-    survivors.sort(key=lambda s: s.score, reverse=True)
-    logger.info("skill verify: %d/%d passed (threshold=%.2f)", len(survivors), len(items), threshold)
-    return survivors
-
-
-async def averify(
-    rank_output: RankOutput,
-    *,
-    query: str,
-    llm: LLMClient,
-    threshold: float = 0.4,
-    prompt: str = SKILL_VERIFY_PROMPT_EN,
-) -> RankOutput:
-    """Skill-only post-rerank LLM relevance verification.
-
-    Args:
-        rank_output: Output of an upstream ``skill.arank`` call (or any ``RankOutput`` whose
-            items carry ``name``/``description``/``content`` metadata).
-        query: The original user query (passed through verbatim into the prompt).
-        llm: LLM client used for the verify call.
-        threshold: Minimum LLM relevance score for an item to survive. Default ``0.4``
-            matches the enterprise ``_verify_skill_relevance`` cut-off.
-        prompt: Verify prompt template; must contain ``{query}`` and ``{skills_json}``
-            placeholders. Defaults to ``SKILL_VERIFY_PROMPT_EN``.
-
-    Returns:
-        A new ``RankOutput`` containing only items whose LLM-assigned relevance ≥ ``threshold``,
-        with each surviving item's score replaced by the LLM score and the original fusion /
-        rerank score preserved in ``metadata["pre_verify_score"]``. On LLM failure the input
-        is returned unchanged (graceful degradation, matches enterprise behaviour).
-    """
-    verified = await _verify_relevance(rank_output.items, query=query, llm=llm, threshold=threshold, prompt=prompt)
+    survivors = [it for it in result.items if it.score >= min_rerank_score]
     return RankOutput(
-        items=verified,
+        items=survivors,
         metadata={
-            **rank_output.metadata,
-            "verified": True,
-            "verify_threshold": threshold,
-            "verify_dropped": len(rank_output.items) - len(verified),
+            **result.metadata,
+            "rerank_min_score": min_rerank_score,
+            "rerank_dropped": len(result.items) - len(survivors),
         },
     )
-
-
-verify = async_to_sync(averify)
-"""Sync bridge for non-event-loop contexts. Per ADR 010."""
 
 
 class SkillRanker:
@@ -166,9 +60,7 @@ class SkillRanker:
         prompt: str | None = None,
         enable_rerank: bool = False,
         rerank_top_k: int | None = None,
-        enable_verify: bool = False,
-        verify_threshold: float = 0.4,
-        verify_prompt: str = SKILL_VERIFY_PROMPT_EN,
+        min_rerank_score: float = 0.4,
     ) -> RankOutput:
         """Skill ranker — see ``rerank._basic_arank`` for the pipeline body.
 
@@ -176,17 +68,17 @@ class SkillRanker:
             rank_input: Query + candidate sets for skill memory ranking.
             config: Fusion mode and hyperparameters.
             prompt: Per-call rerank prompt override; ``None`` uses the built-in default.
-            enable_rerank: When ``True``, run the LLM rerank stage after fusion.
+            enable_rerank: When ``True``, run the LLM rerank stage after fusion. The rerank prompt
+                both reorders and quality-grades candidates (see ``SKILL_RERANK_PROMPT_EN``).
             rerank_top_k: When set, Phase-5 LLM rerank truncates to this count instead of
                 ``rank_input.top_k`` — lets fusion produce a wider candidate pool that the LLM
                 then narrows.
-            enable_verify: When ``True``, run the skill-only post-rerank LLM verify stage
-                (``averify``) after fusion/rerank. Skill is the only facade exposing this flag.
-            verify_threshold: Minimum LLM relevance score for the verify stage (default 0.4).
-            verify_prompt: Verify-stage prompt override; defaults to ``SKILL_VERIFY_PROMPT_EN``.
+            min_rerank_score: Skill-only relevance gate. After rerank, drop items whose LLM score is
+                below this threshold (default 0.4). Set to ``0.0`` to disable. No effect unless
+                ``enable_rerank`` ran, since fusion scores are not on a 0-1 scale.
 
         Returns:
-            Ranked, optionally LLM-reranked, and optionally LLM-verified skill items.
+            Ranked, optionally LLM-reranked, and (when reranked) relevance-gated skill items.
         """
         result = await _basic_arank(
             rank_input,
@@ -196,15 +88,7 @@ class SkillRanker:
             enable_rerank=enable_rerank,
             rerank_top_k=rerank_top_k,
         )
-        if enable_verify and result.items:
-            result = await averify(
-                result,
-                query=rank_input.query,
-                llm=self._llm,
-                threshold=verify_threshold,
-                prompt=verify_prompt,
-            )
-        return result
+        return _apply_relevance_gate(result, min_rerank_score)
 
     rank = async_to_sync(arank)
     """Sync bridge — only callable from non-event-loop contexts."""
@@ -218,11 +102,9 @@ async def arank(
     prompt: str | None = None,
     enable_rerank: bool = False,
     rerank_top_k: int | None = None,
-    enable_verify: bool = False,
-    verify_threshold: float = 0.4,
-    verify_prompt: str = SKILL_VERIFY_PROMPT_EN,
+    min_rerank_score: float = 0.4,
 ) -> RankOutput:
-    """Skill module-level ranker — delegates to ``rerank._basic_arank`` plus optional verify."""
+    """Skill module-level ranker — delegates to ``rerank._basic_arank`` plus a skill-only gate."""
     result = await _basic_arank(
         rank_input,
         config=config,
@@ -231,17 +113,7 @@ async def arank(
         enable_rerank=enable_rerank,
         rerank_top_k=rerank_top_k,
     )
-    if enable_verify and result.items:
-        if llm is None:
-            raise ValueError("enable_verify=True requires llm to be provided")
-        result = await averify(
-            result,
-            query=rank_input.query,
-            llm=llm,
-            threshold=verify_threshold,
-            prompt=verify_prompt,
-        )
-    return result
+    return _apply_relevance_gate(result, min_rerank_score)
 
 
 rank = async_to_sync(arank)

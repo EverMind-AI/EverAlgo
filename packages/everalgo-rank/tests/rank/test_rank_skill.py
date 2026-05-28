@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
 
-from everalgo.llm.errors import LLMError
 from everalgo.rank import RankConfig, skill
+from everalgo.rank.skill import _apply_relevance_gate
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate, RankInput, RankOutput, ScoredItem
-
-if TYPE_CHECKING:
-    from everalgo.llm.types import ChatMessage, ChatResponse
 
 
 def _mk(sparse: list[Candidate], dense: list[Candidate], top_k: int = 5) -> RankInput:
@@ -61,147 +57,53 @@ def test_sync_bridge_is_callable(skill_candidates: list[Candidate]) -> None:
     assert len(out.items) <= 2
 
 
-# ─── averify (post-rerank LLM relevance verification) ───────────────────────
+# ─── enable_rerank (single LLM pass: reorder + quality-grade) ────────────────
 
 
-def _verify_response(scores: dict[int, float]) -> str:
-    """Build a JSON-encoded ``_VerifyResponse`` payload for FakeLLMClient scripted mode."""
-    return json.dumps({"results": [{"index": idx, "score": score, "reason": "test"} for idx, score in scores.items()]})
+def _rerank_response(scores: dict[str, float]) -> str:
+    """Build a JSON-encoded rerank payload (``{"ranked": [{id, score}]}``) for FakeLLMClient."""
+    return json.dumps({"ranked": [{"id": item_id, "score": score} for item_id, score in scores.items()]})
 
 
-def _ranked(*items: tuple[str, float]) -> RankOutput:
-    """Build a RankOutput of skill ScoredItems from ``(id, score)`` pairs."""
-    return RankOutput(
-        items=[
-            ScoredItem(
-                id=item_id,
-                score=score,
-                item_type="skill",
-                metadata={"name": f"name-{item_id}", "description": f"desc-{item_id}", "content": "x"},
-            )
-            for item_id, score in items
-        ]
-    )
-
-
-async def test_averify_filters_items_below_threshold() -> None:
-    """Items with LLM-assigned score < threshold are dropped — matches enterprise hard-cut at 0.4."""
-    ranked = _ranked(("s1", 0.9), ("s2", 0.8), ("s3", 0.7))
-    fake = FakeLLMClient(responses=[_verify_response({0: 0.85, 1: 0.30, 2: 0.55})])
-
-    out = await skill.averify(ranked, query="q", llm=fake, threshold=0.4)
-
-    ids = [it.id for it in out.items]
-    assert ids == ["s1", "s3"]  # s2 (0.30) dropped, sorted desc by new score
-    assert out.metadata["verified"] is True
-    assert out.metadata["verify_threshold"] == 0.4
-    assert out.metadata["verify_dropped"] == 1
-
-
-async def test_averify_overwrites_score_and_preserves_pre_verify_score() -> None:
-    ranked = _ranked(("s1", 0.9), ("s2", 0.5))
-    fake = FakeLLMClient(responses=[_verify_response({0: 0.85, 1: 0.95})])
-
-    out = await skill.averify(ranked, query="q", llm=fake, threshold=0.0)
-
-    by_id = {it.id: it for it in out.items}
-    # Scores overwritten with LLM verdicts; original score stashed in metadata.
-    assert by_id["s1"].score == 0.85
-    assert by_id["s1"].metadata["pre_verify_score"] == 0.9
-    assert by_id["s2"].score == 0.95
-    assert by_id["s2"].metadata["pre_verify_score"] == 0.5
-
-
-async def test_averify_sorts_descending_by_llm_score() -> None:
-    """Output is sorted by the new LLM score, not the input ordering."""
-    ranked = _ranked(("s1", 0.9), ("s2", 0.8), ("s3", 0.7))
-    fake = FakeLLMClient(responses=[_verify_response({0: 0.50, 1: 0.95, 2: 0.70})])
-
-    out = await skill.averify(ranked, query="q", llm=fake, threshold=0.0)
-
-    assert [it.id for it in out.items] == ["s2", "s3", "s1"]
-
-
-async def test_averify_graceful_degradation_on_llm_exception() -> None:
-    """LLM failure → return input items unchanged (matches enterprise ``_verify_skill_relevance``)."""
-
-    def boom(messages: list[ChatMessage], **_: object) -> ChatResponse:
-        raise LLMError("simulated LLM outage")
-
-    ranked = _ranked(("s1", 0.9), ("s2", 0.5))
-    fake = FakeLLMClient(handler=boom)
-
-    out = await skill.averify(ranked, query="q", llm=fake, threshold=0.4)
-
-    # Scores and ids passed through unchanged; metadata still records the (failed) verify attempt.
-    assert [(it.id, it.score) for it in out.items] == [("s1", 0.9), ("s2", 0.5)]
-    assert out.metadata["verified"] is True
-    assert out.metadata["verify_dropped"] == 0
-
-
-async def test_averify_empty_input_returns_empty() -> None:
-    fake = FakeLLMClient(responses=[_verify_response({})])
-
-    out = await skill.averify(RankOutput(), query="q", llm=fake)
-
-    assert out.items == []
-    # LLM should not have been called on empty input.
-    assert fake.call_count == 0
-
-
-async def test_averify_missing_index_in_llm_response_treated_as_zero() -> None:
-    """When the LLM omits a candidate index entirely, treat it as 0.0 and drop under any positive threshold."""
-    ranked = _ranked(("s1", 0.9), ("s2", 0.8))
-    # Only index 0 is scored; index 1 omitted.
-    fake = FakeLLMClient(responses=[_verify_response({0: 0.9})])
-
-    out = await skill.averify(ranked, query="q", llm=fake, threshold=0.4)
-
-    assert [it.id for it in out.items] == ["s1"]
-    assert out.metadata["verify_dropped"] == 1
-
-
-# ─── enable_verify integration ──────────────────────────────────────────────
-
-
-async def test_arank_enable_verify_runs_verify_stage(
+async def test_arank_enable_rerank_applies_llm_scores(
     skill_candidates: list[Candidate],
 ) -> None:
-    """``skill.arank(enable_verify=True, ...)`` runs the verify stage after fusion."""
-    # 3 skill_candidates after rrf → 3 ScoredItems; verify keeps first two.
-    fake = FakeLLMClient(responses=[_verify_response({0: 0.9, 1: 0.6, 2: 0.1})])
+    """``enable_rerank=True`` runs one LLM pass that reorders/grades via SKILL_RERANK_PROMPT."""
+    ids = [c.id for c in skill_candidates]
+    # Invert the natural order so we can prove the LLM scores drive the output ordering.
+    fake = FakeLLMClient(responses=[_rerank_response({ids[0]: 0.2, ids[1]: 0.9, ids[2]: 0.5})])
 
     out = await skill.arank(
         _mk(sparse=[], dense=skill_candidates, top_k=3),
         config=RankConfig(fusion_mode="rrf"),
         llm=fake,
-        enable_verify=True,
+        enable_rerank=True,
+        min_rerank_score=0.0,  # isolate rerank ordering from the relevance gate
     )
 
     assert fake.call_count == 1
-    assert out.metadata.get("verified") is True
-    assert out.metadata.get("verify_dropped") == 1
-    assert len(out.items) == 2
+    assert out.metadata.get("reranked") is True
+    assert [it.id for it in out.items] == [ids[1], ids[2], ids[0]]
 
 
-async def test_arank_enable_verify_without_llm_raises(
+async def test_arank_enable_rerank_without_llm_raises(
     skill_candidates: list[Candidate],
 ) -> None:
-    """Module-level ``arank`` needs an LLM client when ``enable_verify=True``."""
+    """Module-level ``arank`` needs an LLM client when ``enable_rerank=True``."""
     import pytest as _pytest
 
-    with _pytest.raises(ValueError, match="enable_verify=True requires llm"):
+    with _pytest.raises(ValueError, match="enable_rerank=True requires llm"):
         await skill.arank(
             _mk(sparse=[], dense=skill_candidates, top_k=3),
             config=RankConfig(fusion_mode="rrf"),
-            enable_verify=True,
+            enable_rerank=True,
         )
 
 
-async def test_arank_disable_verify_skips_stage(
+async def test_arank_disable_rerank_skips_llm(
     skill_candidates: list[Candidate],
 ) -> None:
-    """``enable_verify=False`` (default) leaves output untouched by verify."""
+    """``enable_rerank=False`` (default) leaves output untouched by the LLM."""
     fake = FakeLLMClient(responses=[])  # would error if invoked
 
     out = await skill.arank(
@@ -211,37 +113,177 @@ async def test_arank_disable_verify_skips_stage(
     )
 
     assert fake.call_count == 0
-    assert "verified" not in out.metadata
+    assert "reranked" not in out.metadata
 
 
-async def test_skill_ranker_class_enable_verify(
+# ─── min_rerank_score (skill-only post-rerank relevance gate) ────────────────
+
+
+async def test_arank_relevance_gate_drops_below_threshold(
     skill_candidates: list[Candidate],
 ) -> None:
-    """``SkillRanker.arank`` exposes the same ``enable_verify`` flag, using the bound LLM."""
-    fake = FakeLLMClient(responses=[_verify_response({0: 0.9, 1: 0.85, 2: 0.85})])
+    """After rerank, items scored below ``min_rerank_score`` (default 0.4) are dropped."""
+    ids = [c.id for c in skill_candidates]
+    fake = FakeLLMClient(responses=[_rerank_response({ids[0]: 0.9, ids[1]: 0.3, ids[2]: 0.5})])
+
+    out = await skill.arank(
+        _mk(sparse=[], dense=skill_candidates, top_k=3),
+        config=RankConfig(fusion_mode="rrf"),
+        llm=fake,
+        enable_rerank=True,
+    )
+
+    # ids[1] (0.3 < 0.4) dropped; survivors sorted desc by LLM score.
+    assert [it.id for it in out.items] == [ids[0], ids[2]]
+    assert out.metadata["rerank_min_score"] == 0.4
+    assert out.metadata["rerank_dropped"] == 1
+
+
+async def test_arank_relevance_gate_disabled_with_zero_threshold(
+    skill_candidates: list[Candidate],
+) -> None:
+    """``min_rerank_score=0.0`` keeps every reranked item."""
+    ids = [c.id for c in skill_candidates]
+    fake = FakeLLMClient(responses=[_rerank_response({ids[0]: 0.9, ids[1]: 0.1, ids[2]: 0.05})])
+
+    out = await skill.arank(
+        _mk(sparse=[], dense=skill_candidates, top_k=3),
+        config=RankConfig(fusion_mode="rrf"),
+        llm=fake,
+        enable_rerank=True,
+        min_rerank_score=0.0,
+    )
+
+    assert len(out.items) == 3
+    assert "rerank_dropped" not in out.metadata
+
+
+async def test_arank_relevance_gate_inactive_without_rerank(
+    skill_candidates: list[Candidate],
+) -> None:
+    """Gate is a no-op when rerank did not run — fusion scores are not on a 0-1 scale."""
+    out = await skill.arank(
+        _mk(sparse=[], dense=skill_candidates, top_k=3),
+        config=RankConfig(fusion_mode="rrf"),
+    )
+
+    # All fused candidates survive even though RRF scores are far below 0.4.
+    assert len(out.items) == 3
+    assert "rerank_dropped" not in out.metadata
+
+
+# ─── SkillRanker (class facade) ─────────────────────────────────────────────
+
+
+async def test_skill_ranker_class_rerank_and_gate(
+    skill_candidates: list[Candidate],
+) -> None:
+    """``SkillRanker.arank`` runs rerank with the bound LLM and applies the relevance gate."""
+    ids = [c.id for c in skill_candidates]
+    fake = FakeLLMClient(responses=[_rerank_response({ids[0]: 0.9, ids[1]: 0.2, ids[2]: 0.6})])
     ranker = skill.SkillRanker(llm=fake)
 
     out = await ranker.arank(
         _mk(sparse=[], dense=skill_candidates, top_k=3),
         config=RankConfig(fusion_mode="rrf"),
-        enable_verify=True,
+        enable_rerank=True,
     )
 
     assert fake.call_count == 1
-    assert out.metadata.get("verified") is True
-    assert len(out.items) == 3
+    # ids[1] (0.2 < 0.4) dropped by the gate; survivors sorted desc.
+    assert [it.id for it in out.items] == [ids[0], ids[2]]
+    assert out.metadata["rerank_dropped"] == 1
 
 
-def test_verify_not_exposed_on_non_skill_facades() -> None:
-    """``enable_verify`` is a skill-only kwarg; case / episodic facades must refuse it at signature level."""
-    import inspect
+def test_skill_ranker_class_sync_bridge(skill_candidates: list[Candidate]) -> None:
+    ranker = skill.SkillRanker(llm=FakeLLMClient(responses=[]))
+    out = ranker.rank(_mk(sparse=[], dense=skill_candidates, top_k=2))
+    assert len(out.items) <= 2
 
-    from everalgo.rank import case, episodic
 
-    case_params = inspect.signature(case.arank).parameters
-    episodic_params = inspect.signature(episodic.arank).parameters
-    skill_params = inspect.signature(skill.arank).parameters
+# ─── _apply_relevance_gate (unit) ───────────────────────────────────────────
 
-    assert "enable_verify" not in case_params
-    assert "enable_verify" not in episodic_params
-    assert "enable_verify" in skill_params  # sanity
+
+def _scored(*items: tuple[str, float], reranked: bool = True) -> RankOutput:
+    """Build a skill RankOutput from ``(id, score)`` pairs, defaulting to a reranked result."""
+    meta = {"stage": "skill", "reranked": True} if reranked else {"stage": "skill"}
+    return RankOutput(
+        items=[ScoredItem(id=item_id, score=score, item_type="skill") for item_id, score in items],
+        metadata=meta,
+    )
+
+
+def test_gate_drops_items_below_threshold() -> None:
+    result = _scored(("s1", 0.9), ("s2", 0.3), ("s3", 0.5))
+
+    gated = _apply_relevance_gate(result, 0.4)
+
+    assert [it.id for it in gated.items] == ["s1", "s3"]
+    assert gated.metadata["rerank_min_score"] == 0.4
+    assert gated.metadata["rerank_dropped"] == 1
+
+
+def test_gate_keeps_item_exactly_at_threshold() -> None:
+    """Threshold is inclusive (``score >= min``)."""
+    result = _scored(("s1", 0.4), ("s2", 0.39))
+
+    gated = _apply_relevance_gate(result, 0.4)
+
+    assert [it.id for it in gated.items] == ["s1"]
+
+
+def test_gate_noop_when_not_reranked() -> None:
+    """Fusion-only output is left untouched — its scores are not on a 0-1 scale."""
+    result = _scored(("s1", 0.016), ("s2", 0.008), reranked=False)
+
+    gated = _apply_relevance_gate(result, 0.4)
+
+    assert gated is result
+    assert [it.id for it in gated.items] == ["s1", "s2"]
+    assert "rerank_dropped" not in gated.metadata
+
+
+def test_gate_disabled_with_zero_threshold() -> None:
+    result = _scored(("s1", 0.9), ("s2", 0.1))
+
+    gated = _apply_relevance_gate(result, 0.0)
+
+    assert gated is result
+    assert "rerank_dropped" not in gated.metadata
+
+
+def test_gate_negative_threshold_is_disabled() -> None:
+    result = _scored(("s1", 0.9), ("s2", 0.1))
+
+    gated = _apply_relevance_gate(result, -1.0)
+
+    assert gated is result
+
+
+def test_gate_preserves_existing_metadata() -> None:
+    result = _scored(("s1", 0.9))
+    result = result.model_copy(update={"metadata": {**result.metadata, "rerank_top_k": 5}})
+
+    gated = _apply_relevance_gate(result, 0.4)
+
+    assert gated.metadata["stage"] == "skill"
+    assert gated.metadata["reranked"] is True
+    assert gated.metadata["rerank_top_k"] == 5
+
+
+def test_gate_empty_items() -> None:
+    result = RankOutput(items=[], metadata={"stage": "skill", "reranked": True})
+
+    gated = _apply_relevance_gate(result, 0.4)
+
+    assert gated.items == []
+    assert gated.metadata["rerank_dropped"] == 0
+
+
+def test_gate_drops_all_when_none_pass() -> None:
+    result = _scored(("s1", 0.2), ("s2", 0.1))
+
+    gated = _apply_relevance_gate(result, 0.4)
+
+    assert gated.items == []
+    assert gated.metadata["rerank_dropped"] == 2
