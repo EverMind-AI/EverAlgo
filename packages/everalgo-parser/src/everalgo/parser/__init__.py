@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from asgiref.sync import async_to_sync
+from PIL import Image
 
 from everalgo.parser import audio, document, image, url
 from everalgo.types import (
@@ -38,6 +39,13 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
+
+# Explicit decompression-bomb cap (Pillow default raises ``DecompressionBombError``
+# only at ~2x this threshold). 100M pixels = 10000x10000, ample for any realistic
+# screenshot / scan while keeping a hostile caller from exhausting memory via a
+# crafted PNG/TIFF. Applications can override by re-assigning
+# ``PIL.Image.MAX_IMAGE_PIXELS`` after importing the parser.
+Image.MAX_IMAGE_PIXELS = 100_000_000
 
 
 async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:

@@ -38,7 +38,7 @@ LoCoMo JSON  ───┐
 ## 数据预处理（Loader）
 
 `LocomoDataset.load_conversations()` 把 LoCoMo `locomo10.json` 转成统一的
-`Conversation { id, speakers, messages }` 值类型，几个关键处理对齐 EverCore main：
+`Conversation { id, speakers, messages }` 值类型，几个关键处理对齐 the upstream reference：
 
 - **message timestamp**：LoCoMo 只有 session 级 `session_<N>_date_time`，没有
   per-message timestamp。loader 给同一 session 内每条 message 派 `session_time +
@@ -208,7 +208,7 @@ vectors = await embedding.embed(texts, dimensions=1024)
 ### 为什么 dim=1024 不是 2560
 
 Qwen3-Embedding-4B 是 Matryoshka 模型，DeepInfra 默认返回 2560 维；传
-`dimensions=1024` 参数让服务端截断到 1024 维。对齐 EverCore main 的
+`dimensions=1024` 参数让服务端截断到 1024 维。对齐 the upstream reference 的
 `HybridVectorizeConfig.dimensions=1024`，确保 cosine 相似度与 RRF 排名跟 baseline
 可逐字节对比。
 
@@ -305,7 +305,7 @@ queries，每个聚焦不同的缺失维度。例如：
 
 字段名是 **`members`**（不是 `memcell_ids`），值为会话内本地序号（如 `"0"`、`"1"` …），不是全局唯一 id。`retrieval_metadata` 的 `is_multi_round` / `reasoning` / `missing_info` / `query_strategy` 等直接透传自 `everalgo.rank` 的 `AgenticDecision`（`search.py:1134-1146`）；文档早期版本的 `round1_count` / `round1_reranked_count` / `total_latency_ms` 字段并不存在。
 
-### 关键参数（对齐 EverCore）
+### 关键参数（aligned with the upstream reference）
 
 | 参数 | 值 | 含义 |
 |---|---|---|
@@ -333,7 +333,7 @@ queries，每个聚焦不同的缺失维度。例如：
 mc_ids = item["members"]
 top_memcells = [memcells_map[conv_id][mc_id] for mc_id in mc_ids[:10] if mc_id in memcells_map[conv_id]]
 
-# 2. 拼 context（对齐 EverCore 格式：每条 doc 间用 "\n---\n\n" 明确分块）
+# 2. 拼 context（aligned with the upstream reference 格式：每条 doc 间用 "\n---\n\n" 明确分块）
 context = f"""Episodes memories for conversation between Caroline and Melanie:
 
 Caroline reconnects with Melanie: On May 8 2023, Caroline...
@@ -346,7 +346,7 @@ Discussion about LGBTQ support: Caroline shared that...
 
 # 3. 喂给 LLM（gpt-4.1-mini @ temperature=0.0 覆盖 config 0.3；max_tokens=32768 覆盖 config 16384）
 prompt = ANSWER_PROMPT.format(context=context, question=question)
-# ANSWER_PROMPT 是从 EverCore 移植的 CoT 模板，要求 LLM 走 7 步推理
+# ANSWER_PROMPT 是从 the upstream reference 移植的 CoT 模板，要求 LLM 走 7 步推理
 
 # 4. LLM 输出长 CoT，STEP 7 节是 "## STEP 7: FINAL ANSWER"
 #    空结果 / 异常都重试：_ANSWER_RETRIES=5 次，退避 1.0 * 2**attempt
@@ -454,7 +454,7 @@ correct = round(accuracy * total)
 ## 配置参数
 
 所有可调参数在 `benchmarks/common/config.py::BenchmarkConfig`，默认值严格对齐
-EverCore 评估框架：
+the upstream evaluation reference：
 
 | 类别 | 字段 | 默认值 |
 |---|---|---|
@@ -476,7 +476,7 @@ EverCore 评估框架：
 | Judge | `judge_temperature` | 0.0 |
 | Judge | `judge_runs` | 3 |
 | Models | `embedding_model` | `Qwen/Qwen3-Embedding-4B` |
-| Models | `embedding_dimensions` | 1024（Matryoshka 截断；对齐 EverCore）|
+| Models | `embedding_dimensions` | 1024（Matryoshka 截断；aligned with the upstream reference）|
 | Models | `reranker_model` | `Qwen/Qwen3-Reranker-4B` |
 | Concurrency | `max_concurrent_convs` | 10（stage 1/2 跨对话并发上限）|
 | Concurrency | `max_concurrent_qa` | 30（stage 3/4/5 QA 并发；main 用 50）|

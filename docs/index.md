@@ -1,6 +1,6 @@
 # EverAlgo
 
-EverAlgo is the **algorithm library** for memory extraction and ranking used by [evermem](https://github.com/npc-work/evermem), EverMind's open-source AI memory framework.
+EverAlgo is the **algorithm library** for memory extraction and ranking used by [evermem](https://github.com/EverMind-AI/evermem), EverMind's open-source AI memory framework.
 
 It is **stateless and storage-free**: every operator takes in-memory data structures and returns in-memory data structures.
 No database connections, no filesystem reads, no business-state ownership — those responsibilities belong to evermem, the orchestration layer that calls EverAlgo.
@@ -103,4 +103,4 @@ uv sync --all-packages
 
 ## License
 
-MIT. See [LICENSE](../LICENSE).
+Apache License 2.0. See [LICENSE](../LICENSE).

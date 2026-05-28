@@ -72,8 +72,17 @@ The parser detects `soffice` via `shutil.which("soffice")` and the canonical mac
 - The library is **stateless**: it never reads the filesystem and never owns business state. HTTP I/O (LLM calls, URL fetching) is explicitly allowed.
 - No retry / fallback / metrics inside operators — surface failures via `LLMError`, let the caller wrap.
 
+## Security notes for callers
+
+`everalgo-parser` is a stateless library; production safety properties belong to the calling service. The points below are easy to miss and worth wiring into your integration:
+
+- **SSRF — `url.aparse` fetches arbitrary HTTP(S) URIs.** `fetch_uri` rejects non-http(s) schemes (no `file://`, no `gopher://`) but does **not** block private / link-local / loopback IPs (e.g. `127.0.0.1`, `10.0.0.0/8`, `169.254.169.254` cloud metadata, IPv6 ULA). If callers may pass attacker-controlled URLs, resolve the hostname first and reject private ranges before invoking `aparse`, or front the parser with an egress proxy that does the filtering.
+- **Decompression-bomb cap is set at import time.** `everalgo/parser/__init__.py` pins `PIL.Image.MAX_IMAGE_PIXELS = 100_000_000` (10000×10000) — Pillow will raise `DecompressionBombError` above that. Re-assign after import if your workload genuinely needs larger images.
+- **Office conversion runs LibreOffice as a subprocess.** `document._convert_to_pdf_via_soffice` validates the `extension` parameter (alphanumeric, ≤8 chars) before writing the temp file, but the LibreOffice attack surface itself is large. Run the host with a non-root user and treat untrusted office docs as you would any other complex binary input.
+- **`cairosvg` (optional `[svg]` extra) is LGPL-3.0-or-later.** EverAlgo itself is Apache-2.0. LGPLv3 is compatible with Apache-2.0 when `cairosvg` is consumed as an unmodified library through its public Python API (which is what the SVG path does); if you statically vendor or modify `cairosvg`, LGPLv3 §4 / §5 obligations apply to that derivative. Not installing the `[svg]` extra removes the dependency entirely.
+
 ## Reference
 
 - Architecture (definitive): [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md)
-- Schema source for PDF / image / audio / document / html / email: `evermemos-multimodal` (tag `prod-20260306-0331-v1`).
-- Schema source for URL metadata extraction: `evermemos-opensource/src/common_utils/url_extractor.py`.
+- Schema source for PDF / image / audio / document / html / email: upstream internal multimodal parser library (snapshot `prod-20260306-0331-v1`).
+- Schema source for URL metadata extraction: upstream internal URL extractor reference implementation.

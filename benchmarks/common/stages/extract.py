@@ -3,7 +3,7 @@
 For each conversation: BoundaryDetector segments messages into MemCells; for
 each MemCell run EpisodeExtractor + AtomicFactExtractor. Output is one
 ``memcells_conv_<i>.json`` per conversation, in a shape compatible with
-EverCore's evaluation pipeline.
+the upstream reference's evaluation pipeline.
 
 After the extraction pass completes, an optional clustering pass embeds each
 MemCell's episode body and incrementally assigns it to a geometric cluster via
@@ -516,7 +516,7 @@ async def _process_conversation(
     """Process one conversation under the conv semaphore.
 
     The ``mc_sem`` is shared across all conversations to bound total concurrent
-    MemCell LLM calls, matching EverCore's Semaphore(20) design.
+    MemCell LLM calls, matching the upstream reference's Semaphore(20) design.
 
     Returns:
         Tuple of (success, estimated_prompt_tokens, estimated_completion_tokens).
@@ -569,7 +569,7 @@ async def run_extract_stage(ctx: StageContext) -> StageStats:
     - Conversations are processed concurrently (bounded by ``conv_sem``).
     - Within each conversation, MemCell extraction tasks (Episode + AtomicFact)
       are gathered concurrently and bounded by a global ``mc_sem`` (limit 20),
-      matching EverCore's Semaphore(20) model.
+      matching the upstream reference's Semaphore(20) model.
     """
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     stats = StageStats(stage_name="extract")

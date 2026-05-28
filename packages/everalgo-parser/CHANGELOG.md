@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **PDF parser** — single multimodal LLM call, mirrors
-  `evermemos-multimodal/src/parser/pdf/gemini_parser.py`.
+- **PDF parser** — single multimodal LLM call, mirrors the upstream
+  internal multimodal PDF parser reference implementation.
 - **Image parser** — single LLM call for normal-ratio images; tall
   screenshots (height/width > 10) are split into overlapping vertical
   slices, OCR'd per slice, and merged with a second LLM call using
@@ -41,8 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown) → HTML handler with Open Graph / Twitter Card / `<meta>` tag
   extraction into `ParsedContent.metadata`. `file://` and other local-
   filesystem URIs are rejected (AGENTS.md §1). Inner modality recorded in
-  `metadata["inner_modality"]`. Metadata-extractor schema lifted from
-  `evermemos-opensource/src/common_utils/url_extractor.py`.
+  `metadata["inner_modality"]`. Metadata-extractor schema lifted from the
+  upstream internal URL extractor reference implementation.
 - **MIME-aware top-level dispatch** — `parser.aparse` now falls back to
   `mime` when `extension` is missing or `UNKNOWN`, so the canonical
   `RawFile(uri=..., mime="application/pdf")` example actually routes to
@@ -59,8 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- `video` submodule remains a stub — upstream evermemos-multimodal has no
-  video implementation to port; backend selection pending an ADR.
+- `video` submodule remains a stub — the upstream internal multimodal parser
+  has no video implementation to port; backend selection pending an ADR.
 - The parser layer deliberately omits retry / fallback / multi-key
   rotation / Prometheus metrics. Those are deployment concerns
   (ADR-012); algorithm-layer operators surface failures via `LLMError`

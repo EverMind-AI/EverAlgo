@@ -3,7 +3,7 @@
 **日期**：2026-05-27
 **Tag**：`v6-2-92.55`，commit `914ddec`（`🎨 refactor(benchmarks): pass encoding_format="float" to /embeddings explicitly`）
 **分支**：`refactor/extract-algo-from-benchmarks`（run 时 HEAD）
-**对照基线**：EverCore `locomo-benchmark` 分支（92.84% mean-of-runs）
+**对照基线**：the upstream reference locomo-benchmark branch（92.84% mean-of-runs）
 **最终结果**：**EverAlgo 92.55%（1425/1540）**
 
 > 注：Stage 3 alignment commits（§3.A + §3.B）是在这次 run **之后**才加的；要精确复现这一档分数请 `git checkout v6-2-92.55`。
@@ -16,8 +16,8 @@
 
 | 系统 | Overall | C1 single-hop | C2 temporal | C3 open-domain | C4 multi-hop | 备注 |
 |---|---|---|---|---|---|---|
-| **A. EverCore 论文卡片**（声称）| **93.05%** | — | — | — | — | cherry-pick 最高 run |
-| **B. EverCore `locomo-benchmark` 复现**（93 worktree, mean-of-runs）| **92.84%** | 89.48% | 90.55% | 77.08% | 96.63% | std 0.15pp |
+| **A. the upstream reference paper卡片**（声称）| **93.05%** | — | — | — | — | cherry-pick 最高 run |
+| **B. the upstream reference locomo-benchmark reproduction**（93 worktree, mean-of-runs）| **92.84%** | 89.48% | 90.55% | 77.08% | 96.63% | std 0.15pp |
 | **C. EverAlgo `v6-2-92.55`**（本次，agentic retrieval）| **92.55%** | **92.20%** | 88.68% | **79.17%** | 95.68% | 1425/1540 |
 
 ---

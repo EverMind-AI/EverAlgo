@@ -130,7 +130,7 @@ namespace_packages = true
 explicit_package_bases = true
 # Pyright runs over the same tree, so some `# type: ignore` lines are pyright-only and look unused to mypy.
 warn_unused_ignores = false
-# Vendored opensource reference code (locomo-benchmark / EverOS) is checked into the repo for algorithm
+# Vendored opensource reference code (locomo-benchmark / the upstream system) is checked into the repo for algorithm
 # porting; it is not part of the published distributions and must not block the workspace's strict gate.
 exclude = "^opensource/"
 # Required for PEP 420 namespace resolution; also disambiguates `everalgo.types` from stdlib `types`.

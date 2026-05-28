@@ -35,7 +35,7 @@ See [Installation](installation.md) for details.
 
 ## Running checks locally
 
-Before opening a Merge Request, run the full check suite:
+Before opening a Merge Request (GitLab) or Pull Request (GitHub mirror), run the full check suite:
 
 ```bash
 uv run ruff check .
@@ -46,7 +46,7 @@ uv run pytest
 ```
 
 All five commands must pass.
-CI runs the same checks and will reject the MR if any fail.
+CI runs the same checks and will reject the MR / PR if any fail.
 
 ---
 
@@ -71,7 +71,7 @@ Examples:
 The scope is the distribution name without the `everalgo-` prefix (e.g. `core`, `boundary`, `user-memory`).
 For cross-cutting changes use `ci`, `repo`, or `docs`.
 
-The **MR title** is load-bearing: GitLab squash-merges the MR title verbatim onto `main`, and `git-cliff` parses these messages for CHANGELOGs.
+The **MR / PR title** is load-bearing: the primary GitLab repo squash-merges the MR title verbatim onto `main`, and `git-cliff` parses these messages for CHANGELOGs. Keep the same format when contributing via the GitHub mirror.
 
 ---
 
@@ -86,8 +86,8 @@ docs/<topic>
 refactor/<topic>
 ```
 
-Open a Merge Request and squash-merge into `main`.
-`main` is GitLab-protected; direct push is denied.
+Open a Merge Request (GitLab, primary) or Pull Request (GitHub mirror) and squash-merge into `main`.
+`main` is protected; direct push is denied.
 
 ---
 
@@ -101,10 +101,10 @@ In summary:
 3. Store prompt strings as module-level constants in `<subpkg>/prompts/en/<name>.py` (and `zh/` if applicable).
 4. Re-export the operator in `<subpkg>/__init__.py` and add it to `__all__`.
 5. Write tests using `FakeLLMClient` — no real network calls in default `pytest`.
-6. Run the full check suite before opening the MR.
+6. Run the full check suite before opening the MR / PR.
 
 ---
 
 ## Questions
 
-Open a GitLab issue or discussion.
+Open an issue or discussion on the primary GitLab repo or the GitHub mirror.

@@ -301,7 +301,7 @@ flowchart LR
 
 | 项 | 状态 | 备注 |
 |---|---|---|
-| `video.py` | stub | 上游 evermemos-multimodal **也没有**实现,Gemini Video vs Whisper+帧抽取 选型待 ADR |
+| `video.py` | stub | 上游内部多模态解析库**也没有**实现,Gemini Video vs Whisper+帧抽取 选型待 ADR |
 | `audio` BMP-like 转码 | 没做 | mp3/wav 测过;m4a/amr/aiff/aac/ogg/flac 未在 e2e 覆盖,Gemini 兼容度未全测 |
 | `Office` 系统依赖动态检测降级 | 仅运行时报错 | 没有 import 时友好警告;`_find_soffice` 缺失就 `RuntimeError` |
 | `T1` 主条目其他 schema | 待 RESOLVED | 我们只 RESOLVED 了 `T1.parser` 子集(`ParsedContent` / `Modality` / `RawFile`) |

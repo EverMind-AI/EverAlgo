@@ -100,7 +100,7 @@ def test_answer_prompt_has_required_placeholders():
 
 
 def test_judge_prompt_has_required_placeholders():
-    """Regression: judge_prompt must contain the placeholders EverCore's grader uses."""
+    """Regression: judge_prompt must contain the placeholders the upstream reference's grader uses."""
     ds = LocomoDataset(data_path=FIXTURE)
     prompt = ds.judge_prompt()
     assert "{question}" in prompt

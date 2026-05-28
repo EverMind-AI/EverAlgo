@@ -18,10 +18,10 @@ The returned ``ParsedContent.modality`` is always ``Modality.URL`` so
 callers can distinguish "loaded from network" from "passed in as bytes";
 the inner modality is recorded in ``metadata["inner_modality"]``.
 
-Schema source for the metadata extractor:
-``evermemos-opensource/src/common_utils/url_extractor.py``
-(``_extract_og_tags`` / ``_extract_twitter_tags`` / ``_extract_meta_tags`` /
-``_extract_title`` / ``_extract_favicon``).
+Schema source for the metadata extractor: an upstream internal URL
+extractor reference implementation (``_extract_og_tags`` /
+``_extract_twitter_tags`` / ``_extract_meta_tags`` / ``_extract_title`` /
+``_extract_favicon``).
 """
 
 from __future__ import annotations
@@ -166,7 +166,7 @@ async def _dispatch_inner(
     raise ValueError(f"url.aparse: cannot dispatch fetched body for modality={modality.value!r}")
 
 
-# ---- metadata extraction (port from evermemos-opensource) ----
+# ---- metadata extraction (port from upstream internal URL extractor) ----
 
 
 def _extract_metadata(html_text: str, *, base_url: str) -> dict[str, object]:

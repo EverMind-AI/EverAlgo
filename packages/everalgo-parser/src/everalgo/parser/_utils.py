@@ -6,8 +6,8 @@
 - ``clean_html_content`` — strict text extraction (drops all tags).
 - ``clean_html_for_llm`` — preserves structural tags inside ``<body>``,
   strips known-noise tags and useless attributes, returns HTML.
-- ``fetch_uri`` — HTTP(S) fetch for the URL parser. Adapted from
-  ``evermemos-opensource/src/common_utils/url_extractor.py``.
+- ``fetch_uri`` — HTTP(S) fetch for the URL parser. Adapted from an
+  upstream internal URL extractor reference implementation.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ _DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; everalgo-parser/0.1; +https://ev
 async def fetch_uri(uri: str, *, timeout: float = 30.0) -> tuple[bytes, str]:
     """Fetch ``http``/``https`` URI and return ``(content_bytes, content_type)``.
 
-    Adapted from ``evermemos-opensource/src/common_utils/url_extractor.py``;
+    Adapted from an upstream internal URL extractor reference implementation;
     rejects non-http(s) schemes per AGENTS.md §1 (no filesystem access).
 
     Parameters
