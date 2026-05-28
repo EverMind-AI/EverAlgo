@@ -17,11 +17,23 @@ distributions release on the `0.2.0` line; `everalgo-knowledge` is a placeholder
 | `everalgo-core` | 0.2.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.2.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.0 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.2.0 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-rank` | 0.3.0 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.2.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.2.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.0 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | — (not published) | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [everalgo-rank/0.3.0] - 2026-05-28
+
+Per-distribution minor bump of `everalgo-rank` only. Other distributions are unchanged.
+
+### Changed (breaking)
+
+- `everalgo-rank`: skill ranker's standalone post-rerank verify stage is removed; relevance grading folds into a single LLM pass with a new `min_rerank_score` hard-threshold gate. Public API `averify` / `verify` and the `enable_verify` / `verify_threshold` / `verify_prompt` parameters are gone. See [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md#030---2026-05-28) for migration.
+
+### Changed
+
+- License relicensed from MIT to Apache-2.0.
 
 ## [0.2.0] - 2026-05-27
 
