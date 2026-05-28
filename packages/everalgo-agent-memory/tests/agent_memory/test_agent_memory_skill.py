@@ -148,6 +148,20 @@ class TestFormatExistingSkills:
         parsed = json.loads(_format_existing_skills([skill], [], max_description_tokens=400, max_content_tokens=5000))
         assert "supporting_cases" not in parsed[0]
 
+    def test_max_support_cases_caps_rendered_supporting_cases(self) -> None:
+        """``max_support_cases`` bounds rendered supporting cases to the most recent N; count stays full."""
+        cases = [_make_case(case_id=f"cs_{i}", task_intent=f"task {i}") for i in range(5)]
+        skill = _make_skill(source_case_ids=[c.id for c in cases])
+        parsed = json.loads(
+            _format_existing_skills(
+                [skill], cases, max_description_tokens=400, max_content_tokens=5000, max_support_cases=2
+            )
+        )
+        # All 5 matched, but only the last 2 (cs_3, cs_4) are rendered.
+        assert parsed[0]["supporting_case_count"] == 5
+        rendered = [c["task_intent"] for c in parsed[0]["supporting_cases"]]
+        assert rendered == ["task 3", "task 4"]
+
 
 # ── _is_skill_content_sufficient ────────────────────────────────────────────────────────────────────
 

@@ -94,7 +94,6 @@ class AgentSkillExtractor:
         maturity_threshold: float = 0.6,
         retire_confidence: float = 0.1,
         failure_quality_threshold: float = 0.5,
-        max_case_history: int = 9,
         max_description_tokens: int = 400,
         max_content_tokens: int = 5000,
         maturity_trivial_change_ratio: float = 0.2,

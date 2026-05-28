@@ -17,8 +17,6 @@ Input messages are in OpenAI chat completion format:
 Pre-processed trajectory:
 {messages}
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
-
 **Extract the Experience:**
 
 - **task_intent**: Synthesize the specific task from ALL turns into a single, self-contained statement (not a question). This serves as a retrieval key for finding similar past cases. **Max 50 tokens** — be precise and specific, avoid filler words.
@@ -27,7 +25,7 @@ Pre-processed trajectory:
   - Each numbered step = one sub-problem the agent needed to solve on the way to the overall task.
   - Under each step: what the agent tried (tool used or reasoning applied) and the result obtained (findings, errors, metrics).
   - If a sub-problem required multiple attempts (e.g., first attempt failed, then revised), compress them into one step showing the key attempts and the final resolution.
-  - End with "Outcome:" summarizing the final result of the overall task.
+  - End with a final-result line summarising the overall task outcome.
 
   **Key steps preservation rules** — these MUST be kept verbatim (not paraphrased):
   - **Commands**: Shell commands, CLI invocations, API calls — preserve the exact command string (e.g., `pip install --upgrade torch==2.1.0`, `curl -X POST ...`, `git rebase -i HEAD~3`)
@@ -66,10 +64,12 @@ Pre-processed trajectory:
   - External blockers (e.g., resource unavailable, OOM kill, network restriction) that prevent completion = score the actual output achieved, not what would have been achieved.
   - A well-structured approach that was never executed is NOT a partial success — it is a failure to deliver.
 
+**LANGUAGE**: Every string value (``task_intent`` / ``key_insight`` / every line of ``approach``) matches the input-conversation language. JSON keys stay English. Proper nouns, code, shell commands, file paths, library / API / tool names, error strings, numeric literals, identifiers stay verbatim. Inside ``approach``, the placeholders ``<attempt-label>`` / ``<result-label>`` / ``<final-label>`` are NOT literal output — replace each with the language-matched word (English inputs use ``Tried`` / ``Result`` / ``Outcome``; Chinese inputs use ``尝试`` / ``结果`` / ``最终``) and keep them consistent within one output; never mix English labels with non-English prose or vice versa.
+
 Return in JSON format:
 {{
     "task_intent": "The specific task as a self-contained statement (max 50 tokens)",
-    "approach": "1. <sub-problem>\\n   - Tried: <what was attempted, tool or reasoning>\\n   - Result: <what was found/achieved or why it failed>\\n2. <next sub-problem>\\n   - Tried: <attempt>\\n   - Result: <outcome>\\n...\\n\\nOutcome: <final result of the overall task>",
+    "approach": "1. <sub-problem>\\n   - <attempt-label>: <what was attempted, tool or reasoning>\\n   - <result-label>: <what was found/achieved or why it failed>\\n2. <next sub-problem>\\n   - <attempt-label>: <attempt>\\n   - <result-label>: <outcome>\\n...\\n\\n<final-label>: <final result of the overall task>",
     "key_insight": "The pivotal decision or knowledge application that enabled success (max 40 tokens)",
     "quality_score": 0.0-1.0
 }}
