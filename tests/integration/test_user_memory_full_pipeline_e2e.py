@@ -239,7 +239,7 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     # TIME label is rendered as natural-language UTC.
     assert "November 14, 2023" in atomic_prompt, "atomic_fact prompt missing rendered TIME label"
     # AtomicFact's _render_input_text emits `[<ISO>] <speaker>: <content>` lines (mirroring
-    # EverCore main `atomic_fact_extractor.py:255-262`) — the timestamp prefix anchors message-level
+    # the upstream reference `atomic_fact_extractor.py:255-262`) — the timestamp prefix anchors message-level
     # time signals into the LLM context so atomic_fact extraction can preserve when each event
     # happened (critical for LoCoMo temporal questions).
     assert "[2023-11-14 22:13:20] Alice: I've been getting into Python async" in atomic_prompt

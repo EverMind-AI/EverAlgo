@@ -1,8 +1,8 @@
 """Benchmark configuration.
 
-Defaults are deliberately aligned with EverCore evaluation framework's
-``evaluation/src/adapters/evermemos/config.py`` so that benchmark numbers
-are directly comparable to EverCore's published LoCoMo results.
+Defaults are deliberately aligned with the upstream evaluation reference's
+``the upstream reference config`` so that benchmark numbers
+are directly comparable to the upstream reference's published LoCoMo results.
 """
 
 from typing import Literal
@@ -21,7 +21,7 @@ class BenchmarkConfig(BaseModel):
     use_reranker: bool = True
     use_multi_query: bool = True
 
-    # === Top-N parameters (aligned with EverCore eval) ===
+    # === Top-N parameters (aligned with the upstream reference eval) ===
     emb_recall_top_n: int = 40
     reranker_top_n: int = 20
     hybrid_emb_candidates: int = 50
@@ -55,7 +55,7 @@ class BenchmarkConfig(BaseModel):
     # === LLM ===
     llm_model: str = "openai/gpt-4.1-mini"
     llm_base_url: str = "https://openrouter.ai/api/v1"
-    # 0.3 matches EverCore's answer LLM temperature (evaluation/src/adapters/evermemos/config.py:85).
+    # 0.3 matches the upstream reference's answer LLM temperature (the upstream reference config:85).
     llm_temperature: float = 0.3
     # CoT answers normally use ~2-4k tokens; the cap removes truncation risk without inflating cost.
     llm_max_tokens: int = 16384
@@ -105,7 +105,7 @@ class BenchmarkConfig(BaseModel):
 
     # === Judge ===
     judge_model: str = "openai/gpt-4o-mini"
-    # 0.0 matches EverCore's judge temperature (stage5_eval.py / llm_judge.py) for deterministic scoring.
+    # 0.0 matches the upstream reference's judge temperature (stage5_eval.py / llm_judge.py) for deterministic scoring.
     judge_temperature: float = 0.0
     judge_runs: int = 3
 

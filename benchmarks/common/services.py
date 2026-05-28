@@ -171,7 +171,7 @@ def _format_rerank_inputs(query: str, documents: list[str], instruction: str | N
 def _extract_scores(json_body: dict[str, Any], *, expected_len: int) -> list[float]:
     """Normalize the two DeepInfra response shapes into a flat list of scores.
 
-    Ports the dual-shape parser from EverCore's ``_parse_response``.
+    Ports the dual-shape parser from the upstream reference's ``_parse_response``.
     """
     if "results" in json_body:
         results = list(json_body["results"])

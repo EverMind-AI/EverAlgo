@@ -7,14 +7,14 @@ name = "everalgo-core"
 version = "0.2.0"
 description = "EverAlgo foundation: types, LLM client + providers, prompt validators, testing helpers."
 requires-python = ">=3.12"
-license = "MIT"
+license = "Apache-2.0"
 readme = "README.md"
 authors = [{ name = "EverMind", email = "Evermind@shanda.com" }]
 keywords = ["llm", "memory", "algorithm", "everalgo"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",

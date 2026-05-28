@@ -399,6 +399,11 @@ async def _convert_to_pdf_via_soffice(
     content: bytes, extension: str, soffice: str
 ) -> bytes:  # pragma: no cover  (libreoffice binary, not in CI)
     """Run LibreOffice headless to convert bytes → PDF bytes."""
+    # Reject path-traversal / directory separators in `extension` so a hostile
+    # caller cannot escape the tempdir via e.g. ``extension="../../etc/passwd"``.
+    # `extension` is expected to be a short ASCII suffix (docx / xlsx / ...).
+    if not extension or not extension.isalnum() or len(extension) > 8:
+        raise ValueError(f"invalid extension for soffice conversion: {extension!r}")
     with tempfile.TemporaryDirectory() as tmpdir:  # pragma: no cover
         in_path = Path(tmpdir) / f"input.{extension}"  # pragma: no cover
         in_path.write_bytes(content)  # pragma: no cover

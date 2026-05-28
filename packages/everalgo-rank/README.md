@@ -90,5 +90,5 @@ reranked = await arerank(
 ## Cross-links
 
 - [`everalgo-core`](../everalgo-core/) — `RankInput`, `RankOutput`, `Candidate`, `ScoredItem`, `LLMClient`
-- [`everalgo-user-memory`](../everalgo-user-memory/) — produces `Episode` / `AtomicFact` / `Profile` that EverOS Recall packages into `Candidate` for ranking
+- [`everalgo-user-memory`](../everalgo-user-memory/) — produces `Episode` / `AtomicFact` / `Profile` that the caller's recall layer packages into `Candidate` for ranking
 - [`everalgo-agent-memory`](../everalgo-agent-memory/) — produces `AgentCase` / `AgentSkill` candidates

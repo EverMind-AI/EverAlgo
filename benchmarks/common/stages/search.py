@@ -9,6 +9,13 @@ unified retrieval path that delegates to the algo facade:
 Both branches (cluster-enabled and plain-hybrid) share one ``_attempt_single_qa``
 implementation; the cluster branch passes ``cluster_scoped`` as ``base_retrieve``
 and ``hybrid_full`` as ``round2_retrieve`` so Round 2 spills out to the full corpus.
+
+Security: this module uses ``pickle`` to load benchmark index artifacts
+(``bm25_conv_*.pkl`` / ``emb_conv_*.pkl`` / ``cluster_index_conv_*.pkl``)
+produced by Stage 2 in the same trusted local workspace. **Never point the
+``input_dir`` at untrusted / network-shared paths** — a tampered ``.pkl`` can
+execute arbitrary code on load. The ``benchmarks/`` package is internal-only
+(``[tool.uv] package = false``) and is not published to PyPI.
 """
 
 from __future__ import annotations
@@ -467,7 +474,7 @@ async def reranker_search(
     """Rerank candidate docs with Qwen3 reranker; return top-n.
 
     Documents containing atomic facts are formatted as multi-line text
-    (timestamp + one fact per line) to match EverCore scoring format.
+    (timestamp + one fact per line) to match the upstream reference scoring format.
     Documents without usable text are silently skipped.
 
     Batches are processed with controlled concurrency and per-batch retry

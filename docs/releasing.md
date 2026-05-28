@@ -16,8 +16,8 @@ summary points here.
 ## One-time prerequisites (on PyPI, by a project owner)
 
 For each published distribution, add a GitLab Trusted Publisher:
-<https://docs.pypi.org/trusted-publishers/adding-a-publisher/> — namespace `npc-work/aic/ai`,
-project `everalgo`, top-level pipeline file `.gitlab-ci.yml`.
+<https://docs.pypi.org/trusted-publishers/adding-a-publisher/> — fill in your GitLab
+namespace and project name, top-level pipeline file `.gitlab-ci.yml`.
 
 ## Procedure
 

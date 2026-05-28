@@ -89,10 +89,10 @@ async def test_aextract_raises_when_atomic_facts_missing() -> None:
 async def test_aextract_accepts_empty_atomic_fact_list() -> None:
     """Regression: empty atomic_fact list must return [] without raising.
 
-    EverCore's original atomic_fact_extractor.py accepts empty arrays for
+    the upstream reference's original atomic_fact_extractor.py accepts empty arrays for
     MemCells with no extractable facts (e.g. greeting-only conversations).
     EverAlgo's port had added a stricter check that broke benchmark parity —
-    removing it restores the EverCore contract.
+    removing it restores the upstream reference contract.
 
     Surfaced by LoCoMo benchmark Stage 1 (smoke5: 2 ok, 1 failed).
     """

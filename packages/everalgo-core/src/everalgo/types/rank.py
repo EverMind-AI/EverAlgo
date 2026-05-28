@@ -2,10 +2,10 @@
 
 Spec: ``docs/superpowers/specs/2026-05-11-everalgo-rank-design.md`` §4.1.
 
-Design contract: ``Rank`` performs **no storage I/O**. EverOS Recall pre-fetches
-multi-route candidates plus cross-memory linkage (e.g. Episode → AtomicFact) and
-passes them in via ``RankInput``. The ranker reads only the dataclass; it never
-talks to a database.
+Design contract: ``Rank`` performs **no storage I/O**. The caller's upstream
+recall layer pre-fetches multi-route candidates plus cross-memory linkage
+(e.g. Episode → AtomicFact) and passes them in via ``RankInput``. The ranker
+reads only the dataclass; it never talks to a database.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Candidate(BaseModel):
-    """A single recall candidate produced by EverOS and consumed by the ranker.
+    """A single recall candidate produced by the upstream recall layer and consumed by the ranker.
 
     Business fields (``quality_score`` / ``maturity_score`` / ``confidence`` /
     raw text / ``parent_episode_id`` / ...) live in ``metadata``. Each ranker
@@ -34,7 +34,7 @@ class Candidate(BaseModel):
 class FactCandidate(BaseModel):
     """AtomicFact candidate used by the episodic facade for ep→fact expansion.
 
-    ``score`` is cosine similarity from Milvus, pre-fetched by EverOS Recall.
+    ``score`` is cosine similarity from a vector store, pre-fetched by the caller's recall layer.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -76,8 +76,8 @@ class ScoredItem(BaseModel):
     """A single ranked output item.
 
     Episodic may produce a mix of episode and atomic_fact items (expansion
-    decides); other facades produce a single ``item_type``. EverOS reshapes the
-    list back into the response DTO it serves to clients.
+    decides); other facades produce a single ``item_type``. The caller reshapes
+    the list back into the response DTO it serves to clients.
     """
 
     model_config = ConfigDict(extra="forbid")

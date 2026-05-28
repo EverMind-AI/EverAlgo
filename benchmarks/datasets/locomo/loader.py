@@ -100,7 +100,7 @@ class LocomoDataset:
         adversarial category ``"5"``) at the loader boundary so that no
         downstream stage burns LLM / embedding / reranker budget on questions
         that will never be scored. ``question_id`` preserves the original
-        ``qa{N}`` index from the raw file for joinability with EverCore artifacts.
+        ``qa{N}`` index from the raw file for joinability with upstream reference artifacts.
         """
         prefix = "locomo_exp_user_"
         if not conv_id.startswith(prefix):

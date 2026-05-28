@@ -1,6 +1,6 @@
 # EverAlgo
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![PyPI - everalgo-core](https://img.shields.io/pypi/v/everalgo-core)](https://pypi.org/project/everalgo-core/)
 
@@ -210,4 +210,4 @@ Read [`AGENTS.md`](AGENTS.md) — the single source of truth for assistant conte
 
 ## License
 
-[MIT](LICENSE).
+[Apache License 2.0](LICENSE).
