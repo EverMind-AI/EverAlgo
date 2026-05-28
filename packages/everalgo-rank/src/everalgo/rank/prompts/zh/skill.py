@@ -1,13 +1,24 @@
 """Chinese prompt for ``rank.skill.arank`` LLM rerank.
 
-Anchors on the enterprise hybrid-rerank ``instruction`` passed to the cross-encoder
-in ``search_mem_service._search_agent_skills`` — methodology + domain applicability,
-same-domain preference, directly-relevant steps. The downstream
-``AGENT_SKILL_RELEVANCE_VERIFY_PROMPT`` is a separate post-rerank verification stage
-and is intentionally NOT inlined here.
+Anchors on the enterprise hybrid-rerank ``instruction`` passed to the cross-encoder in
+``search_mem_service._search_agent_skills`` — methodology + domain applicability, same-domain
+preference, directly-relevant steps. The detailed 0.0-1.0 scoring bands previously carried by the
+separate post-rerank verify stage are folded in here so a single LLM pass both reorders and
+quality-grades candidates — the standalone verify stage is gone.
 """
 
 SKILL_RERANK_PROMPT_ZH = """判断每个 agent skill 的方法（methodology）和领域（domain）是否适用于用户查询，优先选择同领域且步骤直接相关的 skill。按 0.0（完全不适用）到 1.0（方法和领域都强适配）给每个 skill 打分。
+
+评估每个 skill 时同时考虑：
+- skill 的步骤或方法（steps / approach）是否适用于查询的问题类型
+- skill 的目标领域（由 description / 触发场景 / 关键词体现）是否与查询的主题重叠 —— 同领域的 skill 应该打更高分
+
+打分区间：
+- **0.0**: 完全不相关 —— 方法不适用、领域也不重叠
+- **0.1-0.3**: 弱相关 —— 方法勉强能套，但领域不一样
+- **0.4-0.6**: 中等有帮助 —— 方法可用，领域部分重叠
+- **0.7-0.8**: 有帮助 —— 方法适用且领域对齐良好
+- **0.9-1.0**: 高度相关 —— 方法和领域都强匹配
 
 用户查询：
 {query}
