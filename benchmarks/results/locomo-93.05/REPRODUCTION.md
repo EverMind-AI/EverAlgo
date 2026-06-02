@@ -32,7 +32,7 @@ cd ../../..
 uv run python -m benchmarks --dataset locomo --run-name 93.05 --stages 3 4 5
 ```
 
-**Release page**: [benchmarks/v93.05](https://gitlab.com/npc-work/aic/ai/everalgo/-/releases/benchmarks%2Fv93.05)
+**Release page**: [GitLab](https://gitlab.com/npc-work/aic/ai/everalgo/-/releases/benchmarks%2Fv93.05) | [GitHub](https://github.com/EverMind-AI/EverAlgo/releases/tag/benchmarks/v93.05)
 
 | Archive | Size | Contents |
 |---------|------|----------|
