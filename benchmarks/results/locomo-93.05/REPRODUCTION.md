@@ -20,27 +20,23 @@ This runs all 5 stages end-to-end (~55 min, ~$7). Results land in `benchmarks/re
 ## Partial Re-run from Cached Artifacts
 
 Stages 1-2 (extract + index) are the most expensive and LLM-dependent. To skip them and only re-run
-retrieval + answer + evaluation, download the pre-built artifacts from the GitLab Release:
+retrieval + answer + evaluation, download the pre-built artifacts from the GitHub Release:
 
 ```bash
 cd benchmarks/results && mkdir -p locomo-93.05 && cd locomo-93.05
 
-# Download all 5 archives from the release page, then extract:
-for f in *.tar.gz; do tar xzf "$f"; done
+# Download the archive from the release page, then extract:
+tar xzf locomo-93.05-artifacts.tar.gz
 
 cd ../../..
 uv run python -m benchmarks --dataset locomo --run-name 93.05 --stages 3 4 5
 ```
 
-**Release page**: [GitLab](https://gitlab.com/npc-work/aic/ai/everalgo/-/releases/benchmarks%2Fv93.05) | [GitHub](https://github.com/EverMind-AI/EverAlgo/releases/tag/benchmarks/v93.05)
+**Release page**: [GitHub](https://github.com/EverMind-AI/EverAlgo/releases/tag/benchmarks/v93.05)
 
 | Archive | Size | Contents |
 |---------|------|----------|
-| `locomo-93.05-stage1.tar.gz` | 87 MB | `stage1_extract/` — 10 conv × (memcells + clusters + stats) |
-| `locomo-93.05-stage2-bm25.tar.gz` | 36 MB | `stage2_index/bm25_conv_*.pkl` |
-| `locomo-93.05-stage2-emb.tar.gz` | 70 MB | `stage2_index/emb_conv_*.pkl` |
-| `locomo-93.05-stage2-cluster.tar.gz` | 1.3 MB | `stage2_index/cluster_index_conv_*.pkl` |
-| `locomo-93.05-stage345.tar.gz` | 8.5 MB | stage 3-5 outputs + profile.json + run.log |
+| `locomo-93.05-artifacts.tar.gz` | 204 MB | All 5 stages: `stage1_extract/` + `stage2_index/` + stage 3-5 outputs + `profile.json` + `run.log` |
 
 ## Scoring
 
