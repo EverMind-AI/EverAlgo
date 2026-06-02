@@ -228,16 +228,16 @@ def _print_summary(
         answers: List of answer records (each with formatted_context for token calculation).
         all_stats: List of StageStats for timing/token breakdown.
     """
-    overall = eval_results.get("accuracy", 0.0)
-    correct = eval_results.get("correct", 0)
     total = eval_results.get("total_questions", 0)
     per_cat = eval_results.get("per_category", {})
     avg_tokens = avg_context_tokens(answers)
+    maj_correct = eval_results.get("majority_correct", eval_results.get("correct", 0))
+    maj_acc = eval_results.get("majority_accuracy", eval_results.get("accuracy", 0.0))
 
     print("\n" + "=" * 60, flush=True)
     print(f"📊 Results: {dataset_name} / {run_name}", flush=True)
     print("=" * 60, flush=True)
-    print(f"{'Overall:':<32}  {overall * 100:>6.2f}%   ({correct}/{total})", flush=True)
+    print(f"{'Overall:':<32}  {maj_acc * 100:>6.2f}%   ({maj_correct}/{total})", flush=True)
     print(
         f"{'Avg context tokens per question:':<32}  {avg_tokens:>6}    (Stage 4 retrieved context)",
         flush=True,
@@ -248,11 +248,11 @@ def _print_summary(
         sorted_cats = sorted(per_cat.items(), key=lambda kv: kv[0])
         for cat_num, v in sorted_cats:
             label = v.get("label", f"unknown-{cat_num}")
-            acc = v.get("accuracy", 0.0)
-            c = v.get("correct", 0)
+            mc = v.get("majority_correct", v.get("correct", 0))
             t = v.get("total", 0)
+            ma = v.get("majority_accuracy", v.get("accuracy", 0.0))
             cat_str = f"Category {cat_num} ({label})"
-            print(f"  {cat_str:<30} {acc * 100:>6.2f}%   ({c:>4}/{t:>4})", flush=True)
+            print(f"  {cat_str:<30} {ma * 100:>6.2f}%   ({mc:>4}/{t:>4})", flush=True)
 
     print("\nStage timings:", flush=True)
     total_secs = sum(s.duration_seconds for s in all_stats)

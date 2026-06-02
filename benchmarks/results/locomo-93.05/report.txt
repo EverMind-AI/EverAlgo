@@ -1,23 +1,25 @@
 ============================================================
-EverAlgo Benchmark Report — locomo / stage-1-v6-2
+EverAlgo Benchmark Report — locomo / main-baseline
 ============================================================
 
 Total Questions: 1540
-Correct: 1425
-Overall Accuracy: 0.9255 (92.55%)
+Avg Context Tokens: 2294
 
-Per-Category Accuracy:
-  Category 1 (single-hop   ) 0.9220 (260/282)
-  Category 2 (temporal     ) 0.8868 (285/321)
-  Category 3 (open-domain  ) 0.7917 ( 76/ 96)
-  Category 4 (multi-hop    ) 0.9568 (805/841)
+— Majority-Vote (≥2/3 judges agree) —
+Overall: 93.05% (1433/1540)
+  Category 1 (single-hop   )  89.72%  (253/282)
+  Category 2 (temporal     )  91.59%  (294/321)
+  Category 3 (open-domain  )  79.17%  ( 76/ 96)
+  Category 4 (multi-hop    )  96.31%  (810/841)
 
-Avg Context Tokens: 2226
+— Mean-of-Runs (average of per-judge-run accuracies) —
+Overall: 92.92% (1431/1540)
+  Category 1 (single-hop   )  89.48%  (252/282)
+  Category 2 (temporal     )  91.48%  (294/321)
+  Category 3 (open-domain  )  79.17%  ( 76/ 96)
+  Category 4 (multi-hop    )  96.20%  (809/841)
 
-Stage Summary:
-  search     duration=885.6s  prompt_tokens=4083323  completion_tokens=327004
-  answer     duration=484.2s  prompt_tokens=4587338  completion_tokens=1153323
-  evaluate   duration=65.7s  prompt_tokens=2322720  completion_tokens=27753
+Judge runs: 3, std: 0.0005
 
 Config:
   retrieval_mode: agentic
@@ -66,16 +68,9 @@ Config:
   max_concurrent_qa: 30
 
 Package Versions:
-  everalgo-core: 0.1.0
-  everalgo-boundary: 0.1.0
-  everalgo-user-memory: 0.1.0
-  everalgo-rank: 0.1.1
-
-Git Provenance:
-  Tag:    v6-2-92.55
-  Commit: 914ddec  🎨 refactor(benchmarks): pass encoding_format="float" to /embeddings explicitly
-  Branch: refactor/extract-algo-from-benchmarks (HEAD at run time)
-  Notes:  Stage 3 alignment commits (7839d9c §3.A + cbb56ae §3.B) were
-          added AFTER this run; restore via `git checkout v6-2-92.55`.
+  everalgo-core: 0.2.0
+  everalgo-boundary: 0.2.0
+  everalgo-user-memory: 0.2.0
+  everalgo-rank: 0.3.0
 
 ============================================================

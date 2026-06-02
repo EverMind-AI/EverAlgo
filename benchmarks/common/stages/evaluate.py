@@ -127,11 +127,14 @@ def _aggregate_per_category(
         total = len(items)
         run_accs = _per_run_accuracies(items, num_runs)
         mean_acc = sum(run_accs) / len(run_accs) if run_accs else 0.0
+        maj_correct = sum(1 for d in items if d.get("is_correct"))
         summary[cat] = {
             "label": category_label_fn(cat),
             "correct": round(mean_acc * total),
             "total": total,
             "accuracy": mean_acc,
+            "majority_correct": maj_correct,
+            "majority_accuracy": maj_correct / total if total else 0.0,
             "run_accuracies": run_accs,
         }
     return summary
@@ -168,6 +171,7 @@ async def run_evaluate_stage(ctx: StageContext) -> StageStats:
     # Step 3: compute overall + per-category accuracy
     num_runs = ctx.config.judge_runs
     correct, mean_acc, std_acc, run_accs = _overall_metrics(detailed, num_runs)
+    majority_correct = sum(1 for d in detailed if d.get("is_correct"))
     per_category = _aggregate_per_category(detailed, ctx.dataset.category_label, num_runs)
 
     # Step 4: persist eval_results.json + return stats
@@ -178,6 +182,8 @@ async def run_evaluate_stage(ctx: StageContext) -> StageStats:
         "total_questions": total,
         "correct": correct,
         "accuracy": mean_acc,
+        "majority_correct": majority_correct,
+        "majority_accuracy": majority_correct / total if total else 0.0,
         "std_accuracy": std_acc,
         "run_accuracies": run_accs,
         "per_category": per_category,

@@ -1,20 +1,24 @@
 {
   "dataset": "locomo",
-  "run_name": "stage-1-v6-2",
-  "overall_accuracy": 0.9255411255411256,
+  "run_name": "main-baseline",
   "total_questions": 1540,
-  "correct": 1425,
+  "majority_accuracy": 0.9305194805194805,
+  "majority_correct": 1433,
+  "mean_of_runs_accuracy": 0.9292207792207793,
+  "mean_of_runs_correct": 1431,
   "per_category": {
     "2": {
       "label": "temporal",
-      "correct": 285,
+      "correct": 294,
       "total": 321,
-      "accuracy": 0.8868120456905504,
+      "accuracy": 0.9148494288681205,
       "run_accuracies": [
-        0.8878504672897196,
-        0.8847352024922118,
-        0.8878504672897196
-      ]
+        0.9127725856697819,
+        0.9158878504672897,
+        0.9158878504672897
+      ],
+      "majority_correct": 294,
+      "majority_accuracy": 0.9158878504672897
     },
     "3": {
       "label": "open-domain",
@@ -22,61 +26,42 @@
       "total": 96,
       "accuracy": 0.7916666666666666,
       "run_accuracies": [
-        0.78125,
         0.7916666666666666,
-        0.8020833333333334
-      ]
+        0.7916666666666666,
+        0.7916666666666666
+      ],
+      "majority_correct": 76,
+      "majority_accuracy": 0.7916666666666666
     },
     "1": {
       "label": "single-hop",
-      "correct": 260,
+      "correct": 252,
       "total": 282,
-      "accuracy": 0.9219858156028368,
+      "accuracy": 0.8947990543735225,
       "run_accuracies": [
-        0.925531914893617,
-        0.9219858156028369,
-        0.9184397163120568
-      ]
+        0.8971631205673759,
+        0.8936170212765957,
+        0.8936170212765957
+      ],
+      "majority_correct": 253,
+      "majority_accuracy": 0.8971631205673759
     },
     "4": {
       "label": "multi-hop",
-      "correct": 805,
+      "correct": 809,
       "total": 841,
-      "accuracy": 0.9567974633372969,
+      "accuracy": 0.9619500594530321,
       "run_accuracies": [
-        0.9583828775267539,
-        0.9548156956004756,
-        0.9571938168846611
-      ]
+        0.9619500594530321,
+        0.9631391200951248,
+        0.9607609988109393
+      ],
+      "majority_correct": 810,
+      "majority_accuracy": 0.9631391200951248
     }
   },
-  "avg_context_tokens": 2226,
-  "stage_summary": {
-    "search": {
-      "duration_seconds": 885.5708799168933,
-      "prompt_tokens": 4083323,
-      "completion_tokens": 327004,
-      "http_calls": 0,
-      "success": 1540,
-      "failed": 0
-    },
-    "answer": {
-      "duration_seconds": 484.1920957909897,
-      "prompt_tokens": 4587338,
-      "completion_tokens": 1153323,
-      "http_calls": 0,
-      "success": 1540,
-      "failed": 0
-    },
-    "evaluate": {
-      "duration_seconds": 65.70059283287264,
-      "prompt_tokens": 2322720,
-      "completion_tokens": 27753,
-      "http_calls": 0,
-      "success": 1425,
-      "failed": 115
-    }
-  },
+  "avg_context_tokens": 2294,
+  "stage_summary": {},
   "config": {
     "retrieval_mode": "agentic",
     "use_hybrid_search": true,
@@ -124,9 +109,9 @@
     "max_concurrent_qa": 30
   },
   "package_versions": {
-    "everalgo-core": "0.1.0",
-    "everalgo-boundary": "0.1.0",
-    "everalgo-user-memory": "0.1.0",
-    "everalgo-rank": "0.1.1"
+    "everalgo-core": "0.2.0",
+    "everalgo-boundary": "0.2.0",
+    "everalgo-user-memory": "0.2.0",
+    "everalgo-rank": "0.3.0"
   }
 }
