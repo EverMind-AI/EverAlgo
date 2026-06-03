@@ -232,6 +232,8 @@ async def _multi_query_round2(
         fused: list[Candidate] = list(round2_lists[0])
     else:
         fused = rrf(*round2_lists, k=rrf_k)
+    if round2_cap is not None:
+        fused = fused[:round2_cap]
     return await _merge_truncate_rerank(
         query=query,
         reranked=reranked,
@@ -425,9 +427,10 @@ async def _generate_multi_queries(
         key_info=", ".join(key_info) if key_info else "N/A",
     )
     result = await _call_llm_for_multi_queries(llm, rendered)
+    validated = [q for q in result.queries if 5 <= len(q) <= 300 and q.lower() != original_query.lower()]
     if count > 0:
-        return MultiQueryResponse(queries=list(result.queries[:count]), reasoning=result.reasoning)
-    return result
+        validated = validated[:count]
+    return MultiQueryResponse(queries=validated, reasoning=result.reasoning)
 
 
 async def _generate_refined_query(
@@ -458,16 +461,22 @@ def _format_docs(candidates: Sequence[Candidate]) -> str:
     Four lines per doc (``Document {i}:`` / Title / Date / Content). Body truncates at 500 chars.
     ``Date`` renders the doc's ms-epoch ``timestamp`` as ISO ``YYYY-MM-DDTHH:MM:SSZ`` to align
     with the ``Date`` field referenced by sufficiency/multi-query prompts.
+
+    Raises:
+        ValueError: If any candidate lacks ``episode.content`` — fail-loud, no fallback.
     """
     if not candidates:
         return "No retrieval results"
     lines: list[str] = []
     for i, c in enumerate(candidates, 1):
         episode_raw = c.metadata.get("episode")
-        episode_dict: dict[str, Any] = cast("dict[str, Any]", episode_raw) if isinstance(episode_raw, dict) else {}
-        subject = str(episode_dict.get("subject") or c.metadata.get("subject") or "N/A")
-        body_raw: Any = episode_dict.get("content") or c.metadata.get("text") or c.id
-        body = str(body_raw)
+        if not isinstance(episode_raw, dict):
+            raise TypeError(f"Candidate {c.id} has no episode dict in metadata")
+        episode_dict: dict[str, Any] = cast("dict[str, Any]", episode_raw)
+        subject = str(episode_dict.get("subject") or "N/A")
+        body = str(episode_dict.get("content") or "")
+        if not body:
+            raise ValueError(f"Candidate {c.id} has no episode.content")
         if len(body) > 500:
             body = body[:500] + "..."
         timestamp_str = _format_doc_timestamp(c.metadata.get("timestamp"))

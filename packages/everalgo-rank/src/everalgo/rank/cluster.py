@@ -1,12 +1,12 @@
 """Cluster-scoped retriever composer for ``aagentic_retrieve``.
 
-``acluster_retrieve`` narrows a full-corpus retrieval to the top-K clusters whose
-members appear with highest scores in the base retrieval, expands those clusters'
-full memberships from a caller-provided ``all_docs`` list, and returns the expansion
-unreranked. Rerank is intentionally left to the caller (typically
-``aagentic_retrieve`` rerunning the same ``rerank_fn`` over Round 1 and again over
-the merged Round 1 + Round 2 set), which avoids the double-rerank trap and keeps the
-Round 2 final rerank effective.
+``acluster_retrieve`` scans the base retrieval results in score order and accumulates
+distinct clusters until ``cluster_top_k`` are reached (first-hit strategy), then
+expands those clusters' full memberships from a caller-provided ``all_docs`` list and
+returns the expansion unreranked. Rerank is intentionally left to the caller
+(typically ``aagentic_retrieve`` rerunning the same ``rerank_fn`` over Round 1 and
+again over the merged Round 1 + Round 2 set), which avoids the double-rerank trap and
+keeps the Round 2 final rerank effective.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ async def acluster_retrieve(
     query: str,
     *,
     base_retrieve: RetrieveFn,
-    base_candidates: int,
+    base_candidates: int | None = None,
     clusters: Sequence[Cluster],
     all_docs: Sequence[Candidate],
     cluster_top_k: int = 5,
@@ -40,18 +40,20 @@ async def acluster_retrieve(
         1. ``base_retrieve(query, base_candidates)`` — wide candidate pool for cluster
            selection (Level 1). Caller typically passes a hybrid (dense+sparse RRF)
            closure.
-        2. MaxSim aggregate to clusters: each cluster's score = ``max(score of its members
-           appearing in step 1's candidates)``. Clusters with no member hit are ignored.
-        3. Pick top ``cluster_top_k`` clusters by score.
-        4. Expand the selected clusters' full memberships from ``all_docs`` (id lookup)
-           and return as-is (no rerank, no truncation).
+        2. Scan results in score order, accumulating distinct clusters (first-hit): the
+           first member of a cluster seen determines that cluster's inclusion. Stop as
+           soon as ``cluster_top_k`` distinct clusters are reached.
+        3. Expand the selected clusters' full memberships from ``all_docs`` (id lookup)
+           and return in ``all_docs`` order (no rerank, no truncation).
 
     Args:
         query: Search query.
         base_retrieve: Async ``(query, k) -> list[Candidate]`` used to seed cluster
             selection. Caller typically passes a hybrid (dense+sparse RRF) closure.
-        base_candidates: Top-k passed to ``base_retrieve``. Typically 50-100; must
-            be wide enough to cover ≥ ``cluster_top_k`` distinct clusters.
+        base_candidates: Top-k passed to ``base_retrieve``. ``None`` means no
+            truncation (passes ``len(all_docs)`` — the corpus upper bound). When set,
+            typically 50-100; must be wide enough to cover ≥ ``cluster_top_k`` distinct
+            clusters.
         clusters: All clusters in the corpus. Each cluster contributes its members at
             most once; the algorithm reads ``c.id`` and ``c.members``.
         all_docs: Full corpus snapshot as ``Candidate`` list. Used to expand selected
@@ -70,7 +72,7 @@ async def acluster_retrieve(
         - No rerank calls.
         - No LLM calls.
     """
-    base_results = await base_retrieve(query, base_candidates)
+    base_results = await base_retrieve(query, base_candidates if base_candidates is not None else len(all_docs))
     if not base_results:
         return []
 
@@ -79,24 +81,19 @@ async def acluster_retrieve(
         member: cluster.id for cluster in clusters if cluster.id is not None for member in cluster.members
     }
 
-    # MaxSim: cluster_score = max(member_score) over members appearing in base_results.
-    cluster_scores: dict[str, float] = {}
+    selected_cluster_ids: set[str] = set()
     for cand in base_results:
         cluster_id = memcell_to_cluster.get(cand.id)
         if cluster_id is None:
             continue
-        prev = cluster_scores.get(cluster_id)
-        if prev is None or cand.score > prev:
-            cluster_scores[cluster_id] = cand.score
+        selected_cluster_ids.add(cluster_id)
+        if len(selected_cluster_ids) >= cluster_top_k:
+            break
 
-    if not cluster_scores:
+    if not selected_cluster_ids:
         return []
 
-    selected_cluster_ids = {
-        cid for cid, _ in sorted(cluster_scores.items(), key=lambda kv: kv[1], reverse=True)[:cluster_top_k]
-    }
-
-    # Expand selected clusters' full memberships from all_docs.
+    # Expand selected clusters' full memberships from all_docs (original docs order).
     member_ids: set[str] = set()
     for cluster in clusters:
         if cluster.id in selected_cluster_ids:

@@ -15,6 +15,12 @@ from everalgo.types import Candidate
 if TYPE_CHECKING:
     from everalgo.llm.types import ChatResponse
 
+
+def _ep_cand(cid: str, score: float = 1.0) -> Candidate:
+    """Build a Candidate with a valid episode dict (required by _format_docs fail-loud)."""
+    return Candidate(id=cid, score=score, metadata={"episode": {"subject": cid, "content": f"content of {cid}"}})
+
+
 # ─── Smoke tests (3 new) ────────────────────────────────────────────────────
 
 
@@ -24,9 +30,7 @@ async def test_agentic_sufficient_round1_returns_base_no_round2() -> None:
 
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
         base_calls.append(k)
-        return [
-            Candidate(id=f"d{i}", score=1.0 / (i + 1), source="other", metadata={"text": f"doc {i}"}) for i in range(k)
-        ]
+        return [_ep_cand(f"d{i}", 1.0 / (i + 1)) for i in range(k)]
 
     fake = FakeLLMClient(
         responses=[
@@ -63,7 +67,7 @@ async def test_agentic_insufficient_triggers_multi_query_round2() -> None:
 
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
         base_calls.append(q)
-        return [Candidate(id=f"{q}_d{i}", score=1.0 / (i + 1), source="other", metadata={}) for i in range(k)]
+        return [_ep_cand(f"{q}_d{i}", 1.0 / (i + 1)) for i in range(k)]
 
     fake = FakeLLMClient(
         responses=[
@@ -75,7 +79,7 @@ async def test_agentic_insufficient_triggers_multi_query_round2() -> None:
                     "missing_information": ["date"],
                 }
             ),
-            json.dumps({"queries": ["alt1", "alt2"], "reasoning": "two alts"}),
+            json.dumps({"queries": ["alpha query", "beta query"], "reasoning": "two alts"}),
         ],
     )
 
@@ -89,11 +93,11 @@ async def test_agentic_insufficient_triggers_multi_query_round2() -> None:
         multi_query_count=2,
     )
     assert decision.is_multi_round is True
-    assert decision.refined_queries == ["alt1", "alt2"]
+    assert decision.refined_queries == ["alpha query", "beta query"]
     assert decision.query_strategy == "multi_query"
     assert "q" in base_calls
-    assert "alt1" in base_calls
-    assert "alt2" in base_calls
+    assert "alpha query" in base_calls
+    assert "beta query" in base_calls
 
 
 async def test_agentic_decision_returns_correct_type() -> None:
@@ -153,7 +157,7 @@ async def test_agentic_sufficient_returns_reranked_truncated_to_top_n() -> None:
     """Sufficiency=True → return reranked[:top_n] (cross-encoder-ordered, mirrors scene_retrieval.py:262-267)."""
 
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
-        return [Candidate(id=f"d{i}", score=1.0 / (i + 1), source="other", metadata={}) for i in range(k)]
+        return [_ep_cand(f"d{i}", 1.0 / (i + 1)) for i in range(k)]
 
     fake = FakeLLMClient(
         responses=[
@@ -194,7 +198,7 @@ async def test_agentic_rerank_fn_applied_before_sufficiency_check() -> None:
         return list(reversed(candidates))
 
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
-        return [Candidate(id=f"d{i}", score=1.0 / (i + 1), source="other", metadata={}) for i in range(k)]
+        return [_ep_cand(f"d{i}", 1.0 / (i + 1)) for i in range(k)]
 
     fake = FakeLLMClient(
         responses=[
@@ -229,7 +233,7 @@ async def test_agentic_insufficient_parallel_round2_gather() -> None:
 
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
         call_order.append(q)
-        return [Candidate(id=f"{q}_{i}", score=0.5, source="other", metadata={}) for i in range(k)]
+        return [_ep_cand(f"{q}_{i}", 0.5) for i in range(k)]
 
     fake = FakeLLMClient(
         responses=[
@@ -272,7 +276,7 @@ async def test_agentic_insufficient_refined_query_strategy() -> None:
         base_calls.append(q)
         # Round 1 (original query "q") returns one candidate; Round 2 returns empty.
         if q == "q":
-            return [Candidate(id="d1", score=0.9, source="other", metadata={})]
+            return [_ep_cand("d1", 0.9)]
         return []
 
     fake = FakeLLMClient(
@@ -309,10 +313,10 @@ async def test_agentic_insufficient_refined_query_strategy() -> None:
 
 async def test_agentic_round2_dedup_by_id() -> None:
     """Round 2 candidates that share an id with Round 1 are excluded from the merge."""
-    round1_cands = [Candidate(id="d1", score=0.9, source="other", metadata={})]
+    round1_cands = [_ep_cand("d1", 0.9)]
     round2_cands = [
-        Candidate(id="d1", score=0.5, source="other", metadata={}),  # duplicate — should be dropped
-        Candidate(id="d2", score=0.4, source="other", metadata={}),
+        _ep_cand("d1", 0.5),  # duplicate — should be dropped
+        _ep_cand("d2", 0.4),
     ]
     call_n = {"n": 0}
 
@@ -332,7 +336,7 @@ async def test_agentic_round2_dedup_by_id() -> None:
                     "missing_information": ["X"],
                 }
             ),
-            json.dumps({"queries": ["q2"], "reasoning": "one extra"}),
+            json.dumps({"queries": ["extra query"], "reasoning": "one extra"}),
         ],
     )
 
@@ -355,7 +359,7 @@ async def test_agentic_propagates_llm_error() -> None:
     """LLM raises → error propagates (no swallow)."""
 
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
-        return [Candidate(id="d1", score=0.9, source="other", metadata={})]
+        return [_ep_cand("d1", 0.9)]
 
     def _boom(*_a: object, **_kw: object) -> ChatResponse:
         raise RuntimeError("llm down")
@@ -379,7 +383,7 @@ async def test_agentic_round2_applies_final_rerank() -> None:
 
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
         base_calls.append(q)
-        return [Candidate(id=f"{q}_d{i}", score=1.0 / (i + 1), source="other", metadata={}) for i in range(k)]
+        return [_ep_cand(f"{q}_d{i}", 1.0 / (i + 1)) for i in range(k)]
 
     async def rerank_fn(q: str, docs: list[Candidate]) -> list[Candidate]:
         rerank_calls.append((q, len(docs)))
@@ -396,7 +400,7 @@ async def test_agentic_round2_applies_final_rerank() -> None:
                     "missing_information": ["x"],
                 }
             ),
-            json.dumps({"queries": ["alt"], "reasoning": ""}),
+            json.dumps({"queries": ["alternative query"], "reasoning": ""}),
         ],
     )
 
@@ -558,7 +562,7 @@ async def test_round2_retrieve_separates_r1_and_r2_bases() -> None:
                 }
             ),
             # Multi-query generation: 2 sub-queries
-            json.dumps({"queries": ["sub1", "sub2"], "reasoning": "expand"}),
+            json.dumps({"queries": ["sub query one", "sub query two"], "reasoning": "expand"}),
         ],
     )
 
@@ -577,7 +581,7 @@ async def test_round2_retrieve_separates_r1_and_r2_bases() -> None:
     assert decision.is_multi_round is True
     assert r1_calls == ["q"]
     # R2 used round2 closure, not base
-    assert r2_calls == ["sub1", "sub2"]
+    assert r2_calls == ["sub query one", "sub query two"]
 
 
 async def test_round2_retrieve_default_falls_back_to_base() -> None:
@@ -598,7 +602,7 @@ async def test_round2_retrieve_default_falls_back_to_base() -> None:
                     "missing_information": ["x"],
                 }
             ),
-            json.dumps({"queries": ["q2"], "reasoning": "x"}),
+            json.dumps({"queries": ["round two query"], "reasoning": "x"}),
         ],
     )
 
@@ -613,7 +617,7 @@ async def test_round2_retrieve_default_falls_back_to_base() -> None:
         multi_query_count=1,
     )
     # base used for both R1 and R2
-    assert calls == ["q", "q2"]
+    assert calls == ["q", "round two query"]
 
 
 async def test_round2_cap_truncates_merged_to_cap() -> None:
@@ -635,7 +639,7 @@ async def test_round2_cap_truncates_merged_to_cap() -> None:
                     "missing_information": ["x"],
                 }
             ),
-            json.dumps({"queries": ["q2"], "reasoning": "x"}),
+            json.dumps({"queries": ["round two query"], "reasoning": "x"}),
         ],
     )
 
@@ -677,7 +681,7 @@ async def test_round2_cap_none_keeps_current_behavior() -> None:
                     "missing_information": ["x"],
                 }
             ),
-            json.dumps({"queries": ["q2"], "reasoning": "x"}),
+            json.dumps({"queries": ["round two query"], "reasoning": "x"}),
         ],
     )
 

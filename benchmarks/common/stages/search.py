@@ -355,50 +355,21 @@ def _episode_field(doc: dict[str, Any], field: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _first_atomic_fact(doc: dict[str, Any]) -> str:
-    """Return the first atomic_fact text in the doc, or empty if absent.
+def _format_doc_for_rerank(doc: dict[str, Any]) -> str:
+    """Format a doc for reranker input — ``episode.content`` only, no fallback.
 
-    Stage 1 emits ``atomic_facts`` as a dict
-    ``{"time": str, "timestamp": int, "atomic_fact": list[str], "fact_embeddings": list[list[float]]}``
-    — NOT a list of dicts. The first fact is ``atomic_facts["atomic_fact"][0]``.
+    Mirrors the 93-version behavior (``stage3_memory_retrivel.py:127-130``) which
+    reads ``doc["episode"]`` as a single string. In our nested schema the equivalent
+    is ``doc["episode"]["content"]``.
+
+    Raises:
+        ValueError: If ``episode.content`` is missing or empty — fail-loud so Stage 1
+            schema regressions surface immediately.
     """
-    af_raw = doc.get("atomic_facts")
-    if not isinstance(af_raw, dict):
-        return ""
-    af: dict[str, Any] = cast("dict[str, Any]", af_raw)
-    facts: list[Any] = af.get("atomic_fact") or []
-    if not facts:
-        return ""
-    first: Any = facts[0]
-    return first if isinstance(first, str) else ""
-
-
-def _format_doc_for_rerank(doc: dict[str, Any]) -> str | None:
-    """Format a doc for reranker input — first non-empty field wins.
-
-    fork-specific fallback over the nested episode schema:
-    ``episode.content → first atomic_fact → episode.summary → episode.subject``.
-    The legacy schema where ``doc.episode`` is a plain string is also tolerated
-    (returned as-is). evercore's reranker reads a single ``doc["episode"]``
-    string field — this fallback only matters on edge cases where Stage 1
-    produced a partially-filled memcell; on the standard LoCoMo path
-    ``episode.content`` always wins.
-
-    No timestamp prefix, no atomic_facts concatenation.
-    """
-    episode = doc.get("episode")
-    if isinstance(episode, str) and episode:
-        return episode
-
-    for source in (
-        _episode_field(doc, "content"),
-        _first_atomic_fact(doc),
-        _episode_field(doc, "summary"),
-        _episode_field(doc, "subject"),
-    ):
-        if source:
-            return source
-    return None
+    content = _episode_field(doc, "content")
+    if content:
+        return content
+    raise ValueError(f"doc has no episode.content for reranker: id={doc.get('id', 'unknown')}")
 
 
 def _trace_scored(results: list[_Scored], *, limit: int) -> list[dict[str, Any]]:
@@ -703,7 +674,7 @@ def _emb_doc_to_children(
     else:
         # D: fallback chain — fixed field order mirrors _score_emb_item
         field_vecs: list[Any] = [
-            embeddings[f] for f in ("subject", "summary", "episode") if embeddings.get(f) is not None
+            embeddings[f] for f in ("episode", "subject", "summary") if embeddings.get(f) is not None
         ]
         if not field_vecs:
             return []  # E

@@ -80,20 +80,15 @@ class BenchmarkConfig(BaseModel):
 
     # === Stage 3 cluster path ===
     # When ``enable_cluster_retrieval`` and a cluster index exists for the conv,
-    # stage 3 takes the 2-level path (Level 1 selects top-K clusters via RRF +
-    # MaxSim, Level 2 reranks inside clusters). Falls back to flat hybrid when the
-    # cluster index is missing.
+    # stage 3 takes the 2-level path (Level 1 selects top-K clusters via first-hit
+    # scan over RRF results, Level 2 reranks inside clusters). Falls back to flat
+    # hybrid when the cluster index is missing.
     enable_cluster_retrieval: bool = True
     cluster_top_k: int = 10
-    # Level-1 candidate-pool size for cluster selection. evercore retrieves
-    # ``level1_emb_candidates + level1_bm25_candidates = 50 + 50``
-    # (``scene_retrieval.py:132/145``) and RRF-fuses without truncation; after dedup
-    # the pool is typically <=100 unique candidates. Passing 100 lets ``hybrid_full``
-    # deliver essentially the full deduped pool, matching evercore's non-truncating
-    # behavior. Wide enough to cover >= ``cluster_top_k`` distinct clusters in a
-    # 26-29-cluster LoCoMo conv; narrowing this is the most common Stage 3 recall
-    # regression.
-    cluster_base_candidates: int = 100
+    # Level-1 candidate-pool size for cluster selection. ``None`` means no truncation,
+    # matching the upstream behavior where the full RRF result set is scanned for
+    # cluster selection without a cap (``scene_retrieval.py:164-174``).
+    cluster_base_candidates: int | None = None
 
     # === Stage 2 (index) ===
     # Embedding batching: flatten all searchable units in a conversation, then
