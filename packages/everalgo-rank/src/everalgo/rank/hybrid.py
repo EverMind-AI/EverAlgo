@@ -29,7 +29,7 @@ async def ahybrid_retrieve(
     *,
     dense_retrieve: RetrieveFn,
     sparse_retrieve: RetrieveFn,
-    top_n: int = 20,
+    top_n: int | None = None,
     dense_candidates: int = 50,
     sparse_candidates: int = 50,
     fusion: Literal["rrf", "lr"] = "rrf",
@@ -47,7 +47,7 @@ async def ahybrid_retrieve(
         query: The search query string.
         dense_retrieve: Async retrieval function for the dense (vector) route.
         sparse_retrieve: Async retrieval function for the sparse (keyword) route.
-        top_n: Maximum number of candidates to return.
+        top_n: Maximum number of candidates to return. ``None`` means no truncation.
         dense_candidates: How many candidates to request from ``dense_retrieve``.
         sparse_candidates: How many candidates to request from ``sparse_retrieve``.
         fusion: Fusion algorithm — ``"rrf"`` (Reciprocal Rank Fusion, default) or ``"lr"`` (Logistic Regression).
@@ -85,7 +85,8 @@ async def ahybrid_retrieve(
         fused = lr(dense, sparse, coefs=lr_coefs)
     else:  # rrf
         fused = rrf(dense, sparse, k=rrf_k)
-    fused = fused[:top_n]
+    if top_n is not None:
+        fused = fused[:top_n]
     if min_score is not None:
         fused = [c for c in fused if c.score >= min_score]
     return fused

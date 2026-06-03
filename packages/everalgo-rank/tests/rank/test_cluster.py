@@ -23,8 +23,8 @@ def _cluster(cid: str, members: list[str]) -> Cluster:
     )
 
 
-async def test_acluster_picks_top_k_clusters_by_max_member_score() -> None:
-    """Cluster score = max of its members' scores in the base_retrieve result."""
+async def test_acluster_picks_first_k_clusters_by_scan_order() -> None:
+    """First-hit: clusters are selected in the order their first member appears in base results."""
     clusters = [
         _cluster("c0", ["a", "b"]),
         _cluster("c1", ["c", "d"]),
@@ -54,8 +54,7 @@ async def test_acluster_picks_top_k_clusters_by_max_member_score() -> None:
         cluster_top_k=2,
     )
 
-    # cluster_top_k=2 picks c1 (members c,d) + c0 (members a,b) -> 4 docs expanded;
-    # returned in ``all_docs`` order, unranked.
+    # cluster_top_k=2 picks c1 + c0 -> 4 docs expanded; returned in all_docs order.
     assert {c.id for c in result} == {"a", "b", "c", "d"}
     assert [c.id for c in result] == ["a", "b", "c", "d"]
 
@@ -96,6 +95,57 @@ async def test_acluster_empty_base_returns_empty() -> None:
         cluster_top_k=2,
     )
     assert result == []
+
+
+async def test_acluster_first_hit_stops_early() -> None:
+    """First-hit skips a cluster whose highest-scoring member appears late in the result list."""
+    clusters = [
+        _cluster("c0", ["a", "b"]),
+        _cluster("c1", ["c", "d"]),
+        _cluster("c2", ["e"]),
+    ]
+    all_docs = [_doc(x) for x in ["a", "b", "c", "d", "e"]]
+
+    async def base(q: str, k: int) -> list[Candidate]:
+        # Scan order: c0 hit first (a@0.9), c1 hit second (c@0.8) -> top_k=2 reached, stop.
+        # c2's member e has the highest score (0.99) but appears after the scan stops.
+        return [
+            Candidate(id="a", score=0.9, metadata=all_docs[0].metadata),
+            Candidate(id="c", score=0.8, metadata=all_docs[2].metadata),
+            Candidate(id="e", score=0.99, metadata=all_docs[4].metadata),
+            Candidate(id="b", score=0.5, metadata=all_docs[1].metadata),
+        ]
+
+    result = await acluster_retrieve(
+        "q",
+        base_retrieve=base,
+        base_candidates=10,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=2,
+    )
+    # c2 (member e, score 0.99) would win under MaxSim top-K but is excluded by first-hit.
+    assert {c.id for c in result} == {"a", "b", "c", "d"}
+
+
+async def test_acluster_base_candidates_none_passes_corpus_size() -> None:
+    """``base_candidates=None`` passes ``len(all_docs)`` to base_retrieve (no truncation)."""
+    clusters = [_cluster("c0", ["a", "b"])]
+    all_docs = [_doc("a"), _doc("b")]
+    received_k: list[int] = []
+
+    async def base(q: str, k: int) -> list[Candidate]:
+        received_k.append(k)
+        return [_doc("a", 1.0)]
+
+    await acluster_retrieve(
+        "q",
+        base_retrieve=base,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=1,
+    )
+    assert received_k == [2]  # len(all_docs)
 
 
 async def test_acluster_ignores_docs_outside_selected_clusters() -> None:

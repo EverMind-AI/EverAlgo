@@ -13,8 +13,8 @@ from benchmarks.common.stages.search import (
 )
 
 
-def test_format_doc_prefers_episode_content():
-    """Generic fallback: episode body is the first match."""
+def test_format_doc_returns_episode_content():
+    """Only episode.content is used for reranker input."""
     doc = {
         "episode": {"subject": "birthday", "content": "Alice's birthday party"},
         "atomic_facts": {"atomic_fact": ["Alice ate cake"]},
@@ -22,36 +22,16 @@ def test_format_doc_prefers_episode_content():
     assert _format_doc_for_rerank(doc) == "Alice's birthday party"
 
 
-def test_format_doc_falls_back_to_first_atomic_fact():
-    """Episode content empty -> step to atomic_facts; only the first fact is returned.
-
-    Stage 1 emits ``atomic_facts`` as a dict
-    ``{"time", "timestamp", "atomic_fact": list[str], "fact_embeddings": ...}``.
-    """
-    doc = {
-        "atomic_facts": {
-            "atomic_fact": ["Alice ate cake", "It was chocolate"],
-        },
-    }
-    assert _format_doc_for_rerank(doc) == "Alice ate cake"
-
-
-def test_format_doc_falls_back_to_summary_then_subject():
-    """No content, no facts -> walk summary -> subject."""
-    assert _format_doc_for_rerank({"episode": {"summary": "s", "subject": "x"}}) == "s"
-    assert _format_doc_for_rerank({"episode": {"subject": "x"}}) == "x"
-
-
-def test_format_doc_returns_none_when_empty():
-    """All probe fields absent -> None."""
-    assert _format_doc_for_rerank({}) is None
-    assert _format_doc_for_rerank({"atomic_facts": {"atomic_fact": []}}) is None
-    assert _format_doc_for_rerank({"episode": {"subject": "", "content": ""}}) is None
-
-
-def test_format_doc_accepts_legacy_string_episode():
-    """Tolerate the legacy schema where episode was a plain string."""
-    assert _format_doc_for_rerank({"episode": "raw episode body"}) == "raw episode body"
+def test_format_doc_raises_on_missing_content():
+    """No episode.content → ValueError (fail-loud, no fallback)."""
+    with pytest.raises(ValueError, match=r"no episode\.content"):
+        _format_doc_for_rerank({})
+    with pytest.raises(ValueError, match=r"no episode\.content"):
+        _format_doc_for_rerank({"atomic_facts": {"atomic_fact": ["Alice ate cake"]}})
+    with pytest.raises(ValueError, match=r"no episode\.content"):
+        _format_doc_for_rerank({"episode": {"subject": "x"}})
+    with pytest.raises(ValueError, match=r"no episode\.content"):
+        _format_doc_for_rerank({"episode": {"subject": "", "content": ""}})
 
 
 @pytest.mark.asyncio
@@ -119,27 +99,19 @@ async def test_reranker_search_empty_input_returns_empty():
 
 
 @pytest.mark.asyncio
-async def test_reranker_search_docs_without_text_filtered_out():
-    """Docs with no atomic_fact or episode should not be sent to reranker."""
+async def test_reranker_search_raises_on_doc_without_episode_content():
+    """Docs with no episode.content raise ValueError (fail-loud, no silent filtering)."""
     rerank_client = MagicMock()
-    rerank_client.rerank = AsyncMock(return_value=[(0, 0.9)])
-
     docs: list[tuple[dict[str, Any], float]] = [
-        ({"id": "0"}, 0.5),  # no text
-        ({"id": "1", "episode": {"subject": "hi", "content": "hello"}}, 0.4),  # usable
+        ({"id": "0"}, 0.5),  # no episode.content
+        ({"id": "1", "episode": {"subject": "hi", "content": "hello"}}, 0.4),
     ]
-    out = await reranker_search(
-        "q",
-        results=docs,
-        rerank_client=rerank_client,
-        top_n=5,
-        batch_size=10,
-        concurrent_batches=1,
-    )
-    # Only the one with text was reranked
-    assert len(out) == 1
-    assert out[0][0]["id"] == "1"
-    rerank_client.rerank.assert_called_once()
-    # Verify the reranker only saw the one usable doc
-    call_args = rerank_client.rerank.call_args
-    assert call_args.kwargs.get("documents") == ["hello"] or call_args.args[1] == ["hello"]
+    with pytest.raises(ValueError, match=r"no episode\.content"):
+        await reranker_search(
+            "q",
+            results=docs,
+            rerank_client=rerank_client,
+            top_n=5,
+            batch_size=10,
+            concurrent_batches=1,
+        )
