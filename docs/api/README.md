@@ -9,7 +9,7 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 | Distribution | README | What it provides |
 |---|---|---|
 | `everalgo-core` | [`packages/everalgo-core/README.md`](../../packages/everalgo-core/README.md) | `ChatMessage`, `MemCell`, `Episode`, `RankInput`/`RankOutput`, `LLMClient`, `LLMConfig`, `FakeLLMClient` |
-| `everalgo-boundary` | [`packages/everalgo-boundary/README.md`](../../packages/everalgo-boundary/README.md) | `detect_boundaries`, `DetectionResult`, `BoundaryDecision`, `_tokenize` |
+| `everalgo-boundary` | [`packages/everalgo-boundary/README.md`](../../packages/everalgo-boundary/README.md) | `detect_boundaries`, `DetectionResult`, `BoundaryDecision` |
 | `everalgo-clustering` | [`packages/everalgo-clustering/README.md`](../../packages/everalgo-clustering/README.md) | `Cluster`, `cluster_by_geometry`, `cluster_by_llm` |
 | `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `rank.episodic`, `rank.profile`, `rank.case`, `rank.skill`, `rank.fusion`, `rank.weight`, `rank.rerank` |
 | `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `ParsedContent`, image / audio / document / URL parsers (video deferred) |

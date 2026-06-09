@@ -124,7 +124,7 @@ async def test_arerank_serializes_non_native_metadata_via_default_str() -> None:
     """``default=str`` in json.dumps must prevent TypeError when metadata contains datetime.
 
     Regression guard: before the fix, passing a Candidate with a ``datetime`` value
-    in ``metadata`` (e.g. a LanceDB ``timestamp`` column forwarded by evermem's
+    in ``metadata`` (e.g. a LanceDB ``timestamp`` column forwarded by EverOS's
     ``row_to_candidate``) raised ``TypeError: Object of type datetime is not JSON
     serializable``.  After the fix, the value is serialized via ``str()``, which
     produces the ISO-8601-like representation that is sufficient for LLM prompting.

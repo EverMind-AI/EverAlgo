@@ -77,8 +77,8 @@ Each extractor accepts a `prompt=` override per call, or the module-level consta
 
 ```python
 # Per-call: use the bundled Chinese variant
-from everalgo.user_memory.prompts.zh.episode import EPISODE_EXTRACT_PROMPT_ZH
-episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice", prompt=EPISODE_EXTRACT_PROMPT_ZH)
+from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
+episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice", prompt=EPISODE_GENERATION_PROMPT)
 
 # Global: replace the default English prompt at startup
 import everalgo.user_memory.prompts.en.foresight as _fs

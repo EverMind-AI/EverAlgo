@@ -10,8 +10,9 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Install
 
 ```bash
-pip install everalgo-knowledge
-# Auto-pulls: everalgo-core, everalgo-parser
+# This package is NOT published to PyPI (Private :: Do Not Upload classifier).
+# Install within the workspace only:
+uv sync --package everalgo-knowledge
 ```
 
 ## Public surface (stubbed)
@@ -22,5 +23,5 @@ pip install everalgo-knowledge
 
 ## Related distributions
 
-- [`everalgo-parser`](../everalgo-parser/) — produces `ParsedContent` from raw files; also experimental
+- [`everalgo-parser`](../everalgo-parser/) — produces `ParsedContent` from raw files (fully implemented except video, which is deferred pending ADR)
 - [`everalgo-core`](../everalgo-core/) — `KnowledgeMemory` type is defined here

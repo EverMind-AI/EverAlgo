@@ -1,32 +1,31 @@
 # everalgo-parser
 
-Multimodal parsing — image / audio / document / video / url raw inputs into `ParsedContent`. Used by `everalgo-knowledge` for file ingestion and by evermem step 1 for inline parsing.
+Multimodal parsing — image / audio / document / video / url raw inputs into `ParsedContent`. Used by `everalgo-knowledge` for file ingestion and by EverOS step 1 for inline parsing.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
 ## Quick start
 
 ```python
-import everalgo
 from everalgo.llm.config import LLMConfig
 from everalgo.llm.providers.openai_compat import OpenAICompatClient
 from everalgo.parser import aparse, RawFile
 
-# Configure an LLM once (process-wide). The parser uses OpenAI-compatible
-# clients; OpenRouter is the reference deployment (Gemini multimodal via
-# OpenRouter passthrough).
-everalgo.configure(OpenAICompatClient(LLMConfig(
+# Create an LLM client per call (or share one instance). The parser uses
+# OpenAI-compatible clients; OpenRouter is the reference deployment
+# (Gemini multimodal via OpenRouter passthrough).
+client = OpenAICompatClient(LLMConfig(
     model="google/gemini-3-flash-preview",
     api_key="sk-or-v1-...",
     base_url="https://openrouter.ai/api/v1",
-)))
+))
 
 # Bytes-in: caller already hydrated the file.
-parsed = await aparse(RawFile(content=pdf_bytes, extension="pdf"))
+parsed = await aparse(RawFile(content=pdf_bytes, extension="pdf"), llm=client)
 print(parsed.text)
 
 # URL-in: parser fetches over HTTP, then delegates to the HTML handler.
-parsed = await aparse(RawFile(uri="https://example.com/article"))
+parsed = await aparse(RawFile(uri="https://example.com/article"), llm=client)
 print(parsed.metadata["title"], parsed.text[:500])
 ```
 

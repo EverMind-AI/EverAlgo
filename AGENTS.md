@@ -14,7 +14,7 @@ If you are an AI assistant (Claude Code / Cursor / Copilot / Codex / …) onboar
 - **Two paths.** Every operator belongs to one of two read/write paths whose contracts are symmetric (stateless, in-memory I/O):
   - **Extract** — write path. Input: structured units (e.g. `MemCell`). Output: structured memories (`Episode` / `Profile` / `Case` / `Skill` / …).
   - **Retrieve** — read path. Input: query + caller-injected `RetrieveFn` / `RerankFn` callables. Output: a ranked memory list. The `everalgo-rank` package serves as both the retrieval facade and the underlying ranking toolkit: it exposes four strategies — **hybrid** (dual-route RRF), **agentic** (LLM-guided sufficiency + multi/refined query wrapper over any base), **cluster** (cluster-based recall expansion), and **maxsim** (MaxSim nearest-neighbour reranking) — alongside the lower-level ranking primitives (rrf / lr / vector_anchored fusion, weight helpers, LLM-based rerank). Caller binds storage / model clients inside its `RetrieveFn` / `RerankFn`; algo never touches persistence.
-- **Orchestration is upstream.** When to call, in what order, with what concurrency, persistence to the markdown filesystem — all owned by **evermem**. EverAlgo does not care whether the caller is open-source or cloud commercial; both paths share this code.
+- **Orchestration is upstream.** When to call, in what order, with what concurrency, persistence to the markdown filesystem — all owned by **EverOS**. EverAlgo does not care whether the caller is open-source or cloud commercial; both paths share this code.
 
 For the rationale and deeper background, read `docs/concepts/architecture.md`
 
@@ -29,10 +29,10 @@ everalgo/                              # monorepo, uv virtual workspace
 ├── AGENTS.md  ← you are here          # CLAUDE.md and .cursorrules are symlinks
 ├── README.md
 ├── LICENSE                            # Apache-2.0
-├── .gitignore  .gitlab-ci.yml
+├── .gitignore  .gitlab-ci.yml  cliff.toml  .pre-commit-config.yaml
 ├── docs/
 │   ├── concepts/                      # high-level architecture notes
-│   └── reference/                     # API reference (per-distribution)
+│   └── api/                            # API reference (per-distribution)
 ├── examples/                          # runnable quickstart scripts (01–07, use FakeLLMClient)
 ├── packages/
 │   ├── everalgo-core/                 # types, llm (+ providers), prompts, testing
@@ -193,7 +193,7 @@ The full rationale lives in `docs/concepts/architecture.md`. Hard rules:
 - **Lint configuration.** Workspace-wide ruff is configured in the root `pyproject.toml` (`line-length = 120`, target version inferred from `requires-python = ">=3.12"`, rule set derived from the pytorch + pydantic-ai intersection). Google-style docstrings — aligns with Google Python Style Guide. `Args:` / `Returns:` / `Raises:` sections, no type repetition in the body (type annotations in the signature are authoritative).
 - **Logging discipline.** On the LLM / I/O path use `logger = logging.getLogger(__name__)` with lazy `%`-format (`logger.debug("count=%d", n)` — never f-strings inside log calls) and `logger.exception(...)` inside `except` blocks. For user-behaviour problems and deprecations use `warnings.warn(..., stacklevel=2)`; for pure-algorithm errors `raise ValueError(...)` with a detailed message (numpy style — `shapes (3,4) and (5,6) not aligned`, etc.). Every public subpackage `__init__.py` already attaches a `NullHandler`; `everalgo.llm` carries a default-on `SensitiveHeadersFilter`. **Forbidden in library code**: `logging.basicConfig`, `addHandler` (anything but `NullHandler`), `setLevel`, explicit `propagate = True/False`, and any module-level `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()` (no-arg) / `logging.root.*` — these all target the root logger and are an application's job. **Forbidden in DEBUG logs**: request / response bodies, prompt text, model outputs (the Filter only redacts headers; bodies leak PII the Filter cannot see). Performance timing is the user's job (`cProfile` / `line_profiler` / `%timeit`); the library does not log durations. ruff rule sets `G` + `LOG` + `TRY` enforce these at lint time.
 - **Use the full `line-length = 120` budget when hand-wrapping.** For Python comments / docstrings and TOML/YAML comments, fill each line to roughly 100–115 characters before wrapping — do not pre-wrap at 70 / 79 / 80 / 88 / 100 out of habit. `E501` is in the ignore list, and ruff never flags lines that are *too short*, so this is a writer's discipline rather than a lint check. A 3-line comment that collapses cleanly into 2 lines at 120 should be 2 lines. Exceptions: bullet lists, code blocks, and any line where a natural break aids comprehension. Markdown files in this repo deliberately use the **one-paragraph-per-line** (no hard-wrap) style — the same convention Prettier emits by default and GitHub renders cleanly — so `.md` prose is exempt from the 100–115 rule entirely; rely on editor soft-wrap.
-- **English only in code, config, and commit messages.** All Python code, comments, identifiers, `pyproject.toml` comments, CI files, and commit messages must be English. The same rule that `evermem` enforces with a pre-commit hook applies here. Content under `docs/` must be English as well.
+- **English only in code, config, and commit messages.** All Python code, comments, identifiers, `pyproject.toml` comments, CI files, and commit messages must be English. The same rule that EverOS enforces with a pre-commit hook applies here. Content under `docs/` must be English as well.
 
 ---
 
@@ -244,12 +244,12 @@ Follow this checklist when introducing a new extractor / ranker / clusterer:
 
 Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (per ADR 004 — providers are *nested* in `llm`, not a separate distribution; the convention follows litellm / instructor / dspy / llama-index).
 
-1. Create `everalgo/llm/providers/<provider>/__init__.py` and `client.py`.
+1. Create `everalgo/llm/providers/<provider>.py`.
 2. Implement the `LLMClient` Protocol from `everalgo.llm.protocols` — a single `async def chat(...) -> ChatResponse` method (no sync variant, no streaming).
 3. Wire the provider into `everalgo/llm/factory.py::build_client` (it currently constructs `OpenAICompatClient` directly; add provider selection there — there is no separate `routing.py`).
-4. Map provider-native exceptions onto the canonical `LLMError` subclass tree.
+4. Map provider-native exceptions onto `LLMError` (chain via `raise LLMError(...) from original`).
 5. Add per-provider prompts only if the provider needs special formatting (rare — most providers are OpenAI-compatible).
-6. Add tests under `packages/everalgo-core/tests/llm/providers/<provider>/`. **No mocks at the HTTP layer** when a real key is available in CI; otherwise use `respx` to record fixtures.
+6. Add tests under `packages/everalgo-core/tests/llm/providers/test_<provider>.py`. **No mocks at the HTTP layer** when a real key is available in CI; otherwise use `respx` to record fixtures.
 7. Update `docs/concepts/architecture.md` and `AGENTS.md` if the public surface changes.
 
 ---
@@ -270,7 +270,7 @@ Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (pe
 | Architecture (definitive) | [`docs/concepts/architecture.md`](docs/concepts/architecture.md) |
 | High-level architecture notes | [`docs/concepts/`](docs/concepts/) |
 | Runnable operator examples | [`examples/`](examples/) — use `FakeLLMClient`, no API key needed |
-| Source of `evermem` contract | Confluence (internal) |
+| Source of EverOS contract | Confluence (internal) |
 | uv workspace concepts | https://docs.astral.sh/uv/concepts/projects/workspaces/ |
 | PEP 420 namespace packages | https://peps.python.org/pep-0420/ |
 | PEP 8 (style) / 257 (docstrings) / 484 (type hints) | https://peps.python.org/ |

@@ -92,5 +92,6 @@ Coordinated release-readiness baseline across the seven published distributions.
 - **`TextMessage` type** — merged into `ChatMessage` with multimodal `content: str | list[ContentBlock]`.
 - **Dead `_conversation_item_adapter`** from `agent_memory/case.py`.
 
-[0.2.0]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
-[0.1.0]: https://github.com/EverMind-AI/EverAlgo/compare/main...HEAD
+[everalgo-rank/0.3.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.3.0
+[0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-core/v0.2.0
+[0.1.0]: https://github.com/EverMind-AI/EverAlgo/tree/everalgo-core/v0.2.0

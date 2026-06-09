@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks through a complete user-memory pipeline end-to-end — boundary detection, four extractors, clustering, and profile building — in about 5 minutes.
+This guide walks through a complete user-memory pipeline end-to-end — boundary detection, four extractors, and profile building — in about 5 minutes.
 No API key is needed: all LLM calls are handled by `FakeLLMClient`.
 
 ---
@@ -11,7 +11,7 @@ No API key is needed: all LLM calls are handled by `FakeLLMClient`.
 pip install everalgo-user-memory
 ```
 
-This pulls `everalgo-core`, `everalgo-boundary`, and `everalgo-clustering` automatically.
+This pulls `everalgo-core` and `everalgo-boundary` automatically.
 
 For the monorepo development install, see [Installation](installation.md).
 
@@ -184,10 +184,10 @@ The `llm=` argument is bound at construction time. There is no global default �
 
 ### Two access paths, same class
 
-Every operator can be imported via the **product path** (what evermem uses) or the **physical path** (what algorithm engineers use to iterate on specific modules):
+Every operator can be imported via the **product path** (what EverOS uses) or the **physical path** (what algorithm engineers use to iterate on specific modules):
 
 ```python
-# Product path — follow evermem contracts
+# Product path — follow EverOS contracts
 from everalgo.user_memory import BoundaryDetector
 
 # Physical path — edit boundary logic, prompt, tokenize
@@ -202,5 +202,5 @@ Both import the same class.
 
 - **Architecture deep-dive** → [concepts/architecture.md](concepts/architecture.md)
 - **Stateless design rationale** → [concepts/stateless-design.md](concepts/stateless-design.md)
-- **Full example scripts** → [`examples/`](../examples/) (01 through 06)
+- **Full example scripts** → [`examples/`](../examples/) (01 through 07)
 - **API index per package** → [api/README.md](api/README.md)

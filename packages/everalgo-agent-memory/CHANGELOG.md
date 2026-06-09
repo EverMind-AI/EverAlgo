@@ -14,7 +14,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - `AgentBoundaryDetector`: facade class that filters a `list[ConversationItem]` to only tool-call-carrying turns, calls `everalgo.boundary.detect_boundaries` on the result, then remaps indices back to the original sequence.
 - `AgentCaseExtractor`: 11-step pipeline — heuristic skip check, tool-call-round counting, message trimming / pre-compression, `AgentCase` extraction via LLM. Accepts `llm=` at construction time.
-- `AgentSkillExtractor`: add / update / retire operations with `cluster_id` binding; accepts `llm=` at construction time. `SkillConfig` pydantic model exposes maturity and retire thresholds.
+- `AgentSkillExtractor`: add / update / retire operations with `cluster_id` binding; accepts `llm=` at construction time. Configuration is handled via `_SkillCfg` (internal dataclass, not public API); maturity and retire thresholds are passed as per-call kwargs.
 - English prompts for case and skill extraction under `agent_memory/prompts/en/`.
 
 ### Changed

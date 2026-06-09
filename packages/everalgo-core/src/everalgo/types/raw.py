@@ -1,7 +1,7 @@
 """Raw input data contracts — pre-boundary inputs to EverAlgo.
 
 EverAlgo is a stateless algorithm library: it never reads the filesystem,
-never fetches URLs. Callers must hydrate raw bytes upstream (in evermem or
+never fetches URLs. Callers must hydrate raw bytes upstream (in EverOS or
 the application layer) and hand them to the algorithm operators via
 ``RawFile.content``.
 """

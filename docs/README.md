@@ -12,6 +12,9 @@
 | [concepts/architecture.md](concepts/architecture.md) | High-level architecture, subpackage layout, naming, LLM injection |
 | [concepts/stateless-design.md](concepts/stateless-design.md) | Why operators are pure functions and what that means for callers |
 | [concepts/async-sync-bridge.md](concepts/async-sync-bridge.md) | The `a`-prefix convention and the sync bridge |
+| [concepts/stage1-boundary-detection-flow.md](concepts/stage1-boundary-detection-flow.md) | Stage 1 boundary detection flow |
+| [concepts/stage3-agentic-retrieval-flow.md](concepts/stage3-agentic-retrieval-flow.md) | Stage 3 agentic retrieval flow |
+| [releasing.md](releasing.md) | Release process and checklist |
 | [api/README.md](api/README.md) | Index linking to each package README and the generated API reference |
 
 ## Diátaxis map
@@ -20,5 +23,5 @@
 Tutorials  →  getting-started.md
 Reference  →  api/README.md  +  packages/*/README.md
 Concepts   →  concepts/
-How-to     →  (see AGENTS.md §7–§8 for operator and provider checklists)
+How-to     →  releasing.md  +  (see AGENTS.md §7–§8 for operator and provider checklists)
 ```
