@@ -4,9 +4,9 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![PyPI - everalgo-core](https://img.shields.io/pypi/v/everalgo-core)](https://pypi.org/project/everalgo-core/)
 
-EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, storage-free, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in evermem.
+EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, storage-free, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in EverOS.
 
-## Why split EverAlgo from evermem?
+## Why split EverAlgo from EverOS?
 
 - **Algorithm engineers iterate fast.** EverAlgo is the algorithm team's home base — every change to extraction strategies, prompts, fusion math, and ranker weights happens here without going through service-layer ceremony.
 - **Pure functions, easy to reason about.** No DB, no filesystem, no business state. All operators are plain in-memory transforms with explicit input / output types.
@@ -24,7 +24,7 @@ This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespac
 | [`everalgo-boundary`](packages/everalgo-boundary/) | `detect_boundaries` + `DetectionResult` + token helpers |
 | [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
 | [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank toolkit |
-| [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (EXPERIMENTAL — stub) |
+| [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (image, audio, PDF, HTML, email, office, URL; video deferred) |
 | [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
 | [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCase` / `AgentSkill` extractors |
 | [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeMemory` extractor (NOT YET IMPLEMENTED — not published) |
@@ -128,7 +128,7 @@ pip install everalgo-clustering     # pulls core
 
 ## Status & known limitations
 
-Seven of the eight distributions are published on PyPI at `0.1.x`; `everalgo-knowledge` is intentionally **not published** (namespace reserved only). Three operators are **unimplemented placeholders that raise `NotImplementedError`** — they are deliberately kept out of the public `__all__` (import the submodule directly if you want the reserved stub) and must not be relied on yet:
+Seven of the eight distributions are published on PyPI (most at `0.2.0`, `everalgo-rank` at `0.3.0`); `everalgo-knowledge` is intentionally **not published** (namespace reserved only). Three operators are **unimplemented placeholders that raise `NotImplementedError`** — they are deliberately kept out of the public `__all__` (import the submodule directly if you want the reserved stub) and must not be relied on yet:
 
 | Placeholder | Reachable at | Status |
 |---|---|---|
@@ -179,7 +179,7 @@ Steps for releasing `everalgo-clustering v0.2.0`:
    git push origin everalgo-clustering/v0.2.0
    ```
 
-6. **Publish to PyPI.** _Current state (0.1.x): **manual**_ — run `uv build --package everalgo-<name>` then `uv publish` per distribution; see the [PyPA publishing guide](https://packaging.python.org/en/latest/tutorials/packaging-projects/) for the underlying steps. _Planned (post-0.1.x):_ a `.gitlab-ci.yml` publish stage will trigger on `<dist>/v<semver>` tag push using [PyPI Trusted Publishers](https://docs.pypi.org/trusted-publishers/) (OIDC, no long-lived tokens).
+6. **Publish to PyPI.** The `.gitlab-ci.yml` `publish` stage triggers automatically on `<dist>/v<semver>` tag push using [PyPI Trusted Publishers](https://docs.pypi.org/trusted-publishers/) (GitLab OIDC, no long-lived tokens). See the CI file for prerequisites and mechanism details.
 
 Tag format: `<dist-name>/v<semver>` — e.g. `everalgo-core/v0.1.0`, `everalgo-rank/v0.2.0`.
 

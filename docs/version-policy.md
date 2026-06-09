@@ -22,8 +22,8 @@ Dependencies between distributions use **loose constraints** (a lower bound plus
 
 ```toml
 # In everalgo-user-memory/pyproject.toml
-everalgo-core>=0.1.0,<2.0.0
-everalgo-boundary>=0.1.0,<2.0.0
+everalgo-core>=0.2.0,<2.0.0
+everalgo-boundary>=0.2.0,<2.0.0
 ```
 
 The upper bound spans the entire next major version so diamond-dependency resolution works without manual coordination across distributions.

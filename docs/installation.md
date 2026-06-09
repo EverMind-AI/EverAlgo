@@ -13,7 +13,7 @@ Install only the distribution that covers your use case.
 Each distribution automatically pulls its required dependencies.
 
 ```bash
-# User-memory pipeline: boundary detection + 4 extractors + clustering
+# User-memory pipeline: boundary detection + 4 extractors
 pip install everalgo-user-memory
 
 # Agent-memory pipeline: case and skill extractors
@@ -68,17 +68,11 @@ uv sync --package everalgo-clustering
 
 ---
 
-## Optional LLM provider dependencies
+## LLM provider dependencies
 
-Each provider backend is gated behind an optional extras group so you only pull the SDK you actually use.
+`openai` is a mandatory dependency of `everalgo-core` — it is installed automatically when you install any EverAlgo distribution. Only the OpenAI-compatible provider (`OpenAICompatClient`) is currently implemented; it works with any OpenAI-API-compatible endpoint (OpenAI, OpenRouter, vLLM, DeepSeek, Azure).
 
-| Provider | Install command |
-|---|---|
-| OpenAI-compatible (OpenAI, OpenRouter, vLLM, DeepSeek, Azure) | `pip install "everalgo-core[openai]"` |
-| Anthropic | `pip install "everalgo-core[anthropic]"` |
-| Amazon Bedrock | `pip install "everalgo-core[bedrock]"` |
-
-`everalgo.testing.fake_llm.FakeLLMClient` is always available without any LLM provider installed — use it for local development and tests.
+`everalgo.testing.fake_llm.FakeLLMClient` is always available without any real API key — use it for local development and tests.
 
 ---
 

@@ -1,19 +1,19 @@
 # Architecture
 
-This document describes EverAlgo's structure, the two algorithm axes, the subpackage layout, naming conventions, LLM injection, and the boundary between EverAlgo and its caller (evermem).
+This document describes EverAlgo's structure, the two algorithm axes, the subpackage layout, naming conventions, LLM injection, and the boundary between EverAlgo and its caller (EverOS).
 
 ---
 
-## 1. EverAlgo and evermem
+## 1. EverAlgo and EverOS
 
-**evermem** is the AI memory management system: it owns the API gateway, database persistence, orchestration, concurrency control, scene routing (which algorithm step uses which model), and the memory lifecycle.
+**EverOS** is the AI memory management system: it owns the API gateway, database persistence, orchestration, concurrency control, scene routing (which algorithm step uses which model), and the memory lifecycle.
 
-**EverAlgo** is the algorithm library that evermem depends on.
+**EverAlgo** is the algorithm library that EverOS depends on.
 It is stateless and has no knowledge of storage, deployment topology, or scene routing.
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  evermem — AI memory management system           │
+│  EverOS — AI memory management system            │
 │  API gateway / persistence / orchestration       │
 │  concurrency / scene routing / lifecycle         │
 └────────────────┬─────────────────────────────────┘
@@ -103,9 +103,9 @@ Sibling distributions at the same layer do not depend on each other (e.g. `user-
 
 | Subpackage | Role |
 |---|---|
-| `boundary` | MemCell boundary detection (chat / workspace / agent) + shared `_tokenize` / `_force_split` |
+| `boundary` | MemCell boundary detection (chat / workspace / agent) |
 | `clustering` | `cluster_by_geometry` / `cluster_by_llm` operating on caller-owned `list[Cluster]` |
-| `rank` | 4 business facades (`episodic` / `profile` / `case` / `skill`) + algorithm tools (`fusion` / `weight` / `rerank`) |
+| `rank` | 4 retrieval strategies (`hybrid` / `agentic` / `cluster` / `maxsim`) + 4 business facades (`episodic` / `profile` / `case` / `skill`) + algorithm tools (`fusion` / `weight` / `rerank`) |
 | `parser` | Multimodal raw-file → `ParsedContent` (OCR, ASR, document layout, URL fetch) |
 
 **Infrastructure subpackages** (all in `everalgo-core`):
@@ -126,7 +126,7 @@ The public product API is expressed through `__init__.py` re-exports.
 Both paths resolve to the same class:
 
 ```python
-# Product path — used by evermem and external callers
+# Product path — used by EverOS and external callers
 from everalgo.user_memory import BoundaryDetector, EpisodeExtractor
 
 # Physical path — used by algorithm engineers iterating on boundary logic
@@ -167,7 +167,7 @@ extractor = EpisodeExtractor(llm=client)
 episode = await extractor.aextract(memcell, sender_id="u_alice")
 ```
 
-EverAlgo has **no scene concept** — it does not know which algorithm step should use which model. That mapping lives in evermem's scene router; evermem constructs and injects the appropriate client per operator.
+EverAlgo has **no scene concept** — it does not know which algorithm step should use which model. That mapping lives in EverOS's scene router; EverOS constructs and injects the appropriate client per operator.
 
 ---
 

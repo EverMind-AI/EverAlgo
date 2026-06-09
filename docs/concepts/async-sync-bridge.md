@@ -18,7 +18,7 @@ episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alic
 
 # ✅ Correct — sync pure-compute method, no await
 merged  = cluster_by_geometry(new_cluster, existing_clusters)
-score   = rank.fusion.rrf(vec_hits, keyword_hits)
+fused   = rank.fusion.rrf(vec_hits, keyword_hits)
 n       = boundary._tokenize.count_tokens(text)
 ```
 

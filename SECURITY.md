@@ -7,7 +7,7 @@ namespace. Security fixes are applied to the latest released version of each dis
 
 | Distribution | Supported |
 |---|---|
-| `everalgo-*` (latest `0.1.x` release of each) | ✅ |
+| `everalgo-*` (latest release of each) | ✅ |
 | Older pre-releases / yanked versions | ❌ |
 
 ## Reporting a vulnerability
@@ -29,4 +29,4 @@ we will credit reporters who wish to be acknowledged.
 EverAlgo is a **stateless algorithm library** — it does not connect to databases, read or write
 the filesystem, or manage credentials. The caller injects all I/O (LLM clients, storage) through
 the `LLMClient` / `RetrieveFn` / `RerankFn` interfaces. Vulnerabilities in caller-supplied clients
-or in the orchestration layer (e.g. `evermem`) are out of scope for this repository.
+or in the orchestration layer (e.g. `everos`) are out of scope for this repository.

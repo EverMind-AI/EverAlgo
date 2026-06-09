@@ -23,7 +23,7 @@ Serialization to/from a storage system is always the caller's responsibility.
 
 ## Why this matters for the caller
 
-Because EverAlgo is stateless, the caller (evermem or any other orchestrator) retains full control:
+Because EverAlgo is stateless, the caller (EverOS or any other orchestrator) retains full control:
 
 - **When to call.** The pipeline can fan out steps in parallel or run them sequentially — EverAlgo imposes no ordering constraints.
 - **Which storage backend to use.** MongoDB, Redis, a local file, an in-memory dict for tests — the operator does not care.

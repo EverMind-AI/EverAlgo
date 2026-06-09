@@ -22,7 +22,7 @@ pip install everalgo-rank
 | `FusionMode` | Literal type: `"rrf"` / `"lr"` / `"vector_anchored"` |
 | `DEFAULT_RANK_CONFIG` | `RankConfig()` with defaults (`fusion_mode="rrf"`, `rrf_k=60`) |
 | `arank` / `rank` | Top-level async / sync dispatch — routes to the registered ranker by `RankInput.memory_type` |
-| `arerank` / `rerank` | Low-level LLM rerank step; used by the ranker facades internally |
+| `arerank` / `rerank` | Low-level LLM rerank step (not top-level: import from `everalgo.rank.rerank`) |
 
 ## Quick start
 

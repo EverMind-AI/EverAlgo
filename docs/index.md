@@ -1,9 +1,9 @@
 # EverAlgo
 
-EverAlgo is the **algorithm library** for memory extraction and ranking used by [evermem](https://github.com/EverMind-AI/evermem), EverMind's open-source AI memory framework.
+EverAlgo is the **algorithm library** for memory extraction and ranking used by [EverOS](https://github.com/EverMind-AI/everos), EverMind's open-source AI memory framework.
 
 It is **stateless and storage-free**: every operator takes in-memory data structures and returns in-memory data structures.
-No database connections, no filesystem reads, no business-state ownership — those responsibilities belong to evermem, the orchestration layer that calls EverAlgo.
+No database connections, no filesystem reads, no business-state ownership — those responsibilities belong to EverOS, the orchestration layer that calls EverAlgo.
 
 ---
 
@@ -37,7 +37,7 @@ merged = rank.fusion.rrf(vec_hits, keyword_hits)
 
 - Connect to any database or filesystem
 - Own retry logic, multi-key rotation, or provider fallback
-- Route requests to different LLM models by business scene (that is evermem's `SceneRouter`)
+- Route requests to different LLM models by business scene (that is EverOS's `SceneRouter`)
 - Compute embeddings (the caller computes and passes vectors in)
 
 ---
@@ -50,9 +50,9 @@ Install only what your use case needs:
 | Distribution | Purpose |
 |---|---|
 | `everalgo-core` | Types, LLM client + providers, prompt validators, testing helpers |
-| `everalgo-boundary` | `MemCell` extractors (chat / workspace / agent) + tokenize / split utilities |
+| `everalgo-boundary` | `MemCell` boundary detection (chat / workspace / agent) |
 | `everalgo-clustering` | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
-| `everalgo-rank` | 4 rankers (episodic / profile / case / skill) + fusion / weight / rerank tools |
+| `everalgo-rank` | 4 retrieval strategies (hybrid / agentic / cluster / maxsim) + 4 business rankers (episodic / profile / case / skill) + fusion / weight / rerank tools |
 | `everalgo-parser` | Multimodal raw-file → `ParsedContent` |
 | `everalgo-user-memory` | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
 | `everalgo-agent-memory` | `AgentCase` / `AgentSkill` extractors |
@@ -78,7 +78,7 @@ Install only what your use case needs:
 ## Quick install
 
 ```bash
-# Full user-memory pipeline (boundary + 4 extractors + clustering)
+# Full user-memory pipeline (boundary + 4 extractors)
 pip install everalgo-user-memory
 
 # Agent memory

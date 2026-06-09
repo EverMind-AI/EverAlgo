@@ -12,7 +12,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `detect_boundaries(messages, *, llm, tail) -> DetectionResult`: async public entry point that splits a `list[ChatMessage]` into `MemCell` slices using a single LLM call; no retry.
+- `detect_boundaries(messages, *, llm, is_final, prompt, hard_token_limit, hard_msg_limit) -> DetectionResult`: async public entry point that splits a `list[ChatMessage]` into `MemCell` slices using a single LLM call; no retry.
 - `DetectionResult` `NamedTuple`: `(cells: list[MemCell], tail: list[ChatMessage])` where `tail` is the unconsumed carry-forward window.
 - `count_tokens(text: str) -> int`: token count using OpenAI `o200k_base` encoding via `tiktoken`.
 - `force_split(text: str, *, max_tokens: int) -> list[str]`: token-bounded chunking for caller-side prompt fitting.
