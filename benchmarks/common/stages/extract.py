@@ -30,6 +30,7 @@ from benchmarks.common.stages.types import StageStats
 from everalgo.clustering.algorithm import cluster_by_geometry
 from everalgo.clustering.state import Cluster
 from everalgo.llm.config import LLMConfig
+from everalgo.llm.errors import LLMError
 from everalgo.llm.format import format_atomic_fact_time
 from everalgo.llm.parse import retry_on_json_parse_failure
 from everalgo.llm.providers.openai_compat import OpenAICompatClient
@@ -48,6 +49,8 @@ if TYPE_CHECKING:
     from benchmarks.common.stages.types import StageContext
 
 logger = logging.getLogger(__name__)
+
+_RETRYABLE_EXC = (json.JSONDecodeError, ValueError, LLMError)
 
 
 def _build_llm(ctx: StageContext) -> OpenAICompatClient:
@@ -156,7 +159,7 @@ async def _extract_memcell_data(
         completion tokens). Token counts are tiktoken approximations.
     """
 
-    @retry_on_json_parse_failure(max_retries=max_attempts)
+    @retry_on_json_parse_failure(max_retries=max_attempts, retryable_exc=_RETRYABLE_EXC)
     async def _do_extract_episode() -> Any:
         return await EpisodeExtractor(llm=llm).aextract(mc, sender_id=None)
 
@@ -165,7 +168,7 @@ async def _extract_memcell_data(
     if not episode_body:
         raise ValueError(f"EpisodeExtractor returned empty episode body (mc_idx={mc_idx})")
 
-    @retry_on_json_parse_failure(max_retries=max_attempts)
+    @retry_on_json_parse_failure(max_retries=max_attempts, retryable_exc=_RETRYABLE_EXC)
     async def _do_extract_facts() -> list[AtomicFact]:
         # Use EVENT_LOG_PROMPT (event_log schema key) rather than the algo default
         # ATOMIC_FACT_FROM_TEXT_PROMPT_EN (atomic_facts schema key). Both prompts share the same
@@ -257,7 +260,7 @@ async def _detect_all_boundaries(
     """
     detector = BoundaryDetector(llm=llm)
 
-    @retry_on_json_parse_failure(max_retries=max_attempts)
+    @retry_on_json_parse_failure(max_retries=max_attempts, retryable_exc=_RETRYABLE_EXC)
     async def _step(
         hist: list[EverAlgoMemMessage],
         m: EverAlgoMemMessage,
