@@ -14,7 +14,7 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 | `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `rank.episodic`, `rank.profile`, `rank.case`, `rank.skill`, `rank.fusion`, `rank.weight`, `rank.rerank` |
 | `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `ParsedContent`, image / audio / document / URL parsers (video deferred) |
 | `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor` |
-| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `AgentBoundaryDetector`, `AgentCaseExtractor`, `AgentSkillExtractor` |
+| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `AgentBoundaryDetector`, `AgentCaseExtractor`, `AgentSkillExtractor`, `AgentProfileExtractor` |
 | `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `KnowledgeMemory` (NOT YET IMPLEMENTED — not published) |
 
 ---
@@ -36,6 +36,9 @@ from everalgo.types import (
     Profile,            # structured user profile — owner_id, summary, timestamp; extra fields via extra="allow"
     AgentCase,          # distilled agent trajectory — id, timestamp, task_intent, approach, quality_score, key_insight
     AgentSkill,         # aggregated skill — id, cluster_id (caller-stamped), name, description, content, confidence
+    AgentProfilePatch,  # one section-level SOUL.md / AGENTS.md edit — file, action, section, old_text, new_text
+    AgentProfileUpdate, # AgentProfileExtractor result — patches, soul_diff / agents_diff, new_*_md, signals
+    AgentProfileSignal, # below-gate implicit signal — caller persists and feeds back as pending_signals
     KnowledgeMemory,    # extracted knowledge from a file (EXPERIMENTAL)
     RankInput,          # multi-route recall candidates + cross-memory linkage
     RankOutput,         # ranked memory list

@@ -8,6 +8,9 @@ import logging
 
 from everalgo.types.agent import (
     AgentCase,
+    AgentProfilePatch,
+    AgentProfileSignal,
+    AgentProfileUpdate,
     AgentSkill,
     ToolCall,
     ToolCallFunction,
@@ -47,6 +50,9 @@ __all__ = [
     "SUPPORTED_EXTENSIONS",
     "SUPPORTED_MIMES",
     "AgentCase",
+    "AgentProfilePatch",
+    "AgentProfileSignal",
+    "AgentProfileUpdate",
     "AgentSkill",
     "AtomicFact",
     "Candidate",
