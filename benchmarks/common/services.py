@@ -35,19 +35,18 @@ async def _retry_with_backoff[T](
 ) -> T:
     """Exponential backoff retry: 1s, 2s, 4s.
 
-    Retries on httpx.HTTPError (network) and httpx.HTTPStatusError (5xx).
-    Lets non-retryable errors (4xx) propagate immediately.
+    Retries on httpx.HTTPStatusError (5xx) and httpx.TransportError (network resets,
+    timeouts, protocol errors). Lets non-retryable errors (4xx) propagate immediately.
     """
     last_exc: Exception | None = None
     for attempt in range(max_retries):
         try:
             return await fn()
         except httpx.HTTPStatusError as exc:
-            # Only retry server errors (5xx); 4xx is caller's fault, fail fast
             if exc.response.status_code < 500:
                 raise
             last_exc = exc
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+        except httpx.TransportError as exc:
             last_exc = exc
         if attempt < max_retries - 1:
             await asyncio.sleep(base_delay * (2**attempt))
