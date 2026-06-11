@@ -1,6 +1,6 @@
 # everalgo-agent-memory
 
-Agent-side memory products for EverAlgo — `AgentCaseExtractor` distils an agent trajectory `MemCell` into one `AgentCase`; `AgentSkillExtractor` maintains a cluster's reusable skill set from accumulated cases. `AgentBoundaryDetector` handles boundary detection over mixed `ConversationItem` trajectories (chat + tool calls).
+Agent-side memory products for EverAlgo — `AgentCaseExtractor` distils an agent trajectory `MemCell` into one `AgentCase`; `AgentSkillExtractor` maintains a cluster's reusable skill set from accumulated cases; `AgentProfileExtractor` proposes precision-first section-level patches to the agent's injected config files (SOUL.md / AGENTS.md). `AgentBoundaryDetector` handles boundary detection over mixed `ConversationItem` trajectories (chat + tool calls).
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -18,6 +18,7 @@ pip install everalgo-agent-memory
 | `AgentBoundaryDetector` | Boundary detection on agent trajectories (filter → detect → remap for mixed `ConversationItem` lists) |
 | `AgentCaseExtractor` | Distils one agent-trajectory `MemCell` into `[] \| [AgentCase]` (11-step pipeline) |
 | `AgentSkillExtractor` | Aggregates one new `AgentCase` into incremental skill operations for a cluster; returns add / update / retire entries |
+| `AgentProfileExtractor` | Screens one trajectory `MemCell` for durable agent-config signals (four-gate, default noop) and returns validated section-level SOUL.md / AGENTS.md patches + unified diffs |
 
 ## Quick start
 
@@ -99,6 +100,22 @@ class AgentSkillExtractor:
         maturity_trivial_change_ratio: float = 0.2,
         maturity_reeval_change_ratio: float = 0.4,
     ) -> list[AgentSkill]: ...
+
+class AgentProfileExtractor:
+    def __init__(
+        self, *, llm: LLMClient,
+        min_recurrence: int = 2,      # implicit signals must recur this many times across sessions (gate 3)
+        max_file_tokens: int = 8000,  # anti-bloat budget for each patched file
+    ) -> None: ...
+    async def aextract(
+        self,
+        memcell: MemCell,
+        *,
+        soul_md: str,
+        agents_md: str,
+        pending_signals: Sequence[AgentProfileSignal] = (),
+        prompt: str | None = None,
+    ) -> AgentProfileUpdate: ...
 ```
 
 All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`.
@@ -114,6 +131,14 @@ Pass the new `AgentCase` and the pre-filtered `existing_relevant_skills` (e.g. t
 Cases with `quality_score < skip_quality_threshold` (default 0.2) short-circuit to `[]` without calling the LLM.
 
 `AgentSkill.cluster_id` is always `""` on extraction — the caller stamps the cluster identity after persisting.
+
+### AgentProfileExtractor contract
+
+SOUL.md / AGENTS.md are injected into every future system prompt and are self-reinforcing, so the operator is precision-first: it defaults to noop and a candidate signal must pass all four gates (persistence, directedness, evidence strength, novelty) before any patch is proposed. Routing follows one line: SOUL = who the agent is and how it speaks; AGENTS = global rules the agent must obey when acting; everything else (user facts, future intents, one-off task parameters, task solutions) is rejected at the gate. A single LLM call emits each candidate's gate verdicts together with its proposed patch; the prompt sees the full chat view (user + assistant text turns, tool traffic excluded) for context, but config authority stays user-only — every candidate must quote the user verbatim and the quote is re-checked in code against user messages alone. The gates are re-enforced in code.
+
+The returned `AgentProfileUpdate` carries section-level `patches` (never whole-file rewrites — human edits are preserved), `soul_diff` / `agents_diff` unified diffs, and `new_soul_md` / `new_agents_md` with all patches applied. Patches with `is_conflict=True` override an existing rule (the user changed their mind); they are applied like any other patch, and the flag lets the caller route them through a user-confirmation step or surface them in debugging. `signals` are implicit below-gate observations: persist them and pass them back as `pending_signals` on later runs so recurring corrections accumulate toward `min_recurrence`.
+
+Every LLM proposal is re-validated in code: the evidence quote must appear verbatim in the user messages, a `modify` `old_text` must match the file exactly once, an `add` must not duplicate existing content, and a patch that would push a file past `max_file_tokens` is dropped.
 
 ### Customising prompts
 

@@ -41,7 +41,7 @@ everalgo/                              # monorepo, uv virtual workspace
 │   ├── everalgo-rank/                 # 4 rankers + fusion / weight / rerank toolkit
 │   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (EXPERIMENTAL stub)
 │   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile
-│   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill
+│   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill / AgentProfile
 │   └── everalgo-knowledge/            # KnowledgeMemory extractor (NOT YET IMPLEMENTED — not published)
 ├── benchmarks/                        # internal LoCoMo benchmark suite ([tool.uv] package = false, not published)
 └── tests/
