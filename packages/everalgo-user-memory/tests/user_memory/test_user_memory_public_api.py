@@ -4,27 +4,29 @@ import everalgo.user_memory
 from everalgo.testing.fake_llm import FakeLLMClient
 
 
-def test_six_symbols_exported() -> None:
-    """user_memory exposes 4 user-memory Extractors + BoundaryDetector + DetectionResult re-export."""
+def test_seven_symbols_exported() -> None:
+    """user_memory exposes 4 Extractors + EpisodeReflector + BoundaryDetector + DetectionResult re-export."""
     for name in (
         "AtomicFactExtractor",
         "BoundaryDetector",
         "DetectionResult",
         "EpisodeExtractor",
+        "EpisodeReflector",
         "ForesightExtractor",
         "ProfileExtractor",
     ):
         assert hasattr(everalgo.user_memory, name)
 
 
-def test_dunder_all_lists_six_symbols() -> None:
-    """__all__ exposes exactly 6 symbols (4 Extractors + BoundaryDetector + DetectionResult)."""
+def test_dunder_all_lists_seven_symbols() -> None:
+    """__all__ exposes exactly 7 symbols (4 Extractors + EpisodeReflector + BoundaryDetector + DetectionResult)."""
     assert sorted(everalgo.user_memory.__all__) == sorted(
         [
             "AtomicFactExtractor",
             "BoundaryDetector",
             "DetectionResult",
             "EpisodeExtractor",
+            "EpisodeReflector",
             "ForesightExtractor",
             "ProfileExtractor",
         ]
@@ -38,10 +40,11 @@ def test_workspace_extractor_is_not_re_exported() -> None:
 
 
 def test_user_memory_extractors_instantiable_with_llm() -> None:
-    """All 4 user-memory Extractors accept a required llm= keyword argument at construction."""
+    """All 4 Extractors + EpisodeReflector accept a required llm= keyword argument at construction."""
     from everalgo.user_memory import (
         AtomicFactExtractor,
         EpisodeExtractor,
+        EpisodeReflector,
         ForesightExtractor,
         ProfileExtractor,
     )
@@ -49,5 +52,6 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
     fake = FakeLLMClient(responses=[])
     assert AtomicFactExtractor(llm=fake).__class__.__name__ == "AtomicFactExtractor"
     assert EpisodeExtractor(llm=fake).__class__.__name__ == "EpisodeExtractor"
+    assert EpisodeReflector(llm=fake).__class__.__name__ == "EpisodeReflector"
     assert ForesightExtractor(llm=fake).__class__.__name__ == "ForesightExtractor"
     assert ProfileExtractor(llm=fake).__class__.__name__ == "ProfileExtractor"
