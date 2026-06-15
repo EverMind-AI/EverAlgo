@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 <!-- git-cliff-unreleased-end -->
 
+## [0.2.1] - 2026-06-15
+
+### Changed
+
+- **License relicensed from MIT to Apache-2.0** as part of the pre-open-source security audit.
+
 ## [0.2.0] - 2026-05-27
 
 > First archived changelog. Entries below accumulated since the initial `0.1.0` PyPI release (published manually, without a git tag or per-package changelog), so this `0.2.0` section also consolidates the previously-unarchived `0.1.0` surface.
@@ -74,5 +80,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `cairosvg >= 2.7.0` via `[svg]` extra.
 - System: LibreOffice (`soffice` on PATH) for Office document parsing.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.1...HEAD
+[0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.0...everalgo-parser/v0.2.1
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-parser/v0.2.0

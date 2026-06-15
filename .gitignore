@@ -57,3 +57,6 @@ local/
 # Claude Code session-local state (scheduled tasks, agent caches, locks)
 .claude/
 benchmarks/claudecode
+
+# Git worktrees (isolated workspaces)
+.worktrees/

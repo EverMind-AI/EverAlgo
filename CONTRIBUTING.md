@@ -25,6 +25,7 @@ uv run mypy . && uv run pyright      # both type-checkers (CI gate)
   `refactor/<topic>`.
 - **Commit messages: Gitmoji + Conventional Commits** — `<emoji> <type>(<scope>): <description>`.
   The MR title is load-bearing (it becomes the squash commit). See [`AGENTS.md`](AGENTS.md) §6.
+- **CHANGELOG: update `[Unreleased]` in every user-visible MR.** If your MR adds, changes, or removes user-visible behaviour, add a one-line entry to the affected package's `packages/everalgo-<dist>/CHANGELOG.md` under `## [Unreleased]`. See [`docs/releasing.md`](docs/releasing.md) for format.
 - **English only** in code, comments, configuration, and commit messages.
 - By contributing you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 

@@ -224,6 +224,8 @@ Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `bu
 
 **Squashing matters for per-distribution filtering.** `git cliff --include-path 'packages/everalgo-<name>/**'` filters commits by changed paths. Squash merges keep one commit = one MR = one scoped Conventional-Commit message, which is the unit git-cliff groups by.
 
+**CHANGELOG `[Unreleased]` entry is part of the MR.** Every MR that adds, changes, or removes user-visible behaviour must include a one-line entry in `packages/everalgo-<dist>/CHANGELOG.md` under `## [Unreleased]`. Written by the MR author (the person with the most context), not reconstructed at release time. See `docs/releasing.md` "Keeping `[Unreleased]` up to date" for format and scope rules.
+
 ---
 
 ## 7. Adding a New Algorithm Operator
@@ -236,7 +238,8 @@ Follow this checklist when introducing a new extractor / ranker / clusterer:
 4. **Re-export the public surface.** If the operator is part of the public API of its facade subpackage, add it to `<subpkg>/__init__.py`'s re-export block and `__all__`. See `docs/concepts/architecture.md` for the re-export pattern.
 5. **Wire dependencies.** If the new code requires a new third-party library, add it via `uv add --package everalgo-<dist> <library>`, which updates the right `pyproject.toml`.
 6. **Write tests.** Use `everalgo.testing.FakeLLMClient` to avoid real API calls; use `everalgo.testing.assert_*_shape` for structural memory checks.
-7. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`).
+7. **Update the CHANGELOG.** Add a one-line entry under `## [Unreleased]` in `packages/everalgo-<dist>/CHANGELOG.md` describing the new operator (subsection `### Added`). See `docs/releasing.md` for format.
+8. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`).
 
 ---
 
@@ -250,7 +253,8 @@ Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (pe
 4. Map provider-native exceptions onto `LLMError` (chain via `raise LLMError(...) from original`).
 5. Add per-provider prompts only if the provider needs special formatting (rare — most providers are OpenAI-compatible).
 6. Add tests under `packages/everalgo-core/tests/llm/providers/test_<provider>.py`. **No mocks at the HTTP layer** when a real key is available in CI; otherwise use `respx` to record fixtures.
-7. Update `docs/concepts/architecture.md` and `AGENTS.md` if the public surface changes.
+7. **Update the CHANGELOG.** Add an entry under `## [Unreleased]` in `packages/everalgo-core/CHANGELOG.md` (subsection `### Added`). See `docs/releasing.md` for format.
+8. Update `docs/concepts/architecture.md` and `AGENTS.md` if the public surface changes.
 
 ---
 
