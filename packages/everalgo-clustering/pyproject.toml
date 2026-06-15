@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-clustering"
-version = "0.2.0"
+version = "0.2.1"
 description = "EverAlgo clustering: cluster_by_geometry / cluster_by_llm functional operators with Cluster value object."
 requires-python = ">=3.12"
 license = "Apache-2.0"

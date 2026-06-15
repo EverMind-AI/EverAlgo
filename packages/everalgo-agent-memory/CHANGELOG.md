@@ -6,6 +6,17 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-15
+
+### Changed
+
+- **License relicensed from MIT to Apache-2.0** as part of the pre-open-source security audit.
+- Case filter tightened: exploration turns and user-correction signals now contribute to case boundary detection, reducing noise in extracted cases.
+
+### Added
+
+- `AgentProfileExtractor`: extract and update agent profiles (SOUL.md / AGENTS.md section-level updates). Supports INIT and UPDATE modes mirroring `ProfileExtractor`. Re-exported from `everalgo.agent_memory`.
+
 ## [0.2.0] - 2026-05-27
 
 > First archived changelog. Entries below accumulated since the initial `0.1.0` PyPI release (published manually, without a git tag or per-package changelog), so this `0.2.0` section also consolidates the previously-unarchived `0.1.0` surface.
@@ -27,5 +38,6 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.2.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.0...HEAD
+[0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.2.0...everalgo-agent-memory/v0.3.0
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-agent-memory/v0.2.0

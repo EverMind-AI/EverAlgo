@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-rank"
-version = "0.3.0"
+version = "0.3.1"
 description = "EverAlgo rank: 4 business-facing rankers (episodic / profile / case / skill) over a shared fusion / weight / rerank toolkit."
 requires-python = ">=3.12"
 license = "Apache-2.0"

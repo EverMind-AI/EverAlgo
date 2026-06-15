@@ -6,6 +6,16 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-15
+
+### Changed
+
+- **License relicensed from MIT to Apache-2.0** as part of the pre-open-source security audit.
+
+### Added
+
+- `EpisodeReflector`: merge N chronologically-ordered episodes into one accurate narrative. Two modes: INIT (full merge, `old_episode=None`) and UPDATE (incremental, `old_episode=Episode`). Uses OpenAI Structured Outputs via `response_format`. Re-exported from `everalgo.user_memory`.
+
 ## [0.2.0] - 2026-05-27
 
 > First archived changelog. Entries below accumulated since the initial `0.1.0` PyPI release (published manually, without a git tag or per-package changelog), so this `0.2.0` section also consolidates the previously-unarchived `0.1.0` surface.
@@ -28,5 +38,6 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.2.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.0...HEAD
+[0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.2.0...everalgo-user-memory/v0.3.0
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-user-memory/v0.2.0

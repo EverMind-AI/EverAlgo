@@ -10,18 +10,32 @@ Per-distribution changelogs are the source of truth. This file is a navigation i
 ## Distribution status
 
 The table tracks the current version declared in each `packages/everalgo-*/pyproject.toml`. Seven
-distributions release on the `0.2.0` line; `everalgo-knowledge` is a placeholder and is **not published**.
+distributions are published to PyPI; `everalgo-knowledge` is a placeholder and is **not published**.
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.2.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.2.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
-| `everalgo-clustering` | 0.2.0 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.3.0 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.2.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.2.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
-| `everalgo-parser` | 0.2.0 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
+| `everalgo-core` | 0.2.1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.2.1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
+| `everalgo-rank` | 0.3.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.3.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.3.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | — (not published) | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Coordinated patch + minor — 2026-06-15
+
+Seven distributions updated. All relicensed from MIT to Apache-2.0. Per-distribution detail in each package's CHANGELOG.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.2.1 | patch |
+| `everalgo-boundary` | 0.2.1 | patch |
+| `everalgo-clustering` | 0.2.1 | patch |
+| `everalgo-rank` | 0.3.1 | patch |
+| `everalgo-parser` | 0.2.1 | patch |
+| `everalgo-user-memory` | 0.3.0 | minor — `EpisodeReflector` |
+| `everalgo-agent-memory` | 0.3.0 | minor — `AgentProfileExtractor` + case filter |
 
 ## [everalgo-rank/0.3.0] - 2026-05-28
 

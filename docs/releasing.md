@@ -41,6 +41,20 @@ Done once per distribution by a PyPI project owner: add a GitLab Trusted Publish
 and the top-level `.gitlab-ci.yml`. `everalgo-knowledge` is deliberately **not** registered;
 its `pyproject.toml` carries the `Private :: Do Not Upload` classifier.
 
+## Keeping `[Unreleased]` up to date
+
+Every MR that adds, changes, or removes user-visible behaviour **must** include a one-line entry in the affected package's `## [Unreleased]` section (`packages/everalgo-<dist>/CHANGELOG.md`). This is part of the MR, not a separate task.
+
+**What counts as user-visible:** new public API, changed behaviour, removed API, bug fixes, performance changes, dependency changes. Internal refactors, test-only changes, and CI tweaks do not need an entry.
+
+**Format:** use the Keep a Changelog subsection that fits (`### Added`, `### Changed`, `### Fixed`, `### Removed`, `### Performance`). One line per change, written for the user who will read the release notes — describe impact, not commit mechanics.
+
+**Why this matters:** at release time, the `[Unreleased]` section is promoted to the new version section as-is. If it is empty, the release author must reconstruct the changelog from git history under time pressure, which produces worse release notes and slows down the release. The MR author is the person with the most context on what changed and why — they should write the entry.
+
+**AI assistants (Claude Code / Cursor / Copilot):** when you create an MR that touches files under `packages/everalgo-<dist>/`, check whether the change is user-visible. If so, append the appropriate entry to `packages/everalgo-<dist>/CHANGELOG.md` under `## [Unreleased]` before committing. Do not wait for the human to ask.
+
+---
+
 ## Default path — single-distribution bump
 
 Use this whenever a release touches only one distribution. The vast majority of releases

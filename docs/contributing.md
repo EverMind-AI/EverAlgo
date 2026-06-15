@@ -75,6 +75,16 @@ The **MR / PR title** is load-bearing: the primary GitLab repo squash-merges the
 
 ---
 
+## CHANGELOG
+
+Every MR that adds, changes, or removes **user-visible behaviour** must include a one-line entry in the affected package's `packages/everalgo-<dist>/CHANGELOG.md` under the `## [Unreleased]` section. Use the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) subsection that fits: `### Added`, `### Changed`, `### Fixed`, `### Removed`, or `### Performance`.
+
+Internal refactors, test-only changes, and CI tweaks do not need an entry.
+
+At release time, the `[Unreleased]` section is promoted to the new version header. Writing the entry in the MR — when the author has full context — produces better release notes than reconstructing from git history later. See [releasing.md](releasing.md) for the full policy.
+
+---
+
 ## Branching
 
 Work on short-lived branches off `main`:
@@ -101,7 +111,8 @@ In summary:
 3. Store prompt strings as module-level constants in `<subpkg>/prompts/en/<name>.py` (and `zh/` if applicable).
 4. Re-export the operator in `<subpkg>/__init__.py` and add it to `__all__`.
 5. Write tests using `FakeLLMClient` — no real network calls in default `pytest`.
-6. Run the full check suite before opening the MR / PR.
+6. Add a CHANGELOG entry under `## [Unreleased]` in `packages/everalgo-<dist>/CHANGELOG.md` (see [releasing.md](releasing.md)).
+7. Run the full check suite before opening the MR / PR.
 
 ---
 

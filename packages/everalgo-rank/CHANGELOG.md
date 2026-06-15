@@ -6,6 +6,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-15
+
+### Changed
+
+- Retrieval alignment: cluster selection changed from MaxSim scoring to first-hit scan; `cluster_base_candidates` default changed from 100 to None (no cap); embedding fallback order updated to prefer atomic-facts over episode-level embeddings.
+
 ## [0.3.0] - 2026-05-28
 
 ### Changed
@@ -70,7 +76,8 @@ result = await SkillRanker(llm=...).arank(
 
 - `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as EverOS's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.3.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.3.1...HEAD
+[0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.3.0...everalgo-rank/v0.3.1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.3.0
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.2.0
 [0.1.1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.1.1
