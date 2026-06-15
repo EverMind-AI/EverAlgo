@@ -433,7 +433,7 @@ wheels = [
 
 [[package]]
 name = "everalgo-agent-memory"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/everalgo-agent-memory" }
 dependencies = [
     { name = "everalgo-boundary" },

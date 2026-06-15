@@ -6,6 +6,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-15
+
+### Fixed
+
+- Raise `everalgo-core` dependency lower bound from `>=0.2.0` to `>=0.2.1`. `AgentProfileExtractor` imports `AgentProfilePatch` from `everalgo.types`, which was added in core 0.2.1; the previous floor allowed resolving core 0.2.0 where the type does not exist.
+
 ## [0.3.0] - 2026-06-15
 
 ### Changed
@@ -38,6 +44,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.1...HEAD
+[0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.0...everalgo-agent-memory/v0.3.1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.2.0...everalgo-agent-memory/v0.3.0
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-agent-memory/v0.2.0

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-agent-memory"
-version = "0.3.0"
+version = "0.3.1"
 description = "EverAlgo agent memory: AgentCase / AgentSkill extractors and AgentBoundaryDetector facade."
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -20,7 +20,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-  "everalgo-core>=0.2.0,<2.0.0",
+  "everalgo-core>=0.2.1,<2.0.0",
   "everalgo-boundary>=0.2.0,<2.0.0",
   "everalgo-clustering>=0.2.0,<2.0.0",
 ]
