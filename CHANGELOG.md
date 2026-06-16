@@ -20,7 +20,7 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-user-memory` | 0.3.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.3.1 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.1.0 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
 
 ## Coordinated minor — 2026-06-16
 
@@ -30,7 +30,7 @@ Three distributions updated. `everalgo-knowledge` is published to PyPI for the f
 |---|---|---|
 | `everalgo-core` | 0.3.0 | minor — `CategorySpec` type + `KnowledgeMemory.category_id` field |
 | `everalgo-rank` | 0.4.0 | minor — category-aware retrieval (`acategory_retrieve`) |
-| `everalgo-knowledge` | 0.1.0 | **first public release** — `KnowledgeExtractor` pipeline + `aclassify_category` |
+| `everalgo-knowledge` | 0.1.1 | **first public release** — `KnowledgeExtractor` pipeline + `aclassify_category` |
 
 ## Coordinated patch + minor — 2026-06-15
 
