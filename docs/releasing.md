@@ -149,6 +149,30 @@ d. **Dependency audit** — verify version floors and declared dependencies befo
    grep -rl 'everalgo-<dist>' packages/everalgo-*/pyproject.toml
    ```
 
+e. **Documentation sweep** — grep for stale references to the package's status, version, or
+   API surface across the entire repo. `README.md` ships inside the wheel, so stale text
+   lands on PyPI. `AGENTS.md` feeds AI coding assistants, so stale claims propagate into
+   generated code. The sweep must cover at least:
+
+   ```bash
+   # Find all docs that mention this distribution by name
+   grep -rn 'everalgo-<dist>\|everalgo.<subpkg>' \
+     AGENTS.md README.md docs/ packages/everalgo-<dist>/README.md \
+     --include='*.md' | grep -iE 'stub|placeholder|not.published|not.implemented|reserved|TODO'
+   ```
+
+   Common stale patterns to look for:
+   - "NOT YET IMPLEMENTED", "not published", "placeholder", "namespace reserved" — a
+     previously-stubbed distribution now ships real code.
+   - Version numbers in prose ("most at `0.2.0`") — often forgotten when the table is
+     updated but the paragraph is not.
+   - `__all__` or public-API lists in docs that do not reflect new exports.
+   - `pyproject.toml` classifiers (`Development Status :: 1 - Planning`,
+     `Private :: Do Not Upload`) that no longer apply.
+
+   This step is especially critical for **first-time publications** (stub → real) where
+   references to the old status are scattered across files written months earlier.
+
 ### 4. Sync the lockfile
 
 ```bash
@@ -279,6 +303,14 @@ so future maintainers can reason about tool migrations without rewriting policy.
   repo root would have to walk N package CHANGELOGs to reconstruct what shipped when. A
   one-paragraph root section per release preserves the timeline without duplicating
   detail.
+- **Why a documentation sweep is mandatory before tagging.** `README.md` is baked into the
+  sdist and wheel by hatchling; stale text ("not published", "NOT YET IMPLEMENTED") lands
+  on the PyPI project page and cannot be corrected without a new release. `AGENTS.md`
+  feeds AI coding assistants (Claude Code, Cursor, Copilot), so a stale claim like
+  "knowledge is a stub" propagates into every AI-generated answer. Historical example:
+  the `everalgo-knowledge` 0.1.0 release MR updated all 3 CHANGELOGs and the root table,
+  but missed 4 prose references to "NOT YET IMPLEMENTED — not published" in `AGENTS.md`,
+  `README.md` (×2), and `docs/api/README.md` — caught only at tag time.
 - **Why a dependency audit is mandatory before release.** The uv workspace installs all
   8 distributions into a shared venv, so a missing `[project.dependencies]` entry or a
   too-low version floor is invisible during development and CI — every symbol resolves

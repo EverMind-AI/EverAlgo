@@ -15,7 +15,7 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 | `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `ParsedContent`, image / audio / document / URL parsers (video deferred) |
 | `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor` |
 | `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `AgentBoundaryDetector`, `AgentCaseExtractor`, `AgentSkillExtractor`, `AgentProfileExtractor` |
-| `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `KnowledgeMemory` (NOT YET IMPLEMENTED — not published) |
+| `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `aclassify_category`, `KnowledgeMemory`, `CategorySpec` |
 
 ---
 
