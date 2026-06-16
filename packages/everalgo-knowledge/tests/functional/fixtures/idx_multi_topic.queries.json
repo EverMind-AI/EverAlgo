@@ -1,0 +1,104 @@
+{
+  "queries": [
+    {
+      "query": "How many microservices were deployed to Kubernetes?",
+      "answer": "12 services were deployed to Kubernetes cluster with 99.9% uptime SLA",
+      "answer_groups": [
+        [
+          2
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What was the improvement in CI/CD build times?",
+      "answer": "Build times reduced from 45 minutes to 12 minutes using GitHub Actions",
+      "answer_groups": [
+        [
+          3
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What security vulnerabilities were patched in Q2?",
+      "answer": "CVE-2024-1234, CVE-2024-5678, and CVE-2024-9012, all patched within 24 hours",
+      "answer_groups": [
+        [
+          4
+        ]
+      ],
+      "difficulty": "list"
+    },
+    {
+      "query": "How much did Instagram followers grow?",
+      "answer": "Instagram followers grew by 340%",
+      "answer_groups": [
+        [
+          6
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What was the average webinar attendance?",
+      "answer": "850 participants, up from 200 in Q1",
+      "answer_groups": [
+        [
+          7
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What partnership was finalized for marketing?",
+      "answer": "Partnership with TechConf 2024, securing platinum sponsor slot and 3 speaking opportunities",
+      "answer_groups": [
+        [
+          8
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What was the total revenue for Q2?",
+      "answer": "$4.2 million, a 28% increase over Q1",
+      "answer_groups": [
+        [
+          10
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What is the target for Series B fundraising?",
+      "answer": "$15 million at $120 million pre-money valuation, three VC firms in due diligence",
+      "answer_groups": [
+        [
+          12
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What was the code coverage improvement?",
+      "answer": "Code coverage increased from 72% to 89% across all repositories",
+      "answer_groups": [
+        [
+          3
+        ]
+      ],
+      "difficulty": "factual"
+    },
+    {
+      "query": "What was the net profit margin in Q2?",
+      "answer": "33%, with $4.2M revenue and $2.8M operating expenses",
+      "answer_groups": [
+        [
+          10
+        ]
+      ],
+      "difficulty": "aggregate"
+    }
+  ]
+}

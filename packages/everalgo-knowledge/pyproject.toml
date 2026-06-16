@@ -26,6 +26,7 @@ classifiers = [
 dependencies = [
   "everalgo-core>=0.2.0,<2.0.0",
   "everalgo-parser>=0.2.0,<2.0.0",
+  "tiktoken>=0.7",
 ]
 
 [project.urls]

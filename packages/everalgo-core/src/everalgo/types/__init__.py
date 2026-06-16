@@ -20,7 +20,7 @@ from everalgo.types.agent import (
 from everalgo.types.chat import ChatMessage
 from everalgo.types.content import ContentBlock, TextContent
 from everalgo.types.conversation import ConversationItem, MemCell
-from everalgo.types.knowledge import KnowledgeMemory
+from everalgo.types.knowledge import CategorySpec, KnowledgeMemory
 from everalgo.types.memories import AtomicFact, Episode, Foresight, Profile
 from everalgo.types.modality import (
     EXTENSION_TO_MODALITY,
@@ -56,6 +56,7 @@ __all__ = [
     "AgentSkill",
     "AtomicFact",
     "Candidate",
+    "CategorySpec",
     "ChatMessage",
     "ContentBlock",
     "ConversationItem",
