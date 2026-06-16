@@ -38,8 +38,9 @@ These hold regardless of which tools we use:
 
 Done once per distribution by a PyPI project owner: add a GitLab Trusted Publisher
 (<https://docs.pypi.org/trusted-publishers/adding-a-publisher/>), pointing at this project
-and the top-level `.gitlab-ci.yml`. `everalgo-knowledge` is deliberately **not** registered;
-its `pyproject.toml` carries the `Private :: Do Not Upload` classifier.
+and the top-level `.gitlab-ci.yml`. For a distribution that has never been published, use
+PyPI's **pending publisher** flow (<https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/>) — it creates the PyPI project and configures the publisher in one step;
+the first tag-triggered upload activates it automatically.
 
 ## Keeping `[Unreleased]` up to date
 
@@ -110,10 +111,43 @@ c. **Root `CHANGELOG.md`** — two edits:
      a link to the package CHANGELOG. The root timeline is for repo-level chronology; the
      package CHANGELOG holds the authoritative detail.
 
-If the bumped package is depended on by other workspace packages and you want them to
-require the new behaviour, raise their `everalgo-<dist> >=<X.Y.Z>,<2.0.0` lower bounds in
-the corresponding `pyproject.toml`. Most single-package bumps do not need this — only
-bumps that introduce a feature/fix downstream packages must adopt.
+d. **Dependency audit** — verify version floors and declared dependencies before tagging.
+
+   **Completeness: every runtime import must be declared.** Grep the package source for all
+   external `import` / `from ... import` statements that execute outside `TYPE_CHECKING`
+   blocks. Each resolved top-level package must appear in `[project.dependencies]`. A
+   missing entry means `pip install everalgo-<dist>` in a clean venv will fail at runtime
+   even though the workspace venv (which installs everything) masks the problem.
+
+   ```bash
+   # Quick audit: list external runtime imports, compare against pyproject.toml
+   grep -rh 'from \|^import ' packages/everalgo-<dist>/src/ --include='*.py' \
+     | grep -v '# Deferred' | sort -u
+   # Cross-check each top-level package against [project.dependencies].
+   ```
+
+   **Floor correctness: every `everalgo-*` floor must cover the APIs actually used.** For
+   each workspace dependency (`everalgo-core`, `everalgo-parser`, ...) declared with a
+   `>=X.Y.Z` floor, verify that the floor version actually exports every type, function,
+   and field the package imports — including fields added to existing types. If the package
+   uses `CategorySpec` (introduced in core 0.3.0) but the floor says `>=0.2.0`, users who
+   install an older core will get `ImportError` or `ValidationError` at runtime.
+
+   ```bash
+   # List all imports from workspace dependencies
+   grep -rh 'from everalgo\.' packages/everalgo-<dist>/src/ --include='*.py' | sort -u
+   # For each imported symbol: which version of the dependency introduced it?
+   # Raise the floor if the current floor predates that version.
+   ```
+
+   **Downstream propagation: raise floors in packages that depend on *this* package** if
+   they must adopt a new feature or handle a changed API. Most single-package bumps do not
+   need this — only bumps that introduce a feature/fix downstream packages must adopt.
+
+   ```bash
+   # Find all workspace consumers of the bumped package
+   grep -rl 'everalgo-<dist>' packages/everalgo-*/pyproject.toml
+   ```
 
 ### 4. Sync the lockfile
 
@@ -191,9 +225,10 @@ the canonical example.
 
 Differences from the default path:
 
-1. **Step 3** runs once per affected package. The root `CHANGELOG.md` gets a single shared
-   `## [<X.Y.Z>] - <date>` section summarising the coordinated baseline rather than one
-   section per package.
+1. **Step 3** runs once per affected package, including the dependency audit (3.d) which
+   must cover cross-package floor raises across *all* distributions in the coordinated set.
+   The root `CHANGELOG.md` gets a single shared `## [<X.Y.Z>] - <date>` section
+   summarising the coordinated baseline rather than one section per package.
 2. **Step 5** typically carries many scoped commits (per-package `chore` / `fix` /
    `refactor`). Merge with a **merge commit, not squash** — squashing collapses N scoped
    commits into one and destroys git-cliff's per-commit grouping. In the GitLab UI,
@@ -244,6 +279,17 @@ so future maintainers can reason about tool migrations without rewriting policy.
   repo root would have to walk N package CHANGELOGs to reconstruct what shipped when. A
   one-paragraph root section per release preserves the timeline without duplicating
   detail.
+- **Why a dependency audit is mandatory before release.** The uv workspace installs all
+  8 distributions into a shared venv, so a missing `[project.dependencies]` entry or a
+  too-low version floor is invisible during development and CI — every symbol resolves
+  because sibling packages are co-installed. The bug surfaces only when an end user runs
+  `pip install everalgo-<dist>` in isolation, which is the exact scenario a release
+  creates. Historical example: `everalgo-knowledge` shipped code that `from asgiref.sync
+  import async_to_sync` in four modules but never declared `asgiref` as a dependency; the
+  workspace venv masked the gap because `everalgo-rank` (a sibling, not a dependency of
+  knowledge) pulls in `asgiref`. A second example from the same release: knowledge
+  imported `CategorySpec` (introduced in core 0.3.0) but declared `everalgo-core>=0.2.0`,
+  meaning users who already had core 0.2.x installed would hit `ImportError` at runtime.
 
 ## Where tool versions live
 

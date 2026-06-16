@@ -9,19 +9,28 @@ Per-distribution changelogs are the source of truth. This file is a navigation i
 
 ## Distribution status
 
-The table tracks the current version declared in each `packages/everalgo-*/pyproject.toml`. Seven
-distributions are published to PyPI; `everalgo-knowledge` is a placeholder and is **not published**.
+The table tracks the current version declared in each `packages/everalgo-*/pyproject.toml`. All eight distributions are published to PyPI.
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.2.1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-core` | 0.3.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.2.1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.3.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-rank` | 0.4.0 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.3.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.3.1 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | — (not published) | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.1.0 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Coordinated minor — 2026-06-16
+
+Three distributions updated. `everalgo-knowledge` is published to PyPI for the first time. Per-distribution detail in each package's CHANGELOG.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.3.0 | minor — `CategorySpec` type + `KnowledgeMemory.category_id` field |
+| `everalgo-rank` | 0.4.0 | minor — category-aware retrieval (`acategory_retrieve`) |
+| `everalgo-knowledge` | 0.1.0 | **first public release** — `KnowledgeExtractor` pipeline + `aclassify_category` |
 
 ## Coordinated patch + minor — 2026-06-15
 

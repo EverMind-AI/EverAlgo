@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-core"
-version = "0.2.1"
+version = "0.3.0"
 description = "EverAlgo foundation: types, LLM client + providers, prompt validators, testing helpers."
 requires-python = ">=3.12"
 license = "Apache-2.0"

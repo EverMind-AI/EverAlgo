@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-16
+
 ### Added
 
 - `acategory_retrieve` / `category_retrieve`: category-aware retrieval facade with soft search-after boost. `rollup_category_mass` estimates score-weighted category confidence; `apply_category_boost` adds a precision-only tiebreaker that auto-mutes on ambiguous queries.
