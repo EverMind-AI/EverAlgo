@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -515,7 +515,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-core"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "packages/everalgo-core" }
 dependencies = [
     { name = "openai" },
@@ -532,9 +532,10 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-knowledge"
-version = "0.2.0"
+version = "0.1.0"
 source = { editable = "packages/everalgo-knowledge" }
 dependencies = [
+    { name = "asgiref" },
     { name = "everalgo-core" },
     { name = "everalgo-parser" },
     { name = "tiktoken" },
@@ -542,6 +543,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "asgiref", specifier = ">=3.0" },
     { name = "everalgo-core", editable = "packages/everalgo-core" },
     { name = "everalgo-parser", editable = "packages/everalgo-parser" },
     { name = "tiktoken", specifier = ">=0.7" },
@@ -577,7 +579,7 @@ provides-extras = ["svg"]
 
 [[package]]
 name = "everalgo-rank"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/everalgo-rank" }
 dependencies = [
     { name = "asgiref" },

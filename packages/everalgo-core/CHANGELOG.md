@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-16
+
 ### Added
 
 - `CategorySpec` type in `everalgo.types`: caller-owned classification taxonomy entry `(id, description)` for document-level categorization.
