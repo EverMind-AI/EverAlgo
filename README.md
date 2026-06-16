@@ -27,7 +27,7 @@ This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespac
 | [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (image, audio, PDF, HTML, email, office, URL; video deferred) |
 | [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
 | [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCase` / `AgentSkill` extractors |
-| [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeMemory` extractor (NOT YET IMPLEMENTED — not published) |
+| [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeExtractor` pipeline + `aclassify_category` (file-based knowledge extraction) |
 
 ## 60-second quickstart
 
@@ -128,15 +128,14 @@ pip install everalgo-clustering     # pulls core
 
 ## Status & known limitations
 
-Seven of the eight distributions are published on PyPI (most at `0.2.0`, `everalgo-rank` at `0.3.0`); `everalgo-knowledge` is intentionally **not published** (namespace reserved only). Three operators are **unimplemented placeholders that raise `NotImplementedError`** — they are deliberately kept out of the public `__all__` (import the submodule directly if you want the reserved stub) and must not be relied on yet:
+All eight distributions are published on PyPI. Two operators are **unimplemented placeholders that raise `NotImplementedError`** — they are deliberately kept out of the public `__all__` (import the submodule directly if you want the reserved stub) and must not be relied on yet:
 
 | Placeholder | Reachable at | Status |
 |---|---|---|
 | `WorkspaceMemCellExtractor` | `everalgo.boundary.workspace` | Jira / Email / Confluence slicing — not implemented |
-| `KnowledgeExtractor` | `everalgo.knowledge` | whole `everalgo-knowledge` distribution unpublished |
 | video parsing | `everalgo.parser.video` | deferred pending an ADR (Gemini Video vs Whisper + frame sampling) |
 
-Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile), and the agent-memory extractors (Case / Skill).
+Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile), the agent-memory extractors (Case / Skill), and the knowledge extractor (KnowledgeExtractor + document classification).
 
 ## Releasing
 
