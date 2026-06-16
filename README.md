@@ -16,7 +16,7 @@ The full architecture lives in [`docs/concepts/architecture.md`](docs/concepts/a
 
 ## Repository layout
 
-This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespace via [PEP 420](https://peps.python.org/pep-0420/), managed with [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) (seven published to PyPI; `everalgo-knowledge` is namespace-reserved and not yet published — see [Status & known limitations](#status--known-limitations)):
+This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespace via [PEP 420](https://peps.python.org/pep-0420/), managed with [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) (all published to PyPI):
 
 | Distribution | What it provides |
 |---|---|

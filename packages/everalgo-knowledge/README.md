@@ -29,8 +29,12 @@ ParsedContent
 ## Install
 
 ```bash
-# This package is NOT published to PyPI (Private :: Do Not Upload classifier).
-# Install within the workspace only:
+pip install everalgo-knowledge    # pulls everalgo-core + everalgo-parser
+```
+
+For development within the monorepo workspace:
+
+```bash
 uv sync --package everalgo-knowledge
 ```
 
