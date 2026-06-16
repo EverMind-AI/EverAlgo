@@ -12,6 +12,7 @@ from asgiref.sync import sync_to_async
 from everalgo.rank import (
     agentic,
     case,
+    category,
     cluster,
     episodic,
     fusion,
@@ -25,6 +26,12 @@ from everalgo.rank import (
 )
 from everalgo.rank.agentic import aagentic_retrieve, agentic_retrieve
 from everalgo.rank.case import CaseRanker
+from everalgo.rank.category import (
+    acategory_retrieve,
+    apply_category_boost,
+    category_retrieve,
+    rollup_category_mass,
+)
 from everalgo.rank.cluster import acluster_retrieve, cluster_retrieve
 from everalgo.rank.episodic import EpisodicRanker
 from everalgo.rank.hybrid import ahybrid_retrieve, hybrid_retrieve
@@ -60,13 +67,17 @@ __all__ = [
     "RetrieveFn",
     "SkillRanker",
     "aagentic_retrieve",
+    "acategory_retrieve",
     "acluster_retrieve",
     "agentic",
     "agentic_retrieve",
     "ahybrid_retrieve",
     "amaxsim_retrieve",
+    "apply_category_boost",
     "arank",
     "case",
+    "category",
+    "category_retrieve",
     "cluster",
     "cluster_retrieve",
     "episodic",
@@ -79,6 +90,7 @@ __all__ = [
     "protocols",
     "rank",
     "rerank",
+    "rollup_category_mass",
     "skill",
     "weight",
 ]

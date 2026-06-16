@@ -1,0 +1,162 @@
+{
+  "queries": [
+    {
+      "query": "What does the acronym OKR stand for?",
+      "answer": "Objectives and Key Results",
+      "answer_groups": [
+        [
+          1
+        ]
+      ],
+      "difficulty": "factual",
+      "_verified": true,
+      "_verification_note": "group [1]: token overlap 3/3"
+    },
+    {
+      "query": "What is the main purpose of using the OKR framework?",
+      "answer": "a goal-setting framework used by teams to define measurable goals and track outcomes.",
+      "answer_groups": [
+        [
+          1
+        ]
+      ],
+      "difficulty": "factual",
+      "_verified": true,
+      "_verification_note": "group [1]: token overlap 10/10"
+    },
+    {
+      "query": "What are the three key characteristics of a well-defined objective?",
+      "answer": "Clear, ambitious, and time-bound.",
+      "answer_groups": [
+        [
+          2
+        ]
+      ],
+      "difficulty": "factual",
+      "_verified": true,
+      "_verification_note": "group [2]: token overlap 4/4"
+    },
+    {
+      "query": "How should a team define their Key Results?",
+      "answer": "Measurable milestones per objective.",
+      "answer_groups": [
+        [
+          3
+        ]
+      ],
+      "difficulty": "factual",
+      "_verified": true,
+      "_verification_note": "group [3]: token overlap 4/4"
+    },
+    {
+      "query": "How frequently should teams conduct check-ins to track their progress?",
+      "answer": "Weekly check-ins",
+      "answer_groups": [
+        [
+          4
+        ]
+      ],
+      "difficulty": "factual",
+      "_verified": true,
+      "_verification_note": "group [4]: token overlap 3/3"
+    },
+    {
+      "query": "When are OKR reviews supposed to take place?",
+      "answer": "quarterly reviews.",
+      "answer_groups": [
+        [
+          4
+        ]
+      ],
+      "difficulty": "factual",
+      "_verified": true,
+      "_verification_note": "group [4]: token overlap 2/2"
+    },
+    {
+      "query": "What are the recommended best practices when implementing OKRs?",
+      "answer": "Alignment, transparency, and stretch goals.",
+      "answer_groups": [
+        [
+          5
+        ]
+      ],
+      "difficulty": "factual",
+      "_verified": true,
+      "_verification_note": "group [5]: token overlap 4/4"
+    },
+    {
+      "query": "What are the four main topics covered in the OKR guide?",
+      "answer": "1. Setting Objectives... 2. Defining Key Results... 3. Tracking Progress... 4. Best Practices",
+      "answer_groups": [
+        [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      ],
+      "difficulty": "list",
+      "_verified": true,
+      "_verification_note": "group [1, 2, 3, 4, 5]: token overlap 13/13"
+    },
+    {
+      "query": "What is the difference between an Objective and a Key Result in this framework?",
+      "answer": "Objectives are 'Clear, ambitious, and time-bound' while Key Results are 'Measurable milestones per objective.'",
+      "answer_groups": [
+        [
+          2,
+          3
+        ]
+      ],
+      "difficulty": "aggregate",
+      "_verified": true,
+      "_verification_note": "group [2, 3]: token overlap 11/12"
+    },
+    {
+      "query": "What mechanisms are used to measure and monitor an objective once it has been set?",
+      "answer": "Defining 'Measurable milestones per objective' and tracking progress via 'Weekly check-ins and quarterly reviews.'",
+      "answer_groups": [
+        [
+          3,
+          4
+        ]
+      ],
+      "difficulty": "aggregate",
+      "_verified": true,
+      "_verification_note": "group [3, 4]: token overlap 12/13"
+    },
+    {
+      "query": "To ensure that objectives meet the requirement of being ambitious, what specific best practice should teams adopt?",
+      "answer": "stretch goals.",
+      "answer_groups": [
+        [
+          2,
+          5
+        ]
+      ],
+      "difficulty": "multi_hop",
+      "_verified": true,
+      "_verification_note": "group [2, 5]: token overlap 2/2"
+    },
+    {
+      "query": "How does the framework ensure that the measurable goals defined by teams are consistently monitored over time?",
+      "answer": "By tracking outcomes through 'Weekly check-ins and quarterly reviews.'",
+      "answer_groups": [
+        [
+          1,
+          4
+        ]
+      ],
+      "difficulty": "multi_hop",
+      "_verified": true,
+      "_verification_note": "group [1, 4]: token overlap 7/8"
+    }
+  ],
+  "_meta": {
+    "block_count": 6,
+    "model": "google/gemini-3.1-pro-preview",
+    "verified_count": 12,
+    "total": 12
+  }
+}

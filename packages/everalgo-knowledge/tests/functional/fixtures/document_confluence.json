@@ -1,0 +1,29 @@
+{
+  "_fixture": {
+    "id_prefix": "test_doc_confluence",
+    "participants": [
+      {
+        "suffix": "editor",
+        "user_name": "TestEditor",
+        "roles": [
+          "editor"
+        ]
+      },
+      {
+        "suffix": "recip",
+        "user_name": "TestRecipient",
+        "roles": [
+          "recipient"
+        ]
+      }
+    ]
+  },
+  "resource_type": "Document",
+  "source_type": "confluence",
+  "title": "OKR Framework Guide",
+  "content": "OKR Framework Guide\n\nObjectives and Key Results (OKR) is a goal-setting framework used by teams to define measurable goals and track outcomes. This guide covers:\n\n1. Setting Objectives: Clear, ambitious, and time-bound.\n2. Defining Key Results: Measurable milestones per objective.\n3. Tracking Progress: Weekly check-ins and quarterly reviews.\n4. Best Practices: Alignment, transparency, and stretch goals.",
+  "doc_type": "PDF",
+  "meta_data": {
+    "source": "test"
+  }
+}

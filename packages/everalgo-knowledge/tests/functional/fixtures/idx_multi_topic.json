@@ -1,0 +1,23 @@
+{
+  "_fixture": {
+    "id_prefix": "test_doc_idx_multi",
+    "participants": [
+      {
+        "suffix": "editor",
+        "user_name": "ReportEditor",
+        "roles": [
+          "editor"
+        ]
+      }
+    ],
+    "topic_count_hint": 3
+  },
+  "resource_type": "Document",
+  "source_type": "one_drive",
+  "title": "Company Q2 Report: Engineering, Marketing, and Finance",
+  "content": "Company Q2 Report: Engineering, Marketing, and Finance\n\nEngineering Department Update\n\nThe engineering team completed the migration from monolith to microservices architecture. Total of 12 services were deployed to Kubernetes cluster with 99.9% uptime SLA.\n\nThe CI/CD pipeline was upgraded to use GitHub Actions, reducing build times from 45 minutes to 12 minutes. Code coverage increased from 72% to 89% across all repositories.\n\nThree critical security vulnerabilities were patched: CVE-2024-1234, CVE-2024-5678, and CVE-2024-9012. All patches were deployed within 24 hours of disclosure.\n\nMarketing Department Update\n\nThe marketing team launched the new brand identity campaign across social media platforms. Instagram followers grew by 340% and Twitter engagement increased by 215%.\n\nThe content marketing strategy shifted to focus on video tutorials and webinars. Average webinar attendance was 850 participants, up from 200 in Q1.\n\nPartnership with TechConf 2024 was finalized, securing a platinum sponsor slot and 3 speaking opportunities for company executives.\n\nFinance Department Update\n\nTotal revenue for Q2 was $4.2 million, representing a 28% increase over Q1. Operating expenses were $2.8 million, with a net profit margin of 33%.\n\nThe finance team completed the annual audit with no material findings. New expense tracking system reduced reimbursement processing time by 60%.\n\nSeries B fundraising preparations are underway. Target raise is $15 million at a $120 million pre-money valuation. Three VC firms are in due diligence.",
+  "doc_type": "PDF",
+  "meta_data": {
+    "source": "test"
+  }
+}

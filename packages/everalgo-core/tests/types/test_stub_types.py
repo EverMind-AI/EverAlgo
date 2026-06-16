@@ -68,14 +68,35 @@ def test_raw_types_importable() -> None:
     assert RawFile(uri="").uri == ""
 
 
-def test_parsed_and_knowledge_importable() -> None:
-    from everalgo.types import KnowledgeMemory, Modality, ParsedContent
+def test_parsed_importable() -> None:
+    from everalgo.types import Modality, ParsedContent
 
     # ParsedContent gained a concrete schema in the parser migration (no more `id` TBD).
     pc = ParsedContent()
     assert pc.text == ""
     assert pc.modality is Modality.UNKNOWN
-    assert KnowledgeMemory().id == ""
+
+
+def test_knowledge_importable_with_required_fields() -> None:
+    """KnowledgeMemory is no longer a stub; minimal-instantiation needs required fields."""
+    from everalgo.types import KnowledgeMemory
+
+    km = KnowledgeMemory(
+        doc_id="doc1",
+        topic_index=0,
+        topic="Root Title",
+        summary="s",
+        depth=0,
+        topic_path="Root Title",
+    )
+    assert km.doc_id == "doc1"
+    assert km.topic_index == 0
+    # Root convention: parent is None, content / refs / labels default to empty.
+    assert km.parent_index is None
+    assert km.content == ""
+    assert km.block_refs == []
+    assert km.children_index == []
+    assert km.content_labels == []
 
 
 def test_rank_io_importable() -> None:
