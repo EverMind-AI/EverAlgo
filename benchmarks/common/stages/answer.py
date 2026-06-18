@@ -13,6 +13,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from benchmarks.common.retry import answer_retry
 from benchmarks.common.stages.types import StageStats
 from everalgo.llm.parse import extract_final_answer as _algo_extract_final_answer
 from everalgo.llm.types import ChatMessage
@@ -30,8 +31,6 @@ _CONTEXT_TEMPLATE = """Episodes memories for conversation between {speaker_a} an
 
     {episodes}
 """
-
-_ANSWER_RETRIES = 5
 
 
 def _extract_final_answer(raw: str) -> str:
@@ -115,38 +114,23 @@ async def _answer_one_question(
     selected = [session_memcells[mc_id] for mc_id in mc_ids[: ctx.config.response_top_k] if mc_id in session_memcells]
     context = _build_context(selected, speakers)
     prompt = ctx.dataset.answer_prompt().format(context=context, question=qa["question"])
-    # try/except inside the retry loop so both empty completions (OpenRouter timeout / streaming
-    # truncation) and exceptions (network blips, transient 429 / 503) trigger another attempt.
-    # Fail-loud on exhaustion.
-    answer = ""
-    response = None
-    for attempt in range(_ANSWER_RETRIES):
-        try:
-            response = await ctx.services.llm.chat(
-                [ChatMessage(role="user", content=prompt)],
-                temperature=0.0,
-                max_tokens=32768,
-            )
-            answer = _extract_final_answer(response.content)
-            if answer:
-                break
-        except Exception:
-            if attempt == _ANSWER_RETRIES - 1:
-                raise
-            logger.warning(
-                "answer attempt %d/%d failed for question_id=%s; retrying",
-                attempt + 1,
-                _ANSWER_RETRIES,
-                qa["question_id"],
-                exc_info=True,
-            )
-            await asyncio.sleep(1.0 * (2**attempt))
-            continue
-        # Empty-answer path: retry with backoff.
-        if attempt < _ANSWER_RETRIES - 1:
-            await asyncio.sleep(1.0 * (2**attempt))
-    if not answer or response is None:
-        raise RuntimeError(f"answer empty after {_ANSWER_RETRIES} retries (question_id={qa['question_id']})")
+
+    @answer_retry(max_attempts=ctx.config.llm_max_retries)
+    async def _generate() -> tuple[str, Any] | None:
+        resp = await ctx.services.llm.chat(
+            [ChatMessage(role="user", content=prompt)],
+            temperature=0.0,
+            max_tokens=32768,
+        )
+        ans = _extract_final_answer(resp.content)
+        if not ans:
+            return None  # triggers retry_if_result
+        return ans, resp
+
+    result = await _generate()
+    if result is None:
+        raise RuntimeError(f"answer empty after retries (question_id={qa['question_id']})")
+    answer, response = result
     pt = (response.usage.prompt_tokens or 0) if response.usage is not None else 0
     ct = (response.usage.completion_tokens or 0) if response.usage is not None else 0
     return {

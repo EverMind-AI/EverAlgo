@@ -1,4 +1,4 @@
-"""Tests for testing.judge — LLM-as-judge with N-run majority vote."""
+"""Tests for benchmarks.common.judge — LLM-as-judge with N-run majority vote."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import json
 
 import pytest
 
+from benchmarks.common.judge import JudgeResult, allm_judge
 from everalgo.llm.types import ChatResponse, Usage
 from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.testing.judge import JudgeResult, allm_judge
 
 _TEST_JUDGE_PROMPT = (
     "Question: {question}\nGold: {gold_answer}\nResponse: {response}\nOutput JSON with label CORRECT or WRONG."
@@ -59,7 +59,7 @@ async def test_judge_majority_vote_3_runs_correct() -> None:
         llm=fake,
         num_runs=3,
     )
-    assert result.is_correct is True  # 2/3 vote
+    assert result.is_correct is True
     assert len(result.runs) == 3
     assert sum(result.runs) == 2
     assert len(result.reasoning) == 3
@@ -83,16 +83,11 @@ async def test_judge_majority_vote_3_runs_wrong() -> None:
         llm=fake,
         num_runs=3,
     )
-    assert result.is_correct is False  # 1/3 vote — not strict majority
+    assert result.is_correct is False
 
 
 async def test_judge_raises_on_legacy_is_correct_field() -> None:
-    """Legacy ``{is_correct: bool}`` schema is no longer accepted — fail-loud.
-
-    evercore judge prompt only emits ``{"label": ...}``; the legacy fallback was
-    dead code masking real judge-format drift. After retries are exhausted the
-    parse failure surfaces as ``ValueError``.
-    """
+    """Legacy ``{is_correct: bool}`` schema is no longer accepted — fail-loud."""
     fake = FakeLLMClient(
         responses=[
             ChatResponse(content=json.dumps({"is_correct": True, "reasoning": "ok"}), model="fake"),
@@ -106,12 +101,11 @@ async def test_judge_raises_on_legacy_is_correct_field() -> None:
             judge_prompt=_TEST_JUDGE_PROMPT,
             llm=fake,
             num_runs=1,
-            max_retries=1,
         )
 
 
 async def test_judge_raises_on_plain_prose_without_json() -> None:
-    """No JSON in LLM output → fail-loud (keyword-scan fallback was banned)."""
+    """No JSON in LLM output — fail-loud."""
     fake = FakeLLMClient(
         responses=[ChatResponse(content="The response is correct.", model="fake")],
     )
@@ -123,12 +117,11 @@ async def test_judge_raises_on_plain_prose_without_json() -> None:
             judge_prompt=_TEST_JUDGE_PROMPT,
             llm=fake,
             num_runs=1,
-            max_retries=1,
         )
 
 
 async def test_judge_raises_on_unknown_label() -> None:
-    """Label outside ``{CORRECT, WRONG}`` is rejected, not silently mapped."""
+    """Label outside ``{CORRECT, WRONG}`` is rejected."""
     fake = FakeLLMClient(
         responses=[ChatResponse(content=json.dumps({"label": "MAYBE"}), model="fake")],
     )
@@ -140,36 +133,21 @@ async def test_judge_raises_on_unknown_label() -> None:
             judge_prompt=_TEST_JUDGE_PROMPT,
             llm=fake,
             num_runs=1,
-            max_retries=1,
         )
 
 
-async def test_judge_retry_recovers_from_transient_parse_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A bad parse followed by a valid response succeeds; retry budget covers it."""
-
-    # Collapse exponential backoff so the test does not actually wait.
-    async def _no_sleep(_seconds: float) -> None:
-        return
-
-    monkeypatch.setattr("everalgo.testing.judge.asyncio.sleep", _no_sleep)
-
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(content="not json at all", model="fake"),
-            _judge_chat_response("CORRECT", "recovered"),
-        ]
-    )
-    result = await allm_judge(
-        question="Q",
-        golden_answer="A",
-        generated_answer="A",
-        judge_prompt=_TEST_JUDGE_PROMPT,
-        llm=fake,
-        num_runs=1,
-        max_retries=3,
-    )
-    assert result.is_correct is True
-    assert "recovered" in result.reasoning[0]
+async def test_judge_single_run_raises_on_parse_failure() -> None:
+    """Without retry, a parse failure propagates immediately."""
+    fake = FakeLLMClient(responses=["not json at all"])
+    with pytest.raises(ValueError, match="No JSON object found"):
+        await allm_judge(
+            question="Q",
+            golden_answer="A",
+            generated_answer="A",
+            judge_prompt=_TEST_JUDGE_PROMPT,
+            llm=fake,
+            num_runs=1,
+        )
 
 
 async def test_judge_system_prompt_prepended_when_provided() -> None:

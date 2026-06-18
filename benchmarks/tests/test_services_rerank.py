@@ -1,6 +1,6 @@
 """Tests for DeepInfra RerankClient."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -100,7 +100,7 @@ async def test_rerank_request_includes_qwen3_template(cfg: BenchmarkConfig, monk
 @respx.mock
 @pytest.mark.asyncio
 async def test_rerank_retries_on_5xx(cfg: BenchmarkConfig, monkeypatch: MonkeyPatch) -> None:
-    """Transient 5xx is retried; backoff sleep mocked."""
+    """Transient 5xx is retried via tenacity http_retry."""
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
     responses = [
         httpx.Response(500),
@@ -109,10 +109,10 @@ async def test_rerank_retries_on_5xx(cfg: BenchmarkConfig, monkeypatch: MonkeyPa
     route = respx.post("https://api.deepinfra.com/v1/inference/Qwen/Qwen3-Reranker-4B").mock(side_effect=responses)
     client = RerankClient.from_config(cfg)
     try:
-        with patch("benchmarks.common.services.asyncio.sleep") as mock_sleep:
+        # tenacity's async retry sleeps via asyncio.sleep; patch it to avoid real delays
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             out = await client.rerank("q", ["x"])
         assert out == [(0, 0.7)]
         assert route.call_count == 2
-        assert [c.args[0] for c in mock_sleep.call_args_list] == [1.0]
     finally:
         await client.close()

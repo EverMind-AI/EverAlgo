@@ -1,6 +1,6 @@
 """Tests for DeepInfra EmbeddingClient."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -95,7 +95,7 @@ async def test_embed_empty_input_returns_empty(cfg: BenchmarkConfig, monkeypatch
 @respx.mock
 @pytest.mark.asyncio
 async def test_embed_retries_on_5xx(cfg: BenchmarkConfig, monkeypatch: MonkeyPatch) -> None:
-    """Transient 5xx must be retried; verify exponential backoff sleep sequence."""
+    """Transient 5xx must be retried via tenacity http_retry."""
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
     responses = [
         httpx.Response(500),
@@ -111,11 +111,10 @@ async def test_embed_retries_on_5xx(cfg: BenchmarkConfig, monkeypatch: MonkeyPat
     route = respx.post("https://api.deepinfra.com/v1/openai/embeddings").mock(side_effect=responses)
     client = EmbeddingClient.from_config(cfg)
     try:
-        with patch("benchmarks.common.services.asyncio.sleep") as mock_sleep:
+        # tenacity's async retry sleeps via asyncio.sleep; patch it to avoid real delays
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             out = await client.embed(["x"])
         assert out == [[0.5]]
         assert route.call_count == 2
-        # First retry waits base_delay * 2**0 = 1.0
-        assert [c.args[0] for c in mock_sleep.call_args_list] == [1.0]
     finally:
         await client.close()

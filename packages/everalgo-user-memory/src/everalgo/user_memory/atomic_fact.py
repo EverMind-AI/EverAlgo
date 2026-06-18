@@ -56,7 +56,7 @@ class AtomicFactExtractor:
             ATOMIC_FACT_PROMPT,
             prompt,
             INPUT_TEXT=_render_input_text(memcell),
-            TIME=format_atomic_fact_time(memcell.timestamp),
+            TIME=format_atomic_fact_time(memcell.items[0].timestamp),
         )
 
         block = await _call_llm_for_atomic_facts(self._llm, rendered, memcell.timestamp)

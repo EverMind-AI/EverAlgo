@@ -16,6 +16,7 @@ dependencies = [
     "nltk>=3.9",
     "numpy>=1.26",
     "tqdm>=4.66",
+    "tenacity>=8.2",
 ]
 
 [tool.uv]

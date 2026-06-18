@@ -64,7 +64,7 @@ class ForesightExtractor:
             CONVERSATION_TEXT=_render_conversation(memcell),
         )
 
-        start_time_fallback = _format_start_time_from_timestamp(memcell.timestamp)
+        start_time_fallback = _format_start_time_from_timestamp(memcell.items[0].timestamp)
 
         foresight_items = await _call_llm_for_foresight(self._llm, rendered, temperature=_FORESIGHT_TEMPERATURE)
         foresights = _build_foresights_from_items(

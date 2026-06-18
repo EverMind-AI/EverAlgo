@@ -10,7 +10,6 @@ DeepInfra HTTP surface and are not in the algo surface.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -18,39 +17,12 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from pydantic import SecretStr
 
+from benchmarks.common.retry import http_retry
 from everalgo.llm.config import LLMConfig
 from everalgo.llm.providers.openai_compat import OpenAICompatClient
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from benchmarks.common.config import BenchmarkConfig
-
-
-async def _retry_with_backoff[T](
-    fn: Callable[[], Awaitable[T]],
-    *,
-    max_retries: int = 3,
-    base_delay: float = 1.0,
-) -> T:
-    """Exponential backoff retry: 1s, 2s, 4s.
-
-    Retries on httpx.HTTPStatusError (5xx) and httpx.TransportError (network resets,
-    timeouts, protocol errors). Lets non-retryable errors (4xx) propagate immediately.
-    """
-    last_exc: Exception | None = None
-    for attempt in range(max_retries):
-        try:
-            return await fn()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code < 500:
-                raise
-            last_exc = exc
-        except httpx.TransportError as exc:
-            last_exc = exc
-        if attempt < max_retries - 1:
-            await asyncio.sleep(base_delay * (2**attempt))
-    raise RuntimeError(f"Retries exhausted after {max_retries} attempts") from last_exc
 
 
 def build_llm_client(cfg: BenchmarkConfig) -> OpenAICompatClient:
@@ -122,7 +94,8 @@ class EmbeddingClient:
         if not texts:
             return []
 
-        async def call() -> dict[str, Any]:
+        @http_retry()
+        async def _call() -> dict[str, Any]:
             # ``dimensions`` is the Matryoshka truncation knob — Qwen3-Embedding-4B's full
             # output is 2560-dim; DeepInfra truncates server-side when ``dimensions`` is passed.
             # ``encoding_format="float"`` is semantically a no-op (OpenAI /embeddings defaults to
@@ -138,7 +111,7 @@ class EmbeddingClient:
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
 
-        data: dict[str, Any] = await _retry_with_backoff(call)
+        data: dict[str, Any] = await _call()
         items = sorted(data["data"], key=lambda x: x["index"])
         return [item["embedding"] for item in items]
 
@@ -239,12 +212,13 @@ class RerankClient:
         queries, formatted_docs = _format_rerank_inputs(query, documents, instruction)
         payload = {"queries": queries, "documents": formatted_docs}
 
-        async def call() -> dict[str, Any]:
+        @http_retry()
+        async def _call() -> dict[str, Any]:
             r = await self._client.post(self._url, json=payload)
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
 
-        data: dict[str, Any] = await _retry_with_backoff(call)
+        data: dict[str, Any] = await _call()
         scores = _extract_scores(data, expected_len=len(documents))
         indexed = list(enumerate(scores))
         indexed.sort(key=lambda x: x[1], reverse=True)

@@ -197,8 +197,8 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
-    # Collapse the retry backoff so the test doesn't actually wait 1+2+4+8 = 15 s.
-    monkeypatch.setattr("benchmarks.common.stages.answer.asyncio.sleep", AsyncMock())
+    # Tenacity's async retry sleeps via asyncio.sleep; patch it to avoid real delays.
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)

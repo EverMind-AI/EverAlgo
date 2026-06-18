@@ -16,8 +16,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from benchmarks.common.judge import JudgeResult, allm_judge
+from benchmarks.common.retry import llm_retry
 from benchmarks.common.stages.types import StageStats
-from everalgo.testing.judge import JudgeResult, allm_judge
 
 if TYPE_CHECKING:
     from benchmarks.common.stages.types import StageContext
@@ -30,18 +31,22 @@ async def _judge_one(
     judge_system_prompt: str | None,
 ) -> dict[str, Any]:
     """Run judge for a single QA. Exceptions propagate so the stage fails loudly."""
-    result: JudgeResult = await allm_judge(
-        question=answer["question"],
-        golden_answer=answer["golden_answer"],
-        generated_answer=answer["answer"],
-        judge_prompt=judge_prompt,
-        llm=ctx.services.llm,  # type: ignore[arg-type]
-        num_runs=ctx.config.judge_runs,
-        judge_model=ctx.config.judge_model,
-        judge_temperature=ctx.config.judge_temperature,
-        judge_system_prompt=judge_system_prompt,
-        max_retries=ctx.config.llm_max_retries,
-    )
+
+    @llm_retry(max_attempts=ctx.config.llm_max_retries)
+    async def _call_judge() -> JudgeResult:
+        return await allm_judge(
+            question=answer["question"],
+            golden_answer=answer["golden_answer"],
+            generated_answer=answer["answer"],
+            judge_prompt=judge_prompt,
+            llm=ctx.services.llm,  # type: ignore[arg-type]
+            num_runs=ctx.config.judge_runs,
+            judge_model=ctx.config.judge_model,
+            judge_temperature=ctx.config.judge_temperature,
+            judge_system_prompt=judge_system_prompt,
+        )
+
+    result = await _call_judge()
     return {
         **answer,
         "is_correct": result.is_correct,
