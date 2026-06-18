@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
-from everalgo.llm.parse import extract_final_answer, parse_llm_json_object, retry_on_json_parse_failure
+from everalgo.llm.parse import extract_final_answer, parse_llm_json_object
 
 
 def test_direct_happy_path() -> None:
@@ -57,134 +55,6 @@ def test_empty_string_raises() -> None:
     """Empty string raises ValueError."""
     with pytest.raises(ValueError, match="Failed to parse LLM response as a JSON object"):
         parse_llm_json_object("")
-
-
-# ---------------------------------------------------------------------------
-# retry_on_json_parse_failure
-# ---------------------------------------------------------------------------
-
-
-async def test_retry_succeeds_on_first_try() -> None:
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=3)
-    async def fn() -> dict[str, int]:
-        nonlocal calls
-        calls += 1
-        return {"ok": 1}
-
-    result = await fn()
-    assert result == {"ok": 1}
-    assert calls == 1
-
-
-async def test_retry_recovers_after_one_failure() -> None:
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=3)
-    async def fn() -> dict[str, int]:
-        nonlocal calls
-        calls += 1
-        if calls < 2:
-            raise json.JSONDecodeError("bad", "", 0)
-        return {"ok": 1}
-
-    result = await fn()
-    assert result == {"ok": 1}
-    assert calls == 2
-
-
-async def test_retry_exhausts_then_raises() -> None:
-    """After max_retries failed attempts, raise the last exception."""
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=2)
-    async def fn() -> dict[str, int]:
-        nonlocal calls
-        calls += 1
-        raise json.JSONDecodeError("bad", "", 0)
-
-    with pytest.raises(json.JSONDecodeError):
-        await fn()
-    assert calls == 2, "max_retries=2 should produce exactly 2 attempts"
-
-
-async def test_retry_retries_on_value_error_by_default() -> None:
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=3)
-    async def fn() -> str:
-        nonlocal calls
-        calls += 1
-        if calls < 2:
-            raise ValueError("bad value")
-        return "ok"
-
-    result = await fn()
-    assert result == "ok"
-    assert calls == 2
-
-
-async def test_retry_does_not_swallow_non_retryable_exceptions() -> None:
-    """Non-retryable exceptions propagate immediately without consuming retry budget."""
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=3)
-    async def fn() -> None:
-        nonlocal calls
-        calls += 1
-        raise RuntimeError("network down")
-
-    with pytest.raises(RuntimeError):
-        await fn()
-    assert calls == 1, "Non-retryable exceptions should NOT trigger retries"
-
-
-async def test_retry_max_retries_3_invokes_exactly_3_times() -> None:
-    """max_retries=3 means 3 total attempts (first call + 2 retries)."""
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=3)
-    async def fn() -> str:
-        nonlocal calls
-        calls += 1
-        raise json.JSONDecodeError("always", "", 0)
-
-    with pytest.raises(json.JSONDecodeError):
-        await fn()
-    assert calls == 3, f"Expected exactly 3 attempts, got {calls}"
-
-
-async def test_retry_custom_retryable_exc_narrows_retry_set() -> None:
-    """Passing retryable_exc=(RuntimeError,) makes RuntimeError retryable and json.JSONDecodeError NOT retryable."""
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=3, retryable_exc=(RuntimeError,))
-    async def retries_runtime_error() -> str:
-        nonlocal calls
-        calls += 1
-        if calls < 2:
-            raise RuntimeError("transient")
-        return "ok"
-
-    result = await retries_runtime_error()
-    assert result == "ok"
-    assert calls == 2
-
-
-async def test_retry_custom_retryable_exc_excludes_default_types() -> None:
-    """When retryable_exc=(RuntimeError,), json.JSONDecodeError propagates immediately."""
-    calls = 0
-
-    @retry_on_json_parse_failure(max_retries=3, retryable_exc=(RuntimeError,))
-    async def fn() -> str:
-        nonlocal calls
-        calls += 1
-        raise json.JSONDecodeError("not in retryable_exc", "", 0)
-
-    with pytest.raises(json.JSONDecodeError):
-        await fn()
-    assert calls == 1, "JSONDecodeError should not be retried when not in retryable_exc"
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `EpisodeExtractor`, `ForesightExtractor`, and `AtomicFactExtractor` now pass the first message's timestamp (`memcell.items[0].timestamp`) as the conversation start time to LLM prompts. Previously they passed `memcell.timestamp` (closing time of the slice), which skewed absolute date resolution for relative time expressions.
+
 ## [0.3.0] - 2026-06-15
 
 ### Changed

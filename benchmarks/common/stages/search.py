@@ -34,6 +34,7 @@ from nltk.corpus import stopwords  # type: ignore[import-untyped]
 from nltk.stem import PorterStemmer  # type: ignore[import-untyped]
 from nltk.tokenize import word_tokenize  # type: ignore[import-untyped]
 
+from benchmarks.common.retry import http_retry
 from everalgo.clustering import Cluster
 from everalgo.rank import aagentic_retrieve, acluster_retrieve, ahybrid_retrieve, amaxsim_retrieve
 from everalgo.types import Candidate as _Candidate
@@ -388,7 +389,7 @@ def _trace_scored(results: list[_Scored], *, limit: int) -> list[dict[str, Any]]
 # ---------------------------------------------------------------------------
 
 
-async def _rerank_batch_with_retry(
+async def _rerank_batch(
     query: str,
     start: int,
     batch_texts: list[str],
@@ -396,10 +397,9 @@ async def _rerank_batch_with_retry(
     rerank_client: RerankClient,
     reranker_instruction: str | None,
     max_retries: int,
-    retry_delay: float,
     timeout: float,
-) -> list[tuple[int, float]] | None:
-    """Attempt a single reranker batch up to ``max_retries`` times.
+) -> list[tuple[int, float]]:
+    """Score a single reranker batch with tenacity retry.
 
     Args:
         query: Raw query text forwarded to the reranker.
@@ -408,24 +408,24 @@ async def _rerank_batch_with_retry(
         rerank_client: RerankClient instance.
         reranker_instruction: Optional task instruction.
         max_retries: Maximum attempts before giving up.
-        retry_delay: Base delay for exponential backoff (seconds).
         timeout: Per-attempt asyncio timeout (seconds).
 
     Returns:
-        List of ``(global_index, score)`` on success, or ``None`` after all
-        retries are exhausted.
+        List of ``(global_index, score)`` on success.
+
+    Raises:
+        Exception: Propagated after all retries are exhausted.
     """
-    for attempt in range(max_retries):
-        try:
-            scored: list[tuple[int, float]] = await asyncio.wait_for(
-                rerank_client.rerank(query, batch_texts, instruction=reranker_instruction),
-                timeout=timeout,
-            )
-            return [(start + idx, score) for idx, score in scored]
-        except Exception:  # intentional broad catch — retry on any failure
-            if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay * (2**attempt))
-    return None
+
+    @http_retry(max_attempts=max_retries)
+    async def _call() -> list[tuple[int, float]]:
+        scored: list[tuple[int, float]] = await asyncio.wait_for(
+            rerank_client.rerank(query, batch_texts, instruction=reranker_instruction),
+            timeout=timeout,
+        )
+        return [(start + idx, score) for idx, score in scored]
+
+    return await _call()
 
 
 async def reranker_search(
@@ -438,7 +438,6 @@ async def reranker_search(
     batch_size: int = 20,
     concurrent_batches: int = 5,
     max_retries: int = 3,
-    retry_delay: float = 0.8,
     timeout: float = 60.0,
     fallback_threshold: float = 0.3,
 ) -> list[_Scored]:
@@ -465,8 +464,7 @@ async def reranker_search(
         reranker_instruction: Optional task instruction for the reranker.
         batch_size: Documents per API call.
         concurrent_batches: Max batches processed simultaneously per group.
-        max_retries: Per-batch retry limit.
-        retry_delay: Base delay for exponential backoff (seconds).
+        max_retries: Per-batch retry limit (delegated to tenacity ``http_retry``).
         timeout: Per-batch asyncio timeout (seconds).
         fallback_threshold: Minimum batch success rate; below this the call raises.
 
@@ -505,21 +503,23 @@ async def reranker_search(
         group = batches[group_start : group_start + concurrent_batches]
         group_results = await asyncio.gather(
             *(
-                _rerank_batch_with_retry(
+                _rerank_batch(
                     query,
                     start,
                     batch,
                     rerank_client=rerank_client,
                     reranker_instruction=reranker_instruction,
                     max_retries=max_retries,
-                    retry_delay=retry_delay,
                     timeout=timeout,
                 )
                 for start, batch in group
-            )
+            ),
+            return_exceptions=True,
         )
         for r in group_results:
-            if r is not None:
+            if isinstance(r, BaseException):
+                logger.warning("Rerank batch failed after retries: %s", r)
+            else:
                 all_scored.extend(r)
                 successful += 1
         if group_start + concurrent_batches < len(batches):
@@ -554,7 +554,6 @@ def _build_rerank_fn(
     batch_size: int,
     concurrent_batches: int,
     max_retries: int,
-    retry_delay: float,
     timeout: float,
     fallback_threshold: float,
 ) -> RerankFn:
@@ -576,7 +575,6 @@ def _build_rerank_fn(
             batch_size=batch_size,
             concurrent_batches=concurrent_batches,
             max_retries=max_retries,
-            retry_delay=retry_delay,
             timeout=timeout,
             fallback_threshold=fallback_threshold,
         )
@@ -592,7 +590,6 @@ def _reranker_kwargs(config: Any) -> dict[str, Any]:
         "batch_size": config.reranker_batch_size,
         "concurrent_batches": config.reranker_concurrent_batches,
         "max_retries": config.reranker_max_retries,
-        "retry_delay": config.reranker_retry_delay,
         "timeout": config.reranker_timeout,
         "fallback_threshold": config.reranker_fallback_threshold,
     }

@@ -44,7 +44,6 @@ class BenchmarkConfig(BaseModel):
     reranker_batch_size: int = 32
     reranker_concurrent_batches: int = 2
     reranker_max_retries: int = 3
-    reranker_retry_delay: float = 3.0
     reranker_timeout: float = 60.0
     reranker_fallback_threshold: float = 0.3
     reranker_instruction: str = (

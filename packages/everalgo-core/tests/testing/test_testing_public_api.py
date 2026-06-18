@@ -15,8 +15,6 @@ def test_public_symbols_exposed_at_top_level() -> None:
     assert hasattr(everalgo.testing, "assert_foresight_shape")
     assert hasattr(everalgo.testing, "assert_atomic_fact_shape")
     assert hasattr(everalgo.testing, "assert_profile_shape")
-    assert hasattr(everalgo.testing, "JudgeResult")
-    assert hasattr(everalgo.testing, "allm_judge")
 
 
 def test_dunder_all_lists_exact_public_surface() -> None:
@@ -25,8 +23,6 @@ def test_dunder_all_lists_exact_public_surface() -> None:
         [
             "CallRecord",
             "FakeLLMClient",
-            "JudgeResult",
-            "allm_judge",
             "assert_atomic_fact_shape",
             "assert_episode_shape",
             "assert_foresight_shape",
@@ -40,15 +36,12 @@ def test_top_level_import_works() -> None:
     from everalgo.testing import (
         CallRecord,
         FakeLLMClient,
-        JudgeResult,
-        allm_judge,
         assert_atomic_fact_shape,
         assert_episode_shape,
         assert_foresight_shape,
         assert_profile_shape,
     )
 
-    # smoke-instantiate to verify they are importable, not just present
     client = FakeLLMClient(responses=["x"])
     assert client.call_count == 0
     record = CallRecord(messages=[])
@@ -57,6 +50,3 @@ def test_top_level_import_works() -> None:
     assert callable(assert_foresight_shape)
     assert callable(assert_atomic_fact_shape)
     assert callable(assert_profile_shape)
-    assert callable(allm_judge)
-    result = JudgeResult(is_correct=True)
-    assert result.is_correct is True

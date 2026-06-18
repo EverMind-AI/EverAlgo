@@ -54,7 +54,7 @@ class EpisodeExtractor:
             ValueError: If the LLM returns no parsed structured output.
         """
         custom_instr = custom_instructions or DEFAULT_CUSTOM_INSTRUCTIONS
-        conv_start = _format_conversation_start_time(memcell.timestamp)
+        conv_start = _format_conversation_start_time(memcell.items[0].timestamp)
         conversation = _render_conversation(memcell)
 
         if sender_id is None:

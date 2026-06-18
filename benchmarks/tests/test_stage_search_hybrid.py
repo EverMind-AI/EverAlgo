@@ -82,7 +82,6 @@ async def test_reranker_search_raises_when_all_batches_fail():
             batch_size=10,
             concurrent_batches=1,
             max_retries=1,
-            retry_delay=0.001,
         )
 
 

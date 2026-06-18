@@ -129,8 +129,6 @@ async def test_run_evaluate_stage_raises_when_judge_keeps_failing(tmp_path: Path
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
-    # Collapse the per-attempt backoff so the test does not wait 1+2+4+8 = 15 s.
-    monkeypatch.setattr("everalgo.testing.judge.asyncio.sleep", AsyncMock())
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
