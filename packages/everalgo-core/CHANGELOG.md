@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-24
+
 ### Removed
 
 - **BREAKING:** `retry_on_json_parse_failure` removed from `everalgo.llm.parse`. Callers should use [tenacity](https://github.com/jd/tenacity) or equivalent for retry policies.
