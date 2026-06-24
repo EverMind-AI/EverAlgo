@@ -1,0 +1,86 @@
+============================================================
+EverAlgo Benchmark Report — locomo / 0622-prompt-fewshot-all-3
+============================================================
+
+Total Questions: 1540
+Avg Context Tokens: 2596
+
+— Majority-Vote (≥2/3 judges agree) —
+Overall: 93.51% (1440/1540)
+  Category 1 (single-hop   )  92.20%  (260/282)
+  Category 2 (temporal     )  91.59%  (294/321)
+  Category 3 (open-domain  )  79.17%  ( 76/ 96)
+  Category 4 (multi-hop    )  96.31%  (810/841)
+
+— Mean-of-Runs (average of per-judge-run accuracies) —
+Overall: 93.33% (1437/1540)
+  Category 1 (single-hop   )  91.96%  (259/282)
+  Category 2 (temporal     )  91.59%  (294/321)
+  Category 3 (open-domain  )  78.47%  ( 75/ 96)
+  Category 4 (multi-hop    )  96.16%  (809/841)
+
+Judge runs: 3, std: 0.0012
+
+Stage Summary:
+  extract    duration=1348.1s  prompt_tokens=379832  completion_tokens=165249
+  reflect    duration=0.0s  prompt_tokens=0  completion_tokens=0
+  enrich     duration=482.5s  prompt_tokens=0  completion_tokens=0
+  index      duration=3.6s  prompt_tokens=0  completion_tokens=0
+  search     duration=1280.0s  prompt_tokens=4293890  completion_tokens=337185
+  answer     duration=912.2s  prompt_tokens=5158410  completion_tokens=1181664
+  evaluate   duration=76.4s  prompt_tokens=2331441  completion_tokens=29968
+
+Config:
+  retrieval_mode: agentic
+  use_hybrid_search: True
+  use_reranker: True
+  use_multi_query: True
+  emb_recall_top_n: 40
+  reranker_top_n: 20
+  hybrid_emb_candidates: 50
+  hybrid_bm25_candidates: 50
+  hybrid_rrf_k: 40
+  multi_query_num: 3
+  response_top_k: 10
+  round1_rerank_top_n: 10
+  reranker_batch_size: 32
+  reranker_concurrent_batches: 2
+  reranker_max_retries: 3
+  reranker_timeout: 60.0
+  reranker_fallback_threshold: 0.3
+  reranker_instruction: Determine if the passage contains specific facts, entities (names, dates, locations), or details that directly answer the question.
+  extract_model: openai/gpt-4.1-mini
+  answer_model: openai/gpt-4.1-mini
+  llm_base_url: https://openrouter.ai/api/v1
+  llm_temperature: 0.3
+  llm_max_tokens: 16384
+  llm_timeout: 60.0
+  llm_max_retries: 5
+  extract_smart_mask: True
+  enable_reflection: False
+  cluster_similarity_threshold: 0.7
+  cluster_max_time_gap_days: 7.0
+  enable_cluster_retrieval: True
+  cluster_top_k: 10
+  cluster_base_candidates: None
+  embedding_batch_size: 256
+  embedding_concurrent_batches: 5
+  judge_model: openai/gpt-4o-mini
+  judge_temperature: 0.0
+  judge_runs: 3
+  embedding_model: Qwen/Qwen3-Embedding-4B
+  embedding_base_url: https://api.deepinfra.com/v1/openai
+  embedding_dimensions: 1024
+  reranker_model: Qwen/Qwen3-Reranker-4B
+  deepinfra_base_url: https://api.deepinfra.com/v1/inference
+  max_concurrent_convs: 10
+  max_concurrent_qa: 20
+  session_filter: None
+
+Package Versions:
+  everalgo-core: 0.3.0
+  everalgo-boundary: 0.2.1
+  everalgo-user-memory: 0.3.0
+  everalgo-rank: 0.4.0
+
+============================================================

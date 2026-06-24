@@ -1,5 +1,7 @@
 # Benchmark Variance Analysis
 
+> **Historical — 5-stage pipeline.** This study was run on code `a0d3609` (2026-06), which predates the 7-stage refactor now on `main`. The numbers below characterise the run-to-run variance of that older 5-stage pipeline and are kept as a historical reference; they are not the current canonical. Current canonical run: `results/locomo-93.51`.
+
 ## Setup
 
 - **Code**: `origin/main` at `a0d3609` (includes `524ffd0` retrieval alignment refactor)

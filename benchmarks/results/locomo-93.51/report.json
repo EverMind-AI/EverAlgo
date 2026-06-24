@@ -1,0 +1,175 @@
+{
+  "dataset": "locomo",
+  "run_name": "0622-prompt-fewshot-all-3",
+  "total_questions": 1540,
+  "majority_accuracy": 0.935064935064935,
+  "majority_correct": 1440,
+  "mean_of_runs_accuracy": 0.9333333333333332,
+  "mean_of_runs_correct": 1437,
+  "per_category": {
+    "2": {
+      "label": "temporal",
+      "correct": 294,
+      "total": 321,
+      "accuracy": 0.9158878504672897,
+      "majority_correct": 294,
+      "majority_accuracy": 0.9158878504672897,
+      "run_accuracies": [
+        0.9190031152647975,
+        0.9127725856697819,
+        0.9158878504672897
+      ]
+    },
+    "3": {
+      "label": "open-domain",
+      "correct": 75,
+      "total": 96,
+      "accuracy": 0.7847222222222222,
+      "majority_correct": 76,
+      "majority_accuracy": 0.7916666666666666,
+      "run_accuracies": [
+        0.7708333333333334,
+        0.7916666666666666,
+        0.7916666666666666
+      ]
+    },
+    "1": {
+      "label": "single-hop",
+      "correct": 259,
+      "total": 282,
+      "accuracy": 0.9196217494089834,
+      "majority_correct": 260,
+      "majority_accuracy": 0.9219858156028369,
+      "run_accuracies": [
+        0.9184397163120568,
+        0.9184397163120568,
+        0.9219858156028369
+      ]
+    },
+    "4": {
+      "label": "multi-hop",
+      "correct": 809,
+      "total": 841,
+      "accuracy": 0.9615537059056679,
+      "majority_correct": 810,
+      "majority_accuracy": 0.9631391200951248,
+      "run_accuracies": [
+        0.9607609988109393,
+        0.9607609988109393,
+        0.9631391200951248
+      ]
+    }
+  },
+  "avg_context_tokens": 2596,
+  "stage_summary": {
+    "extract": {
+      "duration_seconds": 1348.1060287081636,
+      "prompt_tokens": 379832,
+      "completion_tokens": 165249,
+      "http_calls": 0,
+      "success": 10,
+      "failed": 0
+    },
+    "reflect": {
+      "duration_seconds": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "http_calls": 0,
+      "success": 0,
+      "failed": 0
+    },
+    "enrich": {
+      "duration_seconds": 482.47307187505066,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "http_calls": 0,
+      "success": 10,
+      "failed": 0
+    },
+    "index": {
+      "duration_seconds": 3.5843528327532113,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "http_calls": 0,
+      "success": 10,
+      "failed": 0
+    },
+    "search": {
+      "duration_seconds": 1279.9826711248606,
+      "prompt_tokens": 4293890,
+      "completion_tokens": 337185,
+      "http_calls": 0,
+      "success": 1540,
+      "failed": 0
+    },
+    "answer": {
+      "duration_seconds": 912.2177694579586,
+      "prompt_tokens": 5158410,
+      "completion_tokens": 1181664,
+      "http_calls": 0,
+      "success": 1540,
+      "failed": 0
+    },
+    "evaluate": {
+      "duration_seconds": 76.37350820936263,
+      "prompt_tokens": 2331441,
+      "completion_tokens": 29968,
+      "http_calls": 0,
+      "success": 1437,
+      "failed": 103
+    }
+  },
+  "config": {
+    "retrieval_mode": "agentic",
+    "use_hybrid_search": true,
+    "use_reranker": true,
+    "use_multi_query": true,
+    "emb_recall_top_n": 40,
+    "reranker_top_n": 20,
+    "hybrid_emb_candidates": 50,
+    "hybrid_bm25_candidates": 50,
+    "hybrid_rrf_k": 40,
+    "multi_query_num": 3,
+    "response_top_k": 10,
+    "round1_rerank_top_n": 10,
+    "reranker_batch_size": 32,
+    "reranker_concurrent_batches": 2,
+    "reranker_max_retries": 3,
+    "reranker_timeout": 60.0,
+    "reranker_fallback_threshold": 0.3,
+    "reranker_instruction": "Determine if the passage contains specific facts, entities (names, dates, locations), or details that directly answer the question.",
+    "extract_model": "openai/gpt-4.1-mini",
+    "answer_model": "openai/gpt-4.1-mini",
+    "llm_base_url": "https://openrouter.ai/api/v1",
+    "llm_temperature": 0.3,
+    "llm_max_tokens": 16384,
+    "llm_timeout": 60.0,
+    "llm_max_retries": 5,
+    "extract_smart_mask": true,
+    "enable_reflection": false,
+    "cluster_similarity_threshold": 0.7,
+    "cluster_max_time_gap_days": 7.0,
+    "enable_cluster_retrieval": true,
+    "cluster_top_k": 10,
+    "cluster_base_candidates": null,
+    "embedding_batch_size": 256,
+    "embedding_concurrent_batches": 5,
+    "judge_model": "openai/gpt-4o-mini",
+    "judge_temperature": 0.0,
+    "judge_runs": 3,
+    "embedding_model": "Qwen/Qwen3-Embedding-4B",
+    "embedding_base_url": "https://api.deepinfra.com/v1/openai",
+    "embedding_dimensions": 1024,
+    "reranker_model": "Qwen/Qwen3-Reranker-4B",
+    "deepinfra_base_url": "https://api.deepinfra.com/v1/inference",
+    "max_concurrent_convs": 10,
+    "max_concurrent_qa": 20,
+    "session_filter": null
+  },
+  "package_versions": {
+    "everalgo-core": "0.3.0",
+    "everalgo-boundary": "0.2.1",
+    "everalgo-user-memory": "0.3.0",
+    "everalgo-rank": "0.4.0"
+  }
+}
