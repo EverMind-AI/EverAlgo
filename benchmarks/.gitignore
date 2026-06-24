@@ -2,11 +2,21 @@
 results/*
 !results/.gitkeep
 
-# Whitelist the canonical reference run committed for reviewers.
-# 2026-06-02 full LoCoMo run, main branch, 93.05% majority-vote / 92.92% mean-of-runs (1433/1540).
-# Only the top-level summary (report.txt / report.json + profile.json) and the
-# reproduction note (REPRODUCTION.md) are committed. Everything else stays
-# gitignored — re-run from source to regenerate (eval_results.json + stage 1-4 outputs).
+# Whitelist the canonical reference runs committed for reviewers.
+# For each run only the top-level summary (report.txt / report.json + profile.json) and the
+# reproduction note (REPRODUCTION.md) are committed. Everything else stays gitignored —
+# re-run from source to regenerate (eval_results.json + stage intermediate outputs).
+#
+# CURRENT canonical: 7-stage pipeline, 93.51% majority-vote / 93.33% mean-of-runs (1440/1540).
+# Peak of 4 runs (4-run mean 92.95%); see its REPRODUCTION.md for the reproducibility caveats.
+!results/locomo-93.51
+results/locomo-93.51/*
+!results/locomo-93.51/report.txt
+!results/locomo-93.51/report.json
+!results/locomo-93.51/profile.json
+!results/locomo-93.51/REPRODUCTION.md
+#
+# HISTORICAL: 5-stage pipeline, 2026-06-02, 93.05% majority-vote / 92.92% mean-of-runs (1433/1540).
 !results/locomo-93.05
 results/locomo-93.05/*
 !results/locomo-93.05/report.txt

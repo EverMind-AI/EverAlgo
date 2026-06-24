@@ -1,0 +1,58 @@
+{
+  "extract": {
+    "duration_seconds": 1348.1060287081636,
+    "prompt_tokens": 379832,
+    "completion_tokens": 165249,
+    "http_calls": 0,
+    "success": 10,
+    "failed": 0
+  },
+  "reflect": {
+    "duration_seconds": 0.0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "http_calls": 0,
+    "success": 0,
+    "failed": 0
+  },
+  "enrich": {
+    "duration_seconds": 482.47307187505066,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "http_calls": 0,
+    "success": 10,
+    "failed": 0
+  },
+  "index": {
+    "duration_seconds": 3.5843528327532113,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "http_calls": 0,
+    "success": 10,
+    "failed": 0
+  },
+  "search": {
+    "duration_seconds": 1279.9826711248606,
+    "prompt_tokens": 4293890,
+    "completion_tokens": 337185,
+    "http_calls": 0,
+    "success": 1540,
+    "failed": 0
+  },
+  "answer": {
+    "duration_seconds": 912.2177694579586,
+    "prompt_tokens": 5158410,
+    "completion_tokens": 1181664,
+    "http_calls": 0,
+    "success": 1540,
+    "failed": 0
+  },
+  "evaluate": {
+    "duration_seconds": 76.37350820936263,
+    "prompt_tokens": 2331441,
+    "completion_tokens": 29968,
+    "http_calls": 0,
+    "success": 1437,
+    "failed": 103
+  }
+}
