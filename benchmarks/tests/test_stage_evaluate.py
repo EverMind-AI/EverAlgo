@@ -47,7 +47,7 @@ async def test_run_evaluate_stage_writes_eval_results_json(tmp_path: Path, monke
     )
 
     # Prepare stage 4 output (answers.json)
-    stage4_dir: Path = tmp_path / "stage4_answer"
+    stage4_dir: Path = tmp_path / "stage6_answer"
     stage4_dir.mkdir()
     answers: list[dict[str, Any]] = [
         {
@@ -90,12 +90,12 @@ async def test_run_evaluate_stage_writes_eval_results_json(tmp_path: Path, monke
         services=services,
         dataset=LocomoDataset(data_path=fixture),
         input_dir=stage4_dir,
-        output_dir=tmp_path / "stage5_evaluate",
+        output_dir=tmp_path / "stage7_evaluate",
     )
     stats = await run_evaluate_stage(ctx)
     assert stats.stage_name == "evaluate"
 
-    out: Path = tmp_path / "stage5_evaluate" / "eval_results.json"
+    out: Path = tmp_path / "stage7_evaluate" / "eval_results.json"
     assert out.exists()
     data: dict[str, Any] = json.loads(out.read_text())
     # Adversarial cat 5 filtered out
@@ -134,7 +134,7 @@ async def test_run_evaluate_stage_raises_when_judge_keeps_failing(tmp_path: Path
     services = Services.from_config(cfg)
     services.llm.chat = AsyncMock(side_effect=RuntimeError("judge LLM down"))  # type: ignore[method-assign]
 
-    stage4_dir: Path = tmp_path / "stage4_answer"
+    stage4_dir: Path = tmp_path / "stage6_answer"
     stage4_dir.mkdir()
     (stage4_dir / "answers.json").write_text(
         json.dumps(
@@ -159,8 +159,8 @@ async def test_run_evaluate_stage_raises_when_judge_keeps_failing(tmp_path: Path
         services=services,
         dataset=LocomoDataset(data_path=fixture),
         input_dir=stage4_dir,
-        output_dir=tmp_path / "stage5_evaluate",
+        output_dir=tmp_path / "stage7_evaluate",
     )
     with pytest.raises(RuntimeError, match="judge LLM down"):
         await run_evaluate_stage(ctx)
-    assert not (tmp_path / "stage5_evaluate" / "eval_results.json").exists()
+    assert not (tmp_path / "stage7_evaluate" / "eval_results.json").exists()

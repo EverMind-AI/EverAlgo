@@ -32,16 +32,17 @@ Custom instructions:
 {custom_instructions}
 
 IMPORTANT TIME HANDLING:
-- Use the provided "Conversation start time" as the exact time when this conversation/episode began
-- When the conversation mentions relative times (e.g., "yesterday", "last week"), preserve both the original relative expression AND calculate the absolute date
-- Format time references as: "original relative time (absolute date)" - e.g., "last week (May 7, 2023)"
+- "Conversation start time" indicates when this conversation began
+- Each message has its own timestamp. ANY non-absolute time reference must be resolved to an absolute date using the timestamp of the specific message that contains it — NOT the conversation start time
+- Examples: "yesterday", "last Friday", "last summer", "recently" — any granularity
+- Preserve both the original expression AND the resolved absolute date
+- Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (July 21, 2023)"
 - This dual format supports both absolute and relative time-based questions
-- All absolute time calculations should be based on the provided start time
 
 Please generate a structured episodic memory and return only a JSON object containing the following two fields:
 {{
     "title": "A concise, descriptive title that accurately summarizes the theme (10-20 words)",
-    "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information. Use the provided conversation start time as the base time for this episode."
+    "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information. Resolve every non-absolute time reference using the individual message's timestamp, not the conversation start time."
 }}
 
 Requirements:
@@ -51,7 +52,7 @@ Requirements:
 4. Maintain chronological order and causal relationships.
 5. Use third-person unless explicitly first-person.
 6. Include specific details that aid keyword search, especially concrete activities, places, and objects.
-7. For time references, use the dual format: "relative time (absolute date)" to support different question types.
+7. For time references, resolve ANY non-absolute time expression using the message's own timestamp: "original expression (absolute date)" — e.g., "last summer (summer 2022)".
 8. When describing decisions or actions, naturally include the reasoning or motivation behind them, but avoid repetitive explanations.
 9. Use specific names consistently rather than pronouns to avoid ambiguity in retrieval.
 10. CONCISENESS AND REDUNDANCY REMOVAL:
@@ -143,9 +144,10 @@ Output quality requirements (continued from the principles above):
     - Document repetition counts (e.g., "asked about the project status twice")
 
 8.  **TIME REFERENCES — DUAL FORMAT**:
-    - When the conversation mentions relative times (e.g., "yesterday", "last week"), preserve both the original relative expression AND calculate the absolute date
-    - Format as: "original relative time (absolute date)" — e.g., "last week (May 7, 2023)"
-    - All absolute time calculations must be based on the provided conversation start time
+    - ANY non-absolute time reference must be resolved to an absolute date using the timestamp of the specific message that contains it — NOT the conversation start time
+    - Examples: "yesterday", "last Friday", "last summer", "recently" — any granularity
+    - Preserve both the original expression AND the resolved absolute date
+    - Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (July 21, 2023)"
 
 9.  **TITLE LENGTH AND PREFIX**:
     - Keep the title within 15-25 words

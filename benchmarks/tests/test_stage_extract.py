@@ -1,4 +1,4 @@
-"""Tests for Stage 1 MemCell extraction.
+"""Tests for Stage 1 Extract Base (boundary detection + episode extraction + clustering).
 
 Most tests are skipped without API credentials (integration). A structural
 test verifies the stage entry point exists and imports. Unit tests cover the
@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
@@ -19,117 +17,68 @@ import pytest
 
 from benchmarks.common.config import BenchmarkConfig
 from benchmarks.common.stages.extract import (
-    _cluster_one_memcell,
+    _build_clusters_data,
+    _cluster_one_episode,
     _detect_all_boundaries,
     _run_clustering_pass,
-    _serialize_cluster_file,
-    run_extract_stage,
+    run_extract_base_stage,
 )
 from benchmarks.common.stages.types import StageContext
 from everalgo.boundary import DetectionResult
 from everalgo.clustering.state import Cluster
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
 
-def _make_embedding_client(vector: list[float] | None = None) -> MagicMock:  # pyright: ignore[reportUnusedFunction]
-    """Return a mock EmbeddingClient whose embed() returns a single vector."""
-    vec = vector or [0.1, 0.2, 0.3]
-    client = MagicMock()
-    client.embed = AsyncMock(return_value=[vec])
-    return client
-
-
-def _make_memcell(
-    mc_id: str = "0",
+def _make_episode(
+    ep_id: str = "0",
     timestamp: int = 1_000_000,
-    content: str = "hello world",
-    content_embeddings: list[float] | None = None,
+    episode_text: str = "hello world",
+    episode_embedding: list[float] | None = None,
+    subject: str = "test",
+    subject_embedding: list[float] | None = None,
 ) -> dict[str, Any]:
-    """Return a minimal memcell dict matching the stage 1 output schema."""
+    """Return a minimal episode dict matching the Extract Base output schema."""
     return {
-        "id": mc_id,
+        "id": ep_id,
+        "owner_id": None,
+        "memcell_ids": [ep_id],
+        "subject": subject,
+        "episode": episode_text,
         "timestamp": timestamp,
-        "items": [],
-        "episode": {"subject": "test", "summary": "test", "content": content, "content_embeddings": content_embeddings},
-        "atomic_facts": {
-            "time": "",
-            "timestamp": 0,
-            "atomic_fact": [],
-            "fact_embeddings": [],
+        "embeddings": {
+            "episode": episode_embedding,
+            "subject": subject_embedding,
         },
     }
 
 
-def test_run_extract_stage_callable():
+def _make_memcell(mc_id: str = "0", timestamp: int = 1_000_000) -> dict[str, Any]:
+    """Return a minimal memcell dict matching the Extract Base output schema."""
+    return {
+        "id": mc_id,
+        "timestamp": timestamp,
+        "items": [],
+    }
+
+
+def test_run_extract_base_stage_callable():
     """Structural check: function imports and is async."""
     import inspect
 
-    assert inspect.iscoroutinefunction(run_extract_stage)
+    assert inspect.iscoroutinefunction(run_extract_base_stage)
 
 
-@pytest.mark.integration
-@pytest.mark.skipif(
-    not os.getenv("OPENROUTER_API_KEY"),
-    reason="requires OPENROUTER_API_KEY for real LLM call",
-)
-@pytest.mark.asyncio
-async def test_extract_writes_memcell_json_for_mini_fixture(tmp_path: Path) -> None:
-    """End-to-end: run extract on 1-conv fixture; verify output shape."""
-    import json
+def test_backward_compat_alias():
+    """The old ``run_extract_stage`` name must still be importable."""
+    from benchmarks.common.stages.extract import run_extract_stage
 
-    from benchmarks.common.services import Services
-    from benchmarks.datasets.locomo.loader import LocomoDataset
-
-    fixture = Path(__file__).parent / "fixtures" / "locomo_mini.json"
-    dataset = LocomoDataset(data_path=fixture)
-    cfg = BenchmarkConfig()
-    ctx = StageContext(
-        config=cfg,
-        services=Services.from_config(cfg),
-        dataset=dataset,
-        input_dir=tmp_path,
-        output_dir=tmp_path / "stage1_extract",
-        smoke=True,
-    )
-    stats = await run_extract_stage(ctx)
-    assert stats.stage_name == "extract"
-    assert stats.success >= 1
-    assert stats.duration_seconds > 0
-
-    out_file = tmp_path / "stage1_extract" / "memcells_conv_0.json"
-    assert out_file.exists()
-    data: list[Any] = json.loads(out_file.read_text())
-    assert isinstance(data, list)
-    assert len(data) >= 1
-    mc: dict[str, Any] = data[0]
-    # Required EverAlgo-native fields
-    for required in (
-        "id",
-        "timestamp",
-        "items",
-        "episode",
-        "atomic_facts",
-    ):
-        assert required in mc, f"missing field: {required}"
-    # Verify removed multi-tenant fields are absent
-    assert "event_id" not in mc
-    assert "group_id" not in mc
-    assert "participants" not in mc
-    assert "sender_ids" not in mc
-    assert "original_data" not in mc
-    # id is session-local sequence string
-    assert mc["id"] == "0"
-    # episode is a nested dict with subject + content
-    assert isinstance(mc["episode"], dict)
-    assert "subject" in mc["episode"]
-    assert "content" in mc["episode"]
-    # atomic_facts is a dict {"time", "timestamp", "atomic_fact": list[str], "fact_embeddings": list[list[float]]}
-    assert isinstance(mc["atomic_facts"], dict)
-    assert "atomic_fact" in mc["atomic_facts"]
-    assert isinstance(mc["atomic_facts"]["atomic_fact"], list)
+    assert run_extract_stage is run_extract_base_stage
 
 
 # ---------------------------------------------------------------------------
@@ -138,73 +87,70 @@ async def test_extract_writes_memcell_json_for_mini_fixture(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_cluster_one_memcell_mints_first_cluster() -> None:
-    """First memcell in an empty list must always create cluster_0."""
-    mc = _make_memcell("mc0", timestamp=1000, content="first episode", content_embeddings=[1.0, 0.0, 0.0])
+async def test_cluster_one_episode_mints_first_cluster() -> None:
+    """First episode in an empty list must always create cluster_0."""
+    ep = _make_episode("ep0", timestamp=1000, episode_text="first episode", episode_embedding=[1.0, 0.0, 0.0])
 
-    result = await _cluster_one_memcell(mc, [], threshold=0.70, time_window_days=7.0)
+    result = await _cluster_one_episode(ep, [], threshold=0.70, time_window_days=7.0)
 
     assert len(result) == 1
     assert result[0].id == "cluster_0"
-    assert result[0].members == ["mc0"]
+    assert result[0].members == ["ep0"]
     assert result[0].last_ts == 1000
 
 
 @pytest.mark.asyncio
-async def test_cluster_one_memcell_merges_into_existing() -> None:
-    """A memcell similar to an existing cluster must merge, not mint a new one."""
-    # Both vectors are identical → cosine similarity == 1.0, well above threshold.
+async def test_cluster_one_episode_merges_into_existing() -> None:
+    """An episode similar to an existing cluster must merge, not mint a new one."""
     existing = Cluster(
         id="cluster_0",
         centroid=np.array([1.0, 0.0, 0.0], dtype=np.float32),
         count=1,
         last_ts=500,
-        members=["mc0"],
+        members=["ep0"],
         preview=["old preview"],
     )
-    mc = _make_memcell("mc1", timestamp=1000, content="similar episode", content_embeddings=[1.0, 0.0, 0.0])
+    ep = _make_episode("ep1", timestamp=1000, episode_text="similar episode", episode_embedding=[1.0, 0.0, 0.0])
 
-    result = await _cluster_one_memcell(mc, [existing], threshold=0.70, time_window_days=7.0)
+    result = await _cluster_one_episode(ep, [existing], threshold=0.70, time_window_days=7.0)
 
-    # Must still have exactly one cluster (merged, not appended).
     assert len(result) == 1
     assert result[0].id == "cluster_0"
-    assert "mc1" in result[0].members
+    assert "ep1" in result[0].members
     assert result[0].count == 2
 
 
 @pytest.mark.asyncio
-async def test_cluster_one_memcell_raises_on_missing_embeddings() -> None:
-    """MemCell with no content_embeddings must raise ValueError (fail-loud)."""
-    mc = _make_memcell("mc0", content="some episode", content_embeddings=None)
+async def test_cluster_one_episode_raises_on_missing_embeddings() -> None:
+    """Episode with no episode embedding must raise ValueError (fail-loud)."""
+    ep = _make_episode("ep0", episode_text="some episode", episode_embedding=None)
 
-    with pytest.raises(ValueError, match="content_embeddings is missing"):
-        await _cluster_one_memcell(mc, [], threshold=0.70, time_window_days=7.0)
+    with pytest.raises(ValueError, match="episode embedding is missing"):
+        await _cluster_one_episode(ep, [], threshold=0.70, time_window_days=7.0)
 
 
 @pytest.mark.asyncio
-async def test_cluster_one_memcell_appends_new_cluster_when_dissimilar() -> None:
-    """A dissimilar memcell must mint a second cluster, not overwrite the first."""
-    # Orthogonal vectors → cosine == 0.0, below threshold.
+async def test_cluster_one_episode_appends_new_cluster_when_dissimilar() -> None:
+    """A dissimilar episode must mint a second cluster, not overwrite the first."""
     existing = Cluster(
         id="cluster_0",
         centroid=np.array([1.0, 0.0, 0.0], dtype=np.float32),
         count=1,
         last_ts=0,
-        members=["mc0"],
+        members=["ep0"],
         preview=["old"],
     )
-    mc = _make_memcell("mc1", timestamp=0, content="orthogonal topic", content_embeddings=[0.0, 1.0, 0.0])
+    ep = _make_episode("ep1", timestamp=0, episode_text="orthogonal topic", episode_embedding=[0.0, 1.0, 0.0])
 
-    result = await _cluster_one_memcell(mc, [existing], threshold=0.70, time_window_days=7.0)
+    result = await _cluster_one_episode(ep, [existing], threshold=0.70, time_window_days=7.0)
 
     assert len(result) == 2
     ids = {c.id for c in result}
     assert ids == {"cluster_0", "cluster_1"}
 
 
-def test_serialize_cluster_file_shape() -> None:
-    """Output dict must have 'clusters' list and 'memcell_to_cluster' map."""
+def test_build_clusters_data_shape() -> None:
+    """Output list must have correct fields with centroid as plain Python floats."""
     clusters = [
         Cluster(
             id="cluster_0",
@@ -215,24 +161,19 @@ def test_serialize_cluster_file_shape() -> None:
             preview=["preview text"],
         )
     ]
-    out = _serialize_cluster_file(clusters)
+    out = _build_clusters_data(clusters)
 
-    assert "clusters" in out
-    assert "memcell_to_cluster" in out
-
-    c = out["clusters"][0]
+    assert len(out) == 1
+    c = out[0]
     assert c["id"] == "cluster_0"
-    assert isinstance(c["centroid"], list)  # tolist() → plain Python floats
+    assert isinstance(c["centroid"], list)
     assert all(isinstance(v, float) for v in c["centroid"])
     assert c["count"] == 2
     assert c["last_ts"] == 2000
     assert c["members"] == ["a", "b"]
 
-    m2c = out["memcell_to_cluster"]
-    assert m2c == {"a": "cluster_0", "b": "cluster_0"}
 
-
-def test_serialize_cluster_file_is_json_serialisable() -> None:
+def test_build_clusters_data_is_json_serialisable() -> None:
     """Centroid stored as np.float32 must serialise without TypeError."""
     clusters = [
         Cluster(
@@ -244,8 +185,7 @@ def test_serialize_cluster_file_is_json_serialisable() -> None:
             preview=[],
         )
     ]
-    out = _serialize_cluster_file(clusters)
-    # Must not raise
+    out = _build_clusters_data(clusters)
     serialised = json.dumps(out)
     assert "cluster_0" in serialised
 
@@ -253,60 +193,180 @@ def test_serialize_cluster_file_is_json_serialisable() -> None:
 @pytest.mark.asyncio
 async def test_run_clustering_pass_writes_json(tmp_path: Path) -> None:
     """Clustering pass must write clusters_conv_<i>.json with correct shape."""
-    memcells = [_make_memcell("0", timestamp=1000, content="episode one", content_embeddings=[1.0, 0.0])]
+    episodes = [_make_episode("0", timestamp=1000, episode_text="episode one", episode_embedding=[1.0, 0.0])]
+    memcell_to_episode = {"0": "0"}
 
-    await _run_clustering_pass(3, memcells, tmp_path, threshold=0.70, time_window_days=7.0)
+    await _run_clustering_pass(3, episodes, memcell_to_episode, tmp_path, threshold=0.70, time_window_days=7.0)
 
     out_file = tmp_path / "clusters_conv_3.json"
     assert out_file.exists()
     data = json.loads(out_file.read_text())
     assert "clusters" in data
-    assert "memcell_to_cluster" in data
+    assert "episode_to_cluster" in data
     assert len(data["clusters"]) == 1
     assert data["clusters"][0]["id"] == "cluster_0"
-    assert data["memcell_to_cluster"] == {"0": "cluster_0"}
+    assert "episode_ids" in data["clusters"][0]
 
 
 @pytest.mark.asyncio
-async def test_clustering_skipped_when_disabled(tmp_path: Path) -> None:
-    """When enable_clustering=False, no clusters_conv_*.json must be written."""
+async def test_clustering_always_runs(tmp_path: Path) -> None:
+    """Clustering is always enabled; all three entity files must be written."""
     from benchmarks.common.stages.extract import _process_conversation
 
-    cfg = BenchmarkConfig(enable_clustering=False)
+    cfg = BenchmarkConfig()
 
-    # Minimal mock services with a callable embedding (must NOT be invoked).
-    mock_embedding = MagicMock()
-    mock_embedding.embed = AsyncMock(return_value=[[0.1, 0.2]])
     mock_services = MagicMock()
-    mock_services.embedding = mock_embedding
 
     ctx = MagicMock(spec=StageContext)
     ctx.config = cfg
     ctx.services = mock_services
 
-    fake_payload = [_make_memcell("0", content="something")]
+    fake_memcells = [_make_memcell("0")]
+    fake_episodes = [_make_episode("0", episode_embedding=[0.1, 0.2, 0.3])]
 
     with (
         patch(
             "benchmarks.common.stages.extract._extract_one_conversation",
-            new=AsyncMock(return_value=(fake_payload, 10, 5)),
+            new=AsyncMock(return_value=(fake_memcells, fake_episodes, 10, 5)),
+        ),
+        patch(
+            "benchmarks.common.stages.extract._run_clustering_pass",
+            new=AsyncMock(return_value=1),
         ),
     ):
-        ok, _pt, _ct = await _process_conversation(
+        ok, _, _ = await _process_conversation(
             0,
             MagicMock(),  # conv
             MagicMock(),  # llm
             asyncio.Semaphore(1),
             asyncio.Semaphore(20),
-            tmp_path,
+            output_dir=tmp_path,
             smart_mask=True,
             max_attempts=1,
             ctx=ctx,
         )
 
     assert ok is True
-    assert not (tmp_path / "clusters_conv_0.json").exists()
-    mock_embedding.embed.assert_not_awaited()
+    # Verify the three files are written
+    assert (tmp_path / "memcells_conv_0.json").exists()
+    assert (tmp_path / "episodes_conv_0.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Three-file output format tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_process_conversation_writes_three_files(tmp_path: Path) -> None:
+    """_process_conversation must write memcells, episodes, and clusters files."""
+    from benchmarks.common.stages.extract import _process_conversation
+
+    cfg = BenchmarkConfig()
+    mock_services = MagicMock()
+    ctx = MagicMock(spec=StageContext)
+    ctx.config = cfg
+    ctx.services = mock_services
+
+    fake_memcells = [_make_memcell("0", timestamp=1000), _make_memcell("1", timestamp=2000)]
+    fake_episodes = [
+        _make_episode("0", timestamp=1000, episode_embedding=[1.0, 0.0, 0.0]),
+        _make_episode("1", timestamp=2000, episode_embedding=[0.0, 1.0, 0.0]),
+    ]
+
+    with patch(
+        "benchmarks.common.stages.extract._extract_one_conversation",
+        new=AsyncMock(return_value=(fake_memcells, fake_episodes, 20, 10)),
+    ):
+        ok, pt, ct = await _process_conversation(
+            0,
+            MagicMock(),
+            MagicMock(),
+            asyncio.Semaphore(1),
+            asyncio.Semaphore(20),
+            output_dir=tmp_path,
+            smart_mask=True,
+            max_attempts=1,
+            ctx=ctx,
+        )
+
+    assert ok is True
+    assert pt == 20
+    assert ct == 10
+
+    # All three files exist
+    assert (tmp_path / "memcells_conv_0.json").exists()
+    assert (tmp_path / "episodes_conv_0.json").exists()
+    assert (tmp_path / "clusters_conv_0.json").exists()
+
+    # Memcells — no episode/atomic_facts fields
+    memcells = json.loads((tmp_path / "memcells_conv_0.json").read_text())
+    assert len(memcells) == 2
+    for mc in memcells:
+        assert "episode" not in mc
+        assert "atomic_facts" not in mc
+        assert "id" in mc
+        assert "items" in mc
+
+    # Episodes — uses algo field name, has embeddings, no summary
+    episodes = json.loads((tmp_path / "episodes_conv_0.json").read_text())
+    assert len(episodes) == 2
+    for ep in episodes:
+        assert "episode" in ep
+        assert "content" not in ep
+        assert "summary" not in ep
+        assert "memcell_ids" in ep
+        assert "embeddings" in ep
+
+    # Clusters — has episode_ids
+    clusters = json.loads((tmp_path / "clusters_conv_0.json").read_text())
+    for cl in clusters["clusters"]:
+        assert "episode_ids" in cl
+        assert "centroid" in cl
+    assert "episode_to_cluster" in clusters
+
+    # Episode count equals memcell count (1:1 before Reflection)
+    assert len(episodes) == len(memcells)
+
+
+@pytest.mark.asyncio
+async def test_memcell_to_episode_mapping_is_identity(tmp_path: Path) -> None:
+    """Before Reflection, memcell_to_episode must be a 1:1 identity mapping."""
+    from benchmarks.common.stages.extract import _process_conversation
+
+    cfg = BenchmarkConfig()
+    ctx = MagicMock(spec=StageContext)
+    ctx.config = cfg
+    ctx.services = MagicMock()
+
+    n = 3
+    fake_memcells = [_make_memcell(str(i), timestamp=1000 * (i + 1)) for i in range(n)]
+    fake_episodes = [
+        _make_episode(str(i), timestamp=1000 * (i + 1), episode_embedding=[float(i), 0.0, 0.0]) for i in range(n)
+    ]
+
+    with patch(
+        "benchmarks.common.stages.extract._extract_one_conversation",
+        new=AsyncMock(return_value=(fake_memcells, fake_episodes, 30, 15)),
+    ):
+        ok, _, _ = await _process_conversation(
+            0,
+            MagicMock(),
+            MagicMock(),
+            asyncio.Semaphore(1),
+            asyncio.Semaphore(20),
+            output_dir=tmp_path,
+            smart_mask=True,
+            max_attempts=1,
+            ctx=ctx,
+        )
+
+    assert ok is True
+    clusters = json.loads((tmp_path / "clusters_conv_0.json").read_text())
+    ep2cl = clusters["episode_to_cluster"]
+    # For 1:1 identity, every episode maps to a cluster
+    for i in range(n):
+        assert str(i) in ep2cl
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +496,7 @@ async def test_detect_all_boundaries_threads_returned_tail_into_next_call() -> N
     captured_histories: list[list[Any]] = []
     call_idx = {"i": 0}
 
-    async def recording_step(history: list[Any], new: Any, **_: Any) -> DetectionResult:
+    async def recording_step(history: list[Any], _new: Any, **_: Any) -> DetectionResult:
         captured_histories.append(list(history))
         result = side_effects[call_idx["i"]]
         call_idx["i"] += 1

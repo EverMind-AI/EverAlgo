@@ -9,6 +9,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - `EpisodeExtractor`, `ForesightExtractor`, and `AtomicFactExtractor` now pass the first message's timestamp (`memcell.items[0].timestamp`) as the conversation start time to LLM prompts. Previously they passed `memcell.timestamp` (closing time of the slice), which skewed absolute date resolution for relative time expressions.
+- Episode prompt: relative time references (e.g. "last Friday", "last summer") are now resolved using each message's own timestamp instead of `conversation_start_time`. Fixes off-by-one-week errors when a MemCell spans multiple days. Per-message timestamps switched from ISO 8601 to human-readable format with weekday labels.
 
 ## [0.3.0] - 2026-06-15
 

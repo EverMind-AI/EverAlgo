@@ -1,0 +1,85 @@
+# Benchmark configuration — single source of truth.
+#
+# All parameters aligned with the upstream evaluation reference so that
+# benchmark numbers are directly comparable to published LoCoMo results.
+# BenchmarkConfig reads this file on every run.
+
+# ─── Common: LLM ─────────────────────────────────────────────────────
+llm_base_url = "https://openrouter.ai/api/v1"
+llm_temperature = 0.3                       # LLM sampling temperature (Stage 6 answer overrides to 0.0)
+llm_max_tokens = 16384                      # max output tokens per LLM call
+llm_timeout = 60.0                          # per-call timeout in seconds
+llm_max_retries = 5                         # HTTP-level + JSON-parse retry budget
+
+# ─── Common: Embedding / Reranker models ─────────────────────────────
+embedding_model = "Qwen/Qwen3-Embedding-4B"
+embedding_base_url = "https://api.deepinfra.com/v1/openai"
+embedding_dimensions = 1024                 # Matryoshka truncation; server returns 2560 by default
+reranker_model = "Qwen/Qwen3-Reranker-4B"
+deepinfra_base_url = "https://api.deepinfra.com/v1/inference"
+
+# ─── Common: Embedding batching ──────────────────────────────────────
+embedding_batch_size = 256                  # texts per embedding API call
+embedding_concurrent_batches = 5            # max parallel embedding requests
+
+# ─── Common: Concurrency ─────────────────────────────────────────────
+max_concurrent_convs = 10                   # Stage 1-4: conversations processed in parallel
+max_concurrent_qa = 20                      # Stage 5-7: QA pairs processed in parallel
+
+# ─── Stage 1: Extract Base ───────────────────────────────────────────
+extract_model = "openai/gpt-4.1-mini"       # LLM for episode extraction
+extract_smart_mask = true                   # per-message boundary detection with smart_mask
+cluster_similarity_threshold = 0.70         # cosine threshold for cluster_by_geometry
+cluster_max_time_gap_days = 7.0             # episodes older than this gap form separate clusters
+
+# ─── Stage 2: Reflect ────────────────────────────────────────────────
+enable_reflection = true                    # merge episodes within multi-member clusters
+
+# ─── Stage 3: Enrich ─────────────────────────────────────────────────
+# (no stage-specific params; uses common embedding config above)
+
+# ─── Stage 4: Index ──────────────────────────────────────────────────
+# (no stage-specific params; uses common embedding config above)
+
+# ─── Stage 5: Search (Retrieval) ─────────────────────────────────────
+#
+# Agentic retrieval flow:
+#   hybrid(dense 50 + sparse 50 → RRF) → cluster expand → rerank → sufficiency check
+#   → if insufficient: LLM generates 3 sub-queries → Round 2 hybrid → merge → rerank
+#
+retrieval_mode = "agentic"
+hybrid_emb_candidates = 50                  # dense (embedding) route: top-N episodes to recall
+hybrid_bm25_candidates = 50                 # sparse (BM25) route: top-N episodes to recall
+hybrid_rrf_k = 40                           # RRF smoothing constant (higher = less aggressive reranking)
+round1_rerank_top_n = 10                    # after rerank, keep top-N for LLM sufficiency check
+multi_query_num = 3                         # number of LLM-generated sub-queries in Round 2
+response_top_k = 10                         # final episode count returned to Answer stage
+# Cluster path (always on in agentic mode)
+cluster_top_k = 10                          # select top-K clusters by first-hit scan
+# Reranker (cross-encoder)
+reranker_batch_size = 32                    # documents per reranker API call
+reranker_concurrent_batches = 2             # max parallel reranker requests
+reranker_max_retries = 3                    # per-batch retry budget
+reranker_timeout = 60.0                     # per-batch timeout (seconds)
+reranker_fallback_threshold = 0.3           # min batch success rate; below this the stage fails
+reranker_instruction = "Determine if the passage contains specific facts, entities (names, dates, locations), or details that directly answer the question."
+
+# ─── Stage 6: Answer ─────────────────────────────────────────────────
+answer_model = "openai/gpt-4.1-mini"        # LLM for generating answers from retrieved context
+
+# ─── Stage 7: Evaluate (Judge) ───────────────────────────────────────
+judge_model = "openai/gpt-4o-mini"          # LLM judge for correctness evaluation
+judge_temperature = 0.0                     # deterministic judging
+judge_runs = 3                              # majority vote across N independent judge runs
+
+# ─── Session filter (Reflection evaluation) ──────────────────────────
+# Uncomment to run only specific sessions from specific conversations.
+# Keys are conversation indices (0-based), values are session number lists.
+# When commented out / absent, all conversations and sessions are loaded.
+#
+# [session_filter]
+# "5" = [1, 2, 5, 7, 10, 12, 18, 24, 27, 28]
+# "2" = [3, 8, 19, 25, 28]
+# "3" = [1, 2, 6, 10, 12, 14, 17, 19, 20, 22, 27, 28]
+# "8" = [1, 2, 4, 5, 6, 7, 8, 12, 13, 14, 16, 18, 19, 20, 21, 22, 23, 24]
+# "7" = [3, 4, 8, 10, 15, 19]

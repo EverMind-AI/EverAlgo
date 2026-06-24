@@ -76,14 +76,14 @@ async def acluster_retrieve(
     if not base_results:
         return []
 
-    # Reverse map: memcell_id -> cluster_id (built per call; clusters list is tiny).
-    memcell_to_cluster: dict[str, str] = {
+    # Reverse map: member_id -> cluster_id (built per call; clusters list is tiny).
+    member_to_cluster: dict[str, str] = {
         member: cluster.id for cluster in clusters if cluster.id is not None for member in cluster.members
     }
 
     selected_cluster_ids: set[str] = set()
     for cand in base_results:
-        cluster_id = memcell_to_cluster.get(cand.id)
+        cluster_id = member_to_cluster.get(cand.id)
         if cluster_id is None:
             continue
         selected_cluster_ids.add(cluster_id)

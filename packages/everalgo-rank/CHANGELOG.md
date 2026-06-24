@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `acluster_retrieve`: internal variable `memcell_to_cluster` renamed to `member_to_cluster` to reflect entity-split model where clusters reference episode IDs, not memcell IDs.
+
 ## [0.4.0] - 2026-06-16
 
 ### Added

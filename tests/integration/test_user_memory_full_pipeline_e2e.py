@@ -193,12 +193,14 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     assert "{conversation}" not in episode_prompt
     assert "{custom_instructions}" not in episode_prompt
     # Conversation is rendered as pseudo-JSON objects: field names quoted, values unquoted
-    # (not strictly valid JSON but LLM-readable). Timestamps emitted in ISO 8601 via
-    # ``format_iso_timestamp`` — epoch 1700000000000 -> 2023-11-14T22:13:20+00:00.
-    assert '"timestamp": 2023-11-14T22:13:20+00:00' in episode_prompt, "episode conversation missing Alice timestamp"
+    # (not strictly valid JSON but LLM-readable). Timestamps emitted in natural-language via
+    # ``format_natural_language_time`` so LLM can resolve relative time references per message.
+    assert '"timestamp": November 14, 2023 (Tuesday) at 10:13 PM UTC' in episode_prompt, (
+        "episode conversation missing Alice timestamp in natural-language format"
+    )
     assert '"speaker": Alice' in episode_prompt, "episode conversation missing Alice speaker"
-    assert '"timestamp": 2023-11-14T22:13:21+00:00' in episode_prompt, (
-        "episode conversation missing assistant timestamp"
+    assert '"timestamp": November 14, 2023 (Tuesday) at 10:13 PM UTC' in episode_prompt, (
+        "episode conversation missing assistant timestamp in natural-language format"
     )
     assert '"speaker": assistant' in episode_prompt, "episode conversation missing assistant speaker"
     assert "Python async" in episode_prompt

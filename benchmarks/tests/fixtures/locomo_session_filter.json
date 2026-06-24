@@ -1,0 +1,36 @@
+[
+  {
+    "conversation": {
+      "speaker_a": "Alice",
+      "speaker_b": "Bob",
+      "session_1": [
+        {"speaker": "Alice", "text": "Conv0 session1 msg", "dia_id": "C0S1:1"}
+      ],
+      "session_1_date_time": "1:00 pm on 1 May, 2023",
+      "session_2": [
+        {"speaker": "Bob", "text": "Conv0 session2 msg", "dia_id": "C0S2:1"}
+      ],
+      "session_2_date_time": "1:00 pm on 2 May, 2023",
+      "session_3": [
+        {"speaker": "Alice", "text": "Conv0 session3 msg", "dia_id": "C0S3:1"}
+      ],
+      "session_3_date_time": "1:00 pm on 3 May, 2023"
+    },
+    "qa": []
+  },
+  {
+    "conversation": {
+      "speaker_a": "Carol",
+      "speaker_b": "Dave",
+      "session_1": [
+        {"speaker": "Carol", "text": "Conv1 session1 msg", "dia_id": "C1S1:1"}
+      ],
+      "session_1_date_time": "1:00 pm on 1 June, 2023",
+      "session_2": [
+        {"speaker": "Dave", "text": "Conv1 session2 msg", "dia_id": "C1S2:1"}
+      ],
+      "session_2_date_time": "1:00 pm on 2 June, 2023"
+    },
+    "qa": []
+  }
+]

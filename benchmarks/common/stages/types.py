@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from everalgo.llm.errors import LLMError
+
+# Retryable exception tuple shared by Extract and Enrich stages.
+_RETRYABLE_EXC = (json.JSONDecodeError, ValueError, LLMError)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,6 +37,7 @@ class StageContext:
     smoke_conv_limit: int = 1
     smoke_qa_limit: int = 10
     smoke_msg_limit: int = 50
+    conv_indices: list[int] | None = None
 
 
 @dataclass
@@ -51,9 +58,8 @@ class StageStats:
 
         Both must share the same ``stage_name``.
         """
-        assert self.stage_name == other.stage_name, (
-            f"cannot combine stats from different stages: {self.stage_name!r} vs {other.stage_name!r}"
-        )
+        if self.stage_name != other.stage_name:
+            raise ValueError(f"cannot combine stats from different stages: {self.stage_name!r} vs {other.stage_name!r}")
         return StageStats(
             stage_name=self.stage_name,
             duration_seconds=self.duration_seconds + other.duration_seconds,

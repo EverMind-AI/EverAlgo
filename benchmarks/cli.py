@@ -1,6 +1,7 @@
 """CLI entry point for the EverAlgo benchmark suite.
 
-T7 establishes the argparse surface. The runner wiring lands in T21.
+Parses benchmark arguments, resolves dataset + stage configuration, then
+delegates to ``benchmarks.common.runner`` to execute the requested pipeline.
 """
 
 from __future__ import annotations
@@ -34,14 +35,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--stages",
         nargs="+",
         type=int,
-        choices=[1, 2, 3, 4, 5],
-        default=[1, 2, 3, 4, 5],
-        help="Stage numbers to run (1=extract, 2=index, 3=search, 4=answer, 5=evaluate).",
+        choices=[1, 2, 3, 4, 5, 6, 7],
+        default=[1, 2, 3, 4, 5, 6, 7],
+        help="Stage numbers to run (1=extract_base, 2=reflect, 3=enrich, 4=index, 5=search, 6=answer, 7=evaluate).",
     )
     parser.add_argument(
         "--smoke",
         action="store_true",
         help="Smoke mode: 1 conversation x 10 QA (~10 questions). Quick end-to-end sanity check, not a scored run.",
+    )
+    parser.add_argument(
+        "--conv",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Run only these conversation indices (0-based). E.g. --conv 0 or --conv 0 3 5.",
     )
     parser.add_argument(
         "--data-path",
@@ -54,6 +62,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="Override default output dir (results/{dataset}-{run_name}).",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Config name from benchmarks/ (without .toml extension).",
     )
     return parser.parse_args(argv)
 
@@ -133,12 +146,14 @@ def main() -> int:
     output_dir = args.output_dir or (Path("benchmarks/results") / f"{args.dataset}-{args.run_name}")
     _setup_logging(output_dir)
 
+    config = BenchmarkConfig.from_toml(args.config or "config")
     req = PipelineRequest(
         dataset_name=args.dataset,
         run_name=args.run_name,
-        config=BenchmarkConfig(),
+        config=config,
         stages=list(args.stages),
         smoke=args.smoke,
+        conv_indices=args.conv,
         data_path=data_path,
         output_dir=output_dir,
     )

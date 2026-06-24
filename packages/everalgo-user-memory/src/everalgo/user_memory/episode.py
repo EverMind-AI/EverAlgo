@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from everalgo.llm.format import format_iso_timestamp, format_natural_language_time
+from everalgo.llm.format import format_natural_language_time
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
@@ -169,7 +169,7 @@ def _render_conversation(memcell: MemCell) -> str:
             lines.append(
                 f"""
                 {{
-                    "timestamp": {format_iso_timestamp(timestamp)},
+                    "timestamp": {format_natural_language_time(timestamp)},
                     "speaker": {speaker},
                     "content": {text}
                 }}"""

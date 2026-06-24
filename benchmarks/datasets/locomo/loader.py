@@ -5,11 +5,15 @@ Parses snap-research/locomo ``locomo10.json`` format into the benchmark's
 are reported via ``filter_categories`` for the scoring layer to exclude.
 """
 
+from __future__ import annotations
+
 import json
-from collections.abc import Iterable
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
 
 from benchmarks.common.dataset import Conversation, Message, QAPair
 from benchmarks.datasets.locomo.prompts import ANSWER_PROMPT, JUDGE_PROMPT, JUDGE_SYSTEM_PROMPT
@@ -23,75 +27,102 @@ _CATEGORY_LABELS: Final = {
 }
 
 
+def _parse_session_messages(
+    session_msgs: list[dict[str, Any]],
+    *,
+    conv_id: str,
+    session_key: str,
+    base_ts: int,
+    time_interval: float,
+) -> list[Message]:
+    """Parse raw LoCoMo session messages into ``Message`` objects."""
+    result: list[Message] = []
+    for i_in_session, msg in enumerate(session_msgs):
+        speaker = msg.get("speaker", "")
+        content = msg.get("text", "")
+        if msg.get("img_url"):
+            blip_caption = msg.get("blip_caption", "an image")
+            content = f"[{speaker} shared an image: {blip_caption}] {content}"
+        result.append(
+            Message(
+                id=msg["dia_id"],
+                role="user",
+                content=content,
+                timestamp=int(base_ts + i_in_session * time_interval),
+                sender_id=f"{speaker.lower().replace(' ', '_')}_{conv_id}",
+                sender_name=speaker,
+                metadata={
+                    "session": session_key,
+                    "img_url": msg.get("img_url"),
+                    "blip_caption": msg.get("blip_caption"),
+                    "timestamp_source": "session_level",
+                },
+            )
+        )
+    return result
+
+
 class LocomoDataset:
-    """LoCoMo benchmark dataset adapter."""
+    """LoCoMo benchmark dataset adapter.
+
+    Args:
+        data_path: Path to the ``locomo10.json`` file.
+        session_filter: Optional mapping of conversation index to allowed session indices.
+            When set, only the listed sessions are loaded; conversations absent from the
+            dict yield empty ``Conversation`` objects to keep downstream indexes stable.
+    """
 
     name = "locomo"
 
-    def __init__(self, data_path: Path) -> None:
+    def __init__(self, data_path: Path, *, session_filter: dict[int, list[int]] | None = None) -> None:
         self._data_path = data_path
+        self._session_filter = session_filter
         with data_path.open(encoding="utf-8") as f:
             self._raw = json.load(f)
 
     def load_conversations(self) -> Iterable[Conversation]:
-        """Yield one ``Conversation`` per entry in the raw LoCoMo file."""
+        """Yield one ``Conversation`` per entry in the raw LoCoMo file.
+
+        When ``session_filter`` is set, only sessions listed for each conversation
+        index are included. Conversations whose index is absent from the filter dict
+        are yielded with zero messages (they are not skipped, so downstream stage
+        indexes remain stable).
+        """
         for i, entry in enumerate(self._raw):
             conv = entry["conversation"]
             speakers = (conv.get("speaker_a", "A"), conv.get("speaker_b", "B"))
             conv_id = f"locomo_exp_user_{i}"
+
+            allowed_sessions: set[int] | None = None
+            if self._session_filter is not None:
+                if i not in self._session_filter:
+                    yield Conversation(id=conv_id, speakers=speakers, messages=())
+                    continue
+                allowed_sessions = set(self._session_filter[i])
 
             messages: list[Message] = []
             session_keys = sorted(
                 [k for k in conv if k.startswith("session_") and not k.endswith("_date_time")],
                 key=_session_index,
             )
-            # Pre-parse all session timestamps so #3c can look ahead to next session.
             session_timestamps = [_parse_timestamp(conv.get(f"{key}_date_time")) for key in session_keys]
 
             for session_idx, key in enumerate(session_keys):
-                session_msgs = conv[key]
-                if not session_msgs:
+                if allowed_sessions is not None and _session_index(key) not in allowed_sessions:
                     continue
-                current_session_ts = session_timestamps[session_idx]
+                raw_msgs = conv[key]
+                if not raw_msgs:
+                    continue
+                current_ts = session_timestamps[session_idx]
                 next_ts = session_timestamps[session_idx + 1] if session_idx + 1 < len(session_keys) else None
-                time_interval = _compute_msg_interval_ms(len(session_msgs), current_session_ts, next_ts)
-
-                for i_in_session, msg in enumerate(session_msgs):
-                    speaker = msg.get("speaker", "")
-                    content = msg.get("text", "")
-                    # Prepend image caption when a message carries ``img_url`` so the
-                    # downstream LLMs (BoundaryDetector / Episode / AtomicFact) see the
-                    # visual cue. ~15.5% of LoCoMo messages have ``img_url``; dropping
-                    # them loses real signal for retrieval and answer generation.
-                    if msg.get("img_url"):
-                        blip_caption = msg.get("blip_caption", "an image")
-                        content = f"[{speaker} shared an image: {blip_caption}] {content}"
-                    messages.append(
-                        Message(
-                            id=msg["dia_id"],
-                            role="user",  # LoCoMo has no system/assistant distinction
-                            content=content,
-                            timestamp=int(current_session_ts + i_in_session * time_interval),
-                            # 93 alignment #4: suffix is conv_id string, not raw list index.
-                            # ``f"{speaker.lower().replace(' ','_')}_{conv_id}"``.
-                            sender_id=f"{speaker.lower().replace(' ', '_')}_{conv_id}",
-                            sender_name=speaker,
-                            # 93 alignment #6: preserve session / img / blip / timestamp_source.
-                            # dia_id is already stored as Message.id; not duplicated here.
-                            metadata={
-                                "session": key,
-                                "img_url": msg.get("img_url"),
-                                "blip_caption": msg.get("blip_caption"),
-                                "timestamp_source": "session_level",
-                            },
-                        )
+                interval = _compute_msg_interval_ms(len(raw_msgs), current_ts, next_ts)
+                messages.extend(
+                    _parse_session_messages(
+                        raw_msgs, conv_id=conv_id, session_key=key, base_ts=current_ts, time_interval=interval
                     )
+                )
 
-            yield Conversation(
-                id=conv_id,
-                speakers=speakers,
-                messages=tuple(messages),
-            )
+            yield Conversation(id=conv_id, speakers=speakers, messages=tuple(messages))
 
     def load_qa_pairs(self, conv_id: str) -> Iterable[QAPair]:
         """Yield all scorable QA pairs attached to the given conversation id.

@@ -1,4 +1,4 @@
-"""Tests for Stage 4 answer generation."""
+"""Tests for Stage 6 answer generation (entity-split data model)."""
 
 from __future__ import annotations
 
@@ -21,8 +21,6 @@ def test_run_answer_stage_is_async() -> None:
 
 
 def test_extract_final_answer_finds_section() -> None:
-    # rsplit on last marker: trailing text after the answer is preserved (no
-    # blank-line or ##-heading truncation in the 93-branch logic).
     raw = """## STEP 1: ...
 some reasoning
 
@@ -34,9 +32,6 @@ extra text after"""
 
 
 def test_extract_final_answer_step7_priority_over_final_answer_colon() -> None:
-    # When both "## STEP 7: FINAL ANSWER" and an earlier "FINAL ANSWER:" appear,
-    # the STEP 7 branch fires first (highest priority), taking everything after
-    # the last "## STEP 7: FINAL ANSWER" occurrence.
     raw = (
         "## STEP 3: CROSS-MEMORY LINKING & INFERENCE\n"
         "- Connections found: see FINAL ANSWER: section for summary\n\n"
@@ -47,10 +42,7 @@ def test_extract_final_answer_step7_priority_over_final_answer_colon() -> None:
 
 
 def test_extract_final_answer_rsplit_takes_last_marker() -> None:
-    # rsplit behaviour: when "FINAL ANSWER:" appears twice, we get text after the
-    # LAST occurrence (the actual answer), not the first (reasoning chatter).
     raw = "I note that FINAL ANSWER: might be X.\n\n## STEP 7: FINAL ANSWER\nThe definitive answer is Y."
-    # "## STEP 7: FINAL ANSWER" fires (highest priority), so result is after that.
     assert _extract_final_answer(raw) == "The definitive answer is Y."
 
 
@@ -71,7 +63,7 @@ def test_extract_final_answer_at_end_of_string() -> None:
 
 @pytest.mark.asyncio
 async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """End-to-end: stage1 memcells + stage3 search_results → answers.json."""
+    """End-to-end: stage1 episodes + stage3 search_results → answers.json."""
     from benchmarks.common.config import BenchmarkConfig
     from benchmarks.common.services import Services
     from benchmarks.common.stages.types import StageContext
@@ -83,8 +75,6 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
 
-    # Mock LLM to return a structured response with FINAL ANSWER.
-    # answer.py reads response.usage.prompt_tokens — mock must expose .usage.
     mock_usage = MagicMock(prompt_tokens=100, completion_tokens=20)
     monkeypatch.setattr(
         services.llm,
@@ -97,37 +87,22 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
         ),
     )
 
-    # Prepare stage1 output (memcells — EverAlgo-native schema)
-    stage1_dir: Path = tmp_path / "stage1_extract"
+    # Prepare stage1 output (entity-split: episodes file, not monolithic memcells)
+    stage1_dir: Path = tmp_path / "stage3_enrich"
     stage1_dir.mkdir()
-    memcell: dict[str, Any] = {
+    episode: dict[str, Any] = {
         "id": "0",
+        "owner_id": None,
+        "memcell_ids": ["0"],
+        "subject": "greeting",
+        "episode": "Alice said hi to Bob first",
         "timestamp": 1683525360000,
-        "items": [
-            {
-                "id": "m1",
-                "role": "user",
-                "content": "Alice said hi to Bob first",
-                "timestamp": 1683525360000,
-                "sender_id": "u_alice",
-                "sender_name": "Alice",
-            }
-        ],
-        "episode": {
-            "subject": "greeting",
-            "content": "Alice said hi to Bob first",
-        },
-        "atomic_facts": {
-            "time": "T",
-            "timestamp": 0,
-            "atomic_fact": ["Alice greeted Bob first"],
-            "fact_embeddings": [],
-        },
+        "embeddings": {"episode": [0.1, 0.2], "subject": [0.3, 0.4]},
     }
-    (stage1_dir / "memcells_conv_0.json").write_text(json.dumps([memcell]))
+    (stage1_dir / "episodes_conv_0.json").write_text(json.dumps([episode]))
 
-    # Prepare stage3 output (search_results — new schema)
-    stage3_dir: Path = tmp_path / "stage3_search"
+    # Prepare stage3 output (search_results)
+    stage3_dir: Path = tmp_path / "stage5_search"
     stage3_dir.mkdir()
     search_results: dict[str, Any] = {
         "locomo_exp_user_0": [
@@ -154,13 +129,13 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
         services=services,
         dataset=LocomoDataset(data_path=fixture),
         input_dir=stage3_dir,
-        output_dir=tmp_path / "stage4_answer",
+        output_dir=tmp_path / "stage6_answer",
     )
     stats = await run_answer_stage(ctx)
     assert stats.stage_name == "answer"
     assert stats.success >= 1
 
-    out: Path = tmp_path / "stage4_answer" / "answers.json"
+    out: Path = tmp_path / "stage6_answer" / "answers.json"
     assert out.exists()
     data: list[dict[str, Any]] = json.loads(out.read_text())
     assert isinstance(data, list)
@@ -185,11 +160,7 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
 
 @pytest.mark.asyncio
 async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """Fail-loud: persistent LLM exceptions exhaust retries and abort the stage.
-
-    Global principle — silent per-question fallback is forbidden so the operator
-    sees real failures instead of inflated "wrong" counts in stage 5.
-    """
+    """Fail-loud: persistent LLM exceptions exhaust retries and abort the stage."""
     from benchmarks.common.config import BenchmarkConfig
     from benchmarks.common.services import Services
     from benchmarks.common.stages.types import StageContext
@@ -197,36 +168,32 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test")
-    # Tenacity's async retry sleeps via asyncio.sleep; patch it to avoid real delays.
-    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("benchmarks.common.stages.answer.asyncio.sleep", AsyncMock())
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
     services.llm.chat = AsyncMock(side_effect=RuntimeError("LLM down"))  # type: ignore[method-assign]
 
-    # Minimal stage 1/3 outputs (EverAlgo-native schema)
-    stage1_dir: Path = tmp_path / "stage1_extract"
+    # Minimal stage 1 output (entity-split: episodes)
+    stage1_dir: Path = tmp_path / "stage3_enrich"
     stage1_dir.mkdir()
-    (stage1_dir / "memcells_conv_0.json").write_text(
+    (stage1_dir / "episodes_conv_0.json").write_text(
         json.dumps(
             [
                 {
                     "id": "0",
+                    "owner_id": None,
+                    "memcell_ids": ["0"],
+                    "subject": "x",
+                    "episode": "y",
                     "timestamp": 0,
-                    "items": [],
-                    "episode": {"subject": "x", "content": "y"},
-                    "atomic_facts": {
-                        "time": "",
-                        "timestamp": 0,
-                        "atomic_fact": [],
-                        "fact_embeddings": [],
-                    },
+                    "embeddings": {"episode": None, "subject": None},
                 }
             ]
         )
     )
 
-    stage3_dir: Path = tmp_path / "stage3_search"
+    stage3_dir: Path = tmp_path / "stage5_search"
     stage3_dir.mkdir()
     (stage3_dir / "search_results.json").write_text(
         json.dumps(
@@ -256,9 +223,8 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
         services=services,
         dataset=LocomoDataset(data_path=fixture),
         input_dir=stage3_dir,
-        output_dir=tmp_path / "stage4_answer",
+        output_dir=tmp_path / "stage6_answer",
     )
     with pytest.raises(RuntimeError, match="LLM down"):
         await run_answer_stage(ctx)
-    # No answers.json written — failure aborts before the final dump.
-    assert not (tmp_path / "stage4_answer" / "answers.json").exists()
+    assert not (tmp_path / "stage6_answer" / "answers.json").exists()

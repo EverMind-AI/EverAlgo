@@ -13,7 +13,6 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from benchmarks.common.retry import answer_retry
 from benchmarks.common.stages.types import StageStats
 from everalgo.llm.parse import extract_final_answer as _algo_extract_final_answer
 from everalgo.llm.types import ChatMessage
@@ -55,22 +54,19 @@ def _extract_final_answer(raw: str) -> str:
 
 
 def _build_context(
-    selected_memcells: list[dict[str, Any]],
+    selected_episodes: list[dict[str, Any]],
     speakers: tuple[str, str] | None = None,
 ) -> str:
-    r"""Build the context string from pre-selected memcells.
+    r"""Build the context string from pre-selected episodes.
 
-    Each memcell renders as ``{subject}: {content}\n---`` and entries are joined by ``\n\n``. The
+    Each episode renders as ``{subject}: {episode_text}\n---`` and entries are joined by ``\n\n``. The
     ``\n---`` suffix plus double-newline separator give the LLM clear per-memory block boundaries for
-    STEP 1 (RELEVANT MEMORIES EXTRACTION) in the answer prompt. ``subject``/``content`` are read from
-    the nested EverAlgo schema; the raw-ms ``timestamp`` field is intentionally omitted (LLMs cannot
-    parse ms epochs and any temporal cues are already inside ``content`` in natural language).
+    STEP 1 (RELEVANT MEMORIES EXTRACTION) in the answer prompt. ``subject`` and ``episode`` are flat
+    fields on the episode dict (entity-split model). The raw-ms ``timestamp`` field is intentionally
+    omitted (LLMs cannot parse ms epochs and any temporal cues are already inside the episode text).
     """
     speaker_a, speaker_b = speakers if speakers else ("A", "B")
-    episode_lines = [
-        f"{mc.get('episode', {}).get('subject', 'N/A')}: {mc.get('episode', {}).get('content', 'N/A')}\n---"
-        for mc in selected_memcells
-    ]
+    episode_lines = [f"{ep.get('subject', 'N/A')}: {ep.get('episode', 'N/A')}\n---" for ep in selected_episodes]
     return _CONTEXT_TEMPLATE.format(
         speaker_a=speaker_a,
         speaker_b=speaker_b,
@@ -78,30 +74,69 @@ def _build_context(
     )
 
 
-def _load_memcell_map(stage1_dir: Path, ctx: StageContext) -> dict[str, dict[str, dict[str, Any]]]:
-    """Load all memcells_conv_*.json files into a session-scoped map.
+def _load_episode_map(stage1_dir: Path, ctx: StageContext) -> dict[str, dict[str, dict[str, Any]]]:
+    """Load all episodes_conv_*.json files into a session-scoped map.
 
     Returns:
-        ``{conv_id: {mc_id: mc_dict}}`` keyed by dataset conv_id and
-        session-local memcell ``id`` strings (e.g. ``"0"``, ``"1"``).
+        ``{conv_id: {episode_id: episode_dict}}`` keyed by dataset conv_id and
+        episode ``id`` strings (e.g. ``"0"``, ``"1"``).
     """
     map_per_session: dict[str, dict[str, dict[str, Any]]] = {}
     sessions = list(ctx.dataset.load_conversations())
     for idx, conv in enumerate(sessions):
-        path = stage1_dir / f"memcells_conv_{idx}.json"
+        path = stage1_dir / f"episodes_conv_{idx}.json"
         if not path.exists():
             continue
         try:
-            memcells: list[dict[str, Any]] = json.loads(path.read_text())
-            map_per_session[conv.id] = {mc["id"]: mc for mc in memcells if "id" in mc}
+            episodes: list[dict[str, Any]] = json.loads(path.read_text())
+            map_per_session[conv.id] = {ep["id"]: ep for ep in episodes if "id" in ep}
         except (json.JSONDecodeError, OSError, KeyError):
             continue  # tolerate corrupted/empty files
     return map_per_session
 
 
+async def _retry_llm_answer(
+    prompt: str,
+    ctx: StageContext,
+    question_id: str,
+) -> tuple[str, Any]:
+    """Call LLM with retry, extracting the final answer. Fail-loud on exhaustion.
+
+    Returns:
+        Tuple of ``(answer_text, response_object)``.
+    """
+    answer = ""
+    response = None
+    for attempt in range(ctx.config.llm_max_retries):
+        try:
+            response = await ctx.services.llm.chat(
+                [ChatMessage(role="user", content=prompt)],
+                temperature=0.0,
+                max_tokens=32768,
+            )
+            answer = _extract_final_answer(response.content)
+            if answer:
+                return answer, response
+        except Exception:
+            if attempt == ctx.config.llm_max_retries - 1:
+                raise
+            logger.warning(
+                "answer attempt %d/%d failed for question_id=%s; retrying",
+                attempt + 1,
+                ctx.config.llm_max_retries,
+                question_id,
+                exc_info=True,
+            )
+            await asyncio.sleep(1.0 * (2**attempt))
+            continue
+        if attempt < ctx.config.llm_max_retries - 1:
+            await asyncio.sleep(1.0 * (2**attempt))
+    raise RuntimeError(f"answer empty after {ctx.config.llm_max_retries} retries (question_id={question_id})")
+
+
 async def _answer_one_question(
     item: dict[str, Any],
-    memcells_map: dict[str, dict[str, dict[str, Any]]],
+    episodes_map: dict[str, dict[str, dict[str, Any]]],
     speakers_lookup: dict[str, tuple[str, str]],
     ctx: StageContext,
 ) -> dict[str, Any]:
@@ -109,28 +144,13 @@ async def _answer_one_question(
     qa = item["original_qa"]
     conv_id = qa.get("conv_id", item.get("conversation_id", ""))
     speakers = speakers_lookup.get(conv_id)
-    session_memcells = memcells_map.get(conv_id, {})
-    mc_ids = item.get("members", [])
-    selected = [session_memcells[mc_id] for mc_id in mc_ids[: ctx.config.response_top_k] if mc_id in session_memcells]
+    session_episodes = episodes_map.get(conv_id, {})
+    ep_ids = item.get("members", [])
+    selected = [session_episodes[ep_id] for ep_id in ep_ids[: ctx.config.response_top_k] if ep_id in session_episodes]
     context = _build_context(selected, speakers)
     prompt = ctx.dataset.answer_prompt().format(context=context, question=qa["question"])
 
-    @answer_retry(max_attempts=ctx.config.llm_max_retries)
-    async def _generate() -> tuple[str, Any] | None:
-        resp = await ctx.services.llm.chat(
-            [ChatMessage(role="user", content=prompt)],
-            temperature=0.0,
-            max_tokens=32768,
-        )
-        ans = _extract_final_answer(resp.content)
-        if not ans:
-            return None  # triggers retry_if_result
-        return ans, resp
-
-    result = await _generate()
-    if result is None:
-        raise RuntimeError(f"answer empty after retries (question_id={qa['question_id']})")
-    answer, response = result
+    answer, response = await _retry_llm_answer(prompt, ctx, qa["question_id"])
     pt = (response.usage.prompt_tokens or 0) if response.usage is not None else 0
     ct = (response.usage.completion_tokens or 0) if response.usage is not None else 0
     return {
@@ -176,8 +196,10 @@ async def run_answer_stage(ctx: StageContext) -> StageStats:
 
     search_results: dict[str, list[dict[str, Any]]] = json.loads((ctx.input_dir / "search_results.json").read_text())
 
-    stage1_dir = ctx.input_dir.parent / "stage1_extract"
-    memcells_map = _load_memcell_map(stage1_dir, ctx)
+    # Read episodes from stage3_enrich (which always carries the latest episodes —
+    # either original from stage1 or reflected from stage2, passed through by enrich).
+    enrich_dir = ctx.input_dir.parent / "stage3_enrich"
+    episodes_map = _load_episode_map(enrich_dir, ctx)
     speakers_lookup = _build_speakers_lookup(ctx)
 
     all_items = _flatten_search_results(search_results)
@@ -188,7 +210,7 @@ async def run_answer_stage(ctx: StageContext) -> StageStats:
 
     async def _process(item: dict[str, Any]) -> dict[str, Any]:
         async with sem:
-            result = await _answer_one_question(item, memcells_map, speakers_lookup, ctx)
+            result = await _answer_one_question(item, episodes_map, speakers_lookup, ctx)
             stats.prompt_tokens += result["prompt_tokens"]
             stats.completion_tokens += result["completion_tokens"]
             return result

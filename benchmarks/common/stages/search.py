@@ -26,21 +26,22 @@ import logging
 import pickle
 import time
 import traceback
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import nltk  # type: ignore[import-untyped]
 import numpy as np
 from nltk.corpus import stopwords  # type: ignore[import-untyped]
 from nltk.stem import PorterStemmer  # type: ignore[import-untyped]
-from nltk.tokenize import word_tokenize  # type: ignore[import-untyped]
 
 from benchmarks.common.retry import http_retry
+from benchmarks.common.stages._tokenize import ensure_nltk as _ensure_nltk
+from benchmarks.common.stages._tokenize import tokenize as _tokenize
 from everalgo.clustering import Cluster
 from everalgo.rank import aagentic_retrieve, acluster_retrieve, ahybrid_retrieve, amaxsim_retrieve
 from everalgo.types import Candidate as _Candidate
 
 if TYPE_CHECKING:
     from benchmarks.common.services import EmbeddingClient, RerankClient
+    from benchmarks.common.stages.types import StageContext, StageStats
     from everalgo.llm.providers.openai_compat import OpenAICompatClient
     from everalgo.llm.types import ChatMessage, ChatResponse
     from everalgo.rank.protocols import RerankFn, RetrieveFn
@@ -61,11 +62,16 @@ def _doc_to_candidate(doc: _Doc, score: float) -> _Candidate:
     """Wrap a ``(doc, score)`` pair as an algo ``Candidate``.
 
     The original doc dict is stored in ``metadata["_doc"]`` for round-trip recovery.
-    ``id`` is read from ``doc["id"]``; absent ids fall back to an empty string (caller
-    dedup-by-id degrades gracefully for such items).
+    The ``episode`` field is restructured into a nested dict matching the contract
+    expected by ``everalgo.rank.agentic._format_docs`` (``episode.subject`` + ``episode.content``).
     """
     doc_id = str(doc.get("id", "")) if doc.get("id") is not None else ""
-    return _Candidate(id=doc_id, score=float(score), metadata={"_doc": doc, **doc})
+    meta: dict[str, Any] = {"_doc": doc, **doc}
+    # Algo's _format_docs expects metadata["episode"] = {"subject": ..., "content": ...}
+    # but the entity-split model stores episode text as a flat string field.
+    if isinstance(meta.get("episode"), str):
+        meta["episode"] = {"subject": meta.get("subject", ""), "content": meta["episode"]}
+    return _Candidate(id=doc_id, score=float(score), metadata=meta)
 
 
 def _candidate_to_scored(c: _Candidate) -> _Scored:
@@ -106,6 +112,9 @@ class _TokenCountingLLM:
     ``usage.completion_tokens`` into ``self.prompt_tokens`` / ``self.completion_tokens``.
     This lets ``_process_single_qa`` report token totals for the retrieval stage
     while still delegating all logic to the algo.
+
+    Args:
+        inner: The underlying LLM client to proxy.
     """
 
     def __init__(self, inner: OpenAICompatClient) -> None:
@@ -128,35 +137,6 @@ class _TokenCountingLLM:
             self.prompt_tokens += resp.usage.prompt_tokens or 0
             self.completion_tokens += resp.usage.completion_tokens or 0
         return resp
-
-
-# ---------------------------------------------------------------------------
-# NLTK helpers
-# ---------------------------------------------------------------------------
-
-
-def _ensure_nltk() -> None:
-    """Download required NLTK data if not present."""
-    for find_path, download_id in [
-        ("tokenizers/punkt", "punkt"),
-        ("tokenizers/punkt_tab", "punkt_tab"),
-        ("corpora/stopwords", "stopwords"),
-    ]:
-        try:
-            nltk.data.find(find_path)  # type: ignore[no-untyped-call]
-        except LookupError:
-            nltk.download(download_id, quiet=True)  # type: ignore[no-untyped-call]
-
-
-def _tokenize(text: str, stemmer: Any, stop_words: set[str]) -> list[str]:
-    """Lower -> tokenize -> keep alpha words len>=2 not stopword -> stem.
-
-    Must be identical to the tokenization used during indexing (index.py).
-    """
-    if not text:
-        return []
-    tokens: list[str] = word_tokenize(text.lower())  # type: ignore[no-untyped-call]
-    return [str(stemmer.stem(t)) for t in tokens if t.isalpha() and len(t) >= 2 and t not in stop_words]
 
 
 def compute_maxsim_score(
@@ -258,32 +238,32 @@ def _score_emb_item(
     item: dict[str, Any],
     query_vec: np.ndarray,
 ) -> _Scored | None:
-    """Score an embedding index entry via MaxSim — atomic_facts short-circuit + fallback.
+    """Score an embedding index entry via MaxSim — atomic_facts + subject only.
 
-    When the doc carries non-empty ``atomic_facts`` embeddings, the score is the max cosine
-    similarity over just those facts; the ``subject`` / ``summary`` / ``episode`` field embeddings
-    only participate as a fallback when ``atomic_facts`` is missing or empty. Atomic facts are
-    LLM-condensed semantic summaries derived from the episode body, so they typically dominate the
-    cosine similarity against the query — including the parent-field embeddings would dilute the
-    MaxSim pool with redundant signal.
+    Entity-split model: every episode is guaranteed to have atomic_facts embeddings. The score
+    is the max cosine similarity over those facts. The ``subject`` vector provides a supplementary
+    topic-level signal added to the MaxSim pool. No summary or episode content fallback.
     """
-    doc: _Doc = item.get("doc") or {}
+    doc_id: str = str(item.get("doc_id") or "")
     embeddings: dict[str, Any] = item.get("embeddings") or {}
     if not embeddings:
         return None
 
+    pool: list[np.ndarray] = []
+
     atomic_fact_embs = embeddings.get("atomic_facts")
     if isinstance(atomic_fact_embs, list) and atomic_fact_embs:
-        return (doc, compute_maxsim_score(query_vec, cast("list[np.ndarray]", atomic_fact_embs)))
+        pool.extend(cast("list[np.ndarray]", atomic_fact_embs))
 
-    field_vecs: list[np.ndarray] = []
-    for field in ("subject", "summary", "episode"):
-        field_emb = embeddings.get(field)
-        if field_emb is not None:
-            field_vecs.append(field_emb)
-    if not field_vecs:
+    subject_emb = embeddings.get("subject")
+    if subject_emb is not None:
+        pool.append(subject_emb)
+
+    if not pool:
         return None
-    return (doc, compute_maxsim_score(query_vec, field_vecs))
+
+    doc: _Doc = {"id": doc_id}
+    return (doc, compute_maxsim_score(query_vec, pool))
 
 
 async def _resolve_query_vec(
@@ -308,21 +288,15 @@ async def search_with_emb_index(
 ) -> list[_Scored]:
     """Execute embedding retrieval using the MaxSim strategy.
 
-    For documents that contain ``atomic_facts`` embeddings:
-    - Compute cosine similarity between the query and each atomic_fact.
-    - Take the maximum similarity as the document score (MaxSim strategy).
-
-    For documents without ``atomic_facts``:
-    - Fall back to scoring against ``subject``, ``summary``, and ``episode``
-      field embeddings; take the maximum across those fields.
+    Scores each entry by MaxSim over ``atomic_facts`` embeddings + ``subject`` vector.
+    No summary or episode content fallback.
 
     Args:
         query: Raw query text.
         emb_index: Pre-built embedding index; each entry is
-            ``{"doc": dict, "embeddings": {"atomic_facts": [...], ...}}``.
+            ``{"doc_id": str, "embeddings": {"atomic_facts": [...], "subject": vec, ...}}``.
         top_n: Maximum number of results to return.
-        embedding_client: Service used to embed the query when
-            ``query_embedding`` is not pre-provided.
+        embedding_client: Service used to embed the query when ``query_embedding`` is not pre-provided.
         query_embedding: Optional pre-computed query embedding.
 
     Returns:
@@ -343,34 +317,19 @@ async def search_with_emb_index(
     return sorted_results[:top_n]
 
 
-def _episode_field(doc: dict[str, Any], field: str) -> str:
-    """Read ``doc.episode.<field>`` as a non-empty string, else empty.
-
-    Tolerates the legacy schema where ``doc.episode`` was a plain string —
-    such docs do not expose nested fields, so always return empty.
-    """
-    episode = doc.get("episode")
-    if not isinstance(episode, dict):
-        return ""
-    value = cast("dict[str, Any]", episode).get(field) or ""
-    return value if isinstance(value, str) else ""
-
-
 def _format_doc_for_rerank(doc: dict[str, Any]) -> str:
-    """Format a doc for reranker input — ``episode.content`` only, no fallback.
+    """Format a doc for reranker input — ``episode`` text field, no fallback.
 
-    Mirrors the 93-version behavior (``stage3_memory_retrivel.py:127-130``) which
-    reads ``doc["episode"]`` as a single string. In our nested schema the equivalent
-    is ``doc["episode"]["content"]``.
+    In the entity-split model, ``doc["episode"]`` is a flat string field (the episode narrative).
 
     Raises:
-        ValueError: If ``episode.content`` is missing or empty — fail-loud so Stage 1
+        ValueError: If ``episode`` text is missing or empty — fail-loud so upstream
             schema regressions surface immediately.
     """
-    content = _episode_field(doc, "content")
-    if content:
-        return content
-    raise ValueError(f"doc has no episode.content for reranker: id={doc.get('id', 'unknown')}")
+    content = doc.get("episode")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    raise ValueError(f"doc has no episode text for reranker: id={doc.get('id', 'unknown')}")
 
 
 def _trace_scored(results: list[_Scored], *, limit: int) -> list[dict[str, Any]]:
@@ -428,74 +387,46 @@ async def _rerank_batch(
     return await _call()
 
 
-async def reranker_search(
-    query: str,
-    *,
-    results: list[_Scored],
-    rerank_client: RerankClient,
-    top_n: int = 20,
-    reranker_instruction: str | None = None,
-    batch_size: int = 20,
-    concurrent_batches: int = 5,
-    max_retries: int = 3,
-    timeout: float = 60.0,
-    fallback_threshold: float = 0.3,
-) -> list[_Scored]:
-    """Rerank candidate docs with Qwen3 reranker; return top-n.
-
-    Documents containing atomic facts are formatted as multi-line text
-    (timestamp + one fact per line) to match the upstream reference scoring format.
-    Documents without usable text are silently skipped.
-
-    Batches are processed with controlled concurrency and per-batch retry
-    with exponential backoff. Fails loud (raises ``RuntimeError``) when the
-    reranker success rate drops below ``fallback_threshold`` — silent fallback
-    to the original ranking is forbidden because on the cluster path the upstream
-    scores are all 0.0 (see ``acluster_retrieve``), so a fallback would degrade
-    to dict-insertion order and silently regress accuracy. The outer
-    ``_attempt_single_qa`` retry loop catches this; 5 retries exhausted means
-    a real problem and the stage aborts (global ``唯一兜底 = 重试`` principle).
-
-    Args:
-        query: Raw query text.
-        results: Candidate (doc, score) pairs from prior retrieval.
-        rerank_client: RerankClient instance (DeepInfra Qwen3-Reranker).
-        top_n: Number of results to return after reranking.
-        reranker_instruction: Optional task instruction for the reranker.
-        batch_size: Documents per API call.
-        concurrent_batches: Max batches processed simultaneously per group.
-        max_retries: Per-batch retry limit (delegated to tenacity ``http_retry``).
-        timeout: Per-batch asyncio timeout (seconds).
-        fallback_threshold: Minimum batch success rate; below this the call raises.
+def _format_docs_for_rerank(results: list[_Scored]) -> tuple[list[str], list[int]]:
+    """Format candidate docs for reranker input, preserving original indices.
 
     Returns:
-        List of ``(doc, reranker_score)`` pairs sorted by score descending.
+        Tuple of ``(doc_texts, original_indices)`` where each entry corresponds
+        to a successfully formatted document.
+
+    Raises:
+        ValueError: Propagated from ``_format_doc_for_rerank`` when a doc lacks episode text.
+    """
+    doc_texts: list[str] = []
+    original_indices: list[int] = []
+    for orig_idx, (doc, _score) in enumerate(results):
+        text = _format_doc_for_rerank(doc)
+        if text:
+            doc_texts.append(text)
+            original_indices.append(orig_idx)
+    return doc_texts, original_indices
+
+
+async def _execute_rerank_batches(
+    query: str,
+    doc_texts: list[str],
+    *,
+    rerank_client: RerankClient,
+    reranker_instruction: str | None,
+    batch_size: int,
+    concurrent_batches: int,
+    max_retries: int,
+    timeout: float,
+    fallback_threshold: float,
+) -> list[tuple[int, float]]:
+    """Run reranker batches with concurrency control; fail-loud on low success rate.
 
     Raises:
         RuntimeError: When batch success rate falls below ``fallback_threshold``.
     """
-    if not results:
-        return []
-
-    # Step 1: Format docs, preserving original index for round-trip mapping.
-    docs_with_text: list[tuple[int, _Doc, str]] = []
-    for orig_idx, (doc, _score) in enumerate(results):
-        text = _format_doc_for_rerank(doc)
-        if text:
-            docs_with_text.append((orig_idx, doc, text))
-
-    if not docs_with_text:
-        return []
-
-    doc_texts = [t for _, _, t in docs_with_text]
-    original_indices = [oi for oi, _, _ in docs_with_text]
-
-    # Step 2: Partition into fixed-size batches.
     batches: list[tuple[int, list[str]]] = [
         (i, doc_texts[i : i + batch_size]) for i in range(0, len(doc_texts), batch_size)
     ]
-
-    # Step 3: Run batches in groups of concurrent_batches with inter-group delay.
     all_scored: list[tuple[int, float]] = []
     successful = 0
 
@@ -526,17 +457,55 @@ async def reranker_search(
             await asyncio.sleep(0.3)
 
     success_rate = successful / len(batches) if batches else 0.0
-
-    # Fail-loud when too many reranker batches failed. Silent fallback to the original
-    # ranking would degenerate to dict-insertion order on the cluster path (upstream
-    # scores are 0.0) and mask real reranker outages.
     if not all_scored or success_rate < fallback_threshold:
         raise RuntimeError(
             f"reranker batch success rate {success_rate:.2f} below threshold {fallback_threshold:.2f} "
             f"({successful}/{len(batches)} batches succeeded)"
         )
+    return all_scored
 
-    # Step 4: Sort by reranker score and map back to original documents.
+
+async def reranker_search(
+    query: str,
+    *,
+    results: list[_Scored],
+    rerank_client: RerankClient,
+    top_n: int = 20,
+    reranker_instruction: str | None = None,
+    batch_size: int = 20,
+    concurrent_batches: int = 5,
+    max_retries: int = 3,
+    timeout: float = 60.0,
+    fallback_threshold: float = 0.3,
+) -> list[_Scored]:
+    """Rerank candidate docs with Qwen3 reranker; return top-n.
+
+    Fails loud (raises ``RuntimeError``) when the reranker success rate drops below
+    ``fallback_threshold`` — silent fallback is forbidden because cluster-path upstream
+    scores are all 0.0 and would degrade to dict-insertion order.
+
+    Raises:
+        RuntimeError: When batch success rate falls below ``fallback_threshold``.
+    """
+    if not results:
+        return []
+
+    doc_texts, original_indices = _format_docs_for_rerank(results)
+    if not doc_texts:
+        return []
+
+    all_scored = await _execute_rerank_batches(
+        query,
+        doc_texts,
+        rerank_client=rerank_client,
+        reranker_instruction=reranker_instruction,
+        batch_size=batch_size,
+        concurrent_batches=concurrent_batches,
+        max_retries=max_retries,
+        timeout=timeout,
+        fallback_threshold=fallback_threshold,
+    )
+
     all_scored.sort(key=lambda x: x[1], reverse=True)
     top_scored = all_scored[:top_n]
     return [(results[original_indices[idx]][0], score) for idx, score in top_scored]
@@ -656,33 +625,29 @@ def _emb_doc_to_children(
 ) -> list[_Candidate]:
     """Score one embedding index entry and return its child Candidates for max-pool.
 
-    Mirrors ``_score_emb_item`` + ``compute_maxsim_score`` corner cases (B-H) exactly.
-    Returns an empty list to skip the doc (B/E), or a list of scored Candidates (H)
-    — including a score=0.0 placeholder when valid_mask is all-false (G).
+    Entity-split model: uses atomic_facts + subject only (no summary/episode content fallback).
+    Returns an empty list when no embeddings exist, or a list of scored Candidates.
     """
     embeddings: dict[str, Any] = item.get("embeddings") or {}
     if not embeddings:
-        return []  # B
+        return []
 
-    # C: atomic_facts non-empty → use exclusively (mirrors _score_emb_item short-circuit)
+    pool: list[Any] = []
     atomic_fact_embs = embeddings.get("atomic_facts")
     if isinstance(atomic_fact_embs, list) and atomic_fact_embs:
-        fact_embs: list[Any] = atomic_fact_embs
-    else:
-        # D: fallback chain — fixed field order mirrors _score_emb_item
-        field_vecs: list[Any] = [
-            embeddings[f] for f in ("episode", "subject", "summary") if embeddings.get(f) is not None
-        ]
-        if not field_vecs:
-            return []  # E
-        fact_embs = field_vecs
+        pool.extend(atomic_fact_embs)
 
-    # H: vectorised MaxSim — mirrors compute_maxsim_score matrix path exactly
-    fact_matrix = np.array(fact_embs)
+    subject_emb = embeddings.get("subject")
+    if subject_emb is not None:
+        pool.append(subject_emb)
+
+    if not pool:
+        return []
+
+    fact_matrix = np.array(pool)
     fact_norms = np.linalg.norm(fact_matrix, axis=1)
     valid_mask = fact_norms > 0
     if not np.any(valid_mask):
-        # G: score=0.0 placeholder ensures parent still enters max-pool (mirrors return 0.0)
         return [_Candidate(id=f"d{doc_idx}_invalid", score=0.0, source="vector", metadata={"parent_id": str(doc_idx)})]
 
     dot_products = np.dot(fact_matrix[valid_mask], query_vec)
@@ -696,34 +661,42 @@ def _emb_doc_to_children(
 def _make_emb_amaxsim_pair(
     emb_index: list[dict[str, Any]],
     embedding_client: Any,
+    episode_docs: list[_Doc] | None = None,
 ) -> tuple[Any, Any]:
     """Return ``(child_retrieve, parent_fetch)`` closures for embedding MaxSim via ``amaxsim_retrieve``.
 
     ``child_retrieve`` mirrors ``search_with_emb_index`` corner cases A (query_norm==0 short-circuit)
-    and delegates per-doc scoring to ``_emb_doc_to_children`` (cases B-H). Max-pool + top-n happen
-    inside ``amaxsim_retrieve`` using the same sentinel/sort as the old inline loop.
+    and delegates per-doc scoring to ``_emb_doc_to_children``. Max-pool + top-n happen
+    inside ``amaxsim_retrieve``.
+
+    Args:
+        emb_index: Embedding index entries (``doc_id`` + ``embeddings``).
+        embedding_client: Client for embedding the query.
+        episode_docs: Optional list of episode dicts aligned by index with ``emb_index``.
+            When provided, ``parent_fetch`` returns the full episode dict (needed by the reranker).
+            When ``None``, returns a minimal ``{"id": doc_id}`` dict.
     """
 
     async def child_retrieve(q: str, _k: int) -> list[_Candidate]:
         query_vec = await _resolve_query_vec(q, embedding_client, None)
         query_norm = float(np.linalg.norm(query_vec))
         if query_norm == 0:
-            return []  # A
+            return []
         children: list[_Candidate] = []
         for doc_idx, item in enumerate(emb_index):
             children.extend(_emb_doc_to_children(doc_idx, item, query_vec, query_norm))
         return children
 
     async def parent_fetch(parent_ids: list[str]) -> list[_Candidate]:
-        return [
-            _Candidate(
-                id=d_idx,
-                score=0.0,
-                source="vector",
-                metadata={"doc": emb_index[int(d_idx)].get("doc") or {}},
-            )
-            for d_idx in parent_ids
-        ]
+        results: list[_Candidate] = []
+        for d_idx in parent_ids:
+            idx = int(d_idx)
+            if episode_docs is not None and idx < len(episode_docs):
+                doc = episode_docs[idx]
+            else:
+                doc = {"id": emb_index[idx].get("doc_id", d_idx)}
+            results.append(_Candidate(id=d_idx, score=0.0, source="vector", metadata={"doc": doc}))
+        return results
 
     return child_retrieve, parent_fetch
 
@@ -733,7 +706,7 @@ def _make_emb_amaxsim_pair(
 # ---------------------------------------------------------------------------
 
 
-async def run_search_stage(ctx: Any) -> Any:
+async def run_search_stage(ctx: StageContext) -> StageStats:
     """Stage 3 — agentic retrieval for every (conv, question).
 
     Loads per-conversation BM25 + embedding indices written by Stage 2
@@ -782,7 +755,7 @@ async def run_search_stage(ctx: Any) -> Any:
     )
 
 
-def _load_conversations_for_search(ctx: Any) -> list[Any]:
+def _load_conversations_for_search(ctx: StageContext) -> list[Any]:
     """Load conversations from the dataset, applying smoke-mode truncation.
 
     Sorts by numeric suffix so ``locomo_exp_user_10`` lands after ``..._9``
@@ -791,7 +764,10 @@ def _load_conversations_for_search(ctx: Any) -> list[Any]:
     contract dataset-agnostic.
     """
     convs = sorted(ctx.dataset.load_conversations(), key=_conv_sort_key)
-    if ctx.smoke:
+    if ctx.conv_indices is not None:
+        allowed = set(ctx.conv_indices)
+        convs = [c for i, c in enumerate(convs) if i in allowed]
+    elif ctx.smoke:
         convs = convs[: ctx.smoke_conv_limit]
     return convs
 
@@ -806,7 +782,7 @@ def _conv_sort_key(conv: Any) -> tuple[str, int]:
 
 async def _search_one_conversation(
     conv: Any,
-    ctx: Any,
+    ctx: StageContext,
     filter_cats: set[str],
     *,
     qa_sem: asyncio.Semaphore,
@@ -837,11 +813,9 @@ async def _search_one_conversation(
 def _load_per_conv_indices(input_dir: Any, conv_idx: int, config: Any) -> dict[str, Any] | None:
     """Load BM25 + embedding + cluster indices for one conversation.
 
-    Returns ``{"bm25": ..., "emb": ..., "cluster": list[Cluster] | None}`` or ``None``
-    when the BM25 or embedding pkl is missing (soft-skip path).  Cluster loading
-    delegates to ``_load_cluster_index`` and preserves its fast-fail contract:
-    when ``enable_cluster_retrieval`` is True but the cluster pkl is missing,
-    the exception propagates to the caller.
+    Returns ``{"bm25": ..., "emb": ..., "cluster": list[Cluster]}`` or ``None``
+    when the BM25 or embedding pkl is missing (soft-skip path). Cluster loading
+    always runs in agentic mode; a missing cluster pkl raises ``FileNotFoundError``.
     """
     bm25_path = input_dir / f"bm25_conv_{conv_idx}.pkl"
     emb_path = input_dir / f"emb_conv_{conv_idx}.pkl"
@@ -854,11 +828,11 @@ def _load_per_conv_indices(input_dir: Any, conv_idx: int, config: Any) -> dict[s
     with emb_path.open("rb") as fh:
         emb_index: list[dict[str, Any]] = pickle.load(fh)
 
-    cluster_index = _load_cluster_index(input_dir, conv_idx, enable=config.enable_cluster_retrieval)
+    cluster_index = _load_cluster_index(input_dir, conv_idx)
     return {"bm25": bm25_index, "emb": emb_index, "cluster": cluster_index}
 
 
-def _load_qa_pairs_for_conv(ctx: Any, conv_id: str) -> list[Any]:
+def _load_qa_pairs_for_conv(ctx: StageContext, conv_id: str) -> list[Any]:
     """Load QA pairs for one conversation, applying smoke-mode truncation."""
     qa_pairs = list(ctx.dataset.load_qa_pairs(conv_id))
     if ctx.smoke:
@@ -869,7 +843,7 @@ def _load_qa_pairs_for_conv(ctx: Any, conv_id: str) -> list[Any]:
 async def _gather_qa_retrieval(
     qa_pairs: list[Any],
     indices: dict[str, Any],
-    ctx: Any,
+    ctx: StageContext,
     filter_cats: set[str],
     *,
     qa_sem: asyncio.Semaphore,
@@ -918,35 +892,39 @@ def _aggregate_retrieval_tokens(
     return total_prompt, total_completion
 
 
+def _write_search_error(ctx: StageContext, question_id: str, max_retries: int) -> None:
+    """Write error traceback to ``search_<question_id>.error.txt`` and log."""
+    err_path = ctx.output_dir / f"search_{question_id}.error.txt"
+    err_path.write_text(traceback.format_exc())
+    logger.exception(
+        "question_id=%s retrieval failed after %d attempts; full traceback in %s",
+        question_id,
+        max_retries,
+        err_path,
+    )
+
+
 async def _process_single_qa(
     qa: Any,
     *,
-    ctx: Any,
+    ctx: StageContext,
     sem: asyncio.Semaphore,
     emb_index: list[dict[str, Any]],
     bm25_index: dict[str, Any],
-    cluster_index: list[Cluster] | None,
+    cluster_index: list[Cluster],
     filter_cats: set[str],
 ) -> dict[str, Any] | None:
-    """Run agentic retrieval for a single QA pair with retry + fail-loud.
+    """Run agentic retrieval for one QA pair with retry + fail-loud.
 
-    Returns ``None`` only for filtered-out categories. On retrieval failure the
-    call is retried up to ``cfg.llm_max_retries`` times with exponential backoff;
-    if all retries are exhausted, writes ``search_<question_id>.error.txt`` with
-    the traceback and re-raises so ``asyncio.gather`` terminates the stage. This
-    mirrors the Stage 2 fast-fail contract (``index.py:466-480``).
+    Returns ``None`` only for filtered-out categories.
     """
     if qa.category in filter_cats:
         return None
 
-    cfg = ctx.config
-    max_retries = max(1, int(cfg.llm_max_retries))
+    max_retries = max(1, int(ctx.config.llm_max_retries))
 
     for attempt in range(max_retries):
         try:
-            # 120 s per-attempt cap. LLM client / embedding / BM25 / reranker each carry their own
-            # timeouts, but a stuck branch on any of them could otherwise hang the whole stage
-            # waiting on ``asyncio.gather``. ``TimeoutError`` falls through to the retry handler below.
             return await asyncio.wait_for(
                 _attempt_single_qa(
                     qa,
@@ -960,14 +938,7 @@ async def _process_single_qa(
             )
         except Exception:
             if attempt >= max_retries - 1:
-                err_path = ctx.output_dir / f"search_{qa.question_id}.error.txt"
-                err_path.write_text(traceback.format_exc())
-                logger.exception(
-                    "question_id=%s retrieval failed after %d attempts; full traceback in %s",
-                    qa.question_id,
-                    max_retries,
-                    err_path,
-                )
+                _write_search_error(ctx, qa.question_id, max_retries)
                 raise
             logger.warning(
                 "Retrieval attempt %d/%d failed for question_id=%s; retrying",
@@ -978,46 +949,32 @@ async def _process_single_qa(
             )
             await asyncio.sleep(1.0 * (2**attempt))
 
-    # Unreachable: loop either returns or raises.
     raise RuntimeError(f"_process_single_qa: exhausted retry loop without return (qa={qa.question_id})")
 
 
-async def _attempt_single_qa(
-    qa: Any,
-    *,
-    ctx: Any,
-    sem: asyncio.Semaphore,
+def _build_retrieval_closures(
+    cfg: Any,
     emb_index: list[dict[str, Any]],
     bm25_index: dict[str, Any],
-    cluster_index: list[Cluster] | None,
-) -> dict[str, Any]:
-    """Single retrieval attempt — caller wraps with retry + error.txt + re-raise.
+    cluster_index: list[Cluster],
+    embedding_client: EmbeddingClient,
+    rerank_fn: RerankFn,
+) -> tuple[RetrieveFn, RetrieveFn, int, RerankFn]:
+    """Build the retrieval closure stack (dense → sparse → hybrid → cluster).
 
-    Builds three caller-side closures wrapping the per-conv BM25 + embedding indices:
-    ``_dense`` (vector search), ``_sparse`` (BM25 search), and ``hybrid_full`` (dense+sparse
-    RRF via ``ahybrid_retrieve``). When cluster retrieval is enabled, also builds a
-    ``cluster_scoped`` closure wrapping ``acluster_retrieve`` and passes it as
-    ``aagentic_retrieve.base_retrieve`` with ``hybrid_full`` as ``round2_retrieve``
-    (Round 2 spills out of cluster scope to the full corpus). Cap merged R1+R2 at 40.
+    Returns:
+        Tuple of ``(base_retrieve, round2_retrieve, round2_cap, rerank_fn)``.
     """
-    cfg = ctx.config
-    embedding_client: EmbeddingClient = ctx.services.embedding
-    rerank_client: RerankClient = ctx.services.rerank
-    llm_proxy = _TokenCountingLLM(ctx.services.llm)
-
-    rerank_fn = _build_rerank_fn(
-        rerank_client,
-        **_reranker_kwargs(cfg),
-    )
+    episode_docs: list[_Doc] = bm25_index["docs"]
 
     async def _dense(q: str, k: int) -> list[_Candidate]:
-        child_retrieve, parent_fetch = _make_emb_amaxsim_pair(emb_index, embedding_client)
+        child_retrieve, parent_fetch = _make_emb_amaxsim_pair(emb_index, embedding_client, episode_docs=episode_docs)
         results = await amaxsim_retrieve(
             q,
             child_retrieve=child_retrieve,
             parent_fetch=parent_fetch,
             top_n=k,
-            child_candidates=len(emb_index),  # exhaustive — mirror search_with_emb_index full scan
+            child_candidates=len(emb_index),
         )
         return [_doc_to_candidate(c.metadata["doc"], c.score) for c in results]
 
@@ -1028,7 +985,7 @@ async def _attempt_single_qa(
             child_retrieve=child_retrieve,
             parent_fetch=parent_fetch,
             top_n=k,
-            child_candidates=len(bm25_index["fact_to_doc_idx"]),  # exhaustive — all fact rows
+            child_candidates=len(bm25_index["fact_to_doc_idx"]),
         )
         return [_doc_to_candidate(c.metadata["doc"], c.score) for c in results]
 
@@ -1043,69 +1000,73 @@ async def _attempt_single_qa(
             rrf_k=cfg.hybrid_rrf_k,
         )
 
-    base_retrieve: RetrieveFn
-    round2_retrieve: RetrieveFn | None
-    round2_cap: int | None
-    agentic_rerank_fn: RerankFn | None
-    if cluster_index is not None:
-        all_docs: list[_Candidate] = [_doc_to_candidate(d, 0.0) for d in bm25_index["docs"]]
+    return _build_cluster_closures(cfg, bm25_index, cluster_index, hybrid_full, rerank_fn)
 
-        async def cluster_scoped(q: str, _k: int) -> list[_Candidate]:
-            # ``_k`` (aagentic's ``round1_top_n``) is ignored on the cluster path: the Level-1
-            # candidate pool size is controlled by ``cluster_base_candidates``, and
-            # ``acluster_retrieve`` returns the entire cluster expansion unreranked so aagentic
-            # can rerank it.
-            return await acluster_retrieve(
-                q,
-                base_retrieve=hybrid_full,
-                base_candidates=cfg.cluster_base_candidates,
-                clusters=cluster_index,
-                all_docs=all_docs,
-                cluster_top_k=cfg.cluster_top_k,
-            )
 
-        base_retrieve = cluster_scoped
-        round2_retrieve = hybrid_full
-        round2_cap = 40
-        # aagentic reranks twice on the cluster path: once over the full Round-1 expansion (Level 2)
-        # and once over the merged Round-1 + Round-2 set (Round-2 final rerank,
-        # ``scene_retrieval.py:331-356``). Both passes share this ``rerank_fn``.
-        agentic_rerank_fn = rerank_fn
-    else:
-        base_retrieve = hybrid_full
-        round2_retrieve = None
-        round2_cap = None
-        # Hybrid path: rerank gated by config (mirrors old _hybrid_agentic_retrieval).
-        agentic_rerank_fn = rerank_fn if cfg.use_reranker else None
+def _build_cluster_closures(
+    cfg: Any,
+    bm25_index: dict[str, Any],
+    cluster_index: list[Cluster],
+    hybrid_full: RetrieveFn,
+    rerank_fn: RerankFn,
+) -> tuple[RetrieveFn, RetrieveFn, int, RerankFn]:
+    """Build the cluster-path closures when ``cluster_index`` is available."""
+    all_docs: list[_Candidate] = [_doc_to_candidate(d, 0.0) for d in bm25_index["docs"]]
 
-    refinement_strategy: Literal["multi_query", "refined_query"] = (
-        "multi_query" if getattr(cfg, "use_multi_query", True) else "refined_query"
-    )
+    async def cluster_scoped(q: str, _k: int) -> list[_Candidate]:
+        return await acluster_retrieve(
+            q,
+            base_retrieve=hybrid_full,
+            base_candidates=None,
+            clusters=cluster_index,
+            all_docs=all_docs,
+            cluster_top_k=cfg.cluster_top_k,
+        )
 
+    return cluster_scoped, hybrid_full, 40, rerank_fn
+
+
+async def _run_agentic_retrieval(
+    query: str,
+    *,
+    cfg: Any,
+    base_retrieve: RetrieveFn,
+    round2_retrieve: RetrieveFn,
+    round2_cap: int,
+    rerank_fn: RerankFn,
+    llm_proxy: _TokenCountingLLM,
+    sem: asyncio.Semaphore,
+) -> tuple[list[_Candidate], Any]:
+    """Execute ``aagentic_retrieve`` under the concurrency semaphore.
+
+    Returns:
+        Tuple of ``(final_candidates, decision)``.
+    """
     async with sem:
-        final_candidates, decision = await aagentic_retrieve(
-            qa.question,
+        return await aagentic_retrieve(
+            query,
             base_retrieve=base_retrieve,
             round2_retrieve=round2_retrieve,
             round2_cap=round2_cap,
-            rerank_fn=agentic_rerank_fn,
+            rerank_fn=rerank_fn,
             llm=llm_proxy,  # type: ignore[arg-type]
             top_n=cfg.response_top_k,
-            # 50 = Round-2 sub-query candidate pool (``hybrid_emb_candidates+hybrid_bm25_candidates``
-            # from ``scene_retrieval.py:302-324``). On the cluster path the Round-1
-            # ``cluster_scoped`` closure ignores this hint and uses ``cfg.cluster_base_candidates``
-            # instead, so this value only governs Round-2 per-query retrieval and the hybrid
-            # fallback path.
             round1_top_n=50,
             round1_rerank_top_n=cfg.round1_rerank_top_n,
-            refinement_strategy=refinement_strategy,
+            refinement_strategy="multi_query",
             multi_query_count=cfg.multi_query_num,
             rrf_k=cfg.hybrid_rrf_k,
         )
 
-    top_results = _candidates_to_scored(final_candidates)
-    members = [doc["id"] for doc, _ in top_results if doc.get("id") is not None]
 
+def _build_retrieval_result(
+    qa: Any,
+    top_results: list[_Scored],
+    decision: Any,
+    llm_proxy: _TokenCountingLLM,
+) -> dict[str, Any]:
+    """Assemble the final search result dict for one QA pair."""
+    members = [doc["id"] for doc, _ in top_results if doc.get("id") is not None]
     retrieval_metadata: dict[str, Any] = {
         "is_multi_round": decision.is_multi_round,
         "is_sufficient": decision.is_sufficient,
@@ -1119,7 +1080,6 @@ async def _attempt_single_qa(
         "completion_tokens": llm_proxy.completion_tokens,
         "trace": {"final_top": _trace_scored(top_results, limit=20)},
     }
-
     return {
         "question_id": qa.question_id,
         "query": qa.question,
@@ -1135,23 +1095,52 @@ async def _attempt_single_qa(
     }
 
 
-def _load_cluster_index(input_dir: Any, conv_idx: int, *, enable: bool) -> list[Cluster] | None:
-    """Load cluster snapshot as ``list[Cluster]`` when ``enable`` is True.
+async def _attempt_single_qa(
+    qa: Any,
+    *,
+    ctx: StageContext,
+    sem: asyncio.Semaphore,
+    emb_index: list[dict[str, Any]],
+    bm25_index: dict[str, Any],
+    cluster_index: list[Cluster],
+) -> dict[str, Any]:
+    """Single retrieval attempt — caller wraps with retry + error.txt + re-raise."""
+    cfg = ctx.config
+    llm_proxy = _TokenCountingLLM(ctx.services.llm)
+    rerank_fn = _build_rerank_fn(ctx.services.rerank, **_reranker_kwargs(cfg))
+
+    base_retrieve, round2_retrieve, round2_cap, rerank_fn = _build_retrieval_closures(
+        cfg, emb_index, bm25_index, cluster_index, ctx.services.embedding, rerank_fn
+    )
+
+    final_candidates, decision = await _run_agentic_retrieval(
+        qa.question,
+        cfg=cfg,
+        base_retrieve=base_retrieve,
+        round2_retrieve=round2_retrieve,
+        round2_cap=round2_cap,
+        rerank_fn=rerank_fn,
+        llm_proxy=llm_proxy,
+        sem=sem,
+    )
+
+    top_results = _candidates_to_scored(final_candidates)
+    return _build_retrieval_result(qa, top_results, decision, llm_proxy)
+
+
+def _load_cluster_index(input_dir: Any, conv_idx: int) -> list[Cluster]:
+    """Load cluster snapshot as ``list[Cluster]``.
 
     Stage 2 writes the pkl as ``list[Cluster.model_dump()]`` (one entry per cluster);
     we round-trip via ``Cluster.model_validate`` so downstream gets a typed view.
 
-    Returns ``None`` only when ``enable`` is False. When enabled, the file MUST exist —
-    stage 2 fast-fails on cluster build, so an absent pkl indicates an out-of-band skip:
-    re-run stage 2 or set ``enable_cluster_retrieval=False``.
+    Always loads in agentic mode — the cluster index MUST exist. Stage 1 fast-fails
+    on cluster build, so an absent pkl indicates a corrupted run.
     """
-    if not enable:
-        return None
     cluster_path = input_dir / f"cluster_index_conv_{conv_idx}.pkl"
     if not cluster_path.exists():
         raise FileNotFoundError(
-            f"enable_cluster_retrieval=True but cluster index not found for conv_{conv_idx}; "
-            f"expected: {cluster_path}. Re-run stage 2 or set enable_cluster_retrieval=False."
+            f"Cluster index not found for conv_{conv_idx}; expected: {cluster_path}. Re-run stage 1."
         )
     with cluster_path.open("rb") as fh:
         raw = pickle.load(fh)

@@ -25,10 +25,17 @@ if TYPE_CHECKING:
     from benchmarks.common.config import BenchmarkConfig
 
 
-def build_llm_client(cfg: BenchmarkConfig) -> OpenAICompatClient:
+def build_llm_client(cfg: BenchmarkConfig, *, model: str | None = None) -> OpenAICompatClient:
     """Construct the algo OpenAI-compatible LLM client from BenchmarkConfig.
 
-    Raises RuntimeError when OPENROUTER_API_KEY is not set.
+    Args:
+        cfg: Benchmark configuration supplying base URL, temperature, and token limits.
+        model: Model identifier override. When ``None``, defaults to ``cfg.extract_model``
+            (covers stages 1-3 and agentic search). Pass ``cfg.answer_model`` explicitly
+            for the stage-4 answer client.
+
+    Raises:
+        RuntimeError: When ``OPENROUTER_API_KEY`` is not set.
     """
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -37,7 +44,7 @@ def build_llm_client(cfg: BenchmarkConfig) -> OpenAICompatClient:
         LLMConfig(
             api_key=SecretStr(key),
             base_url=cfg.llm_base_url,
-            model=cfg.llm_model,
+            model=model if model is not None else cfg.extract_model,
             temperature=cfg.llm_temperature,
             max_tokens=cfg.llm_max_tokens,
             timeout=cfg.llm_timeout,
@@ -56,6 +63,13 @@ class EmbeddingClient:
     Wraps the Qwen/Qwen3-Embedding-4B model exposed by DeepInfra's OpenAI-compat
     surface. Single request batches up to N texts; preserves input order via the
     response's ``index`` field.
+
+    Args:
+        api_key: DeepInfra API key.
+        base_url: Base URL for the embedding endpoint.
+        model: Model identifier (e.g. ``"Qwen/Qwen3-Embedding-4B"``).
+        timeout: HTTP timeout in seconds.
+        dimensions: Matryoshka truncation dimension (0 = full output).
     """
 
     def __init__(
@@ -167,6 +181,12 @@ class RerankClient:
     Query and documents are wrapped with the Qwen3 chat-template prefix/suffix;
     response shape is normalized across the two DeepInfra variants
     (``{"results": [...]}`` vs ``{"scores": [...]}``).
+
+    Args:
+        api_key: DeepInfra API key.
+        base_url: Base URL for the inference endpoint.
+        model: Model identifier (e.g. ``"Qwen/Qwen3-Reranker-4B"``).
+        timeout: HTTP timeout in seconds.
     """
 
     def __init__(
