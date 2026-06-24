@@ -20,7 +20,9 @@ default:
   interruptible: true
   timeout: 15m
 
-# `--frozen` makes uv error on lockfile drift rather than silently updating it. Bump the image tag to upgrade uv.
+# `--locked` makes uv error on lockfile drift rather than installing against a stale lockfile. Note `--frozen`
+# does NOT do this: it trusts the lockfile and skips the consistency check, so editable-member version drift
+# slips through silently. `--locked` is uv's recommended CI default. Bump the image tag to upgrade uv.
 .python-job:
   # Release-tag pipelines only run `publish`; lint / test run on MR and main pipelines, not on tags.
   rules:
@@ -34,7 +36,7 @@ default:
     paths:
       - .uv-cache/
   before_script:
-    - uv sync --all-packages --group dev --frozen
+    - uv sync --all-packages --group dev --locked
 
 ruff-check:
   extends: .python-job
@@ -75,7 +77,7 @@ pytest:
   # extends replaces list keys, so uv sync is restated. git is needed by diff-cover (missing from uv image).
   before_script:
     - apt-get update -qq && apt-get install -y --no-install-recommends git
-    - uv sync --all-packages --group dev --frozen --python "$PYVER"
+    - uv sync --all-packages --group dev --locked --python "$PYVER"
   script:
     - uv run --python "$PYVER" pytest -n auto -v
         --junitxml=report.xml

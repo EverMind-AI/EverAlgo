@@ -179,7 +179,7 @@ e. **Documentation sweep** — grep for stale references to the package's status
 uv sync --all-packages
 ```
 
-CI runs `uv sync --frozen`; a stale lockfile fails the build.
+CI runs `uv sync --locked`; a stale lockfile fails the build.
 
 ### 5. Branch, commit, open the MR
 
