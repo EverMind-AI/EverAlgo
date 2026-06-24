@@ -517,7 +517,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-core"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "packages/everalgo-core" }
 dependencies = [
     { name = "openai" },
@@ -581,7 +581,7 @@ provides-extras = ["svg"]
 
 [[package]]
 name = "everalgo-rank"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/everalgo-rank" }
 dependencies = [
     { name = "asgiref" },
@@ -596,7 +596,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/everalgo-user-memory" }
 dependencies = [
     { name = "asgiref" },
