@@ -1,4 +1,4 @@
-"""Tests for reranker orchestration (hybrid_search_with_rrf was deleted; ported to algo tests)."""
+"""Tests for reranker orchestration (entity-split data model)."""
 
 from __future__ import annotations
 
@@ -13,25 +13,22 @@ from benchmarks.common.stages.search import (
 )
 
 
-def test_format_doc_returns_episode_content():
-    """Only episode.content is used for reranker input."""
-    doc = {
-        "episode": {"subject": "birthday", "content": "Alice's birthday party"},
-        "atomic_facts": {"atomic_fact": ["Alice ate cake"]},
-    }
+def test_format_doc_returns_episode_text():
+    """Flat episode text field is used for reranker input."""
+    doc = {"id": "0", "subject": "birthday", "episode": "Alice's birthday party"}
     assert _format_doc_for_rerank(doc) == "Alice's birthday party"
 
 
-def test_format_doc_raises_on_missing_content():
-    """No episode.content → ValueError (fail-loud, no fallback)."""
-    with pytest.raises(ValueError, match=r"no episode\.content"):
+def test_format_doc_raises_on_missing_episode():
+    """No episode text → ValueError (fail-loud, no fallback)."""
+    with pytest.raises(ValueError, match=r"no episode text"):
         _format_doc_for_rerank({})
-    with pytest.raises(ValueError, match=r"no episode\.content"):
-        _format_doc_for_rerank({"atomic_facts": {"atomic_fact": ["Alice ate cake"]}})
-    with pytest.raises(ValueError, match=r"no episode\.content"):
-        _format_doc_for_rerank({"episode": {"subject": "x"}})
-    with pytest.raises(ValueError, match=r"no episode\.content"):
-        _format_doc_for_rerank({"episode": {"subject": "", "content": ""}})
+    with pytest.raises(ValueError, match=r"no episode text"):
+        _format_doc_for_rerank({"id": "0", "subject": "x"})
+    with pytest.raises(ValueError, match=r"no episode text"):
+        _format_doc_for_rerank({"id": "0", "episode": ""})
+    with pytest.raises(ValueError, match=r"no episode text"):
+        _format_doc_for_rerank({"id": "0", "episode": "   "})
 
 
 @pytest.mark.asyncio
@@ -41,9 +38,9 @@ async def test_reranker_search_returns_top_n_by_rerank_score():
     rerank_client.rerank = AsyncMock(return_value=[(1, 0.9), (2, 0.5), (0, 0.2)])
 
     docs = [
-        ({"id": "0", "episode": {"subject": "a", "content": "doc a body"}}, 0.5),
-        ({"id": "1", "episode": {"subject": "b", "content": "doc b body"}}, 0.4),
-        ({"id": "2", "episode": {"subject": "c", "content": "doc c body"}}, 0.3),
+        ({"id": "0", "subject": "a", "episode": "doc a body"}, 0.5),
+        ({"id": "1", "subject": "b", "episode": "doc b body"}, 0.4),
+        ({"id": "2", "subject": "c", "episode": "doc c body"}, 0.3),
     ]
     out = await reranker_search(
         "q",
@@ -60,18 +57,13 @@ async def test_reranker_search_returns_top_n_by_rerank_score():
 
 @pytest.mark.asyncio
 async def test_reranker_search_raises_when_all_batches_fail():
-    """Fail-loud: when every rerank batch fails, raise instead of silently degrading.
-
-    Silent fallback to ``results[:top_n]`` would degenerate to dict-insertion order
-    on the cluster path (acluster_retrieve returns ``score=0.0`` candidates), masking
-    real reranker outages.
-    """
+    """Fail-loud: when every rerank batch fails, raise instead of silently degrading."""
     rerank_client = MagicMock()
     rerank_client.rerank = AsyncMock(side_effect=RuntimeError("API down"))
 
     docs = [
-        ({"id": "0", "episode": {"subject": "x", "content": "x body"}}, 0.5),
-        ({"id": "1", "episode": {"subject": "y", "content": "y body"}}, 0.4),
+        ({"id": "0", "subject": "x", "episode": "x body"}, 0.5),
+        ({"id": "1", "subject": "y", "episode": "y body"}, 0.4),
     ]
     with pytest.raises(RuntimeError, match="reranker batch success rate"):
         await reranker_search(
@@ -98,14 +90,14 @@ async def test_reranker_search_empty_input_returns_empty():
 
 
 @pytest.mark.asyncio
-async def test_reranker_search_raises_on_doc_without_episode_content():
-    """Docs with no episode.content raise ValueError (fail-loud, no silent filtering)."""
+async def test_reranker_search_raises_on_doc_without_episode_text():
+    """Docs with no episode text raise ValueError (fail-loud, no silent filtering)."""
     rerank_client = MagicMock()
     docs: list[tuple[dict[str, Any], float]] = [
-        ({"id": "0"}, 0.5),  # no episode.content
-        ({"id": "1", "episode": {"subject": "hi", "content": "hello"}}, 0.4),
+        ({"id": "0"}, 0.5),  # no episode text
+        ({"id": "1", "subject": "hi", "episode": "hello"}, 0.4),
     ]
-    with pytest.raises(ValueError, match=r"no episode\.content"):
+    with pytest.raises(ValueError, match=r"no episode text"):
         await reranker_search(
             "q",
             results=docs,

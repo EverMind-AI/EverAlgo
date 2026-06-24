@@ -33,7 +33,7 @@ def test_generate_reports_writes_both_formats(tmp_path: Path):
         answers=answers,
         dataset_name="locomo",
         run_name="v1",
-        config_dump={"llm_model": "openai/gpt-4.1-mini", "judge_runs": 3},
+        config_dump={"extract_model": "openai/gpt-4.1-mini", "answer_model": "openai/gpt-4.1-mini", "judge_runs": 3},
         package_versions={"everalgo-core": "0.1.0", "everalgo-rank": "0.1.0"},
     )
 
@@ -50,15 +50,17 @@ def test_generate_reports_writes_both_formats(tmp_path: Path):
     rep = json.loads((tmp_path / "report.json").read_text())
     assert rep["dataset"] == "locomo"
     assert rep["run_name"] == "v1"
-    assert rep["overall_accuracy"] == 0.9032
+    assert rep["majority_accuracy"] == 0.9032
+    assert rep["mean_of_runs_accuracy"] == 0.9032
     assert rep["total_questions"] == 1540
-    assert rep["correct"] == 1391
+    assert rep["majority_correct"] == 1391
+    assert rep["mean_of_runs_correct"] == 1391
     # per_category now keyed by category number
     assert rep["per_category"]["1"]["accuracy"] == 0.9634
     assert rep["per_category"]["1"]["label"] == "single-hop"
     assert rep["avg_context_tokens"] > 0
     assert rep["stage_summary"]["extract"]["duration_seconds"] == 100.0
-    assert rep["config"]["llm_model"] == "openai/gpt-4.1-mini"
+    assert rep["config"]["extract_model"] == "openai/gpt-4.1-mini"
     assert rep["package_versions"]["everalgo-core"] == "0.1.0"
 
 

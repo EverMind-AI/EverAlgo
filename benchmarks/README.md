@@ -25,16 +25,49 @@ uv run python -m benchmarks.cli --dataset locomo --run-name v1
 
 ## Stages
 
-The pipeline has five stages (1=extract, 2=index, 3=search, 4=answer, 5=evaluate).
-Each writes its output to disk, so stages can be re-run independently — a resumed
-stage reads the previous stage's on-disk artifact:
+The pipeline has seven stages (1=extract\_base, 2=reflect, 3=enrich, 4=index,
+5=search, 6=answer, 7=evaluate). Each writes its output to disk, so stages can
+be re-run independently -- a resumed stage reads the previous stage's on-disk
+artifact:
 
 ```bash
-# Re-run search -> answer -> evaluate, reusing stage 1 + 2 output.
-uv run python -m benchmarks.cli --dataset locomo --run-name v1 --stages 3 4 5
+# Re-run search -> answer -> evaluate, reusing stages 1-4 output.
+uv run python -m benchmarks.cli --dataset locomo --run-name v1 --stages 5 6 7
 ```
 
+### Stage overview
+
+| Stage | Output directory | What it does |
+|-------|------------------|--------------|
+| 1 Extract Base | `stage1_extract_base/` | Boundary detection, MemCell segmentation, Episode extraction, Episode embedding, Clustering |
+| 2 Reflect | `stage2_reflect/` | Merge episodes within 2+ member clusters (optional, `enable_reflection=true`) |
+| 3 Enrich | `stage3_enrich/` | Extract atomic facts + embeddings from final episodes |
+| 4 Index | `stage4_index/` | Build BM25 + embedding + cluster indices |
+| 5 Search | `stage5_search/` | Agentic multi-round retrieval |
+| 6 Answer | `stage6_answer/` | Generate answers from retrieved episodes |
+| 7 Evaluate | `stage7_evaluate/` | LLM-as-judge scoring |
+
 See [`docs/pipeline.md`](docs/pipeline.md) for the full data flow.
+
+## Config
+
+Defaults live in `benchmarks/config.toml` (single source of truth). Override any
+field via a named TOML file under `benchmarks/`:
+
+```bash
+# Load benchmarks/fast.toml (unset fields fall back to benchmark.toml defaults).
+uv run python -m benchmarks.cli --dataset locomo --config fast --run-name fast-run
+```
+
+### Running specific conversations
+
+```bash
+# Run only conversation 0 (0-based index).
+uv run python -m benchmarks.cli --dataset locomo --conv 0 --run-name conv0
+
+# Run conversations 0, 3, and 5.
+uv run python -m benchmarks.cli --dataset locomo --conv 0 3 5 --run-name subset
+```
 
 ## Output
 

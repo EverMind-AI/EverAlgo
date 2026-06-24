@@ -18,12 +18,12 @@ def test_pipeline_request_construction(tmp_path: Path) -> None:
         dataset_name="locomo",
         run_name="test",
         config=BenchmarkConfig(),
-        stages=[1, 2, 3, 4, 5],
+        stages=[1, 2, 3, 4, 5, 6, 7],
         smoke=True,
         data_path=tmp_path / "data.json",
         output_dir=tmp_path / "results",
     )
-    assert req.stages == [1, 2, 3, 4, 5]
+    assert req.stages == [1, 2, 3, 4, 5, 6, 7]
     assert req.smoke is True
 
 
@@ -96,11 +96,11 @@ async def test_run_pipeline_subset_stages(tmp_path: Path, monkeypatch: MonkeyPat
         dataset_name="locomo",
         run_name="test",
         config=BenchmarkConfig(),
-        stages=[5],
+        stages=[7],
         data_path=fixture,
         output_dir=output_root,
     )
-    # Stage 5 reads answers.json from the previous stage output (which doesn't exist).
-    # This raises FileNotFoundError, proving stages 1-4 are NOT being run.
+    # Stage 7 reads answers.json from the previous stage output (which doesn't exist).
+    # This raises FileNotFoundError, proving stages 1-6 are NOT being run.
     with pytest.raises(FileNotFoundError):
         await run_pipeline(req)

@@ -36,7 +36,7 @@ def test_stage_stats_combine_rejects_mismatched_names():
     """combine() must refuse to merge stats from different stages."""
     a = StageStats(stage_name="extract")
     b = StageStats(stage_name="index")
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="cannot combine stats"):
         a.combine(b)
 
 

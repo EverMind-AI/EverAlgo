@@ -226,6 +226,8 @@ Allowed `type`s: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `bu
 
 **CHANGELOG `[Unreleased]` entry is part of the MR.** Every MR that adds, changes, or removes user-visible behaviour must include a one-line entry in `packages/everalgo-<dist>/CHANGELOG.md` under `## [Unreleased]`. Written by the MR author (the person with the most context), not reconstructed at release time. See `docs/releasing.md` "Keeping `[Unreleased]` up to date" for format and scope rules.
 
+**Documentation sweep before every MR.** Before opening an MR, check whether the change affects any documentation — `AGENTS.md`, `README.md`, `docs/`, `benchmarks/docs/`, `benchmarks/README.md`, inline docstrings, or config comments. If a code change makes existing documentation inaccurate (e.g. renamed stages, changed data formats, new CLI flags, modified config parameters), **update the affected docs in the same MR**. Stale docs are bugs.
+
 ---
 
 ## 7. Adding a New Algorithm Operator
@@ -239,7 +241,8 @@ Follow this checklist when introducing a new extractor / ranker / clusterer:
 5. **Wire dependencies.** If the new code requires a new third-party library, add it via `uv add --package everalgo-<dist> <library>`, which updates the right `pyproject.toml`.
 6. **Write tests.** Use `everalgo.testing.FakeLLMClient` to avoid real API calls; use `everalgo.testing.assert_*_shape` for structural memory checks.
 7. **Update the CHANGELOG.** Add a one-line entry under `## [Unreleased]` in `packages/everalgo-<dist>/CHANGELOG.md` describing the new operator (subsection `### Added`). See `docs/releasing.md` for format.
-8. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`).
+8. **Documentation sweep.** Check whether the new operator affects `AGENTS.md`, `docs/concepts/architecture.md`, `README.md`, or `benchmarks/docs/`. Update in the same MR.
+9. **Run lint + format + type-check + tests** locally before raising the MR (`uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pyright && uv run pytest`).
 
 ---
 

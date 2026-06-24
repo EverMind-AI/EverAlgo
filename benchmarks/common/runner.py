@@ -1,4 +1,4 @@
-"""Pipeline orchestrator — wires stages 1..5 in sequence."""
+"""Pipeline orchestrator — wires stages 1..7 in sequence."""
 
 from __future__ import annotations
 
@@ -12,9 +12,11 @@ from benchmarks.common.profile import collect_config_dump, collect_package_versi
 from benchmarks.common.report import generate_reports
 from benchmarks.common.services import Services
 from benchmarks.common.stages.answer import run_answer_stage
+from benchmarks.common.stages.enrich import run_enrich_stage
 from benchmarks.common.stages.evaluate import run_evaluate_stage
-from benchmarks.common.stages.extract import run_extract_stage
+from benchmarks.common.stages.extract import run_extract_base_stage
 from benchmarks.common.stages.index import run_index_stage
+from benchmarks.common.stages.reflect import run_reflect_stage
 from benchmarks.common.stages.search import run_search_stage
 from benchmarks.common.stages.types import StageContext, StageStats
 from benchmarks.datasets import discover_datasets
@@ -30,30 +32,37 @@ class PipelineRequest:
     dataset_name: str
     run_name: str
     config: BenchmarkConfig
-    stages: list[int] = field(default_factory=lambda: [1, 2, 3, 4, 5])
+    stages: list[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
     smoke: bool = False
     smoke_conv_limit: int = 1
     smoke_msg_limit: int = 50
+    conv_indices: list[int] | None = None
     data_path: Path | None = None
     output_dir: Path | None = None
 
 
 _STAGE_RUNNERS = {
-    1: ("stage1_extract", run_extract_stage),
-    2: ("stage2_index", run_index_stage),
-    3: ("stage3_search", run_search_stage),
-    4: ("stage4_answer", run_answer_stage),
-    5: ("stage5_evaluate", run_evaluate_stage),
+    1: ("stage1_extract_base", run_extract_base_stage),
+    2: ("stage2_reflect", run_reflect_stage),
+    3: ("stage3_enrich", run_enrich_stage),
+    4: ("stage4_index", run_index_stage),
+    5: ("stage5_search", run_search_stage),
+    6: ("stage6_answer", run_answer_stage),
+    7: ("stage7_evaluate", run_evaluate_stage),
 }
 
 # Approximate prices per million tokens (USD), as of 2025-Q2.
-# Stage 1 (extract): gpt-4.1-mini via OpenRouter
-# Stage 2 (index): Qwen3-Embedding-4B via DeepInfra — embedding only, no completion
-# Stage 3 (search): gpt-4.1-mini via OpenRouter (agentic sufficiency / query refinement)
-# Stage 4 (answer): gpt-4.1-mini via OpenRouter
-# Stage 5 (evaluate): gpt-4o-mini via OpenRouter
+# Stage 1 (extract_base): gpt-4.1-mini via OpenRouter
+# Stage 2 (reflect):      gpt-4.1-mini via OpenRouter
+# Stage 3 (enrich):       gpt-4.1-mini via OpenRouter (atomic-fact extraction)
+# Stage 4 (index):        Qwen3-Embedding-4B via DeepInfra — embedding only, no completion
+# Stage 5 (search):       gpt-4.1-mini via OpenRouter (agentic sufficiency / query refinement)
+# Stage 6 (answer):       gpt-4.1-mini via OpenRouter
+# Stage 7 (evaluate):     gpt-4o-mini via OpenRouter
 _PRICES_PER_MTOK: dict[str, dict[str, float]] = {
     "extract": {"prompt": 0.40, "completion": 1.60},
+    "reflect": {"prompt": 0.40, "completion": 1.60},
+    "enrich": {"prompt": 0.40, "completion": 1.60},
     "index": {"prompt": 0.10, "completion": 0.0},
     "search": {"prompt": 0.40, "completion": 1.60},
     "answer": {"prompt": 0.40, "completion": 1.60},
@@ -97,7 +106,7 @@ async def run_pipeline(req: PipelineRequest) -> dict[str, Any]:
     all_stats = await _run_stages(req, dataset, services, output_root)
     summary_data = stage_summary(all_stats)
 
-    if 5 in req.stages:
+    if 7 in req.stages:
         _maybe_generate_reports(req, output_root, summary_data, all_stats)
 
     _write_profile(output_root, summary_data)
@@ -115,9 +124,19 @@ def _validate_request(req: PipelineRequest) -> None:
 
 
 def _load_dataset(req: PipelineRequest) -> Any:
-    """Instantiate the dataset from the registry factory."""
+    """Instantiate the dataset from the registry factory.
+
+    Passes ``session_filter`` from the config as a keyword argument when the
+    factory accepts it (LoCoMo does; future datasets may not). Uses
+    ``inspect.signature`` to avoid coupling the runner to dataset-specific APIs.
+    """
+    import inspect
+
     registry = discover_datasets()
     factory = registry[req.dataset_name]
+    sig = inspect.signature(factory)
+    if "session_filter" in sig.parameters:
+        return factory(req.data_path, session_filter=req.config.session_filter)  # type: ignore[call-arg]
     return factory(req.data_path)
 
 
@@ -159,6 +178,7 @@ async def _run_stages(
             smoke=req.smoke,
             smoke_conv_limit=req.smoke_conv_limit,
             smoke_msg_limit=req.smoke_msg_limit,
+            conv_indices=req.conv_indices,
         )
         stats = await runner(ctx)
         all_stats.append(stats)
@@ -183,9 +203,9 @@ def _maybe_generate_reports(
     summary_data: dict[str, Any],
     all_stats: list[StageStats],
 ) -> None:
-    """Generate text + JSON reports if stage 5 output files exist."""
-    eval_path = output_root / "stage5_evaluate" / "eval_results.json"
-    answer_path = output_root / "stage4_answer" / "answers.json"
+    """Generate text + JSON reports if stage 7 output files exist."""
+    eval_path = output_root / "stage7_evaluate" / "eval_results.json"
+    answer_path = output_root / "stage6_answer" / "answers.json"
     if not (eval_path.exists() and answer_path.exists()):
         return
     eval_results = json.loads(eval_path.read_text())
@@ -210,26 +230,14 @@ def _maybe_generate_reports(
     )
 
 
-def _print_summary(
-    output_root: Path,
+def _print_accuracy(
     dataset_name: str,
     run_name: str,
     eval_results: dict[str, Any],
     answers: list[dict[str, Any]],
-    all_stats: list[StageStats],
 ) -> None:
-    """Print a final results summary block to stdout.
-
-    Args:
-        output_root: Root output directory path.
-        dataset_name: Name of the dataset (e.g., "locomo").
-        run_name: Name of the run (e.g., "smoke8").
-        eval_results: Evaluation metrics dict with accuracy, correct, total_questions, per_category.
-        answers: List of answer records (each with formatted_context for token calculation).
-        all_stats: List of StageStats for timing/token breakdown.
-    """
+    """Print the overall accuracy header block."""
     total = eval_results.get("total_questions", 0)
-    per_cat = eval_results.get("per_category", {})
     avg_tokens = avg_context_tokens(answers)
     maj_correct = eval_results.get("majority_correct", eval_results.get("correct", 0))
     maj_acc = eval_results.get("majority_accuracy", eval_results.get("accuracy", 0.0))
@@ -238,28 +246,34 @@ def _print_summary(
     print(f"📊 Results: {dataset_name} / {run_name}", flush=True)
     print("=" * 60, flush=True)
     print(f"{'Overall:':<32}  {maj_acc * 100:>6.2f}%   ({maj_correct}/{total})", flush=True)
-    print(
-        f"{'Avg context tokens per question:':<32}  {avg_tokens:>6}    (Stage 4 retrieved context)",
-        flush=True,
-    )
+    print(f"{'Avg context tokens per question:':<32}  {avg_tokens:>6}    (Stage 6 retrieved context)", flush=True)
 
-    if per_cat:
-        print("\nPer-Category:", flush=True)
-        sorted_cats = sorted(per_cat.items(), key=lambda kv: kv[0])
-        for cat_num, v in sorted_cats:
-            label = v.get("label", f"unknown-{cat_num}")
-            mc = v.get("majority_correct", v.get("correct", 0))
-            t = v.get("total", 0)
-            ma = v.get("majority_accuracy", v.get("accuracy", 0.0))
-            cat_str = f"Category {cat_num} ({label})"
-            print(f"  {cat_str:<30} {ma * 100:>6.2f}%   ({mc:>4}/{t:>4})", flush=True)
 
+def _print_categories(per_cat: dict[str, Any]) -> None:
+    """Print per-category accuracy breakdown."""
+    if not per_cat:
+        return
+    print("\nPer-Category:", flush=True)
+    for cat_num, v in sorted(per_cat.items(), key=lambda kv: kv[0]):
+        label = v.get("label", f"unknown-{cat_num}")
+        mc = v.get("majority_correct", v.get("correct", 0))
+        t = v.get("total", 0)
+        ma = v.get("majority_accuracy", v.get("accuracy", 0.0))
+        cat_str = f"Category {cat_num} ({label})"
+        print(f"  {cat_str:<30} {ma * 100:>6.2f}%   ({mc:>4}/{t:>4})", flush=True)
+
+
+def _print_timings(all_stats: list[StageStats]) -> None:
+    """Print per-stage timing breakdown."""
     print("\nStage timings:", flush=True)
     total_secs = sum(s.duration_seconds for s in all_stats)
     for s in all_stats:
         print(f"  {s.stage_name:<10}  {s.duration_seconds:>10.1f}s", flush=True)
     print(f"  {'total':<10}  {total_secs:>10.1f}s", flush=True)
 
+
+def _print_token_usage(all_stats: list[StageStats]) -> None:
+    """Print per-stage token usage and cost estimates."""
     print("\nStage token usage (estimated):", flush=True)
     total_cost = 0.0
     for s in all_stats:
@@ -272,12 +286,23 @@ def _print_summary(
                 flush=True,
             )
         else:
-            print(
-                f"  {s.stage_name:<10} {s.prompt_tokens:>11,} prompt{'':>23}≈ ${cost:.2f}",
-                flush=True,
-            )
+            print(f"  {s.stage_name:<10} {s.prompt_tokens:>11,} prompt{'':>23}≈ ${cost:.2f}", flush=True)
     print(f"  {'total':<10} {'':>34}≈ ${total_cost:.2f}", flush=True)
 
+
+def _print_summary(
+    output_root: Path,
+    dataset_name: str,
+    run_name: str,
+    eval_results: dict[str, Any],
+    answers: list[dict[str, Any]],
+    all_stats: list[StageStats],
+) -> None:
+    """Print a final results summary block to stdout."""
+    _print_accuracy(dataset_name, run_name, eval_results, answers)
+    _print_categories(eval_results.get("per_category", {}))
+    _print_timings(all_stats)
+    _print_token_usage(all_stats)
     print(f"\nReport: {output_root}/report.txt", flush=True)
     print("=" * 60, flush=True)
 

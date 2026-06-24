@@ -17,7 +17,7 @@ def test_minimal_invocation():
     assert args.dataset == "locomo"
     assert args.smoke is False
     assert args.run_name == "default"
-    assert args.stages == [1, 2, 3, 4, 5]
+    assert args.stages == [1, 2, 3, 4, 5, 6, 7]
 
 
 def test_all_options_parsed():

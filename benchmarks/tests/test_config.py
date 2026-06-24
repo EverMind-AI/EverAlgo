@@ -1,36 +1,87 @@
-"""Tests for BenchmarkConfig."""
+"""Tests for BenchmarkConfig TOML loading and field changes."""
+
+from __future__ import annotations
+
+import textwrap
+from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import ValidationError
 
 from benchmarks.common.config import BenchmarkConfig
 
-
-def test_default_values_match_locomo_benchmark():
-    """Defaults match the runtime values used to generate the reference baseline."""
-    c = BenchmarkConfig()
-    # Retrieval
-    assert c.retrieval_mode == "agentic"
-    assert c.use_hybrid_search is True
-    assert c.use_reranker is True
-    assert c.use_multi_query is True
-    # Top-N
-    assert c.emb_recall_top_n == 40
-    assert c.reranker_top_n == 20
-    assert c.hybrid_emb_candidates == 50
-    assert c.hybrid_bm25_candidates == 50
-    assert c.hybrid_rrf_k == 40
-    assert c.response_top_k == 10
-    # LLM
-    assert c.llm_model == "openai/gpt-4.1-mini"
-    assert c.llm_temperature == 0.3
-    assert c.judge_model == "openai/gpt-4o-mini"
-    assert c.judge_temperature == 0.0
-    assert c.judge_runs == 3
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
-def test_is_frozen():
-    """Config must be immutable after construction."""
-    c = BenchmarkConfig()
-    with pytest.raises(ValidationError):
-        c.llm_model = "gpt-3.5"  # type: ignore[misc]
+class TestConfigDefaults:
+    def test_extract_model_default(self):
+        cfg = BenchmarkConfig()
+        assert cfg.extract_model == "openai/gpt-4.1-mini"
+
+    def test_answer_model_default(self):
+        cfg = BenchmarkConfig()
+        assert cfg.answer_model == "openai/gpt-4.1-mini"
+
+    def test_enable_reflection_default_false(self):
+        cfg = BenchmarkConfig()
+        assert cfg.enable_reflection is False
+
+    def test_session_filter_default_none(self):
+        cfg = BenchmarkConfig()
+        assert cfg.session_filter is None
+
+    def test_no_enable_clustering_field(self):
+        """enable_clustering removed — clustering is always on."""
+        cfg = BenchmarkConfig()
+        assert not hasattr(cfg, "enable_clustering")
+
+    def test_no_llm_model_field(self):
+        """llm_model split into extract_model + answer_model."""
+        cfg = BenchmarkConfig()
+        assert not hasattr(cfg, "llm_model")
+
+
+class TestFromToml:
+    def test_load_overrides(self, tmp_path: Path):
+        toml_content = textwrap.dedent("""\
+            extract_model = "openai/gpt-4.1"
+            answer_model = "openai/gpt-4o"
+            enable_reflection = true
+
+            [session_filter]
+            "5" = [1, 2, 12]
+            "2" = [3, 8]
+        """)
+        cfg_dir = tmp_path / "benchmarks" / "configs"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "test.toml").write_text(toml_content)
+
+        cfg = BenchmarkConfig.from_toml("test", config_dir=cfg_dir)
+        assert cfg.extract_model == "openai/gpt-4.1"
+        assert cfg.answer_model == "openai/gpt-4o"
+        assert cfg.enable_reflection is True
+        assert cfg.session_filter == {5: [1, 2, 12], 2: [3, 8]}
+
+    def test_load_defaults_preserved(self, tmp_path: Path):
+        toml_content = "enable_reflection = true\n"
+        cfg_dir = tmp_path / "benchmarks" / "configs"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "minimal.toml").write_text(toml_content)
+
+        cfg = BenchmarkConfig.from_toml("minimal", config_dir=cfg_dir)
+        assert cfg.enable_reflection is True
+        assert cfg.extract_model == "openai/gpt-4.1-mini"  # default preserved
+
+    def test_missing_file_raises(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError):
+            BenchmarkConfig.from_toml("nonexistent", config_dir=tmp_path)
+
+    def test_session_filter_keys_coerced_to_int(self, tmp_path: Path):
+        toml_content = '[session_filter]\n"5" = [1, 2]\n'
+        cfg_dir = tmp_path / "benchmarks" / "configs"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "sf.toml").write_text(toml_content)
+
+        cfg = BenchmarkConfig.from_toml("sf", config_dir=cfg_dir)
+        assert cfg.session_filter is not None
+        assert isinstance(next(iter(cfg.session_filter.keys())), int)

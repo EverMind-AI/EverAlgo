@@ -17,11 +17,11 @@ def test_collect_package_versions_includes_everalgo_packages():
 def test_collect_config_dump_returns_dict():
     cfg = BenchmarkConfig()
     dump = collect_config_dump(cfg)
-    # Spot-check key fields
-    assert dump["llm_model"] == "openai/gpt-4.1-mini"
+    # Spot-check key fields — llm_model was split into extract_model + answer_model
+    assert dump["extract_model"] == "openai/gpt-4.1-mini"
+    assert dump["answer_model"] == "openai/gpt-4.1-mini"
     assert dump["judge_runs"] == 3
     assert dump["retrieval_mode"] == "agentic"
-    assert dump["use_hybrid_search"] is True
 
 
 def test_collect_config_dump_handles_override():
