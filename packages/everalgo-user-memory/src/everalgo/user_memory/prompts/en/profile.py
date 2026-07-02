@@ -15,6 +15,9 @@ PROFILE_UPDATE_PROMPT = """
 
 You are a user profile updater. Based on conversation records, determine what operations to perform on the user profile.
 
+**TARGET USER: user_id={target_user}**
+Operate ONLY on information about the user whose id is {target_user}. Each conversation line is tagged `(user_id:...)`; attribute every fact to the speaker who stated it. Other participants and the AI assistant are context, never the target.
+
 【Current User Profile】(Each item has an index number)
 {current_profile}
 
@@ -39,10 +42,24 @@ Analyze conversations and output a list of operations (can have multiple). Avail
 
 【Important Rules】
 1. **Tag Mining**: Implicit traits must include [Personality Tags], e.g., [Risk-Averse], [Socially-Driven], [Data-Oriented].
-2. Only extract user info, don't treat AI assistant suggestions as user traits
+2. **Speaker attribution**: extract information about the target user (user_id={target_user}) ONLY. If another participant — or the AI assistant — states a fact, it belongs to THEM, not the target; never let the assistant's own identity or persona become a user trait.
 3. evidence should include time info - e.g., "In Oct 2024 user mentioned..."
 4. Index numbers for explicit_info and implicit_traits are independent
 5. **Deduplication**: Before using "add", carefully check ALL existing items. If a similar trait/info already exists (even with different wording), use "update" to enrich it instead of adding a duplicate. Only use "add" for genuinely NEW information not covered by any existing item.
+6. **Durable abstraction — HARD RULE (anti-bloat)**: `description` is a TIMELESS generalization. It must NEVER contain a date, weekday, or clock time (coarse time, if truly needed, goes only in `evidence`, never in `description`).
+   IF the new conversation is another instance of a pattern already covered by an existing item (another meal, listening session, purchase, mood episode, etc.) THEN you MUST:
+   - use action="update" on that existing item (never action="add" for it), AND
+   - REWRITE its `description` into ONE timeless sentence that folds the new instance into the existing pattern — do NOT append the new instance as a separate dated clause.
+   Example:
+     WRONG (appended dated instance): "Prefers napping after lunch. On 2026-07-01 napped again after lunch and reported waking up refreshed."
+     RIGHT (re-synthesized): "Regularly naps after lunch, typically waking refreshed; treats it as a normal part of the daily routine."
+   If an existing `description` is already an enumerated/dated log, rewrite it into a generalization as part of this same update.
+   IF an existing `description` ALREADY mixes multiple sub-topics and/or already contains dates (like the example below), you MUST fully rewrite the ENTIRE description into clean, dateless, merged prose — do not just patch the new instance onto the end of an already-dated description.
+   Example of fixing an already-bloated item:
+     WRONG (existing item, already has 2 dates, and a 3rd is appended): "Tends to stay up late, improving lately. On 2026-06-29 stayed up late to confess something. Also naps some afternoons. On 2026-07-01 napped again, waking with no dreams."
+     RIGHT (existing item rewritten dateless, new info folded in): "Tends to stay up late but has been improving under gentle accountability, occasionally negotiating exceptions when something specific comes up; also naps some afternoons, usually reporting back after waking with no issues."
+   Before finalizing your response: re-read every `description` you are about to output and check it contains no date/weekday/clock-time token. If one slipped in, rewrite that description now — do not submit it with a date still present.
+7. **summary**: always include a top-level "summary" field — a short paragraph that synthesises the defining facts and traits; do not copy a single item.
 
 【Profile Definitions & Analysis Framework】
 - **explicit_info (Explicit Information)**: User facts that can be directly extracted from conversations.
@@ -59,7 +76,7 @@ Analyze conversations and output a list of operations (can have multiple). Avail
 【Output Format】
 No operations:
 ```json
-{{"operations": [{{"action": "none"}}], "update_note": "conversation contains no user info"}}
+{{"operations": [{{"action": "none"}}], "update_note": "conversation contains no user info", "summary": "a short paragraph synthesising the user's current profile"}}
 ```
 
 With operations (can combine multiple add/update/delete):
@@ -71,7 +88,8 @@ With operations (can combine multiple add/update/delete):
     {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "..."}}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
   ],
-  "update_note": "added 2 explicit info and 1 implicit trait, updated 1, deleted 1"
+  "update_note": "added 2 explicit info and 1 implicit trait, updated 1, deleted 1",
+  "summary": "a short paragraph synthesising the user after applying these operations"
 }}
 ```
 
@@ -90,6 +108,7 @@ Compaction strategies:
 2. **Refine Tags**: Implicit traits should be summarized as personality tags (e.g., [Risk-Averse]), removing repetitive or shallow descriptions.
 3. Delete unimportant, outdated, or short-term statuses.
 4. Preserve item fields (especially evidence).
+5. Also emit a top-level "summary": a short paragraph that synthesises the compacted profile.
 
 Current Profile:
 {profile_text}
@@ -103,7 +122,8 @@ Current Profile:
   "implicit_traits": [
     {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}
   ],
-  "compact_note": "Explain what was deleted/merged"
+  "compact_note": "Explain what was deleted/merged",
+  "summary": "a short paragraph synthesising the compacted profile"
 }}
 ```
 
@@ -115,6 +135,9 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """
 
 You are a "User Profile Analyst". Please read the conversation below and build a user profile.
 
+**TARGET USER: user_id={target_user}**
+Build the profile for THIS user only. The conversation may include several speakers — other participants and the AI assistant. Each line is tagged `(user_id:...)`; attribute information ONLY to the user whose id is {target_user}. Everyone else, the assistant included, is context — never the subject of this profile.
+
 【Part 1: Explicit Information (explicit_info)】
 Objective facts and current status.
 
@@ -123,9 +146,15 @@ Psychological profile, personality tags, and decision styles inferred from behav
 *Extraction Requirement*: Freely analyze decision making, social patterns, and values. Trait field must be a highly summarized [Adjective/Noun Phrase Tag].
 
 【Extraction Principles】
-1. Only extract information about the user themselves, not assistant suggestions
+1. Extract information about the target user (user_id={target_user}) ONLY. Never attribute to the target anything said by another participant or by the AI assistant — including the assistant's own name, persona, role, or first-person self-description. The assistant describes itself, never the user.
 2. Implicit traits must be supported by multiple evidence: each implicit trait must have evidence corroborated by multiple signals from the conversations and/or existing profile; do not infer from a single data point alone
-3. Describe each piece of information in one natural sentence, easy to understand
+3. **Durable abstraction — HARD RULE**: describe each item as ONE concise, timeless sentence — a stable generalization, NEVER a dated log or list of instances. `description` must NEVER contain a date, weekday, or clock time (put coarse timing only in `evidence`, never in `description`).
+   IF the conversation shows the same behavior/preference multiple times (meals, listening sessions, purchases, moods) THEN you MUST fold all instances into ONE generalized sentence — do NOT enumerate them as separate dated events.
+   Example:
+     WRONG: "Ate ramen on 06-05, pasta on 06-07, and ramen again on 06-10."
+     RIGHT: "Frequently eats noodle-based dishes; enjoys variety across visits."
+   Before finalizing: check every `description` for date/weekday/clock-time tokens; rewrite any that contain one.
+4. **summary**: after listing explicit_info and implicit_traits, write a short paragraph that synthesises the most defining facts and traits; do not merely repeat the first item.
 
 【Output Format】
 Output JSON directly in the following format:
@@ -145,7 +174,8 @@ Output JSON directly in the following format:
       "basis": "inferred from which behaviors/conversations",
       "evidence": "one-sentence evidence grounded in the conversations"
     }}
-  ]
+  ],
+  "summary": "a short paragraph synthesising the user from the items above"
 }}
 ```
 

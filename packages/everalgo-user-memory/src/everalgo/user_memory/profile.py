@@ -92,12 +92,17 @@ class ProfileExtractor:
         prompt: str | None,
     ) -> Profile:
         conversation_text = _render_conversation(memcells)
-        rendered = render_prompt(PROFILE_INITIAL_EXTRACTION_PROMPT, prompt, conversation_text=conversation_text)
+        rendered = render_prompt(
+            PROFILE_INITIAL_EXTRACTION_PROMPT,
+            prompt,
+            conversation_text=conversation_text,
+            target_user=sender_id,
+        )
 
         data = await _call_llm_for_profile_init(self._llm, rendered)
         explicit_info = data["explicit_info"]
         implicit_traits = data["implicit_traits"]
-        summary = _build_summary(explicit_info, implicit_traits)
+        summary = _resolve_summary(data.get("summary"), explicit_info, implicit_traits)
         return Profile.model_validate(
             {
                 "owner_id": sender_id,
@@ -127,6 +132,7 @@ class ProfileExtractor:
             prompt,
             current_profile=current_profile_text,
             conversations=conversation_text,
+            target_user=sender_id,
         )
 
         data = await _call_llm_for_profile_update(self._llm, rendered)
@@ -160,7 +166,7 @@ class ProfileExtractor:
         data = await _call_llm_for_profile_compact(self._llm, rendered)
         new_explicit = data["explicit_info"]
         new_implicit = data["implicit_traits"]
-        summary = _build_summary(new_explicit, new_implicit)
+        summary = _resolve_summary(data.get("summary"), new_explicit, new_implicit)
         return Profile.model_validate(
             {
                 "owner_id": profile.owner_id,
@@ -247,7 +253,7 @@ def _render_conversation(memcells: Sequence[MemCell]) -> str:
                 continue
             speaker = m.sender_name or m.sender_id
             user_id = m.sender_id or ""
-            time_str = format_message_timestamp(m.timestamp)
+            time_str = format_message_timestamp(m.timestamp)[:10]  # 粗化到日期:去秒级噪声、回避 UTC 时区误读(画像抽取无需日内精度)
             lines.append(f"[{time_str}] {speaker}(user_id:{user_id}): {text}")
     if not lines:
         lines.append("(no prior MemCells in the cluster)")
@@ -300,7 +306,7 @@ def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: in
             if isinstance(idx, int) and 0 <= idx < len(target):
                 target.pop(idx)
 
-    summary = _build_summary(explicit_info, implicit_traits)
+    summary = _resolve_summary(llm_summary, explicit_info, implicit_traits)
     return Profile.model_validate(
         {
             "owner_id": old_profile.owner_id,
@@ -312,18 +318,29 @@ def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: in
     )
 
 
+def _resolve_summary(candidate: object, explicit_info: list[Any], implicit_traits: list[Any]) -> str:
+    """Prefer the model's holistic ``summary``; fall back to an empty string.
+
+    The extraction prompts ask the model for a short paragraph holistic summary alongside
+    ``explicit_info`` / ``implicit_traits``. When the model omits it -- an older ``prompt=`` override
+    that predates this field, a non-string value, or a blank string -- returns ``""`` so
+    ``Profile.summary`` is never a misleading verbatim copy of a single fact. Downstream synthesis
+    layers (e.g. the caller's own overall-impression module) are responsible for producing a true
+    holistic portrait.
+    """
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate.strip()
+    return _build_summary(explicit_info, implicit_traits)
+
+
 def _build_summary(explicit_info: list[Any], implicit_traits: list[Any]) -> str:
-    """Return the first ``description`` from explicit_info, then implicit_traits; sentinel ``"(no summary)"`` if both empty."""
-    for item in explicit_info:
-        if not isinstance(item, dict):
-            continue
-        desc = item.get("description")  # type: ignore[reportUnknownVariableType,reportUnknownMemberType]
-        if isinstance(desc, str) and desc.strip():
-            return desc.strip()
-    for item in implicit_traits:
-        if not isinstance(item, dict):
-            continue
-        desc = item.get("description") or item.get("trait")  # type: ignore[reportUnknownVariableType,reportUnknownMemberType]
-        if isinstance(desc, str) and desc.strip():
-            return desc.strip()
-    return "(no summary)"
+    """Return an empty string; holistic summaries are produced downstream by the caller's synthesis layer.
+
+    Previously this function returned the first ``description`` from explicit_info or
+    implicit_traits, which caused ``Profile.summary`` to be a verbatim copy of a single
+    item -- misleading downstream consumers that reasonably expect a holistic portrait.
+    The extraction prompts still request a ``summary`` from the model, and
+    :func:`_resolve_summary` prefers it when present; this function is now the
+    intentional empty fallback.
+    """
+    return ""

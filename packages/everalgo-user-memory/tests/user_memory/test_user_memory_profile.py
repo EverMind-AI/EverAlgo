@@ -205,6 +205,42 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
     assert "Default content" in captured["prompt"]
 
 
+async def test_aextract_threads_target_user_into_init_prompt() -> None:
+    """INIT renders the target ``sender_id`` into the prompt so the LLM attributes facts to one speaker."""
+    captured: dict[str, str] = {}
+    payload = _payload(
+        explicit_info=[{"category": "x", "description": "y", "evidence": "z"}],
+        implicit_traits=[],
+    )
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=payload, model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+
+    await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
+
+    assert "TARGET USER: user_id=u_alice" in captured["prompt"]
+
+
+async def test_aextract_threads_target_user_into_update_prompt() -> None:
+    """UPDATE renders the target ``sender_id`` into the prompt (same attribution discipline as INIT)."""
+    captured: dict[str, str] = {}
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=json.dumps({"operations": [{"action": "none"}]}), model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+
+    await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=_old_profile())
+
+    assert "TARGET USER: user_id=u_alice" in captured["prompt"]
+
+
 # ==========================================================================
 # _render_conversation helper
 # ==========================================================================
@@ -239,36 +275,6 @@ def test_render_conversation_uses_sentinel_when_all_inputs_empty() -> None:
 
 
 # ==========================================================================
-# _build_summary defensive branches
-# ==========================================================================
-
-
-def test_build_summary_skips_non_dict_items_in_explicit_info() -> None:
-    """Non-dict entries inside explicit_info are skipped."""
-    summary = _build_summary(
-        explicit_info=["not a dict", 42, {"description": "real one"}],
-        implicit_traits=[],
-    )
-    assert summary == "real one"
-
-
-def test_build_summary_skips_non_dict_items_in_implicit_traits() -> None:
-    """Non-dict entries inside implicit_traits are skipped."""
-    summary = _build_summary(
-        explicit_info=[],
-        implicit_traits=["not a dict", {"description": "trait desc"}],
-    )
-    assert summary == "trait desc"
-
-
-def test_build_summary_returns_sentinel_when_no_usable_description() -> None:
-    """Empty / whitespace-only / non-string descriptions → sentinel."""
-    summary = _build_summary(
-        explicit_info=[{"description": ""}, {"description": "   "}, {"description": 42}],
-        implicit_traits=[{"description": None}],
-    )
-    assert summary == "(no summary)"
-
 
 # ==========================================================================
 # Empty-memcells guard
@@ -496,3 +502,137 @@ async def test_update_merge_correctness_add_update_delete() -> None:
     assert ei[1]["category"] == "Location"
     # delete: implicit_traits[0] removed
     assert len(it) == 0
+
+# ==========================================================================
+# _build_summary — always returns ""; downstream synthesis handles summaries
+# ==========================================================================
+
+
+def test_build_summary_returns_empty_string_regardless_of_input() -> None:
+    """_build_summary always returns '' — it no longer copies the first description."""
+    assert _build_summary([{"description": "real one"}], []) == ""
+    assert _build_summary([], [{"description": "trait desc"}]) == ""
+    assert _build_summary([{"description": ""}], [{"description": None}]) == ""
+    assert _build_summary(["not a dict", 42], []) == ""
+    assert _build_summary([], []) == ""
+
+
+# ==========================================================================
+# Holistic summary — LLM-provided summary preferred, _build_summary fallback
+# ==========================================================================
+
+
+async def test_init_prefers_llm_summary_when_present() -> None:
+    """INIT mode: a top-level ``summary`` from the model becomes ``Profile.summary`` verbatim."""
+    payload = json.dumps(
+        {
+            "explicit_info": [{"category": "Skills", "description": "Alice writes Python.", "evidence": "x"}],
+            "implicit_traits": [],
+            "summary": "A pragmatic backend engineer who values minimal-ceremony tooling.",
+        }
+    )
+    fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
+
+    assert profile.summary == "A pragmatic backend engineer who values minimal-ceremony tooling."
+
+
+async def test_aextract_falls_back_to_empty_when_llm_summary_blank() -> None:
+    """INIT mode: a blank / whitespace-only ``summary`` is ignored; summary falls back to ``""`` (downstream synthesis handles it)."""
+    payload = json.dumps(
+        {
+            "explicit_info": [{"category": "Skills", "description": "Alice writes Python.", "evidence": "x"}],
+            "implicit_traits": [],
+            "summary": "   ",
+        }
+    )
+    fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
+
+    assert profile.summary == ""
+
+
+async def test_update_prefers_llm_summary_when_present() -> None:
+    """UPDATE mode: a top-level ``summary`` in the ops payload becomes ``Profile.summary``."""
+    ops_json = json.dumps(
+        {
+            "operations": [
+                {
+                    "action": "add",
+                    "type": "explicit_info",
+                    "data": {"category": "Location", "description": "Lives in Berlin.", "evidence": "z"},
+                },
+            ],
+            "update_note": "added 1",
+            "summary": "A Berlin-based Python developer.",
+        }
+    )
+    fake = FakeLLMClient(responses=[ChatResponse(content=ops_json, model="fake")])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=_old_profile())
+
+    assert profile.summary == "A Berlin-based Python developer."
+
+
+async def test_update_falls_back_to_empty_when_summary_absent() -> None:
+    """UPDATE mode: with no ``summary`` in the payload, summary is ``""``."""
+    ops_json = json.dumps({"operations": [{"action": "none"}], "update_note": "no change"})
+    fake = FakeLLMClient(responses=[ChatResponse(content=ops_json, model="fake")])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=_old_profile())
+
+    assert profile.summary == ""
+
+
+async def test_compact_prefers_llm_summary_when_present() -> None:
+    """UPDATE → compact: the compact payload's ``summary`` becomes ``Profile.summary``."""
+    n = _PROFILE_COMPACT_THRESHOLD
+    ei_items = [{"category": f"Cat{i}", "description": f"Desc{i}.", "evidence": "x"} for i in range(n)]
+    old_p = _old_profile(explicit_info=ei_items, implicit_traits=[])
+
+    ops_json = json.dumps(
+        {
+            "operations": [
+                {
+                    "action": "add",
+                    "type": "explicit_info",
+                    "data": {"category": "New", "description": "One more.", "evidence": "z"},
+                }
+            ],
+            "update_note": "added 1",
+        }
+    )
+    compact_json = json.dumps(
+        {
+            "explicit_info": [{"category": "Merged", "description": "Compacted profile.", "evidence": "all"}],
+            "implicit_traits": [],
+            "compact_note": "merged many into one",
+            "summary": "A long-tenured user with a broad, now-condensed profile.",
+        }
+    )
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(content=ops_json, model="fake"),
+            ChatResponse(content=compact_json, model="fake"),
+        ]
+    )
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_p)
+
+    assert fake.call_count == 2
+    assert profile.summary == "A long-tenured user with a broad, now-condensed profile."
+
+
+def test_resolve_summary_prefers_non_blank_string() -> None:
+    """A non-blank string candidate is returned stripped, ignoring the fallback inputs."""
+    assert _resolve_summary("  A concise portrait.  ", [{"description": "first"}], []) == "A concise portrait."
+
+
+def test_resolve_summary_falls_back_on_blank_or_non_string() -> None:
+    """Blank, None, or non-string candidates fall back to ``""``."""
+    assert _resolve_summary("   ", [{"description": "first"}], []) == ""
+    assert _resolve_summary(None, [{"description": "first"}], []) == ""
+    assert _resolve_summary(123, [], [{"description": "trait desc"}]) == ""
+    assert _resolve_summary(None, [], []) == ""

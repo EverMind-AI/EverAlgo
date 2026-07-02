@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `ProfileExtractor` now produces a holistic `Profile.summary`. The initial-extraction, update, and compact prompts (en + zh) each request a one-to-two sentence holistic summary, and the extractor uses it when the model returns one. When the model omits it — or a custom `prompt=` override predates the field, or the value is blank / non-string — the summary falls back to an empty string instead of copying the first available description. Downstream synthesis layers are responsible for producing a true holistic portrait. Previously `summary` was always a verbatim copy of the first `explicit_info` description.
+
 ## [0.3.1] - 2026-06-24
 
 ### Fixed
