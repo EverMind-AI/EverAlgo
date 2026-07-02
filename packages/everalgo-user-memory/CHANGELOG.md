@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `ProfileExtractor` now threads the target `sender_id` into the INIT and UPDATE prompts as `{target_user}`, and those prompts attribute each fact to the speaker who stated it. Previously the extraction prompts never received the target id, so in any multi-speaker slice — including an ordinary user↔assistant exchange — the model could attribute another participant's statements, or the assistant's own persona, to the profile owner. This applies to the active extraction paths the same target-aware attribution already encoded in the (until now unused) `TEAM_PROFILE_UPDATE_PROMPT`. Backward compatible: a caller-supplied `prompt=` override that omits `{target_user}` renders unchanged.
+
 ## [0.3.1] - 2026-06-24
 
 ### Fixed

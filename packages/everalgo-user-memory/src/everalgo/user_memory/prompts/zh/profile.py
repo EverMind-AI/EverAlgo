@@ -9,6 +9,9 @@ by :class:`ProfileExtractor` — kept for future minor extractor releases.
 # Incremental Update Prompt
 PROFILE_UPDATE_PROMPT = """你是用户画像更新员。根据对话记录，判断需要对用户画像做哪些操作。
 
+**目标用户：user_id={target_user}**
+只对 user_id 为 {target_user} 的用户的信息执行操作。每行对话都带 `(user_id:...)` 标签；把每个事实归属给真正陈述它的发言者。其他参与者和 AI 助手都只是上下文，绝不是目标用户。
+
 【当前用户画像】（每条都有 index 编号）
 {current_profile}
 
@@ -32,7 +35,7 @@ PROFILE_UPDATE_PROMPT = """你是用户画像更新员。根据对话记录，�
 
 【重要规则】
 1. **挖掘标签**：隐式特征必须包含【性格标签】，例如：[风险厌恶型]、[社交驱动型]、[数据考据党]。
-2. 只提取用户信息，不要把 AI 助手的建议当成用户特征
+2. **发言者归属**：只提取目标用户（user_id={target_user}）的信息。如果其他参与者或 AI 助手陈述了某个事实，那属于他们，不属于目标用户；绝不要让助手自身的身份或人设变成用户特征。
 3. evidence 要包含时间信息 - 如"2024年10月用户提到..."
 4. explicit_info 和 implicit_traits 的 index 是独立编号的
 5. **去重**：在使用 "add" 前，仔细检查所有已有条目。如果类似的特征/信息已存在（即使措辞不同），请用 "update" 来补充而非重复添加。只有确实全新的信息才用 "add"。
@@ -97,6 +100,9 @@ PROFILE_COMPACT_PROMPT = """当前用户画像有 {total_items} 条记录（expl
 # Initial Extraction Prompt
 PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请阅读下面的对话，构建用户画像。
 
+**目标用户：user_id={target_user}**
+只为该用户构建画像。对话中可能有多个发言者——其他参与者以及 AI 助手。每行都带 `(user_id:...)` 标签；只把信息归属给 user_id 为 {target_user} 的用户。其他所有人（包括助手）都只是上下文，绝不是本画像的主体。
+
 【第一部分：显式信息 (explicit_info)】
 用户的客观事实和当前状态，如身高体重、喜好、疾病等。
 
@@ -106,7 +112,7 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请
 *命名规范*：Trait 字段必须简练精准，推荐“[形容词] [名词]”格式，严禁过度堆砌形容词。
 
 【提取原则】
-1. 只提取用户本人的信息，不要把助手的建议当成用户特征
+1. 只提取目标用户（user_id={target_user}）的信息。绝不要把其他参与者或 AI 助手说的话归到目标用户头上——包括助手自身的名字、人设、角色或第一人称自述。助手描述的是它自己，永远不是用户。
 2. 隐式特征必须有多个证据支撑：同一条隐式特征的 evidence 必须来自多个信号；证据可来自【当前对话】与/或【已有画像 current_profile 的 evidence】（更新时可用），不能仅凭单条新对话臆断
 3. 每条信息用一句自然语言描述，通俗易懂
 

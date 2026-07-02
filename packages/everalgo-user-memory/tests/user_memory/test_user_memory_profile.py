@@ -205,6 +205,42 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
     assert "Default content" in captured["prompt"]
 
 
+async def test_aextract_threads_target_user_into_init_prompt() -> None:
+    """INIT renders the target ``sender_id`` into the prompt so the LLM attributes facts to one speaker."""
+    captured: dict[str, str] = {}
+    payload = _payload(
+        explicit_info=[{"category": "x", "description": "y", "evidence": "z"}],
+        implicit_traits=[],
+    )
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=payload, model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+
+    await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
+
+    assert "TARGET USER: user_id=u_alice" in captured["prompt"]
+
+
+async def test_aextract_threads_target_user_into_update_prompt() -> None:
+    """UPDATE renders the target ``sender_id`` into the prompt (same attribution discipline as INIT)."""
+    captured: dict[str, str] = {}
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=json.dumps({"operations": [{"action": "none"}]}), model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+
+    await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=_old_profile())
+
+    assert "TARGET USER: user_id=u_alice" in captured["prompt"]
+
+
 # ==========================================================================
 # _render_conversation helper
 # ==========================================================================
