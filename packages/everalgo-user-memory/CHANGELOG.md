@@ -6,6 +6,15 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Target-aware profile extraction (multi-speaker attribution).** `ProfileExtractor` now threads the `sender_id` it is already given into both the INIT and UPDATE prompts as `target_user`. The prompts instruct the model to attribute each fact to the speaker who stated it (every conversation line is tagged `(user_id:...)`) and to treat other participants — and the AI assistant — as context, never as the profile's subject. This prevents cross-speaker contamination in group conversations (e.g. another member's facts, or the assistant's own persona, leaking into a user's profile). Applied symmetrically to `prompts/en/profile.py` and `prompts/zh/profile.py`.
+
+### Changed
+
+- **Anti-bloat "durable abstraction" rule for profile descriptions.** Both INIT and UPDATE prompts (en + zh) now carry a HARD RULE requiring each `description` to be a timeless generalization: no date/weekday/clock-time in `description` (coarse time belongs in `evidence`), and repeated instances of a pattern must be folded into one existing item via `update` rather than appended as new dated clauses. Includes WRONG/RIGHT examples and a pre-output self-check. Reduces the accumulation of dated, event-log-style profile entries over many updates.
+- **`_render_conversation` coarsens per-message timestamps to date granularity** (`YYYY-MM-DD`). Profile extraction needs no intraday precision; dropping the clock component removes second-level noise, avoids UTC/local intraday misreads, and reinforces the anti-bloat "no clock time" rule by keeping only a coarse date in the rendered transcript.
+
 ## [0.3.1] - 2026-06-24
 
 ### Fixed

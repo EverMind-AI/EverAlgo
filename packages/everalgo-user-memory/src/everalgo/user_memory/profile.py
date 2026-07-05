@@ -92,7 +92,12 @@ class ProfileExtractor:
         prompt: str | None,
     ) -> Profile:
         conversation_text = _render_conversation(memcells)
-        rendered = render_prompt(PROFILE_INITIAL_EXTRACTION_PROMPT, prompt, conversation_text=conversation_text)
+        rendered = render_prompt(
+            PROFILE_INITIAL_EXTRACTION_PROMPT,
+            prompt,
+            conversation_text=conversation_text,
+            target_user=sender_id,
+        )
 
         data = await _call_llm_for_profile_init(self._llm, rendered)
         explicit_info = data["explicit_info"]
@@ -127,6 +132,7 @@ class ProfileExtractor:
             prompt,
             current_profile=current_profile_text,
             conversations=conversation_text,
+            target_user=sender_id,
         )
 
         data = await _call_llm_for_profile_update(self._llm, rendered)
@@ -247,7 +253,11 @@ def _render_conversation(memcells: Sequence[MemCell]) -> str:
                 continue
             speaker = m.sender_name or m.sender_id
             user_id = m.sender_id or ""
-            time_str = format_message_timestamp(m.timestamp)
+            # Coarsen to date granularity: profile extraction needs no intraday precision,
+            # and dropping the clock component removes second-level noise while avoiding
+            # UTC/local intraday misreads. Reinforces the anti-bloat "no clock time in
+            # description" rule below by keeping only a coarse date in the transcript.
+            time_str = format_message_timestamp(m.timestamp)[:10]
             lines.append(f"[{time_str}] {speaker}(user_id:{user_id}): {text}")
     if not lines:
         lines.append("(no prior MemCells in the cluster)")

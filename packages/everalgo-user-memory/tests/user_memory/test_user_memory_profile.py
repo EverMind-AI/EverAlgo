@@ -239,6 +239,68 @@ def test_render_conversation_uses_sentinel_when_all_inputs_empty() -> None:
 
 
 # ==========================================================================
+# Target-aware extraction (multi-speaker attribution)
+# ==========================================================================
+
+
+def test_render_conversation_tags_each_speaker_with_own_user_id() -> None:
+    """Multi-speaker cell: every line carries its speaker's own ``(user_id:...)`` tag.
+
+    Attribution must key on ``user_id``, not the display name — so the id, not the
+    (possibly ambiguous) ``sender_name``, is what the target-aware prompt matches on.
+    """
+    cell = MemCell(
+        items=[
+            ChatMessage(
+                id="m1", role="user", content="I ship Rust daily.",
+                timestamp=_TS, sender_id="u_alice", sender_name="Alice",
+            ),
+            ChatMessage(
+                id="m2", role="user", content="I only write Go.",
+                timestamp=_TS, sender_id="u_bob", sender_name="Bob",
+            ),
+        ],
+        timestamp=_TS,
+    )
+    rendered = _render_conversation([cell])
+    assert "(user_id:u_alice): I ship Rust daily." in rendered
+    assert "(user_id:u_bob): I only write Go." in rendered
+
+
+async def test_aextract_threads_target_user_id_into_prompt() -> None:
+    """The target user's ``user_id`` (not the display name) is injected into the prompt,
+    so the LLM is told to attribute facts to that id in a multi-speaker transcript."""
+    captured: dict[str, str] = {}
+    payload = _payload(
+        explicit_info=[{"category": "x", "description": "y", "evidence": "z"}],
+        implicit_traits=[],
+    )
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=payload, model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+
+    multi_speaker = MemCell(
+        items=[
+            _msg("I ship Rust daily.", sender="u_alice", sender_name="Alice"),
+            _msg("I only write Go.", sender="u_bob", sender_name="Bob"),
+        ],
+        timestamp=_TS,
+    )
+
+    await ProfileExtractor(llm=fake).aextract([multi_speaker], sender_id="u_alice")
+
+    prompt = captured["prompt"]
+    # Target is identified by user_id, and both speakers' lines are present for the
+    # model to discriminate — the other speaker (u_bob) is context, never the subject.
+    assert "user_id=u_alice" in prompt
+    assert "(user_id:u_bob): I only write Go." in prompt
+
+
+# ==========================================================================
 # _build_summary defensive branches
 # ==========================================================================
 
