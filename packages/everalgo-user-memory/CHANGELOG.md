@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-21
+
 ### Fixed
 
 - `ProfileExtractor` no longer leaks other participants' information into the target user's `Profile` in multi-speaker conversations. INIT and UPDATE prompts now receive `sender_id` as an explicit `{target_user}` with speaker-attribution rules, and `aextract` fail-loud validates that `sender_id` is a human (`role == "user"`) speaker present in the input. Removed the never-consumed `TEAM_PROFILE_UPDATE_PROMPT` dead constant.
@@ -49,6 +51,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.2...HEAD
+[0.3.2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.1...everalgo-user-memory/v0.3.2
+[0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.0...everalgo-user-memory/v0.3.1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.2.0...everalgo-user-memory/v0.3.0
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-user-memory/v0.2.0
