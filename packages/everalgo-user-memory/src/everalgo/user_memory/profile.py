@@ -62,17 +62,28 @@ class ProfileExtractor:
 
         Args:
             memcells: Must be non-empty and ordered chronologically; last element is the most recent.
-            sender_id: Must be one of the memcells' chat senders; not inferred.
+            sender_id: Must be one of the memcells' human (``role == "user"``) senders; not inferred.
+                An assistant sender_id is rejected — an assistant is never a valid Profile owner.
+                Injected into the prompt as the target user so extraction is scoped to this speaker
+                in multi-party conversations.
             old_profile: Existing profile for UPDATE mode; None triggers INIT mode.
             prompt: Prompt override; None uses the bundled default for the selected mode.
 
         Raises:
-            ValueError: If ``memcells`` is empty or the LLM response is malformed.
+            ValueError: If ``memcells`` is empty, ``sender_id`` is not a user speaker in ``memcells``,
+                or the LLM response is malformed.
             LLMError: From the LLM call.
             json.JSONDecodeError: On unparseable response.
         """
         if not memcells:
             raise ValueError("memcells must contain at least one MemCell")
+
+        user_senders = _user_senders(memcells)
+        if sender_id not in user_senders:
+            raise ValueError(
+                f"sender_id {sender_id!r} is not a user speaker in the provided memcells; "
+                f"available user senders: {sorted(user_senders)!r}"
+            )
 
         if old_profile is None:
             return await self._init_extract(memcells, sender_id=sender_id, prompt=prompt)
@@ -92,7 +103,9 @@ class ProfileExtractor:
         prompt: str | None,
     ) -> Profile:
         conversation_text = _render_conversation(memcells)
-        rendered = render_prompt(PROFILE_INITIAL_EXTRACTION_PROMPT, prompt, conversation_text=conversation_text)
+        rendered = render_prompt(
+            PROFILE_INITIAL_EXTRACTION_PROMPT, prompt, conversation_text=conversation_text, target_user=sender_id
+        )
 
         data = await _call_llm_for_profile_init(self._llm, rendered)
         explicit_info = data["explicit_info"]
@@ -127,6 +140,7 @@ class ProfileExtractor:
             prompt,
             current_profile=current_profile_text,
             conversations=conversation_text,
+            target_user=sender_id,
         )
 
         data = await _call_llm_for_profile_update(self._llm, rendered)
@@ -235,6 +249,14 @@ def _extract_json_object(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Module-level helpers.
 # ---------------------------------------------------------------------------
+
+
+def _user_senders(memcells: Sequence[MemCell]) -> set[str]:
+    """Return sender_ids of human (``role == "user"``) chat messages across all memcells.
+
+    Assistant turns are intentionally excluded: an assistant is never a valid Profile owner.
+    """
+    return {m.sender_id for cell in memcells for m in chat_messages(cell) if m.role == "user"}
 
 
 def _render_conversation(memcells: Sequence[MemCell]) -> str:

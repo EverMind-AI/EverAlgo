@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `ProfileExtractor` no longer leaks other participants' information into the target user's `Profile` in multi-speaker conversations. INIT and UPDATE prompts now receive `sender_id` as an explicit `{target_user}` with speaker-attribution rules, and `aextract` fail-loud validates that `sender_id` is a human (`role == "user"`) speaker present in the input. Removed the never-consumed `TEAM_PROFILE_UPDATE_PROMPT` dead constant.
+
 ## [0.3.1] - 2026-06-24
 
 ### Fixed

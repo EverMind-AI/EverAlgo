@@ -2,12 +2,16 @@
 
 ``PROFILE_INITIAL_EXTRACTION_PROMPT`` is the active prompt used by :class:`ProfileExtractor`; it
 replaces the prior 2-stage ``CONVERSATION_PROFILE_PART1 + PART2`` flow with a single call returning
-``{explicit_info, implicit_traits}``. The other prompts cover maintenance operations not yet consumed
-by :class:`ProfileExtractor` — kept for future minor extractor releases.
+``{explicit_info, implicit_traits}``. ``PROFILE_INITIAL_EXTRACTION_PROMPT`` and ``PROFILE_UPDATE_PROMPT``
+inject a ``{target_user}`` so extraction is scoped to a single speaker; ``PROFILE_COMPACT_PROMPT`` only
+re-summarises already-stored items.
 """
 
 # Incremental Update Prompt
 PROFILE_UPDATE_PROMPT = """你是用户画像更新员。根据对话记录，判断需要对用户画像做哪些操作。
+
+**目标用户：{target_user}**
+这可能是多人对话，每行都用说话人的 user_id 标注。只更新 {target_user}（user_id 等于 {target_user} 的说话人）的画像。任何其他参与者陈述的、或关于他们自己的信息都属于那个人，绝不要归到 {target_user} 名下。
 
 【当前用户画像】（每条都有 index 编号）
 {current_profile}
@@ -32,7 +36,7 @@ PROFILE_UPDATE_PROMPT = """你是用户画像更新员。根据对话记录，�
 
 【重要规则】
 1. **挖掘标签**：隐式特征必须包含【性格标签】，例如：[风险厌恶型]、[社交驱动型]、[数据考据党]。
-2. 只提取用户信息，不要把 AI 助手的建议当成用户特征
+2. 只提取 {target_user} 的信息，不要把其他参与者的信息或 AI 助手的建议当成用户特征
 3. evidence 要包含时间信息 - 如"2024年10月用户提到..."
 4. explicit_info 和 implicit_traits 的 index 是独立编号的
 5. **去重**：在使用 "add" 前，仔细检查所有已有条目。如果类似的特征/信息已存在（即使措辞不同），请用 "update" 来补充而非重复添加。只有确实全新的信息才用 "add"。
@@ -97,6 +101,9 @@ PROFILE_COMPACT_PROMPT = """当前用户画像有 {total_items} 条记录（expl
 # Initial Extraction Prompt
 PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请阅读下面的对话，构建用户画像。
 
+**目标用户：{target_user}**
+这可能是多人对话，每行都用说话人的 user_id 标注。只为 {target_user}（user_id 等于 {target_user} 的说话人）构建画像。任何其他参与者陈述的、或关于他们自己的信息都属于那个人，绝不要归到 {target_user} 名下。
+
 【第一部分：显式信息 (explicit_info)】
 用户的客观事实和当前状态，如身高体重、喜好、疾病等。
 
@@ -106,7 +113,7 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请
 *命名规范*：Trait 字段必须简练精准，推荐“[形容词] [名词]”格式，严禁过度堆砌形容词。
 
 【提取原则】
-1. 只提取用户本人的信息，不要把助手的建议当成用户特征
+1. 只提取 {target_user} 本人的信息，不要把其他参与者的信息或助手的建议当成用户特征
 2. 隐式特征必须有多个证据支撑：同一条隐式特征的 evidence 必须来自多个信号；证据可来自【当前对话】与/或【已有画像 current_profile 的 evidence】（更新时可用），不能仅凭单条新对话臆断
 3. 每条信息用一句自然语言描述，通俗易懂
 
@@ -134,63 +141,3 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """你是一个"用户画像分析师"。请
 
 【对话原文】
 {conversation_text}"""
-
-
-# ============================================================================
-# TEAM-specific prompts (multi-user group conversation)
-# ============================================================================
-
-TEAM_PROFILE_UPDATE_PROMPT = """你是**群聊场景**的用户画像更新员。你的任务是从多人对话中，仅提取和更新**一个特定用户**的画像。
-
-**目标用户：{target_user}**
-你必须只提取关于 **{target_user}** 的信息。仔细区分每条信息的发言者，不要把其他参与者的信息混入 {target_user} 的画像。
-
-【{target_user} 的当前画像】（每条都有 index 编号）
-{current_profile}
-
-【群聊对话记录】（多个参与者 - 只提取 {target_user} 的信息）
-{conversations}
-
-【任务】
-分析对话，仅输出关于 **{target_user}** 的操作列表。可选操作类型：
-- **update**: 修改现有条目（通过 index 指定）
-- **add**: 新增画像条目
-- **delete**: 删除现有条目
-- **none**: 无需任何操作（当对话不包含 {target_user} 的信息时使用）
-
-【操作选择指南】
-- **update**: 现有条目有信息更新、补充、修改
-- **add**: 发现 {target_user} 的全新信息（与现有条目无关）
-- **delete**: 以下情况应该删除：
-  - {target_user} 明确否定（如"我不再吃素了"）
-  - 信息已过时或与新信息直接矛盾
-
-【重要规则】
-1. **发言者归属**：这是一个多人群聊。只提取 **{target_user}** 说的话或明确关于 {target_user} 的信息。如果其他参与者提到某个事实，那属于其他人的画像，不是 {target_user} 的。
-2. **挖掘标签**：隐式特征必须包含【性格标签】，例如：[风险厌恶型]、[社交驱动型]、[数据考据党]。
-3. evidence 要包含时间和发言者信息 - 如"2024年10月 {target_user} 提到..."
-4. explicit_info 和 implicit_traits 的 index 是独立编号的
-5. **去重**：在使用 "add" 前，检查所有已有条目。如果类似信息已存在，用 "update" 补充。只有确实全新的信息才用 "add"。
-
-【画像定义】
-- **explicit_info（显式信息）**：{target_user} 直接陈述的或关于其本人的事实（技能、背景、偏好、所在地等）
-- **implicit_traits（隐式特征）**：从 {target_user} 在对话中的表述和行为推断出的性格特征和行为模式
-
-【输出格式】
-无操作时：
-```json
-{{"operations": [{{"action": "none"}}], "update_note": "对话不包含 {target_user} 的信息"}}
-```
-
-有操作时：
-```json
-{{
-  "operations": [
-    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "..."}}}},
-    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}}},
-    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "..."}}}},
-    {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
-  ],
-  "update_note": "..."
-}}
-```"""

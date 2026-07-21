@@ -3,10 +3,11 @@
 ``PROFILE_INITIAL_EXTRACTION_PROMPT`` is the active prompt used by :class:`ProfileExtractor`; it
 replaces the prior 2-stage ``CONVERSATION_PROFILE_PART1 + PART2`` flow with a single call returning
 ``{explicit_info, implicit_traits}``. The other prompts exported here (``PROFILE_UPDATE_PROMPT`` /
-``PROFILE_COMPACT_PROMPT`` / ``TEAM_PROFILE_UPDATE_PROMPT``) cover maintenance operations not yet
-consumed by :class:`ProfileExtractor` — kept for future minor extractor releases.
+``PROFILE_COMPACT_PROMPT``) cover maintenance operations. ``PROFILE_INITIAL_EXTRACTION_PROMPT`` and
+``PROFILE_UPDATE_PROMPT`` inject a ``{target_user}`` so extraction is scoped to a single speaker in
+multi-party conversations; ``PROFILE_COMPACT_PROMPT`` only re-summarises already-stored items.
 
-Placeholders & rendering: all four templates use single-brace placeholders that survive
+Placeholders & rendering: all three templates use single-brace placeholders that survive
 :py:meth:`str.format` because their JSON examples already escape literal braces as ``{{ }}``.
 """
 
@@ -14,6 +15,9 @@ PROFILE_UPDATE_PROMPT = """
 **CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 
 You are a user profile updater. Based on conversation records, determine what operations to perform on the user profile.
+
+**TARGET USER: {target_user}**
+This may be a multi-speaker conversation; each line is tagged with the speaker's ``user_id``. Only update the profile for **{target_user}** (the speaker whose ``user_id`` equals {target_user}). Information stated by or about any other participant belongs to THAT participant — never attribute it to {target_user}.
 
 【Current User Profile】(Each item has an index number)
 {current_profile}
@@ -39,7 +43,7 @@ Analyze conversations and output a list of operations (can have multiple). Avail
 
 【Important Rules】
 1. **Tag Mining**: Implicit traits must include [Personality Tags], e.g., [Risk-Averse], [Socially-Driven], [Data-Oriented].
-2. Only extract user info, don't treat AI assistant suggestions as user traits
+2. Only extract info about {target_user}, not other participants; don't treat AI assistant suggestions as user traits
 3. evidence should include time info - e.g., "In Oct 2024 user mentioned..."
 4. Index numbers for explicit_info and implicit_traits are independent
 5. **Deduplication**: Before using "add", carefully check ALL existing items. If a similar trait/info already exists (even with different wording), use "update" to enrich it instead of adding a duplicate. Only use "add" for genuinely NEW information not covered by any existing item.
@@ -115,6 +119,9 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = """
 
 You are a "User Profile Analyst". Please read the conversation below and build a user profile.
 
+**TARGET USER: {target_user}**
+This may be a multi-speaker conversation; each line is tagged with the speaker's ``user_id``. Only build a profile for **{target_user}** (the speaker whose ``user_id`` equals {target_user}). Information stated by or about any other participant belongs to THAT participant — never attribute it to {target_user}.
+
 【Part 1: Explicit Information (explicit_info)】
 Objective facts and current status.
 
@@ -123,7 +130,7 @@ Psychological profile, personality tags, and decision styles inferred from behav
 *Extraction Requirement*: Freely analyze decision making, social patterns, and values. Trait field must be a highly summarized [Adjective/Noun Phrase Tag].
 
 【Extraction Principles】
-1. Only extract information about the user themselves, not assistant suggestions
+1. Only extract information about {target_user} themselves, not other participants and not assistant suggestions
 2. Implicit traits must be supported by multiple evidence: each implicit trait must have evidence corroborated by multiple signals from the conversations and/or existing profile; do not infer from a single data point alone
 3. Describe each piece of information in one natural sentence, easy to understand
 
@@ -153,65 +160,3 @@ LANGUAGE RULE: Detect the language of the input conversation and respond in the 
 
 【Original Conversation】
 {conversation_text}"""
-
-
-TEAM_PROFILE_UPDATE_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
-
-You are a user profile updater for **group conversations**. Your task is to extract and update the profile for ONE specific user from a multi-person conversation.
-
-**TARGET USER: {target_user}**
-You MUST only extract information about **{target_user}**. Carefully attribute each piece of information to the correct speaker. Do NOT mix up information from different participants.
-
-【Current Profile for {target_user}】(Each item has an index number)
-{current_profile}
-
-【Group Conversation Records】(Multiple participants - only extract info about {target_user})
-{conversations}
-
-【Task】
-Analyze the conversations and output operations ONLY for information about **{target_user}**. Available action types:
-- **update**: Modify existing items (specify by index)
-- **add**: Add profile items
-- **delete**: Delete existing items
-- **none**: No operation needed (use when conversation contains no info about {target_user})
-
-【Operation Guide】
-- **update**: Existing item has updates, supplements, or corrections
-- **add**: Discovered completely new information about {target_user} (unrelated to existing items)
-- **delete**: Should delete in these cases:
-  - {target_user} explicitly negates something (e.g., "I'm no longer vegetarian")
-  - Info is outdated or directly contradicts new info
-
-【Important Rules】
-1. **Speaker Attribution**: This is a GROUP conversation with multiple speakers. ONLY extract what **{target_user}** said or what is explicitly about {target_user}. If another participant mentions a fact, it belongs to THAT participant's profile, NOT {target_user}'s.
-2. **Tag Mining**: Implicit traits must include [Personality Tags], e.g., [Risk-Averse], [Socially-Driven], [Data-Oriented].
-3. evidence should include time info and speaker - e.g., "In Oct 2024 {target_user} stated..."
-4. Index numbers for explicit_info and implicit_traits are independent
-5. **Deduplication**: Before using "add", check ALL existing items. If a similar trait/info already exists, use "update" instead. Only "add" genuinely NEW information.
-
-【Profile Definitions】
-- **explicit_info**: Facts directly stated by or about {target_user} (skills, background, preferences, location, etc.)
-- **implicit_traits**: Personality traits and behavioral patterns inferred from {target_user}'s statements and behavior in the conversation.
-
-【Output Format】
-No operations:
-```json
-{{"operations": [{{"action": "none"}}], "update_note": "conversation contains no info about {target_user}"}}
-```
-
-With operations:
-```json
-{{
-  "operations": [
-    {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "..."}}}},
-    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}}},
-    {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "..."}}}},
-    {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
-  ],
-  "update_note": "..."
-}}
-```
-
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
-"""
