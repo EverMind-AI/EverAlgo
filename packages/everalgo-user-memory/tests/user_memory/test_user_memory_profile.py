@@ -158,8 +158,9 @@ async def test_aextract_owner_id_equals_sender_id() -> None:
         implicit_traits=[],
     )
     fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
+    cell = MemCell(items=[_msg("Default content", sender="u_custom")], timestamp=_TS)
 
-    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_custom")
+    profile = await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_custom")
 
     assert profile.owner_id == "u_custom"
 
@@ -496,3 +497,85 @@ async def test_update_merge_correctness_add_update_delete() -> None:
     assert ei[1]["category"] == "Location"
     # delete: implicit_traits[0] removed
     assert len(it) == 0
+
+
+async def test_init_injects_target_user_and_preserves_other_speakers() -> None:
+    """INIT prompt names sender_id as target user; other speakers stay rendered as context."""
+    captured: dict[str, str] = {}
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=_payload([], []), model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+    cell = MemCell(
+        items=[
+            _msg("I write Python.", sender="u_alice", sender_name="Alice"),
+            _msg("I prefer Go.", sender="u_bob", sender_name="Bob"),
+        ],
+        timestamp=_TS,
+    )
+    await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_alice")
+
+    assert "TARGET USER: u_alice" in captured["prompt"]  # target injected
+    assert "u_bob" in captured["prompt"]  # other speaker kept as context (no render filtering)
+
+
+async def test_update_injects_target_user() -> None:
+    """UPDATE prompt names sender_id as target user."""
+    captured: dict[str, str] = {}
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=json.dumps({"operations": [{"action": "none"}]}), model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+    cell = MemCell(
+        items=[
+            _msg("I moved to Berlin.", sender="u_alice"),
+            _msg("I prefer Go.", sender="u_bob", sender_name="Bob"),
+        ],
+        timestamp=_TS,
+    )
+    old = Profile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "Alice writes Python.",
+            "timestamp": _TS_OLD_1,
+            "explicit_info": [{"category": "Skills", "description": "Python.", "evidence": "x"}],
+            "implicit_traits": [],
+        }
+    )
+    await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_alice", old_profile=old)
+
+    assert "TARGET USER: u_alice" in captured["prompt"]
+    assert "u_bob" in captured["prompt"]  # other speaker kept as context (no render filtering)
+
+
+# ==========================================================================
+# sender_id fail-loud validation — semantic exclusion of assistant
+# ==========================================================================
+
+
+async def test_aextract_rejects_sender_id_not_a_user_speaker() -> None:
+    """sender_id absent from user speakers raises ValueError before any LLM call."""
+    fake = FakeLLMClient(responses=[ChatResponse(content=_payload([], []), model="fake")])
+    cell = MemCell(items=[_msg("hi", sender="u_alice")], timestamp=_TS)
+    with pytest.raises(ValueError, match="not a user speaker"):
+        await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_ghost")
+
+
+async def test_aextract_rejects_assistant_as_target() -> None:
+    """Assistant is not a valid profile owner even when it speaks (semantic exclusion)."""
+    fake = FakeLLMClient(responses=[ChatResponse(content=_payload([], []), model="fake")])
+    cell = MemCell(
+        items=[
+            _msg("How can I help?", role="assistant", sender="assistant", sender_name="AI"),
+            _msg("I like tea.", role="user", sender="u_alice"),
+        ],
+        timestamp=_TS,
+    )
+    with pytest.raises(ValueError, match="not a user speaker"):
+        await ProfileExtractor(llm=fake).aextract([cell], sender_id="assistant")
