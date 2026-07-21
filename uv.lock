@@ -596,7 +596,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "packages/everalgo-user-memory" }
 dependencies = [
     { name = "asgiref" },
