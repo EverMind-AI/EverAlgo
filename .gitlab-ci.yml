@@ -19,6 +19,8 @@ default:
   image: ghcr.io/astral-sh/uv:0.9.30-python3.12-bookworm
   interruptible: true
   timeout: 15m
+  tags:
+    - evermind-group-ai
 
 # `--locked` makes uv error on lockfile drift rather than installing against a stale lockfile. Note `--frozen`
 # does NOT do this: it trusts the lockfile and skips the consistency check, so editable-member version drift
