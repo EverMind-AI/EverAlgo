@@ -3,19 +3,31 @@
 import everalgo.agent_memory
 from everalgo.testing.fake_llm import FakeLLMClient
 
+_EXPECTED_EXPORTS = [
+    # 3 Extractors + 1 boundary facade
+    "AgentBoundaryDetector",
+    "AgentCaseExtractor",
+    "AgentProfileExtractor",
+    "AgentSkillExtractor",
+    # Diagnostic surface of the *_with_reason methods
+    "CaseExtractionResult",
+    "CaseSkipReason",
+    "OpOutcome",
+    "SkillExtractionResult",
+    "SkillSkipReason",
+]
 
-def test_four_symbols_exported() -> None:
-    """agent_memory exposes 3 Extractors + 1 boundary facade (SkillConfig removed from public API)."""
-    for name in ("AgentBoundaryDetector", "AgentCaseExtractor", "AgentProfileExtractor", "AgentSkillExtractor"):
+
+def test_expected_symbols_exported() -> None:
+    """agent_memory exposes the extractors plus the skip-reason types (SkillConfig removed)."""
+    for name in _EXPECTED_EXPORTS:
         assert hasattr(everalgo.agent_memory, name)
     assert not hasattr(everalgo.agent_memory, "SkillConfig")
 
 
-def test_dunder_all_lists_four_symbols() -> None:
-    """__all__ exposes exactly 4 symbols."""
-    assert sorted(everalgo.agent_memory.__all__) == sorted(
-        ["AgentBoundaryDetector", "AgentCaseExtractor", "AgentProfileExtractor", "AgentSkillExtractor"]
-    )
+def test_dunder_all_matches_expected_exports() -> None:
+    """__all__ exposes exactly the expected symbols — no more, no less."""
+    assert sorted(everalgo.agent_memory.__all__) == sorted(_EXPECTED_EXPORTS)
 
 
 def test_extractors_instantiable_with_llm() -> None:

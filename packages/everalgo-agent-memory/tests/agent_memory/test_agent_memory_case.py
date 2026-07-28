@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from everalgo.agent_memory import CaseSkipReason
 from everalgo.agent_memory._text import json_default
 from everalgo.agent_memory.case import (
     AgentCaseExtractor,
@@ -114,7 +115,10 @@ class TestShouldSkip:
 
     def test_incomplete_last_is_tool_call(self) -> None:
         msgs: list[ConversationItem] = [_user_msg("do X"), _tool_call_msg("thinking")]
-        assert "Incomplete" in (_should_skip(msgs) or "")
+        skip = _should_skip(msgs)
+        assert skip is not None
+        assert skip[0] is CaseSkipReason.TRAJECTORY_NOT_CLOSED
+        assert skip[1] == {"last_item_kind": "tool_call"}
 
     def test_incomplete_last_is_tool_response(self) -> None:
         msgs: list[ConversationItem] = [_user_msg("do X"), _tool_call_msg(), _tool_response_msg()]
@@ -451,37 +455,37 @@ class TestToOpenaiDicts:
 class TestIsWorthExtracting:
     async def test_exploration_signal_extracts(self) -> None:
         fake = FakeLLMClient(responses=['{"has_exploration": true, "has_user_correction": false}'])
-        assert await _is_worth_extracting("[]", 2, fake) is True
+        assert (await _is_worth_extracting("[]", 2, fake))[0] is True
 
     async def test_user_correction_signal_extracts_with_enough_user_messages(self) -> None:
         fake = FakeLLMClient(responses=['{"has_exploration": false, "has_user_correction": true}'])
-        assert await _is_worth_extracting("[]", 2, fake) is True
+        assert (await _is_worth_extracting("[]", 2, fake))[0] is True
 
     async def test_user_correction_rejected_on_single_user_message(self) -> None:
         """``has_user_correction=True`` with only 1 user message → treat as hallucination → False."""
         fake = FakeLLMClient(responses=['{"has_exploration": false, "has_user_correction": true}'])
-        assert await _is_worth_extracting("[]", 1, fake) is False
+        assert (await _is_worth_extracting("[]", 1, fake))[0] is False
 
     async def test_user_correction_rejected_still_lets_exploration_pass(self) -> None:
         """User-correction validation does not affect the exploration signal."""
         fake = FakeLLMClient(responses=['{"has_exploration": true, "has_user_correction": true}'])
-        assert await _is_worth_extracting("[]", 1, fake) is True
+        assert (await _is_worth_extracting("[]", 1, fake))[0] is True
 
     async def test_all_signals_false_filtered_out(self) -> None:
         fake = FakeLLMClient(
             responses=['{"has_exploration": false, "has_user_correction": false, "reason": "trivial"}']
         )
-        assert await _is_worth_extracting("[]", 2, fake) is False
+        assert (await _is_worth_extracting("[]", 2, fake))[0] is False
 
     async def test_partial_signals_treats_missing_as_false(self) -> None:
         """One signal field provided as False, the other missing → missing treated as False → skip."""
         fake = FakeLLMClient(responses=['{"has_exploration": false}'])
-        assert await _is_worth_extracting("[]", 2, fake) is False
+        assert (await _is_worth_extracting("[]", 2, fake))[0] is False
 
     async def test_partial_signals_with_one_true_extracts(self) -> None:
         """One signal field provided as True, the other missing → extract."""
         fake = FakeLLMClient(responses=['{"has_exploration": true}'])
-        assert await _is_worth_extracting("[]", 2, fake) is True
+        assert (await _is_worth_extracting("[]", 2, fake))[0] is True
 
     async def test_malformed_json_raises(self) -> None:
         """Malformed JSON from LLM → ValueError (brace-balanced extraction fails)."""
@@ -492,7 +496,7 @@ class TestIsWorthExtracting:
     async def test_all_signal_fields_missing_defaults_to_false(self) -> None:
         """No signal fields at all → default False (precision over recall — skip when uncertain)."""
         fake = FakeLLMClient(responses=['{"some_other_field": true}'])
-        assert await _is_worth_extracting("[]", 2, fake) is False
+        assert (await _is_worth_extracting("[]", 2, fake))[0] is False
 
 
 # ── End-to-end AgentCaseExtractor.aextract ──────────────────────────────────────────────────────────
@@ -729,9 +733,10 @@ class TestShouldSkipNoToolBranches:
             _user_msg("again"),
             _assistant_msg("yes"),
         ]
-        reason = _should_skip(msgs)
-        assert reason is not None
-        assert "only 4 messages" in reason
+        skip = _should_skip(msgs)
+        assert skip is not None
+        assert skip[0] is CaseSkipReason.NO_TOOL_TOO_FEW_MESSAGES
+        assert skip[1] == {"messages": 4, "min": 5}
 
     def test_no_tool_brief_assistant_tokens_skipped(self) -> None:
         """> 4 msgs + no tools + assistant tokens < FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS (200) → skip."""
@@ -743,9 +748,10 @@ class TestShouldSkipNoToolBranches:
             _user_msg("hi 3"),
             _assistant_msg("done"),  # short — total tokens << 200
         ]
-        reason = _should_skip(msgs)
-        assert reason is not None
-        assert "brief assistant response" in reason
+        skip = _should_skip(msgs)
+        assert skip is not None
+        assert skip[0] is CaseSkipReason.NO_TOOL_ASSISTANT_TOO_SHORT
+        assert skip[1]["min"] == 200
 
 
 # ── _apply_truncation — edge cases on tool_calls / assistant content ─────────────────────────────────
@@ -1010,7 +1016,7 @@ class TestCompressExperience:
                 )
             ]
         )
-        assert await _compress_experience("[]", fake) is None
+        assert await _compress_experience("[]", fake) == (None, CaseSkipReason.COMPRESS_EMPTY_INTENT)
 
     async def test_empty_approach_returns_none(self) -> None:
         """Response 'approach' is empty → None."""
@@ -1022,7 +1028,7 @@ class TestCompressExperience:
                 )
             ]
         )
-        assert await _compress_experience("[]", fake) is None
+        assert await _compress_experience("[]", fake) == (None, CaseSkipReason.COMPRESS_EMPTY_APPROACH)
 
     async def test_json_decode_failure_raises(self) -> None:
         """Malformed JSON from LLM → ValueError after 5 retries."""

@@ -261,7 +261,8 @@ class TestApplyAdd:
             },
         }
         cfg = _SkillCfg()  # skip_maturity_scoring=True by default → no LLM call needed
-        added = await _apply_add(op, ["case_x"], client=FakeLLMClient(responses=[]), cfg=cfg)
+        outcome = await _apply_add(op, ["case_x"], op_index=0, client=FakeLLMClient(responses=[]), cfg=cfg)
+        added = outcome.skill
         assert added is not None
         assert added.name == "New Skill"
         assert added.confidence == 0.6
@@ -273,17 +274,20 @@ class TestApplyAdd:
 
     async def test_empty_content_skipped(self) -> None:
         op = {"action": "add", "data": {"name": "X", "description": "Y", "content": ""}}
-        result = await _apply_add(op, [], client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        result = outcome.skill
         assert result is None
 
     async def test_insufficient_content_skipped(self) -> None:
         op = {"action": "add", "data": {"name": "X", "description": "Y", "content": "too short"}}
-        result = await _apply_add(op, [], client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        result = outcome.skill
         assert result is None
 
     async def test_no_name_and_no_description_skipped(self) -> None:
         op = {"action": "add", "data": {"name": "", "description": "", "content": _DEFAULT_CONTENT}}
-        result = await _apply_add(op, [], client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        result = outcome.skill
         assert result is None
 
     async def test_invalid_confidence_defaults_to_half(self) -> None:
@@ -296,7 +300,8 @@ class TestApplyAdd:
                 "confidence": "not-a-number",
             },
         }
-        result = await _apply_add(op, [], client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        result = outcome.skill
         assert result is not None
         assert result.confidence == 0.5
 
@@ -313,7 +318,8 @@ class TestApplyAdd:
                 "confidence": 0.5,
             },
         }
-        result = await _apply_add(op, [], client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
+        outcome = await _apply_add(op, [], op_index=0, client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
+        result = outcome.skill
         assert result is not None
         assert fake.call_count == 1
         # raw_total = 15 / 20 = 0.75
@@ -336,94 +342,108 @@ class TestApplyAdd:
             },
         }
         with pytest.raises(RuntimeError, match="simulated LLM provider failure"):
-            await _apply_add(op, [], client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
+            await _apply_add(op, [], op_index=0, client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
 
     async def test_invalid_index_type_returns_none(self) -> None:
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": "abc", "data": {"name": "X"}},
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is None
 
     async def test_out_of_range_index_returns_none(self) -> None:
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 5, "data": {"name": "X"}},
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is None
 
     async def test_negative_index_returns_none(self) -> None:
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": -1, "data": {"name": "X"}},
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is None
 
     async def test_duplicate_index_returns_none(self) -> None:
         processed: set[int] = {0}
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"name": "X"}},
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=processed,
         )
+        result = outcome.skill
         assert result is None
 
     async def test_no_fields_to_change_returns_none(self) -> None:
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {}},
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is None
 
     async def test_insufficient_new_content_returns_none(self) -> None:
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"content": "too short"}},
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is None
 
     async def test_retire_branch_low_confidence(self) -> None:
         """Confidence < retire_confidence (0.1) → returned with confidence dropped (caller soft-deletes)."""
         prior = _make_skill(confidence=0.7)
         cfg = _SkillCfg()
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"confidence": 0.05}},
             [prior],
             source_case_ids=["case_x"],
             source_quality=0.4,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=cfg,
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         assert result.id == prior.id
         assert result.confidence == 0.05  # caller decodes RETIRE via this < cfg.retire_confidence
@@ -432,15 +452,17 @@ class TestApplyAdd:
     async def test_update_keeps_prior_id_and_propagates_fields(self) -> None:
         prior = _make_skill(name="Old", description="Old desc")
         cfg = _SkillCfg()
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"name": "New Name", "description": "New description text content"}},
             [prior],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=cfg,
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         assert result.id == prior.id  # caller decodes UPDATE via id ∈ existing + confidence >= retire
         assert result.name == "New Name"
@@ -450,30 +472,34 @@ class TestApplyAdd:
         prior = _make_skill(content="## Old\n1. a\n2. b\n3. c\n4. d\n5. e")
         new_content = "## Steps\n1. New step 1\n2. New step 2\n3. Step 3\n4. Step 4\n5. Step 5"
         cfg = _SkillCfg()
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"content": new_content}},
             [prior],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=cfg,
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         assert result.content == new_content
 
     async def test_source_case_ids_appended_dedup(self) -> None:
         prior = _make_skill(source_case_ids=["case_a"])
         cfg = _SkillCfg()
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"confidence": 0.8}},
             [prior],
             source_case_ids=["case_a", "case_b"],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=cfg,
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         assert result.source_case_ids == ["case_a", "case_b"]
 
@@ -484,15 +510,17 @@ class TestApplyAdd:
         returns None instead of emitting a no-op update.
         """
         prior = _make_skill(confidence=0.7)
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"confidence": "not-a-number"}},  # only field, and it's invalid
             [prior],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is None  # before the fix: would have emitted a no-op update with prior.confidence
 
     async def test_invalid_confidence_with_real_name_change_still_updates(self) -> None:
@@ -501,15 +529,17 @@ class TestApplyAdd:
         Confidence stays at prior.confidence, but the name change is what triggers the update path.
         """
         prior = _make_skill(name="Old", confidence=0.7)
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"name": "New Name", "confidence": "garbage"}},
             [prior],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         assert result.name == "New Name"
         assert result.confidence == 0.7  # invalid confidence ignored, prior preserved
@@ -521,15 +551,17 @@ class TestApplyAdd:
         path and is treated as no confidence change.
         """
         prior = _make_skill(confidence=0.7)
-        result = await _apply_update(
+        outcome = await _apply_update(
             {"index": 0, "data": {"confidence": None}},
             [prior],
             source_case_ids=[],
             source_quality=0.5,
+            op_index=0,
             client=FakeLLMClient(responses=[]),
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
+        result = outcome.skill
         # data.get("confidence") returns None, and `new_confidence_raw is not None` is False → the
         # pre-parse branch never runs → confidence_changed=False → no-fields guard fires
         assert result is None
@@ -561,6 +593,7 @@ class TestApplyAdd:
                 [prior],
                 source_case_ids=[],
                 source_quality=0.8,
+                op_index=0,
                 client=fake,
                 cfg=_SkillCfg(skip_maturity_scoring=False),  # opt into LLM maturity scoring
                 processed_indices=set(),
@@ -708,7 +741,8 @@ class TestAgentSkillExtractorAExtract:
     async def test_apply_add_with_non_dict_data_skipped(self) -> None:
         """Non-dict ``op["data"]`` falls back to ``{}`` -> empty content -> ``_apply_add`` skips."""
         op = {"action": "add", "data": "not a dict"}  # ← non-dict data
-        result = await _apply_add(op, [], client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        result = outcome.skill
         assert result is None  # empty content from the {} fallback → skip
 
 
@@ -797,15 +831,17 @@ class TestApplyUpdateModerateMaturityBand:
         )
         op = self._build_moderate_change_op()
         fake = FakeLLMClient(responses=[])  # must NOT be called — reeval is skipped
-        result = await _apply_update(
+        outcome = await _apply_update(
             op,
             [prior],
             source_case_ids=["c1"],
             source_quality=0.8,
+            op_index=0,
             client=fake,
             cfg=_SkillCfg(skip_maturity_scoring=False),  # opt into LLM but skip should bypass
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         # No LLM call happened — moderate + mature + stable skipped re-eval
         assert fake.call_count == 0
@@ -821,15 +857,17 @@ class TestApplyUpdateModerateMaturityBand:
         )
         op = self._build_moderate_change_op()
         fake = FakeLLMClient(responses=[])
-        result = await _apply_update(
+        outcome = await _apply_update(
             op,
             [prior],
             source_case_ids=["c1"],
             source_quality=0.2,  # < 0.3 → skip re-eval
+            op_index=0,
             client=fake,
             cfg=_SkillCfg(skip_maturity_scoring=False),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         assert fake.call_count == 0  # re-eval skipped
         assert result.maturity_score == 0.4  # preserved
@@ -844,15 +882,17 @@ class TestApplyUpdateModerateMaturityBand:
         op = self._build_moderate_change_op()
         maturity_json = json.dumps({"completeness": 5, "executability": 5, "evidence": 5, "clarity": 5, "reason": "ok"})
         fake = FakeLLMClient(responses=[ChatResponse(content=maturity_json, model="fake")])
-        result = await _apply_update(
+        outcome = await _apply_update(
             op,
             [prior],
             source_case_ids=["c1"],
             source_quality=0.6,  # ≥ 0.3 → does NOT skip; immature → re-eval fires
+            op_index=0,
             client=fake,
             cfg=_SkillCfg(skip_maturity_scoring=False),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         # LLM was called for maturity re-eval
         assert fake.call_count == 1
@@ -871,15 +911,17 @@ class TestApplyUpdateModerateMaturityBand:
         op["data"]["confidence"] = 0.3
         maturity_json = json.dumps({"completeness": 3, "executability": 3, "evidence": 3, "clarity": 3, "reason": "ok"})
         fake = FakeLLMClient(responses=[ChatResponse(content=maturity_json, model="fake")])
-        result = await _apply_update(
+        outcome = await _apply_update(
             op,
             [prior],
             source_case_ids=["c1"],
             source_quality=0.6,  # ≥ 0.3 → does NOT short-circuit via the low-quality branch
+            op_index=0,
             client=fake,
             cfg=_SkillCfg(skip_maturity_scoring=False),
             processed_indices=set(),
         )
+        result = outcome.skill
         assert result is not None
         # LLM was called — confidence dropping to <0.5 forces re-eval
         assert fake.call_count == 1

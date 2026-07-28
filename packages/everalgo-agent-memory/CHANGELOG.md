@@ -6,6 +6,18 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`aextract_with_reason` on `AgentCaseExtractor` and `AgentSkillExtractor`** (plus `extract_with_reason` sync bridges) — same algorithm as `aextract`, but a rejection comes back as a typed reason instead of only reaching the log. Callers that serve "why is this session's memory empty?" no longer have to scrape log lines to attribute an empty result.
+- **`CaseSkipReason` (13 members) and `SkillSkipReason` (12 members)** — one member per rejection gate in the two pipelines, exported from `everalgo.agent_memory`. Reasons are algorithmic: they name the gate, not what the rejection means for any particular product.
+- **`CaseExtractionResult`, `SkillExtractionResult`, `OpOutcome`** NamedTuples. `CaseExtractionResult` carries `(cases, reason, detail)`. The skill side carries `(pre_reason, pre_detail, outcomes)` — the `pre_*` pair reports short-circuits that fire before any LLM call, while `outcomes` holds one `OpOutcome` per LLM-proposed operation (so `len(outcomes) == len(operations)`), which keeps the three distinct empty states — quality short-circuit, LLM proposed nothing, every operation dropped — distinguishable. Convenience properties: `SkillExtractionResult.skills` / `.dropped`.
+- `detail` payloads carry observed values alongside the thresholds they missed (e.g. `{"rounds": 2, "min_rounds": 3}`) as structured data, so callers can compose user-facing messages without parsing strings.
+
+### Changed
+
+- `aextract` on both extractors is now a thin wrapper over `aextract_with_reason`. Signatures, return types, and behaviour are unchanged.
+- Internal (underscore-prefixed) helpers now return their rejection reason: `_should_skip` returns `(reason, detail) | None` rather than a prose string, `_is_worth_extracting` returns `(worth, llm_reason)`, `_compress_experience` returns `(data, reason)`, and `_apply_add` / `_apply_update` return an `OpOutcome` and take a required `op_index` keyword.
+
 ## [0.3.1] - 2026-06-15
 
 ### Fixed
