@@ -120,6 +120,32 @@ class AgentProfileExtractor:
 
 All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`.
 
+### Diagnosing an empty result
+
+`aextract` reports every rejection the same way — an empty list plus a log line — so a caller looking at `[]` cannot tell a too-simple trajectory from an LLM-filtered one. `AgentCaseExtractor` and `AgentSkillExtractor` each expose an `aextract_with_reason` variant (plus its `extract_with_reason` sync bridge) that returns the same decisions as typed values:
+
+```python
+result = await case_extractor.aextract_with_reason(memcell)
+result.cases    # list[AgentCase] — same value aextract returns
+result.reason   # CaseSkipReason | None ; None means a case was produced
+result.detail   # dict — observed value + threshold, e.g. {"rounds": 2, "min_rounds": 3}
+
+result = await skill_extractor.aextract_with_reason(case, existing_relevant_skills=..., supporting_cases=...)
+result.pre_reason  # SkillSkipReason | None — short-circuit that fired before any LLM call
+result.pre_detail  # dict — context for pre_reason, e.g. {"quality": 0.15, "threshold": 0.2}
+result.outcomes    # one OpOutcome per LLM-proposed operation; len == len(operations)
+result.skills      # the operations that succeeded — same value aextract returns
+result.dropped     # the operations that did not, each with .reason and .detail
+```
+
+Note where each rejection's context lands: a per-operation drop carries it on `OpOutcome.detail`, while the pre-LLM short-circuit carries it on `pre_detail` — it fires before any operation exists, so there is no `OpOutcome` to hang it off.
+
+The reasons are algorithmic: each names the gate that rejected the input. Attribution — caller mistake vs. not-yet-satisfied vs. infrastructure fault — depends on deployment context the library does not have, so that mapping belongs to the caller. `detail` carries numbers as structured data rather than prose so callers can compose their own message without parsing strings.
+
+The two extractors differ in shape because the operations differ: a MemCell yields at most one case, so a single `reason` suffices; a skill extraction integrates one case against N existing skills and may add, update, or leave alone each of them, so outcomes are per operation. Note that `OpOutcome.op_index` is the operation's position in the LLM's `operations` list — not the `index` inside an update operation, which addresses `existing_relevant_skills`.
+
+Exceptions are not reasons: `LLMError` and malformed-response `ValueError` / `json.JSONDecodeError` still propagate. They mean the pipeline could not run, not that the input was judged unworthy.
+
 ### AgentCaseExtractor pipeline
 
 The extractor runs an 11-step pipeline: strip-before-first-user → structural pre-filter → heuristic trim → over-size bail → LLM filter (skipped when ≥2 tool rounds) → tool pre-compress → LLM compress → parse → validate → build `AgentCase`. Returns `[]` when the trajectory is filtered out; returns `[AgentCase]` on success.

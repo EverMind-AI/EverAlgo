@@ -18,6 +18,7 @@ from everalgo.agent_memory._text import count_tokens, json_default, truncate_tex
 from everalgo.agent_memory.prompts.case_compress import AGENT_CASE_COMPRESS_PROMPT
 from everalgo.agent_memory.prompts.case_filter import AGENT_CASE_FILTER_PROMPT
 from everalgo.agent_memory.prompts.tool_pre_compress import AGENT_TOOL_PRE_COMPRESS_PROMPT
+from everalgo.agent_memory.reasons import CaseExtractionResult, CaseSkipReason
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import AgentCase, ChatMessage, ConversationItem, MemCell, ToolCall, ToolCallRequest, ToolCallResult
@@ -99,12 +100,41 @@ class AgentCaseExtractor:
     ) -> list[AgentCase]:
         """Run the 11-step pipeline on one MemCell; return ``[]`` (filtered) or ``[AgentCase]``.
 
+        Thin wrapper over :meth:`aextract_with_reason` — use that one when an empty result needs to
+        be explained rather than merely observed.
+
+        Raises:
+            LLMError: From any provider-side LLM call (no internal retry).
+        """
+        result = await self.aextract_with_reason(
+            memcell,
+            prompt_filter=prompt_filter,
+            prompt_compress=prompt_compress,
+            prompt_tool_pre_compress=prompt_tool_pre_compress,
+        )
+        return result.cases
+
+    extract = async_to_sync(aextract)
+
+    async def aextract_with_reason(  # noqa: C901  — one branch per pipeline gate, all algorithm-intrinsic
+        self,
+        memcell: MemCell,
+        *,
+        prompt_filter: str | None = None,
+        prompt_compress: str | None = None,
+        prompt_tool_pre_compress: str | None = None,
+    ) -> CaseExtractionResult:
+        """Run the 11-step pipeline on one MemCell, reporting which gate rejected it when none passes.
+
+        Same algorithm as :meth:`aextract`; the difference is that a rejection comes back as a typed
+        :class:`CaseSkipReason` plus structured ``detail`` instead of only reaching the log.
+
         Raises:
             LLMError: From any provider-side LLM call (no internal retry).
         """
         if not memcell.items:
             logger.info("no items on memcell (n_items=0), skipping")
-            return []
+            return CaseExtractionResult([], CaseSkipReason.EMPTY_MEMCELL, {})
 
         client = self._llm
 
@@ -112,9 +142,10 @@ class AgentCaseExtractor:
         msgs = _strip_before_first_user(memcell.items)
 
         # Step 3: structural + heuristic pre-filter
-        if reason := _should_skip(msgs):
-            logger.info("skipping memcell (n_items=%d): %s", len(memcell.items), reason)
-            return []
+        if skip := _should_skip(msgs):
+            reason, detail = skip
+            logger.info("skipping memcell (n_items=%d): %s %s", len(memcell.items), reason, detail)
+            return CaseExtractionResult([], reason, detail)
 
         # Step 3b: minimum-rounds gate — drop trajectories that are too simple to be worth learning
         if self._min_tool_call_rounds > 0:
@@ -125,7 +156,11 @@ class AgentCaseExtractor:
                     rounds,
                     self._min_tool_call_rounds,
                 )
-                return []
+                return CaseExtractionResult(
+                    [],
+                    CaseSkipReason.TOO_FEW_TOOL_ROUNDS,
+                    {"rounds": rounds, "min_rounds": self._min_tool_call_rounds},
+                )
 
         # Step 4: heuristic trim (with scale_trigger adaptation)
         msgs, total_tokens = _heuristic_trim(msgs)
@@ -144,7 +179,11 @@ class AgentCaseExtractor:
                     trimmed_tokens,
                     PRE_COMPRESS_CHUNK_SIZE * 2,
                 )
-                return []
+                return CaseExtractionResult(
+                    [],
+                    CaseSkipReason.TRAJECTORY_TOO_LARGE,
+                    {"tokens": trimmed_tokens, "limit": PRE_COMPRESS_CHUNK_SIZE * 2},
+                )
 
         # Step 6: selective LLM pre-compression of largest tool-call groups
         msgs = await _pre_compress_to_list(msgs, client, prompt=prompt_tool_pre_compress)
@@ -153,15 +192,18 @@ class AgentCaseExtractor:
         # Step 7: LLM filter — many tool-call rounds auto-passes as complex task; else judge signals
         # on a slimmed view (tool-result bodies shrunk) to cut prompt tokens. `and` short-circuits, so
         # the slim view is built only when the trajectory actually reaches the LLM filter.
-        if _count_tool_call_rounds(msgs) <= self._complex_task_round_threshold and not await _is_worth_extracting(
-            _dump_messages_for_filter(msgs), _count_user_messages(msgs), client, prompt=prompt_filter
-        ):
-            return []
+        if _count_tool_call_rounds(msgs) <= self._complex_task_round_threshold:
+            worth, llm_reason = await _is_worth_extracting(
+                _dump_messages_for_filter(msgs), _count_user_messages(msgs), client, prompt=prompt_filter
+            )
+            if not worth:
+                return CaseExtractionResult([], CaseSkipReason.FILTER_REJECTED, {"llm_reason": llm_reason})
 
         # Step 8: single LLM compress (no retry)
-        exp = await _compress_experience(messages_json, client, prompt=prompt_compress)
-        if not exp:
-            return []
+        exp, compress_reason = await _compress_experience(messages_json, client, prompt=prompt_compress)
+        if exp is None:
+            # compress_reason is always set when exp is None; the assert-free narrowing keeps mypy happy.
+            return CaseExtractionResult([], compress_reason or CaseSkipReason.COMPRESS_EMPTY_INTENT, {})
 
         # Step 9: hard truncate task_intent (head-only)
         original_intent = exp.get("task_intent", "")
@@ -180,9 +222,9 @@ class AgentCaseExtractor:
             quality_score=_clamp_quality_score(exp.get("quality_score", 0.5)),
             key_insight=exp.get("key_insight", "") or "",
         )
-        return [case]
+        return CaseExtractionResult([case], None, {})
 
-    extract = async_to_sync(aextract)
+    extract_with_reason = async_to_sync(aextract_with_reason)
 
 
 # ── Serialization helpers (ConversationItem → OpenAI Chat Completions wire format) ─────────────────────────
@@ -256,34 +298,42 @@ def _count_user_messages(messages: Sequence[ConversationItem]) -> int:
     return sum(1 for msg in messages if isinstance(msg, ChatMessage) and msg.role == "user")
 
 
-def _should_skip(messages: Sequence[ConversationItem]) -> str | None:
-    """Pre-filter combining structural + heuristic checks. Returns skip reason or ``None``."""
+def _item_kind(item: ConversationItem) -> str:
+    """Short label for a trajectory item, used as ``detail`` on ``TRAJECTORY_NOT_CLOSED``."""
+    if isinstance(item, ChatMessage):
+        return f"text:{item.role}"
+    return "tool_call" if isinstance(item, ToolCallRequest) else "tool_result"
+
+
+def _should_skip(messages: Sequence[ConversationItem]) -> tuple[CaseSkipReason, dict[str, Any]] | None:
+    """Pre-filter combining structural + heuristic checks. Returns ``(reason, detail)`` or ``None``."""
     if not messages:
-        return "No messages after stripping system prompts"
+        return CaseSkipReason.NO_MESSAGES_AFTER_STRIP, {}
     if not any(isinstance(msg, ChatMessage) and msg.role == "user" for msg in messages):
-        return "No user messages found"
+        return CaseSkipReason.NO_USER_MESSAGE, {}
     has_assistant = any(
         (isinstance(msg, ChatMessage) and msg.role == "assistant") or isinstance(msg, ToolCallRequest)
         for msg in messages
     )
     if not has_assistant:
-        return "No assistant messages found"
+        return CaseSkipReason.NO_ASSISTANT_MESSAGE, {}
 
     last_msg = messages[-1]
     if isinstance(last_msg, ToolCallRequest) or not (
         isinstance(last_msg, ChatMessage) and last_msg.role == "assistant"
     ):
-        return "Incomplete agent trajectory (last message is not a final assistant response)"
+        return CaseSkipReason.TRAJECTORY_NOT_CLOSED, {"last_item_kind": _item_kind(last_msg)}
 
     has_tools = _has_tool_calls(messages)
     if not has_tools:
         user_count = sum(1 for msg in messages if isinstance(msg, ChatMessage) and msg.role == "user")
         if user_count < 2:
-            return "Single-turn conversation without tool calls"
+            return CaseSkipReason.NO_TOOL_SINGLE_USER, {"user_count": user_count}
 
         if len(messages) <= FILTER_NO_TOOL_MAX_MESSAGES:
             return (
-                f"No-tool conversation with only {len(messages)} messages (max {FILTER_NO_TOOL_MAX_MESSAGES}), skipping"
+                CaseSkipReason.NO_TOOL_TOO_FEW_MESSAGES,
+                {"messages": len(messages), "min": FILTER_NO_TOOL_MAX_MESSAGES + 1},
             )
 
         assistant_content = " ".join(
@@ -292,8 +342,8 @@ def _should_skip(messages: Sequence[ConversationItem]) -> str | None:
         assistant_tokens = count_tokens(assistant_content)
         if assistant_tokens < FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS:
             return (
-                f"No-tool conversation with brief assistant response "
-                f"({assistant_tokens} tokens < {FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS}), skipping"
+                CaseSkipReason.NO_TOOL_ASSISTANT_TOO_SHORT,
+                {"tokens": assistant_tokens, "min": FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS},
             )
 
     return None
@@ -574,7 +624,7 @@ async def _is_worth_extracting(
     client: LLMClient,
     *,
     prompt: str | None = None,
-) -> bool:
+) -> tuple[bool, str]:
     """LLM filter: ``True`` only if at least one signal (exploration / user correction) is True.
 
     Used only when the tool-call round count is at or below the extractor's configured threshold;
@@ -586,23 +636,29 @@ async def _is_worth_extracting(
     LLM claims a correction on a single-user-message trajectory, the signal is rejected as
     hallucination.
 
+    Returns:
+        ``(worth_extracting, llm_reason)`` — the model's one-line rationale is returned alongside the
+        verdict so callers can surface *why* a trajectory was filtered out. It is free text and may
+        vary between runs; display it, do not branch on it.
+
     Raises:
         LLMError: Propagated from the underlying LLM client call.
         json.JSONDecodeError: If the LLM response is not valid JSON.
     """
     rendered = render_prompt(AGENT_CASE_FILTER_PROMPT, prompt, messages=messages_json)
     filter_data = await _call_llm_for_case_filter(client, rendered)
+    llm_reason = str(filter_data.get("reason", "") or "")
     has_exploration = filter_data.get("has_exploration") is True
     has_user_correction = filter_data.get("has_user_correction") is True and user_message_count >= 2
     if filter_data.get("has_user_correction") is True and user_message_count < 2:
         logger.info(
             "rejecting has_user_correction=True on single-user-message trajectory (likely hallucination): %s",
-            filter_data.get("reason", ""),
+            llm_reason,
         )
     worth = has_exploration or has_user_correction
     if not worth:
-        logger.info("filtered out by LLM: %s", filter_data.get("reason", ""))
-    return worth
+        logger.info("filtered out by LLM: %s", llm_reason)
+    return worth, llm_reason
 
 
 async def _compress_experience(
@@ -610,11 +666,13 @@ async def _compress_experience(
     client: LLMClient,
     *,
     prompt: str | None = None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, CaseSkipReason | None]:
     """Extract task_intent / approach / quality_score / key_insight via one LLM call (no retry).
 
-    Returns ``None`` when the LLM emits empty ``task_intent`` or ``approach`` — those are business
-    validation failures (the trajectory isn't worth compressing), not parse errors.
+    Returns ``(None, reason)`` when the LLM emits an empty ``task_intent`` or ``approach`` — those are
+    business validation failures (the trajectory isn't worth compressing), not parse errors. The two
+    cases are reported separately because they mean different things: an empty intent says the LLM
+    could not name the task at all, an empty approach that it found no method worth recording.
 
     Raises:
         LLMError: Propagated from the underlying LLM client call.
@@ -624,11 +682,11 @@ async def _compress_experience(
     compress_data = await _call_llm_for_case_compress(client, rendered)
     if not compress_data.get("task_intent"):
         logger.info("LLM returned empty 'task_intent', skipping")
-        return None
+        return None, CaseSkipReason.COMPRESS_EMPTY_INTENT
     if not compress_data.get("approach"):
         logger.warning("LLM returned empty 'approach', skipping")
-        return None
-    return compress_data
+        return None, CaseSkipReason.COMPRESS_EMPTY_APPROACH
+    return compress_data, None
 
 
 # ---------------------------------------------------------------------------

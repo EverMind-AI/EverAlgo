@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from everalgo.agent_memory._text import json_default, truncate_text
 from everalgo.agent_memory.prompts.skill_maturity import AGENT_SKILL_MATURITY_SCORE_PROMPT
+from everalgo.agent_memory.reasons import OpOutcome, SkillSkipReason
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import AgentCase, AgentSkill
@@ -134,6 +135,17 @@ def _is_skill_content_sufficient(content: str, min_lines: int = 5, min_length: i
     return len(non_empty_lines) >= min_lines
 
 
+def _content_detail(content: str, min_lines: int = 5, min_length: int = 50) -> dict[str, Any]:
+    """Observed-vs-required numbers behind a content-sufficiency rejection, for ``OpOutcome.detail``."""
+    stripped = content.strip()
+    return {
+        "lines": len([line for line in stripped.splitlines() if line.strip()]),
+        "chars": len(stripped),
+        "min_lines": min_lines,
+        "min_chars": min_length,
+    }
+
+
 def _content_change_ratio(old: str, new: str) -> float:
     """Return ``1 - SequenceMatcher.ratio()`` as a 0.0-1.0 change fraction."""
     if not old and not new:
@@ -254,14 +266,16 @@ async def _apply_add(
     op: dict[str, Any],
     source_case_ids: Sequence[str],
     *,
+    op_index: int,
     client: LLMClient,
     cfg: _SkillCfg,
     prompt_maturity: str | None = None,
-) -> AgentSkill | None:
+) -> OpOutcome:
     """Apply an ``add`` op: validate content / name / description, clamp confidence, run maturity scoring.
 
-    Returns a fresh :class:`AgentSkill` or ``None`` when validation fails.
-    cluster_id is left empty; caller stamps it after extraction.
+    Returns an :class:`OpOutcome` carrying either a fresh :class:`AgentSkill` or the
+    :class:`SkillSkipReason` that rejected the op. cluster_id is left empty; caller stamps it after
+    extraction.
     """
     data = _op_data(op)
     content = str(data.get("content") or "")
@@ -270,17 +284,17 @@ async def _apply_add(
 
     if not content:
         logger.warning("add op empty content, skipping")
-        return None
+        return OpOutcome(op_index, None, SkillSkipReason.ADD_CONTENT_EMPTY, {})
     if not _is_skill_content_sufficient(content):
         logger.warning(
             "add op insufficient content (len=%d), skipping content=%r",
             len(content),
             content[:100],
         )
-        return None
+        return OpOutcome(op_index, None, SkillSkipReason.ADD_CONTENT_INSUFFICIENT, _content_detail(content))
     if not name and not description:
         logger.warning("add op missing both name and description, skipping")
-        return None
+        return OpOutcome(op_index, None, SkillSkipReason.ADD_NAME_AND_DESC_EMPTY, {})
 
     description = truncate_text(description, cfg.max_description_tokens, suffix="...")
     try:
@@ -298,14 +312,19 @@ async def _apply_add(
         prompt_maturity=prompt_maturity,
     )
 
-    return AgentSkill(
-        id=uuid.uuid4().hex,
-        name=name,
-        description=description,
-        content=content,
-        confidence=confidence,
-        maturity_score=score,
-        source_case_ids=list(source_case_ids),
+    return OpOutcome(
+        op_index,
+        AgentSkill(
+            id=uuid.uuid4().hex,
+            name=name,
+            description=description,
+            content=content,
+            confidence=confidence,
+            maturity_score=score,
+            source_case_ids=list(source_case_ids),
+        ),
+        None,
+        {},
     )
 
 
@@ -315,28 +334,37 @@ async def _apply_update(  # noqa: C901
     source_case_ids: Sequence[str],
     source_quality: float,
     *,
+    op_index: int,
     client: LLMClient,
     cfg: _SkillCfg,
     processed_indices: set[int],
     prompt_maturity: str | None = None,
-) -> AgentSkill | None:
-    """Apply an ``update`` op; return a modified :class:`AgentSkill` or ``None`` when nothing changed.
+) -> OpOutcome:
+    """Apply an ``update`` op; return an :class:`OpOutcome` with the modified skill or a drop reason.
 
     ``confidence < cfg.retire_confidence`` signals retire; ``confidence >=`` signals upsert.
-    Returns ``None`` for invalid / duplicate index, insufficient new content, or no changed fields.
+    Drops on invalid / duplicate index, insufficient new content, or no changed fields.
+
+    Note the two distinct indices in play: ``op_index`` is the op's position in the LLM's
+    ``operations`` list, while ``op["index"]`` addresses ``existing_list``.
     """
     # ── index parse + duplicate guard ─────────────────────────────────────────
     try:
         index = int(op.get("index", -1))
     except (TypeError, ValueError):
         logger.warning("update index not int: %r", op.get("index"))
-        return None
+        return OpOutcome(op_index, None, SkillSkipReason.UPDATE_INDEX_INVALID, {"raw": repr(op.get("index"))})
     if index < 0 or index >= len(existing_list):
         logger.warning("update index %d out of range [0, %d)", index, len(existing_list))
-        return None
+        return OpOutcome(
+            op_index,
+            None,
+            SkillSkipReason.UPDATE_INDEX_OUT_OF_RANGE,
+            {"index": index, "size": len(existing_list)},
+        )
     if index in processed_indices:
         logger.warning("duplicate update on index %d, skipping", index)
-        return None
+        return OpOutcome(op_index, None, SkillSkipReason.UPDATE_DUPLICATE_INDEX, {"index": index})
     processed_indices.add(index)
 
     prior = existing_list[index]
@@ -357,7 +385,7 @@ async def _apply_update(  # noqa: C901
             index,
             len(new_content),
         )
-        return None
+        return OpOutcome(op_index, None, SkillSkipReason.UPDATE_CONTENT_INSUFFICIENT, _content_detail(new_content))
 
     # ── confidence pre-parse: invalid input is treated as "no confidence change" ─
     # Opensource :580-585 doesn't add to `updates` dict on parse failure, then the
@@ -383,7 +411,7 @@ async def _apply_update(  # noqa: C901
 
     if not name_changed and not desc_changed and not real_content_changed and not confidence_changed:
         logger.warning("update[%d] has no fields to change, skipping", index)
-        return None
+        return OpOutcome(op_index, None, SkillSkipReason.UPDATE_NO_FIELD_CHANGED, {"index": index})
 
     # ── effective values ──────────────────────────────────────────────────────
     eff_name = new_name if new_name else (prior.name or "")
@@ -409,11 +437,16 @@ async def _apply_update(  # noqa: C901
             eff_confidence,
             cfg.retire_confidence,
         )
-        return prior.model_copy(
-            update={
-                "confidence": eff_confidence,
-                "source_case_ids": existing_ids,
-            }
+        return OpOutcome(
+            op_index,
+            prior.model_copy(
+                update={
+                    "confidence": eff_confidence,
+                    "source_case_ids": existing_ids,
+                }
+            ),
+            None,
+            {},
         )
 
     # ── maturity re-eval decision (three-band) ────────────────────────────────
@@ -507,4 +540,4 @@ async def _apply_update(  # noqa: C901
         real_content_changed,
         new_confidence_raw is not None,
     )
-    return updated
+    return OpOutcome(op_index, updated, None, {})

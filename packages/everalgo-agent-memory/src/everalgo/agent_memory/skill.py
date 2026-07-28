@@ -19,6 +19,7 @@ from asgiref.sync import async_to_sync
 
 from everalgo.agent_memory.prompts.skill_failure import AGENT_SKILL_FAILURE_EXTRACT_PROMPT
 from everalgo.agent_memory.prompts.skill_success import AGENT_SKILL_SUCCESS_EXTRACT_PROMPT
+from everalgo.agent_memory.reasons import OpOutcome, SkillExtractionResult, SkillSkipReason
 from everalgo.agent_memory.skill_ops import (
     _apply_add,
     _apply_update,
@@ -73,7 +74,7 @@ class AgentSkillExtractor:
     def __init__(self, *, llm: LLMClient) -> None:
         self._llm = llm
 
-    async def aextract(  # noqa: C901
+    async def aextract(
         self,
         case: AgentCase,
         *,
@@ -93,6 +94,64 @@ class AgentSkillExtractor:
         maturity_reeval_change_ratio: float = 0.4,
     ) -> list[AgentSkill]:
         """Integrate ``case`` into the skill set; return add / update / retire entries.
+
+        Thin wrapper over :meth:`aextract_with_reason` — use that one when an empty (or
+        smaller-than-expected) result needs to be explained rather than merely observed.
+
+        See :meth:`aextract_with_reason` for the full argument reference.
+
+        Raises:
+            LLMError: Propagated from the underlying LLM client call.
+            json.JSONDecodeError: If the LLM response is not valid JSON.
+            TypeError: If the LLM response is not a dict, or ``operations`` is not a list.
+        """
+        result = await self.aextract_with_reason(
+            case,
+            existing_relevant_skills=existing_relevant_skills,
+            supporting_cases=supporting_cases,
+            prompt_success=prompt_success,
+            prompt_failure=prompt_failure,
+            prompt_maturity=prompt_maturity,
+            skip_quality_threshold=skip_quality_threshold,
+            skip_maturity_scoring=skip_maturity_scoring,
+            maturity_threshold=maturity_threshold,
+            retire_confidence=retire_confidence,
+            failure_quality_threshold=failure_quality_threshold,
+            max_description_tokens=max_description_tokens,
+            max_content_tokens=max_content_tokens,
+            maturity_trivial_change_ratio=maturity_trivial_change_ratio,
+            maturity_reeval_change_ratio=maturity_reeval_change_ratio,
+        )
+        return result.skills
+
+    extract = async_to_sync(aextract)
+
+    async def aextract_with_reason(
+        self,
+        case: AgentCase,
+        *,
+        existing_relevant_skills: Sequence[AgentSkill],
+        supporting_cases: Sequence[AgentCase],
+        prompt_success: str | None = None,
+        prompt_failure: str | None = None,
+        prompt_maturity: str | None = None,
+        skip_quality_threshold: float = 0.2,
+        skip_maturity_scoring: bool = True,
+        maturity_threshold: float = 0.6,
+        retire_confidence: float = 0.1,
+        failure_quality_threshold: float = 0.5,
+        max_description_tokens: int = 400,
+        max_content_tokens: int = 5000,
+        maturity_trivial_change_ratio: float = 0.2,
+        maturity_reeval_change_ratio: float = 0.4,
+    ) -> SkillExtractionResult:
+        """Integrate ``case`` into the skill set, reporting what happened to every proposed operation.
+
+        Same algorithm as :meth:`aextract`. The difference is the return shape: one
+        :class:`OpOutcome` per LLM-proposed operation (so ``len(outcomes) == len(operations)``),
+        each holding either the resulting skill or the reason it was dropped, plus a separate
+        ``pre_reason`` / ``pre_detail`` pair for the quality short-circuit that fires before any
+        operation exists.
 
         Args:
             case: The newly extracted ``AgentCase`` to integrate.
@@ -135,7 +194,11 @@ class AgentSkillExtractor:
                 case.quality_score,
                 cfg.skip_quality_threshold,
             )
-            return []
+            return SkillExtractionResult(
+                SkillSkipReason.CASE_QUALITY_BELOW_THRESHOLD,
+                {"quality": case.quality_score, "threshold": cfg.skip_quality_threshold},
+                [],
+            )
 
         client = self._llm
 
@@ -179,53 +242,59 @@ class AgentSkillExtractor:
         if note:
             logger.debug("LLM update_note: %s", note)
 
-        # Apply ops in-memory — emit list[AgentSkill] per §5.2 encoding
-        result: list[AgentSkill] = []
+        # Apply ops in-memory — one OpOutcome per proposed op, so len(outcomes) == len(operations)
+        outcomes: list[OpOutcome] = []
         processed_indices: set[int] = set()
         source_case_ids = [case.id] if case.id else []
 
-        for op in cast("list[dict[str, Any]]", operations):
+        for op_index, op in enumerate(cast("list[dict[str, Any]]", operations)):
             if not isinstance(op, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
                 logger.warning("skill op is not a dict, skipping: %r", op)
+                outcomes.append(OpOutcome(op_index, None, SkillSkipReason.OP_NOT_DICT, {}))
                 continue
             action: str | None = op.get("action")
 
             if action == "add":
-                added = await _apply_add(
-                    op,
-                    source_case_ids,
-                    client=client,
-                    cfg=cfg,
-                    prompt_maturity=prompt_maturity,
+                outcomes.append(
+                    await _apply_add(
+                        op,
+                        source_case_ids,
+                        op_index=op_index,
+                        client=client,
+                        cfg=cfg,
+                        prompt_maturity=prompt_maturity,
+                    )
                 )
-                if added is not None:
-                    result.append(added)
             elif action == "update":
-                updated = await _apply_update(
-                    op,
-                    existing_list,
-                    source_case_ids,
-                    source_quality=max_quality,
-                    client=client,
-                    prompt_maturity=prompt_maturity,
-                    cfg=cfg,
-                    processed_indices=processed_indices,
+                outcomes.append(
+                    await _apply_update(
+                        op,
+                        existing_list,
+                        source_case_ids,
+                        source_quality=max_quality,
+                        op_index=op_index,
+                        client=client,
+                        prompt_maturity=prompt_maturity,
+                        cfg=cfg,
+                        processed_indices=processed_indices,
+                    )
                 )
-                if updated is not None:
-                    result.append(updated)
             elif action == "none":
-                continue
+                outcomes.append(OpOutcome(op_index, None, SkillSkipReason.OP_ACTION_NONE, {}))
             else:
                 logger.warning("unknown action %r, skipping", action)
+                outcomes.append(OpOutcome(op_index, None, SkillSkipReason.OP_UNKNOWN_ACTION, {"action": action}))
 
+        applied = sum(1 for o in outcomes if o.skill is not None)
         logger.info(
-            "case=%s ops applied: total=%d (adds + updates + retires per §5.2 encoding)",
+            "case=%s ops applied: total=%d of %d proposed (adds + updates + retires per §5.2 encoding)",
             case.id,
-            len(result),
+            applied,
+            len(outcomes),
         )
-        return result
+        return SkillExtractionResult(None, {}, outcomes)
 
-    extract = async_to_sync(aextract)
+    extract_with_reason = async_to_sync(aextract_with_reason)
 
 
 # ---------------------------------------------------------------------------
