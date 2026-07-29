@@ -5,8 +5,21 @@ Placeholders: ``{USER_ID}`` / ``{USER_NAME}`` / ``{CONVERSATION_TEXT}`` (upperca
 Output schema: JSON object ``{"foresights": [{content, evidence, start_time, end_time, duration_days}, ...]}``.
 """
 
-FORESIGHT_GENERATION_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+_LANGUAGE_RULE = (
+    "**CRITICAL LANGUAGE RULE**: Output in the SAME language the conversation participants themselves "
+    "write in. ALL output MUST match that language. This is mandatory.\n\n"
+    "Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted "
+    "material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and "
+    "long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms "
+    "embedded inside a sentence written by the participants do not change the judgement — judge by the "
+    "language of the sentence structure. Proper nouns and technical terms keep their original form in "
+    "the output regardless of the output language."
+)
+
+FORESIGHT_GENERATION_PROMPT = (
+    "\n"
+    + _LANGUAGE_RULE
+    + """
 
 You are an advanced personal foresight analysis agent. Your task is to predict the specific impacts that a user's latest MemCell event might have on their future personal behaviors, habits, decisions, and lifestyle.
 
@@ -149,8 +162,11 @@ You will receive the following Markdown structure:
 {CONVERSATION_TEXT}
 ```
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+"""
+    + _LANGUAGE_RULE
+    + """
 
 ## Please generate 4-8 (up to 10) associations that may impact the user's future life and decisions based on the above content:
 
 """
+)

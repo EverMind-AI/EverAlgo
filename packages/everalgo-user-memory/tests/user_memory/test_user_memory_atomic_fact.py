@@ -240,3 +240,70 @@ async def test_extract_generic_when_sender_id_is_none() -> None:
     facts = await AtomicFactExtractor(llm=fake).aextract(_memcell(), sender_id=None)
     assert len(facts) >= 1
     assert all(f.owner_id is None for f in facts)
+
+
+# ==========================================================================
+# Language rules — mixed-input clauses (mirrors test_user_memory_foresight.py)
+# ==========================================================================
+
+_MIXED_INPUT_CLAUSES_EN = (
+    "themselves compose",  # judgement source restricted to participants' own writing
+    "dominate the conversation by volume",  # long quoted material must not flip the judgement
+    "sentence structure",  # embedded foreign terms do not flip the judgement
+    "keep their original form",  # proper nouns / technical terms stay untranslated
+)
+
+# zh must not rot relative to en — it is a public prompt selectable via `prompt=` (see README.md).
+_MIXED_INPUT_CLAUSES_ZH = (
+    "本人撰写的内容",  # judgement source restricted to participants' own writing
+    "在篇幅上占据对话主体",  # long quoted material must not flip the judgement
+    "句子结构",  # embedded foreign terms do not flip the judgement
+    "保留原文形式",  # proper nouns / technical terms stay untranslated
+)
+
+
+def test_en_prompt_states_language_rule_at_both_ends() -> None:
+    """Long prompts lose middle instructions; the rule is repeated at head and tail."""
+    from everalgo.user_memory.prompts.en.atomic_fact import ATOMIC_FACT_PROMPT
+
+    assert ATOMIC_FACT_PROMPT.count("CRITICAL LANGUAGE RULE") == 2
+
+
+def test_zh_prompt_states_language_rule_at_both_ends() -> None:
+    """The zh prompt mirrors the en head/tail placement."""
+    from everalgo.user_memory.prompts.zh.atomic_fact import ATOMIC_FACT_PROMPT
+
+    assert ATOMIC_FACT_PROMPT.count("关键语言规则") == 2
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
+def test_en_prompt_covers_mixed_input(clause: str) -> None:
+    """Chinese question plus long English pasted material must still yield Chinese facts."""
+    from everalgo.user_memory.prompts.en.atomic_fact import ATOMIC_FACT_PROMPT
+
+    assert clause in ATOMIC_FACT_PROMPT
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
+def test_zh_prompt_covers_mixed_input(clause: str) -> None:
+    """The zh prompt carries the same four judgement clauses as en."""
+    from everalgo.user_memory.prompts.zh.atomic_fact import ATOMIC_FACT_PROMPT
+
+    assert clause in ATOMIC_FACT_PROMPT
+
+
+def test_atomic_fact_from_text_has_no_mixed_input_clause() -> None:
+    """`aextract_from_text` reads an already-extracted episode body, so it inherits the language.
+
+    Language judgement belongs to the layer that reads the raw conversation. Re-judging a
+    single-language narrative would be inert, and a disagreeing judgement would split the
+    language between an episode and the facts derived from it.
+    """
+    from everalgo.user_memory.prompts.en.atomic_fact_from_text import (
+        ATOMIC_FACT_FROM_TEXT_PROMPT_EN,
+        EVENT_LOG_PROMPT,
+    )
+
+    for prompt in (EVENT_LOG_PROMPT, ATOMIC_FACT_FROM_TEXT_PROMPT_EN):
+        assert prompt.count("CRITICAL LANGUAGE RULE") == 2
+        assert "dominate" not in prompt

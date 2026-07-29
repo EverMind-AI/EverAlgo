@@ -579,3 +579,85 @@ async def test_aextract_rejects_assistant_as_target() -> None:
     )
     with pytest.raises(ValueError, match="not a user speaker"):
         await ProfileExtractor(llm=fake).aextract([cell], sender_id="assistant")
+
+
+# ==========================================================================
+# Language rules — INIT decides the language, UPDATE / COMPACT preserve it
+# ==========================================================================
+
+_MIXED_INPUT_CLAUSES_EN = (
+    "themselves compose",  # judgement source restricted to participants' own writing
+    "dominate the conversation by volume",  # long quoted material must not flip the judgement
+    "sentence structure",  # embedded foreign terms do not flip the judgement
+    "keep their original form",  # proper nouns / technical terms stay untranslated
+)
+
+# zh must not rot relative to en — these prompts are public and selectable via `prompt=`.
+_MIXED_INPUT_CLAUSES_ZH = (
+    "本人撰写的内容",
+    "在篇幅上占据对话主体",
+    "句子结构",
+    "保留原文形式",
+)
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
+def test_en_init_prompt_covers_mixed_input(clause: str) -> None:
+    """INIT reads the raw conversation, so it carries the full judgement guidance."""
+    from everalgo.user_memory.prompts.en.profile import PROFILE_INITIAL_EXTRACTION_PROMPT
+
+    assert clause in PROFILE_INITIAL_EXTRACTION_PROMPT
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
+def test_zh_init_prompt_covers_mixed_input(clause: str) -> None:
+    """The zh INIT prompt carries the same four judgement clauses as en."""
+    from everalgo.user_memory.prompts.zh.profile import PROFILE_INITIAL_EXTRACTION_PROMPT
+
+    assert clause in PROFILE_INITIAL_EXTRACTION_PROMPT
+
+
+def test_update_and_compact_preserve_the_existing_language() -> None:
+    """UPDATE / COMPACT inherit the language INIT fixed; they must not re-judge it.
+
+    Re-judging downstream is how an update in a second language would silently split a
+    profile's language, so these two prompts deliberately carry no judgement clauses.
+    """
+    from everalgo.user_memory.prompts.en.profile import PROFILE_COMPACT_PROMPT, PROFILE_UPDATE_PROMPT
+    from everalgo.user_memory.prompts.zh.profile import PROFILE_COMPACT_PROMPT as ZH_COMPACT
+    from everalgo.user_memory.prompts.zh.profile import PROFILE_UPDATE_PROMPT as ZH_UPDATE
+
+    assert "as the existing profile you are updating" in PROFILE_UPDATE_PROMPT
+    assert "as the profile you are compacting" in PROFILE_COMPACT_PROMPT
+    assert "正在更新的已有画像" in ZH_UPDATE
+    assert "正在精简的画像" in ZH_COMPACT
+    for prompt in (PROFILE_UPDATE_PROMPT, PROFILE_COMPACT_PROMPT, ZH_UPDATE, ZH_COMPACT):
+        assert "dominate" not in prompt
+        assert "篇幅上占据对话主体" not in prompt
+
+
+def test_compact_prompt_no_longer_references_a_conversation_it_never_receives() -> None:
+    """`_compact` is called with a Profile only — the old rule cited a non-existent input."""
+    from everalgo.user_memory.prompts.en.profile import PROFILE_COMPACT_PROMPT
+
+    assert "input conversation content" not in PROFILE_COMPACT_PROMPT
+
+
+def test_all_profile_prompts_state_the_language_rule_at_both_ends() -> None:
+    """Long prompts lose middle instructions, so each rule appears at head and tail."""
+    import everalgo.user_memory.prompts.en.profile as en_mod
+    import everalgo.user_memory.prompts.zh.profile as zh_mod
+
+    for name in ("PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT", "PROFILE_INITIAL_EXTRACTION_PROMPT"):
+        assert getattr(en_mod, name).count("CRITICAL LANGUAGE RULE") == 2, name
+        assert getattr(zh_mod, name).count("关键语言规则") == 2, name
+
+
+def test_profile_prompts_mention_tags_follow_the_output_language() -> None:
+    """Personality tags used to be shown only as English examples; every rule now binds them."""
+    import everalgo.user_memory.prompts.en.profile as en_mod
+    import everalgo.user_memory.prompts.zh.profile as zh_mod
+
+    for name in ("PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT", "PROFILE_INITIAL_EXTRACTION_PROMPT"):
+        assert "personality tag" in getattr(en_mod, name), name
+        assert "性格标签" in getattr(zh_mod, name), name

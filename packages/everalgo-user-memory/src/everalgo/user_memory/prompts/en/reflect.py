@@ -6,9 +6,15 @@ Constants:
       Placeholders: ``{old_episode}`` / ``{new_episodes}``.
 
 Output schema (both variants): ``{"content": str, "title": str}`` via Structured Output.
+
+Both variants merge already-extracted episodes, so they inherit the language those episodes were written
+in rather than judging it: the mixed-input judgement belongs to the extractor that read the raw
+conversation. See ``prompts/en/episode.py`` for that judgement.
 """
 
 REFLECT_EPISODE_PROMPT = """\
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the episodes you are merging. Merging never changes the language — do not translate. This is mandatory.
+
 You are a memory consolidation assistant.
 
 Below are the following episode summaries about the same topic, listed chronologically.
@@ -23,10 +29,14 @@ Merge them into a single coherent narrative that:
 - Removes redundant information
 - Ends with a brief summary of the current state as of the latest episode
 
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the episodes you are merging. Merging never changes the language — do not translate. This is mandatory.
+
 Episodes:
 {timeline}"""
 
 REFLECT_EPISODE_UPDATE_PROMPT = """\
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing narrative you are updating. Updating never changes the language — do not translate, even if the new episodes are written in a different language. This is mandatory.
+
 You are updating an existing memory narrative with new information.
 
 Current narrative:
@@ -40,4 +50,6 @@ Update the narrative to incorporate the new information:
 - Append new events in chronological position
 - Preserve content that is still accurate
 - Maintain all factual details: names, dates, locations, specific actions
-- End with an updated summary of the current state"""
+- End with an updated summary of the current state
+
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing narrative you are updating. Updating never changes the language — do not translate, even if the new episodes are written in a different language. This is mandatory."""

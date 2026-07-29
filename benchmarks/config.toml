@@ -33,7 +33,10 @@ cluster_similarity_threshold = 0.70         # cosine threshold for cluster_by_ge
 cluster_max_time_gap_days = 7.0             # episodes older than this gap form separate clusters
 
 # ─── Stage 2: Reflect ────────────────────────────────────────────────
-enable_reflection = true                    # merge episodes within multi-member clusters
+# Off in the canonical configuration: merging a multi-member cluster into one narrative over-compresses
+# it and drops the specific facts LoCoMo asks about, costing 5-12pp. Turn it on only to evaluate the
+# reflect stage itself, and do not compare such a run against the canonical numbers.
+enable_reflection = false                   # merge episodes within multi-member clusters
 
 # ─── Stage 3: Enrich ─────────────────────────────────────────────────
 # (no stage-specific params; uses common embedding config above)

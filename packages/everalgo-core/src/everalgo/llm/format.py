@@ -4,16 +4,15 @@ Four flavours:
 - ``format_message_timestamp`` — UTC anchor for inline conversation-line
   prefixes (e.g. ``[2023-11-14 22:13:20] Alice: ...``). Language-agnostic.
 - ``format_iso_timestamp`` — ISO 8601 with explicit UTC offset
-  (e.g. ``"2024-01-01T06:00:00+00:00"``). Used in JSON-shaped prompt blocks
-  whose timestamp field the LLM must parse and reason about (Episode prompt
-  conversation block).
+  (e.g. ``"2024-01-01T06:00:00+00:00"``). Currently has no in-tree consumer; kept as part of the
+  public surface. The Episode prompt builds its own 24-hour format inside
+  ``everalgo.user_memory.episode``.
 - ``format_atomic_fact_time`` — AtomicFact-flavoured timestamp (e.g. ``March 10, 2024(Sunday) at
   02:00 PM``). No space before the weekday parenthesis, no ``UTC`` suffix. Used in AtomicFact prompts
   where the LLM copies the value verbatim into output JSON.
-- ``format_natural_language_time`` — human-readable label for LLM time-of-day
-  reasoning (e.g. ``Conversation start time:`` / ``TIME:``). Supports EN + ZH;
-  callers pick via ``lang`` (default ``"en"`` matches the current EverAlgo
-  default-EN prompt policy).
+- ``format_natural_language_time`` — human-readable timestamp for LLM time-of-day reasoning (e.g.
+  ``November 14, 2023 (Tuesday) at 10:13 PM UTC``). Supports EN + ZH; callers pick via ``lang``
+  (default ``"en"``). Currently used in episode reflection timelines.
 """
 
 from __future__ import annotations
@@ -47,8 +46,7 @@ def format_iso_timestamp(timestamp_ms: int) -> str:
     Emits whatever Python's :py:meth:`datetime.datetime.isoformat` returns on a timezone-aware UTC
     datetime — ``T`` delimiter and ``+00:00`` suffix included. Distinct from
     :func:`format_message_timestamp` (``[YYYY-MM-DD HH:MM:SS]`` prefix, no T, no offset),
-    which is used for boundary history lines; this function is used in Episode prompt JSON blocks
-    where the LLM is asked to reason about absolute dates.
+    which is used for boundary history lines.
     """
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).isoformat()
 
@@ -59,7 +57,7 @@ def format_atomic_fact_time(timestamp_ms: int) -> str:
     Format: ``"March 10, 2024(Sunday) at 02:00 PM"`` — no space before the weekday parenthesis,
     no ``UTC`` suffix, zero-padded day/hour. The AtomicFact LLM copies this value verbatim into
     its output JSON ``time`` field. Distinct from :func:`format_natural_language_time`
-    (Episode format, which includes a space before the parenthesis and a ``UTC`` suffix).
+    (reflection timeline format, which includes a space before the parenthesis and a ``UTC`` suffix).
     """
     dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
     return dt.strftime("%B %d, %Y(%A) at %I:%M %p")

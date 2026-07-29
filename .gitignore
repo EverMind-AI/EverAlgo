@@ -58,5 +58,8 @@ local/
 .claude/
 benchmarks/claudecode
 
+# Subagent-driven-development scratch (ledgers, task briefs, review packages)
+.superpowers/
+
 # Git worktrees (isolated workspaces)
 .worktrees/

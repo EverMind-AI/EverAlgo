@@ -182,3 +182,55 @@ def test_sync_bridge_extract_from_text_works() -> None:
     )
     result = AtomicFactExtractor(llm=fake).extract_from_text("some text", timestamp=_MARCH_10_2024_14H_UTC_MS)
     assert [af.content for af in result] == ["sync fact"]
+
+
+# ==========================================================================
+# Language rule — from-text prompts inherit the EPISODE_TEXT language
+# ==========================================================================
+
+
+def test_from_text_prompts_state_the_language_rule_at_both_ends() -> None:
+    """Long prompts lose middle instructions, so each rule appears at head and tail."""
+    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
+    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
+
+    assert en_mod.EVENT_LOG_PROMPT.count("CRITICAL LANGUAGE RULE") == 2
+    assert en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN.count("CRITICAL LANGUAGE RULE") == 2
+    assert zh_mod.EVENT_LOG_PROMPT.count("关键语言规则") == 2
+    assert zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH.count("关键语言规则") == 2
+
+
+def test_from_text_prompts_carry_no_mixed_input_judgement() -> None:
+    """EPISODE_TEXT is already extracted, so this prompt inherits rather than judges the language.
+
+    Judgement belongs to episode extraction, where the mixed-input problem (pasted logs, code blocks,
+    quoted foreign-language material) actually exists.
+    """
+    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
+    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
+
+    assert "dominate" not in en_mod.EVENT_LOG_PROMPT
+    assert "dominate" not in en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN
+    assert "篇幅" not in zh_mod.EVENT_LOG_PROMPT
+    assert "篇幅" not in zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH
+
+
+def test_zh_from_text_prompts_are_not_byte_identical_to_en() -> None:
+    """A real translation, not a placeholder re-export of the English constants."""
+    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
+    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
+
+    assert en_mod.EVENT_LOG_PROMPT != zh_mod.EVENT_LOG_PROMPT
+    assert en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN != zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH
+
+
+def test_zh_from_text_prompts_keep_the_same_placeholders_as_en() -> None:
+    """A translated prompt that drops a placeholder would render with a literal `{{TIME}}` in it."""
+    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
+    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
+
+    for placeholder in ("{{EPISODE_TEXT}}", "{{TIME}}"):
+        assert placeholder in en_mod.EVENT_LOG_PROMPT
+        assert placeholder in zh_mod.EVENT_LOG_PROMPT
+        assert placeholder in en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN
+        assert placeholder in zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH

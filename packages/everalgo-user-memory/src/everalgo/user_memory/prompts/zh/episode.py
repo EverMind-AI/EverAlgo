@@ -1,14 +1,26 @@
 """Chinese prompts for EpisodeExtractor.
 
 Constants:
-    - ``DEFAULT_CUSTOM_INSTRUCTIONS`` — 注入 {custom_instructions} 位的默认指令。
-    - ``EPISODE_GENERATION_PROMPT`` — 通用 retrieval-optimised 情节生成；占位符：
-      ``{conversation_start_time}`` / ``{conversation}`` / ``{custom_instructions}``。
-    - ``USER_EPISODE_GENERATION_PROMPT`` — 以特定 ``{user_name}`` 为中心的变体；
-      在以上三个占位符之外**额外**需要 ``{user_name}``。:class:`EpisodeExtractor` 在 `sender_id` 非 None
-      时使用；传入 `sender_id=None` 会回退到通用 `EPISODE_GENERATION_PROMPT`。
+    - ``DEFAULT_CUSTOM_INSTRUCTIONS`` — block of instructions injected into the {custom_instructions} slot.
+    - ``EPISODE_GENERATION_PROMPT`` — generic retrieval-optimised episode generation. Placeholders:
+      ``{conversation_start_time}`` / ``{conversation}`` / ``{custom_instructions}``.
+    - ``USER_EPISODE_GENERATION_PROMPT`` — user-centred variant focused on a specific ``{user_name}``;
+      additional placeholder ``{user_name}`` on top of the three above. Used by
+      ``EpisodeExtractor`` when ``sender_id`` is provided. Pass ``sender_id=None`` to fall back to
+      the generic ``EPISODE_GENERATION_PROMPT``.
 
-输出 schema（两个变体一致）：``{"title": str, "content": str}``。
+Output schema (both variants): ``{"title": str, "content": str}``.
+
+Output language follows the participants' own writing (see the language-rule block stated at the head
+and tail of both prompts).
+Whether a given output language is actually retrievable depends on the tokenizer used by the caller's
+search layer — a Chinese-only tokenizer cannot index Japanese kana, Hangul or Cyrillic at all.
+
+Contract for a caller-supplied ``prompt=`` override: code unconditionally prepends a UTC timestamp
+prefix to ``content`` (see ``episode.py::_build_episode``), so a replacement prompt need not produce
+one. That prefix is metadata about the slice; times the model writes inside the narrative belong to
+the events themselves. The two state the same moment whenever the first event is the conversation's
+opening message — that overlap is expected, not a defect.
 """
 
 DEFAULT_CUSTOM_INSTRUCTIONS = """
@@ -20,8 +32,28 @@ DEFAULT_CUSTOM_INSTRUCTIONS = """
 5. 确保情节内容便于后续检索
 """
 
-EPISODE_GENERATION_PROMPT = """
-**关键语言规则**：你必须使用与输入对话内容**相同**的语言输出。若对话内容为中文，所有输出（标题和内容）**必须**为中文；若为英文，则输出英文。此规则强制执行。
+_LANGUAGE_RULE_GENERIC = (
+    "**关键语言规则**：使用与对话参与者本人撰写内容**相同**的语言输出。所有输出（标题和内容）**必须**"
+    "与该语言保持一致。此规则强制执行。\n\n"
+    "判定语言时**仅依据对话参与者本人撰写的内容**，不依据引用或粘贴的材料。判定时必须明确忽略：粘贴的文档、"
+    "代码块、日志、报错信息，以及大段原文摘录——**即使这些内容在篇幅上占据对话主体**。对话参与者的句子中夹杂"
+    "的外语词汇不改变判定结果，判定依据是该句子结构所使用的语言。专有名词与技术术语在输出中保留原文形式，"
+    "不因输出语言而被翻译。"
+)
+
+_LANGUAGE_RULE_USER = (
+    "**关键语言规则**：使用与 `{user_name}` 本人撰写内容**相同**的语言输出。所有输出（标题和内容）**必须**"
+    "与该语言保持一致。此规则强制执行。\n\n"
+    "判定语言时**仅依据`{user_name}`本人撰写的内容**，不依据引用或粘贴的材料。判定时必须明确忽略：粘贴的文档、"
+    "代码块、日志、报错信息，以及大段原文摘录——**即使这些内容在篇幅上占据对话主体**。`{user_name}`的句子中夹杂"
+    "的外语词汇不改变判定结果，判定依据是该句子结构所使用的语言。专有名词与技术术语在输出中保留原文形式，"
+    "不因输出语言而被翻译。"
+)
+
+EPISODE_GENERATION_PROMPT = (
+    "\n"
+    + _LANGUAGE_RULE_GENERIC
+    + """
 
 你是一位情节记忆生成专家。请将以下对话内容转换为情节记忆。
 
@@ -39,6 +71,7 @@ EPISODE_GENERATION_PROMPT = """
 - 必须同时保留原始表述并附上解析后的绝对日期
 - 格式："原始表述（绝对日期）"——例如"去年夏天（2022 年夏天）""上周五（2023-07-21）"
 - 这种双重格式同时支持基于绝对时间和相对时间的提问
+- 凡是给出钟点的绝对时间**必须**带 UTC 时区标识：写"2024-03-14 15:00 UTC"，不得写"2024-03-14 15:00"，也不得只写"15:00"。不含钟点的日期无需标识——"上周五（2023-07-21）"本身就是正确的。引用说话人原话中的钟点保留其原始措辞（如"下午 3:30"），因为说话人所在时区未知
 
 请生成结构化情节记忆，仅返回包含以下两个字段的 JSON 对象：
 {{
@@ -77,22 +110,26 @@ EPISODE_GENERATION_PROMPT = """
    - 包含习惯性行为（如"通常上班前 8 点喝咖啡"）
    - 记录重复次数（如"两次询问项目状态"）
 
-
 示例：
-如果对话开始时间为"March 14, 2024 (Thursday) at 3:00 PM UTC"，对话内容为 Caroline 计划徒步：
+如果对话开始时间为"2024-03-14 15:00 UTC (Thursday)"，对话内容为 Caroline 计划徒步：
 {{
     "title": "Caroline 的雷尼尔山徒步计划 2024-03-14：周末出行规划讨论",
-    "content": "2024 年 3 月 14 日下午 3:00 UTC，Caroline 表示有兴趣本周末（2024 年 3 月 16-17 日）徒步并寻求建议。她想去雷尼尔山看日出。Melanie 询问装备时，Caroline 收到了以下建议：徒步靴、保暖衣物、手电筒、水和高能量食物。Caroline 决定周六凌晨（2024 年 3 月 16 日）出发以赶上日出，并计划邀请朋友。她对此次行程感到兴奋。"
+    "content": "Caroline 表示有兴趣本周末（2024-03-16 至 2024-03-17）徒步并寻求建议。她想去雷尼尔山看日出。Melanie 询问装备时，Caroline 收到了以下建议：徒步靴、保暖衣物、手电筒、水和高能量食物。Caroline 决定周六凌晨（2024-03-16）出发以赶上日出，并计划邀请朋友。她对此次行程感到兴奋。"
 }}
 
-**关键语言规则**：你必须使用与输入对话内容**相同**的语言输出。若对话内容为中文，所有输出（标题和内容）**必须**为中文；若为英文，则输出英文。此规则强制执行。
+"""
+    + _LANGUAGE_RULE_GENERIC
+    + """
 
 仅返回 JSON 对象，不要添加任何其他文本：
 """
+)
 
 
-USER_EPISODE_GENERATION_PROMPT = """
-**关键语言规则**：你必须使用与输入对话内容**相同**的语言输出。若对话内容为中文，所有输出（标题和内容）**必须**为中文；若为英文，则输出英文。此规则强制执行。
+USER_EPISODE_GENERATION_PROMPT = (
+    "\n"
+    + _LANGUAGE_RULE_USER
+    + """
 
 你是一位专业的事件记录员兼情节记忆生成专家，专注于从对话中为指定用户记录与其相关的关键事件。
 你的任务是聚焦于 {user_name}，客观记录他/她所见、所闻、所言、所行，并将其转化为一段连贯、准确的事件记录。
@@ -152,6 +189,7 @@ USER_EPISODE_GENERATION_PROMPT = """
     - 示例："昨天""上周五""去年夏天""最近"——任何时间粒度均需解析
     - 必须同时保留原始表述并附上解析后的绝对日期
     - 格式："原始表述（绝对日期）"——例如"去年夏天（2022 年夏天）""上周五（2023-07-21）"
+    - 凡是给出钟点的绝对时间**必须**带 UTC 时区标识：写"2024-03-14 15:00 UTC"，不得写"2024-03-14 15:00"，也不得只写"15:00"。不含钟点的日期无需标识——"上周五（2023-07-21）"本身就是正确的。引用说话人原话中的钟点保留其原始措辞（如"下午 3:30"），因为说话人所在时区未知
 
 9.  **标题长度与前缀**：
     - 标题保持在 15-25 个词内
@@ -185,7 +223,10 @@ USER_EPISODE_GENERATION_PROMPT = """
 - `content` 是否是一段流畅的经历叙述，而不是零散事实的堆砌？
 - 所有关键信息是否都已自然地融入叙述中？
 
-**关键语言规则**：你必须使用与输入对话内容**相同**的语言输出。若对话内容为中文，所有输出（标题和内容）**必须**为中文；若为英文，则输出英文。此规则强制执行。
+"""
+    + _LANGUAGE_RULE_USER
+    + """
 
 仅返回 JSON 对象，不要添加任何其他文本：
 """
+)

@@ -117,7 +117,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
   {
     "id": "0",
     "subject": "Caroline reconnects with Melanie",
-    "episode": "On May 8 2023, Caroline and Melanie reconnected...",
+    "episode": "2023-05-08 03:56 UTC — Caroline and Melanie reconnected after years apart and caught up on each other's lives...",
     "embeddings": {
       "episode": [0.01, -0.02, "..."],
       "subject": [0.03, 0.01, "..."]
@@ -126,7 +126,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 ]
 ```
 
-字段名是 **`episode`**（算法命名），不是 `content`。没有 `summary` 字段。
+字段名是 **`episode`**（算法命名），不是 `content`。没有 `summary` 字段。正文以代码固定拼接的 UTC 时间戳开头（`YYYY-MM-DD HH:MM UTC — `，取自该 MemCell 首条消息的时间，见 `everalgo.user_memory.episode._build_episode`）。这个前缀是**该切片的元数据**，格式由代码保证；叙述内部各事件自带的时间由模型书写，属于事件要素，prompt 只要求带钟点的绝对时间必须标 `UTC`。当首个事件就是对话首条消息时，两者表述同一时刻，属预期重合。
 
 #### `clusters_conv_<i>.json` —— 簇信息
 
@@ -386,7 +386,7 @@ top_episodes = [episodes_map[conv_id][ep_id] for ep_id in ep_ids[:10] if ep_id i
 # 2. 拼 context（每条 doc 间用 "\n---\n\n" 明确分块）
 context = f"""Episodes memories for conversation between Caroline and Melanie:
 
-Caroline reconnects with Melanie: On May 8 2023, Caroline...
+Caroline reconnects with Melanie: 2023-05-08 03:56 UTC — Caroline and Melanie reconnected after years apart...
 ---
 
 Discussion about LGBTQ support: Caroline shared that...
@@ -414,7 +414,7 @@ def _extract_final_answer(raw: str) -> str:
     return raw.strip()
 ```
 
-Stage 5 的 `aagentic_retrieve` 以 `top_n=response_top_k=10` 返回，`members` 通常已是 10 条；Stage 6 再按 `response_top_k=10` 截取拼 context。Context 中**有意不渲染原始毫秒 timestamp**（LLM 无法 parse 毫秒 epoch；时间线索靠 `episode` 字段内的自然语言时间词，如「May 8, 2023」）。
+Stage 5 的 `aagentic_retrieve` 以 `top_n=response_top_k=10` 返回，`members` 通常已是 10 条；Stage 6 再按 `response_top_k=10` 截取拼 context。Context 中**有意不渲染原始毫秒 timestamp**（LLM 无法 parse 毫秒 epoch；时间线索靠 `episode` 字段内的日期文本 —— 每条 episode 正文本身以代码拼接的 UTC 时间戳开头，叙述中也可能夹杂 LLM 按 dual-format 规则写下的相对时间解析结果，如「上周五（2023-07-21）」）。
 
 ### 输出：`answers.json`
 
