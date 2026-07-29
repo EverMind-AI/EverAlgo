@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from everalgo.llm.format import format_natural_language_time
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
@@ -46,7 +46,11 @@ class EpisodeExtractor:
             sender_id: Specific chat sender to centre the episode on (uses USER_EPISODE_GENERATION_PROMPT);
                 pass ``None`` to extract one whole-memcell generic episode (uses EPISODE_GENERATION_PROMPT)
                 — cheaper than per-user fan-out.
-            prompt: Prompt override; ``None`` uses the bundled default.
+            prompt: Prompt override; ``None`` uses the bundled default. Code unconditionally prepends a
+                UTC timestamp prefix to ``content`` regardless of which prompt produced it (see
+                ``_build_episode``), so a custom prompt need not produce one. The prefix is metadata
+                about the slice, while times inside the narrative belong to the events; the two state
+                the same moment when the first event is the opening message, which is expected.
             custom_instructions: Extra instruction block appended to the system prompt; ``None`` uses the default.
 
         Raises:
@@ -54,7 +58,7 @@ class EpisodeExtractor:
             ValueError: If the LLM returns no parsed structured output.
         """
         custom_instr = custom_instructions or DEFAULT_CUSTOM_INSTRUCTIONS
-        conv_start = _format_conversation_start_time(memcell.items[0].timestamp)
+        conv_start = _format_prompt_time(memcell.items[0].timestamp)
         conversation = _render_conversation(memcell)
 
         if sender_id is None:
@@ -99,6 +103,8 @@ async def _call_llm_for_episode(llm: LLMClient, rendered: str) -> dict[str, Any]
     data: dict[str, Any] = json.loads(json_str)
     if "title" not in data or "content" not in data:
         raise ValueError(f"Episode LLM response missing required keys: {data!r}")
+    if not str(data["content"]).strip():
+        raise ValueError(f"Episode LLM response has empty content: {data!r}")
     return data
 
 
@@ -130,15 +136,21 @@ def _resolve_user_name(memcell: MemCell, sender_id: str) -> str:
 
 
 def _build_episode(data: dict[str, Any], *, sender_id: str | None, memcell: MemCell) -> Episode:
-    """Assemble an :class:`Episode` from the parsed LLM payload and memcell metadata."""
+    """Assemble an :class:`Episode` from the parsed LLM payload and memcell metadata.
+
+    The body is prefixed with a code-built UTC timestamp rather than one written by the LLM: the model
+    used to translate the injected anchor into the output language, and that translation step is what
+    produced drifting formats and mistranslated AM/PM markers. ``answer``-stage consumers see only
+    ``subject`` and ``episode``, so the body has to carry the timestamp itself.
+    """
     title = str(data["title"])
-    content = str(data["content"])
+    body = f"{_format_episode_prefix(memcell.items[0].timestamp)} — {data['content']!s}"
     summary_raw = data.get("summary")
-    summary = summary_raw if isinstance(summary_raw, str) and summary_raw.strip() else content[:200]
+    summary = summary_raw if isinstance(summary_raw, str) and summary_raw.strip() else body[:200]
     return Episode.model_validate(
         {
             "owner_id": sender_id,
-            "episode": content,
+            "episode": body,
             "subject": title,
             "timestamp": memcell.timestamp,
             "summary": summary,  # preserved via extra='allow' without a schema bump
@@ -146,9 +158,27 @@ def _build_episode(data: dict[str, Any], *, sender_id: str | None, memcell: MemC
     )
 
 
-def _format_conversation_start_time(timestamp_ms: int) -> str:
-    """Render the MemCell timestamp as ``March 14, 2024 (Thursday) at 3:00 PM UTC``."""
-    return format_natural_language_time(timestamp_ms)
+def _format_prompt_time(timestamp_ms: int) -> str:
+    """Render a timestamp for injection into the prompt, e.g. ``2026-05-29 12:25 UTC (Friday)``.
+
+    24-hour clock: a 12-hour clock leaves noon and midnight ambiguous, and the LLM has been observed
+    mistranslating ``12:21 PM`` into a Chinese "before noon" phrasing. The weekday label is load-bearing
+    for relative-time reasoning ("last Friday") — see user-memory 0.3.1, which added it to fix
+    off-by-one-week errors. Do not drop it.
+    """
+    dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
+    return f"{dt:%Y-%m-%d %H:%M} UTC ({dt:%A})"
+
+
+def _format_episode_prefix(timestamp_ms: int) -> str:
+    """Render the timestamp prefix that code prepends to the episode body, e.g. ``2026-05-29 12:25 UTC``.
+
+    Pure ASCII, so a narrative in any language can carry it verbatim and the LLM never has to translate
+    it. No weekday: it would have to be fixed English and reads wrong inside a non-English narrative,
+    while the UI can derive it from ``Episode.timestamp``.
+    """
+    dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
+    return f"{dt:%Y-%m-%d %H:%M} UTC"
 
 
 def _render_conversation(memcell: MemCell) -> str:
@@ -169,7 +199,7 @@ def _render_conversation(memcell: MemCell) -> str:
             lines.append(
                 f"""
                 {{
-                    "timestamp": {format_natural_language_time(timestamp)},
+                    "timestamp": {_format_prompt_time(timestamp)},
                     "speaker": {speaker},
                     "content": {text}
                 }}"""

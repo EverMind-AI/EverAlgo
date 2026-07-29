@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -12,6 +13,8 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 from everalgo.user_memory.episode import (
     EpisodeExtractor,
+    _format_episode_prefix,
+    _format_prompt_time,
     _render_conversation,
     _resolve_user_name,
 )
@@ -42,6 +45,86 @@ def _memcell() -> MemCell:
 
 
 # ==========================================================================
+# Language rules — both variants, both languages, mixed-input clauses
+# ==========================================================================
+
+_MIXED_INPUT_CLAUSES_EN = (
+    "themselves compose",  # judgement source restricted to participants' own writing
+    "dominate the conversation by volume",  # long quoted material must not flip the judgement
+    "sentence structure",  # embedded foreign terms do not flip the judgement
+    "keep their original form",  # proper nouns / technical terms stay untranslated
+)
+
+
+def test_en_generic_variant_has_language_rule() -> None:
+    """The generic variant had no language rule at all — that was the main source of mixed output."""
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+
+    assert "CRITICAL LANGUAGE RULE" in EPISODE_GENERATION_PROMPT
+
+
+def test_en_generic_variant_states_language_rule_at_both_ends() -> None:
+    """Long prompts lose middle instructions; the rule is repeated at head and tail."""
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+
+    assert EPISODE_GENERATION_PROMPT.count("CRITICAL LANGUAGE RULE") == 2
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
+def test_en_generic_variant_covers_mixed_input(clause: str) -> None:
+    """Chinese question plus long English pasted material must still yield Chinese output."""
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+
+    assert clause in EPISODE_GENERATION_PROMPT
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
+def test_en_user_variant_covers_mixed_input(clause: str) -> None:
+    """The user variant already had a rule, but it never defined what to judge the language from."""
+    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT
+
+    assert clause in USER_EPISODE_GENERATION_PROMPT
+
+
+# zh must not rot relative to en — it is a public prompt selectable via `prompt=` (see README.md).
+# Each substring sits after the subject noun phrase in the mixed-input judgement clause, so it is
+# invariant across both the generic ("对话参与者") and user (`` `{user_name}` ``) variants.
+_MIXED_INPUT_CLAUSES_ZH = (
+    "本人撰写的内容",  # judgement source restricted to participants' own writing
+    "在篇幅上占据对话主体",  # long quoted material must not flip the judgement
+    "句子结构",  # embedded foreign terms do not flip the judgement
+    "保留原文形式",  # proper nouns / technical terms stay untranslated
+)
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
+def test_zh_generic_variant_covers_mixed_input(clause: str) -> None:
+    """The zh prompt must not rot relative to en — it is a public prompt selectable via `prompt=`."""
+    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
+
+    assert clause in EPISODE_GENERATION_PROMPT
+
+
+@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
+def test_zh_user_variant_covers_mixed_input(clause: str) -> None:
+    """Same mixed-input clauses as the generic variant."""
+    from everalgo.user_memory.prompts.zh.episode import USER_EPISODE_GENERATION_PROMPT
+
+    assert clause in USER_EPISODE_GENERATION_PROMPT
+
+
+def test_zh_and_en_have_same_language_rule_count() -> None:
+    """Structural parity guard: each variant states its rule at head and tail in both languages."""
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT as EN_GENERIC
+    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT as EN_USER
+    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT as ZH_GENERIC
+    from everalgo.user_memory.prompts.zh.episode import USER_EPISODE_GENERATION_PROMPT as ZH_USER
+
+    assert EN_GENERIC.count("CRITICAL LANGUAGE RULE") == ZH_GENERIC.count("关键语言规则") == 2
+    assert EN_USER.count("CRITICAL LANGUAGE RULE") == ZH_USER.count("关键语言规则") == 2
+
+
+# ==========================================================================
 # (1) Single successful extraction
 # ==========================================================================
 
@@ -66,7 +149,7 @@ async def test_aextract_episode_fields_filled_correctly() -> None:
 
     assert ep.owner_id == "u_alice"
     assert ep.subject == "T"
-    assert ep.episode == "c"
+    assert ep.episode.endswith("c")
 
 
 async def test_aextract_owner_id_comes_from_argument_not_inferred() -> None:
@@ -112,6 +195,27 @@ async def test_aextract_invalid_json_raises_value_error() -> None:
         await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
     assert fake.call_count == 1
+
+
+async def test_aextract_raises_on_empty_content() -> None:
+    """An empty ``content`` must fail loud, not silently produce a body that is just the prefix.
+
+    Once the code-built timestamp prefix is prepended, ``"<prefix> — "`` is truthy, so the old
+    "Episode.episode is empty" guards downstream (assert_episode_shape, benchmark extract stage)
+    can no longer catch a truncated/empty structured-output response.
+    """
+    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": ""}', model="fake")])
+
+    with pytest.raises(ValueError, match="empty content"):
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+
+
+async def test_aextract_raises_on_whitespace_only_content() -> None:
+    """Whitespace-only ``content`` must be treated the same as empty ``content``."""
+    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "   "}', model="fake")])
+
+    with pytest.raises(ValueError, match="empty content"):
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
 
 # ==========================================================================
@@ -411,3 +515,264 @@ async def test_extract_generic_when_sender_id_is_none() -> None:
     assert "User name:" not in rendered
     # Generic prompt header signature.
     assert "You are an episodic memory generation expert" in rendered
+
+
+# ==========================================================================
+# Time formatting helpers — input side keeps the weekday, output side does not
+# ==========================================================================
+
+# 2026-05-29 12:25:10 UTC, a Friday.
+_TS_FRIDAY_MS = 1780057510000
+
+
+def test_format_prompt_time_is_24h_with_weekday() -> None:
+    """Input-side format: 24-hour clock, explicit UTC, weekday retained for relative-time reasoning."""
+    assert _format_prompt_time(_TS_FRIDAY_MS) == "2026-05-29 12:25 UTC (Friday)"
+
+
+def test_format_prompt_time_has_no_am_pm_marker() -> None:
+    """A 12-hour clock makes noon/midnight ambiguous for the LLM; 24-hour clock removes that."""
+    rendered = _format_prompt_time(_TS_FRIDAY_MS)
+    assert "AM" not in rendered
+    assert "PM" not in rendered
+
+
+def test_format_prompt_time_keeps_weekday_for_relative_reasoning() -> None:
+    """Regression guard: the weekday label is what lets the LLM resolve "last Friday".
+
+    Dropping it re-introduces the off-by-one-week errors fixed in user-memory 0.3.1 (commit d9fe22e).
+    """
+    assert "(Friday)" in _format_prompt_time(_TS_FRIDAY_MS)
+
+
+def test_format_episode_prefix_is_language_neutral_without_weekday() -> None:
+    """Output-side format: pure ASCII so any-language narrative can embed it verbatim, no weekday."""
+    assert _format_episode_prefix(_TS_FRIDAY_MS) == "2026-05-29 12:25 UTC"
+
+
+def test_format_episode_prefix_omits_weekday() -> None:
+    """The weekday would have to be fixed English, which reads wrong inside a Chinese narrative."""
+    assert "Friday" not in _format_episode_prefix(_TS_FRIDAY_MS)
+
+
+def test_format_episode_prefix_states_utc_explicitly() -> None:
+    """The UI renders local time from Episode.timestamp; without the marker readers misread the prefix."""
+    assert _format_episode_prefix(_TS_FRIDAY_MS).endswith(" UTC")
+
+
+# ==========================================================================
+# Prompt injection uses the 24-hour input-side format
+# ==========================================================================
+
+
+def test_render_conversation_uses_24h_input_format() -> None:
+    """Per-message timestamps in the conversation block use the input-side format."""
+    mc = MemCell(
+        items=[
+            ChatMessage(
+                id="m1",
+                role="user",
+                content="hello",
+                timestamp=_TS_FRIDAY_MS,
+                sender_id="u_alice",
+                sender_name="Alice",
+            )
+        ],
+        timestamp=_TS_FRIDAY_MS,
+    )
+
+    rendered = _render_conversation(mc)
+
+    assert "2026-05-29 12:25 UTC (Friday)" in rendered
+    assert "PM" not in rendered
+
+
+async def test_conversation_start_time_uses_24h_input_format() -> None:
+    """The {conversation_start_time} slot is filled with the input-side format."""
+    captured: dict[str, Any] = {}
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        captured["content"] = messages[0].content
+        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+    mc = MemCell(
+        items=[
+            ChatMessage(
+                id="m1",
+                role="user",
+                content="hello",
+                timestamp=_TS_FRIDAY_MS,
+                sender_id="u_alice",
+                sender_name="Alice",
+            )
+        ],
+        timestamp=_TS_FRIDAY_MS,
+    )
+
+    await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice", prompt="start={conversation_start_time}")
+
+    assert captured["content"] == "start=2026-05-29 12:25 UTC (Friday)"
+
+
+# ==========================================================================
+# Episode body carries a code-built timestamp prefix
+# ==========================================================================
+
+
+def _memcell_spanning_70_minutes() -> MemCell:
+    """MemCell whose first and closing item differ, to pin down which timestamp the prefix uses."""
+    return MemCell(
+        items=[
+            ChatMessage(
+                id="m1",
+                role="user",
+                content="start",
+                timestamp=_TS_FRIDAY_MS,
+                sender_id="u_alice",
+                sender_name="Alice",
+            ),
+            ChatMessage(
+                id="m2",
+                role="assistant",
+                content="end",
+                timestamp=_TS_FRIDAY_MS + 70 * 60 * 1000,
+                sender_id="assistant",
+            ),
+        ],
+        timestamp=_TS_FRIDAY_MS + 70 * 60 * 1000,
+    )
+
+
+async def test_episode_body_starts_with_code_built_prefix() -> None:
+    """The timestamp prefix is prepended by code, never generated by the LLM."""
+    fake = FakeLLMClient(
+        responses=[ChatResponse(content='{"title": "T", "content": "Alice asked about hiking."}', model="fake")]
+    )
+
+    ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id="u_alice")
+
+    assert ep.episode == "2026-05-29 12:25 UTC — Alice asked about hiking."
+
+
+async def test_episode_prefix_uses_first_item_not_closing_timestamp() -> None:
+    """Prefix means "when the recorded event started", i.e. items[0], not memcell.timestamp."""
+    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "body"}', model="fake")])
+
+    ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id="u_alice")
+
+    assert ep.episode.startswith("2026-05-29 12:25 UTC")
+    assert "13:35" not in ep.episode
+
+
+async def test_episode_prefix_applies_to_generic_variant_too() -> None:
+    """sender_id=None takes the generic prompt path; the prefix must be applied there as well."""
+    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "body"}', model="fake")])
+
+    ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id=None)
+
+    assert ep.episode.startswith("2026-05-29 12:25 UTC — ")
+
+
+async def test_episode_summary_fallback_includes_prefix() -> None:
+    """When the LLM omits `summary`, the fallback slices the prefixed body, so it carries the prefix too."""
+    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "body"}', model="fake")])
+
+    ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id="u_alice")
+
+    assert ep.model_dump()["summary"].startswith("2026-05-29 12:25 UTC — ")
+
+
+# ==========================================================================
+# Date-related prompt text
+# ==========================================================================
+
+_MONTH_NAME_DATE_RE = re.compile(
+    r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},?\s+\d{4}\b"
+)
+_LEADING_TIMESTAMP_RE = re.compile(r"^(?:\d|(?:On|At|In)\s+(?:\S+\s+){0,3}?\d)")
+
+
+def _extract_example_field(prompt_text: str, heading: str, field: str) -> str:
+    """Extract a `"field": "..."` value from the JSON block following `heading` in the worked example."""
+    section = prompt_text.split(heading, 1)[1]
+    match = re.search(rf'"{field}":\s*"([^"]*)"', section)
+    assert match is not None, f"could not find {field!r} field after {heading!r}"
+    return match.group(1)
+
+
+def test_en_dual_format_examples_use_iso_dates() -> None:
+    """The dual-format rule used to show three different date shapes; unify on YYYY-MM-DD."""
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+
+    assert "(2023-07-21)" in EPISODE_GENERATION_PROMPT
+    assert "July 21, 2023" not in EPISODE_GENERATION_PROMPT
+
+
+def test_en_generic_example_body_has_no_timestamp_prefix() -> None:
+    """The generic example was what taught the model to open the body with a date.
+
+    Guards the invariant (no leading digit, no "On/At/In <date>" opening), not just the one
+    historical string, so reintroducing ANY timestamp-shaped opening fails this test.
+    """
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+
+    content = _extract_example_field(EPISODE_GENERATION_PROMPT, "If the conversation start time is", "content")
+    assert not content[0].isdigit()
+    assert _LEADING_TIMESTAMP_RE.match(content) is None
+
+
+def test_en_generic_example_title_uses_iso_date() -> None:
+    """Generic title example used `March 14, 2024` while the user variant used `2024-03-14`.
+
+    The negative half guards against ANY month-name date shape being reintroduced, not just the
+    one historical string.
+    """
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+
+    title = _extract_example_field(EPISODE_GENERATION_PROMPT, "If the conversation start time is", "title")
+    assert "2024-03-14" in title
+    assert _MONTH_NAME_DATE_RE.search(title) is None
+
+
+def test_en_example_start_time_uses_input_side_format() -> None:
+    """The example's conversation-start-time value must match what the code now injects."""
+    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+
+    assert "2024-03-14 15:00 UTC (Thursday)" in EPISODE_GENERATION_PROMPT
+
+
+def test_all_variants_require_utc_label_on_absolute_clock_times() -> None:
+    """Absolute times stating a clock time must be labelled UTC, in all four prompt variants.
+
+    The negative half guards a rule that was tried and removed: an instruction forbidding ``content``
+    from opening with a date or time. It contradicted the same prompt's own demand for a chronological
+    account with per-event times, and a real-LLM run showed the model ignoring it 15/15 — correctly,
+    since the narrative's times belong to the events. Do not reintroduce it.
+    """
+    import everalgo.user_memory.prompts.en.episode as en_mod
+    import everalgo.user_memory.prompts.zh.episode as zh_mod
+
+    for name in ("EPISODE_GENERATION_PROMPT", "USER_EPISODE_GENERATION_PROMPT"):
+        assert "MUST carry the UTC zone label" in getattr(en_mod, name)
+        assert "UTC 时区标识" in getattr(zh_mod, name)
+        assert "must NOT begin with a timestamp" not in getattr(en_mod, name)
+        assert "不要以时间戳开头" not in getattr(zh_mod, name)
+
+
+def test_zh_example_start_time_uses_input_side_format() -> None:
+    """The zh example's conversation-start-time value must match what the code now injects."""
+    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
+
+    assert "2024-03-14 15:00 UTC (Thursday)" in EPISODE_GENERATION_PROMPT
+    assert "3:00 PM" not in EPISODE_GENERATION_PROMPT
+
+
+def test_zh_generic_example_content_uses_iso_dates() -> None:
+    """The zh generic example content used Chinese month-name dates; unify on YYYY-MM-DD."""
+    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
+
+    content = _extract_example_field(EPISODE_GENERATION_PROMPT, "如果对话开始时间为", "content")
+    assert "2024-03-16" in content
+    assert "2024 年 3 月" not in content

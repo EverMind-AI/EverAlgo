@@ -6,7 +6,9 @@ Output schema: ``{"atomic_facts": {"time": str, "atomic_fact": list[str]}}``.
 """
 
 ATOMIC_FACT_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. ALL output MUST match that language. This is mandatory.
+
+Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms embedded inside a sentence written by the participants do not change the judgement — judge by the language of the sentence structure. Proper nouns and technical terms keep their original form in the output regardless of the output language.
 
 You are an expert information extraction analyst and information architect.
 Your task is to analyze the given raw conversation transcript (called "CONVERSATION_TEXT") and produce atomic facts optimized for factual retrieval.
@@ -56,7 +58,7 @@ Return **only** one valid JSON object, with the following exact structure:
 * Resolve pronouns (he/she/it) to specific names where possible.
 
 #### 4. Expression Format
-* Write each atomic_fact as a **single, complete English sentence** in **third-person** form.
+* Write each atomic_fact as a **single, complete sentence** in **third-person** form.
 * Do **not** simplify, paraphrase, or merge logically distinct ideas.
 
 #### 5. Retrieval Clarity & Filtering
@@ -84,5 +86,7 @@ Conversation start time: {TIME}
 Conversation content:
 {INPUT_TEXT}
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. ALL output MUST match that language. This is mandatory.
+
+Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms embedded inside a sentence written by the participants do not change the judgement — judge by the language of the sentence structure. Proper nouns and technical terms keep their original form in the output regardless of the output language.
 """

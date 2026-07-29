@@ -12,7 +12,7 @@ Placeholders & rendering: all three templates use single-brace placeholders that
 """
 
 PROFILE_UPDATE_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing profile you are updating, including every personality tag. Do NOT switch languages even when the new conversation is written in a different language — the profile's language was fixed when it was first created. Tag examples below illustrate format and granularity only, not language. This is mandatory.
 
 You are a user profile updater. Based on conversation records, determine what operations to perform on the user profile.
 
@@ -79,11 +79,11 @@ With operations (can combine multiple add/update/delete):
 }}
 ```
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing profile you are updating, including every personality tag. Do NOT switch languages even when the new conversation is written in a different language — the profile's language was fixed when it was first created. Tag examples above illustrate format and granularity only, not language. This is mandatory.
 """
 
 PROFILE_COMPACT_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the profile you are compacting, including every personality tag. Compaction never changes the profile's language. Tag examples below illustrate format and granularity only, not language. This is mandatory.
 
 The current user profile has {total_items} items (explicit_info + implicit_traits combined), exceeding the limit of {max_items}.
 
@@ -111,11 +111,13 @@ Current Profile:
 }}
 ```
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the profile you are compacting, including every personality tag. Compaction never changes the profile's language. Tag examples above illustrate format and granularity only, not language. This is mandatory.
 """
 
 PROFILE_INITIAL_EXTRACTION_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. ALL output MUST match that language. This is mandatory. This is the call that fixes the profile's language: later update and compaction calls preserve whatever language you choose here, so every personality tag must be written in that language too — never in a different language from the rest of the profile.
+
+Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms embedded inside a sentence written by the participants do not change the judgement — judge by the language of the sentence structure. Proper nouns and technical terms keep their original form in the output regardless of the output language.
 
 You are a "User Profile Analyst". Please read the conversation below and build a user profile.
 
@@ -156,7 +158,9 @@ Output JSON directly in the following format:
 }}
 ```
 
-LANGUAGE RULE: Detect the language of the input conversation and respond in the SAME language. If the conversation is in Chinese, output in Chinese. If in English, output in English.
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. ALL output MUST match that language, including every personality tag. This is mandatory.
+
+Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms embedded inside a sentence written by the participants do not change the judgement — judge by the language of the sentence structure. Proper nouns and technical terms keep their original form in the output regardless of the output language.
 
 【Original Conversation】
 {conversation_text}"""

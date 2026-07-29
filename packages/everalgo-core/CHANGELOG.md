@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `everalgo.llm.format` module docstring no longer claims `format_iso_timestamp` is used by the Episode prompt's conversation block — it has no in-tree consumer, and the Episode prompt builds its own format.
+
 ## [0.4.0] - 2026-06-24
 
 ### Removed

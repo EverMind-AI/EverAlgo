@@ -7,7 +7,20 @@ Event Log Extraction Prompts - English Version
 This module contains prompts for extracting structured event logs from episodic memory text.
 """
 
-EVENT_LOG_PROMPT = """You are an expert episodic memory extraction analyst and information architect.
+# No mixed-input judgement here, unlike ``prompts/en/episode.py``'s language rules: EPISODE_TEXT is
+# already an extracted, single-language narrative, not a live multi-party conversation carrying pasted logs,
+# code blocks, or quoted foreign-language material. That judgement belongs to episode extraction, where the
+# mixed-input problem actually exists; this prompt simply inherits whatever language episode extraction decided.
+_LANGUAGE_RULE = (
+    "**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language EPISODE_TEXT itself is written in. "
+    "ALL output MUST match that language. This is mandatory."
+)
+
+EVENT_LOG_PROMPT = (
+    _LANGUAGE_RULE
+    + """
+
+You are an expert episodic memory extraction analyst and information architect.
 Your task is to analyze the given narrative or multi-turn conversation (called "EPISODE_TEXT") and produce an event log optimized for factual retrieval.
 
 ---
@@ -57,7 +70,7 @@ Return **only** one valid JSON object, with the following exact structure:
 * Keep original wording as much as possible — only fix grammar for clarity.
 
 #### 4. Expression Format
-* Write each atomic_fact as a **single, complete English sentence** in **third-person** form.
+* Write each atomic_fact as a **single, complete sentence** in **third-person** form.
   - e.g., "Gina said that she had launched an ad campaign for her clothing store yesterday (March 9, 2024)."
 * Do **not** simplify, paraphrase, or merge logically distinct ideas.
 
@@ -116,9 +129,16 @@ Now analyze the provided EPISODE_TEXT and TIME carefully, apply all rules above,
 - TIME: "{{TIME}}"  (the start time of the episode, e.g., "March 10, 2024(Sunday) at 2:00 PM")
 
 """
+    + _LANGUAGE_RULE
+    + "\n"
+)
 
 
-ATOMIC_FACT_FROM_TEXT_PROMPT_EN = """You are an expert episodic memory extraction analyst and information architect.
+ATOMIC_FACT_FROM_TEXT_PROMPT_EN = (
+    _LANGUAGE_RULE
+    + """
+
+You are an expert episodic memory extraction analyst and information architect.
 Your task is to analyze the given narrative or multi-turn conversation (called "EPISODE_TEXT") and extract a set of atomic fact optimized for factual retrieval.
 
 ---
@@ -168,7 +188,7 @@ Return **only** one valid JSON object, with the following exact structure:
 * Keep original wording as much as possible — only fix grammar for clarity.
 
 #### 4. Expression Format
-* Write each atomic_fact as a **single, complete English sentence** in **third-person** form.
+* Write each atomic_fact as a **single, complete sentence** in **third-person** form.
   - e.g., "Gina said that she had launched an ad campaign for her clothing store yesterday (March 9, 2024)."
 * Do **not** simplify, paraphrase, or merge logically distinct ideas.
 
@@ -227,3 +247,6 @@ Now analyze the provided EPISODE_TEXT and TIME carefully, apply all rules above,
 - TIME: "{{TIME}}"  (the start time of the episode, e.g., "March 10, 2024(Sunday) at 2:00 PM")
 
 """
+    + _LANGUAGE_RULE
+    + "\n"
+)

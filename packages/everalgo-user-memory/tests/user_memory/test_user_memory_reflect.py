@@ -9,6 +9,7 @@ import pytest
 from everalgo.llm.errors import LLMError
 from everalgo.testing import FakeLLMClient
 from everalgo.types import Episode
+from everalgo.user_memory.episode import _format_episode_prefix
 
 if TYPE_CHECKING:
     from everalgo.llm.types import ChatMessage as LLMChatMessage
@@ -51,23 +52,30 @@ class TestValidateInputs:
 
 
 class TestRenderTimeline:
-    def test_numbered_format_with_timestamp(self) -> None:
+    def test_numbered_format_without_bracketed_timestamp(self) -> None:
+        """No bracketed timestamp: the episode body already carries a code-built prefix."""
         from everalgo.user_memory.reflect import _render_timeline
 
         result = _render_timeline([_ep(1700000000000, "First event"), _ep(1700100000000, "Second event")])
         lines = result.strip().split("\n")
         assert len(lines) == 2
-        assert lines[0].startswith("1. [")
-        assert "First event" in lines[0]
-        assert lines[1].startswith("2. [")
-        assert "Second event" in lines[1]
+        assert lines[0] == "1. First event"
+        assert lines[1] == "2. Second event"
 
     def test_single_episode(self) -> None:
         from everalgo.user_memory.reflect import _render_timeline
 
         result = _render_timeline([_ep(1700000000000, "Only event")])
-        assert result.startswith("1. [")
-        assert "Only event" in result
+        assert result == "1. Only event"
+
+    def test_no_am_pm_or_bracket(self) -> None:
+        """Regression guard: the removed bracket used to carry a 12-hour AM/PM format."""
+        from everalgo.user_memory.reflect import _render_timeline
+
+        result = _render_timeline([_ep(1700000000000, "First event"), _ep(1700100000000, "Second event")])
+        assert "AM" not in result
+        assert "PM" not in result
+        assert "[" not in result
 
 
 class TestReflectInit:
@@ -76,9 +84,11 @@ class TestReflectInit:
         from everalgo.user_memory.reflect import EpisodeReflector
 
         reflector = EpisodeReflector(llm=fake)
-        result = await reflector.areflect([_ep(1000, "Got a dog"), _ep(2000, "Got a cat")])
+        episodes = [_ep(1000, "Got a dog"), _ep(2000, "Got a cat")]
+        result = await reflector.areflect(episodes)
 
-        assert result.episode == "Merged narrative."
+        expected_prefix = _format_episode_prefix(episodes[0].timestamp)
+        assert result.episode == f"{expected_prefix} — Merged narrative."
         assert result.subject == "Pets"
         assert result.timestamp == 2000
         assert result.owner_id is None
@@ -93,7 +103,7 @@ class TestReflectInit:
         prompt_text = fake.calls[0].messages[0].content
         assert "Event A" in prompt_text
         assert "Event B" in prompt_text
-        assert "1. [" in prompt_text
+        assert "1. Event A" in prompt_text
 
     async def test_init_uses_structured_output(self) -> None:
         fake = FakeLLMClient(responses=['{"content": "merged", "title": "t"}'])
@@ -124,12 +134,14 @@ class TestReflectUpdate:
         from everalgo.user_memory.reflect import EpisodeReflector
 
         old = _ep(1000, "Had a dog named Toby.")
+        new_episodes = [_ep(2000, "Got a cat named Whiskers")]
         result = await EpisodeReflector(llm=fake).areflect(
-            [_ep(2000, "Got a cat named Whiskers")],
+            new_episodes,
             old_episode=old,
         )
 
-        assert result.episode == "Updated narrative."
+        expected_prefix = _format_episode_prefix(new_episodes[0].timestamp)
+        assert result.episode == f"{expected_prefix} — Updated narrative."
         assert result.subject == "Pets v2"
         assert result.timestamp == 2000
         assert result.owner_id is None
@@ -150,7 +162,7 @@ class TestReflectUpdate:
         from everalgo.user_memory.reflect import EpisodeReflector
 
         result = await EpisodeReflector(llm=fake).areflect([_ep(2000)], old_episode=_ep(1000))
-        assert result.episode == "ok"
+        assert result.episode.endswith("ok")
 
     async def test_update_empty_raises(self) -> None:
         fake = FakeLLMClient(responses=['{"content": "x", "title": "t"}'])
@@ -158,6 +170,40 @@ class TestReflectUpdate:
 
         with pytest.raises(ValueError, match="at least 1"):
             await EpisodeReflector(llm=fake).areflect([], old_episode=_ep(1000))
+
+
+# 2026-05-29 12:25:10 UTC (Friday) .. +70 minutes — mirrors test_user_memory_episode.py's
+# _memcell_spanning_70_minutes, so the prefix (span start) and timestamp field (span end) are
+# pinned to visibly different instants rather than two epoch-adjacent millisecond values.
+_TS_SPAN_START = 1780057510000
+_TS_SPAN_END = _TS_SPAN_START + 70 * 60 * 1000
+
+
+class TestReflectMergedPrefix:
+    """Finding 1b: the merged episode must carry the same prefix/timestamp split as _build_episode."""
+
+    async def test_init_merge_prefix_is_span_start_not_span_end(self) -> None:
+        fake = FakeLLMClient(responses=['{"content": "Merged.", "title": "t"}'])
+        from everalgo.user_memory.reflect import EpisodeReflector
+
+        episodes = [_ep(_TS_SPAN_START, "first"), _ep(_TS_SPAN_END, "last")]
+        result = await EpisodeReflector(llm=fake).areflect(episodes)
+
+        expected_prefix = _format_episode_prefix(_TS_SPAN_START)
+        assert result.episode == f"{expected_prefix} — Merged."
+        assert result.timestamp == _TS_SPAN_END
+
+    async def test_update_merge_prefix_is_new_episodes_span_start(self) -> None:
+        fake = FakeLLMClient(responses=['{"content": "Updated.", "title": "t"}'])
+        from everalgo.user_memory.reflect import EpisodeReflector
+
+        old = _ep(_TS_SPAN_START - 1, "older narrative")
+        new_episodes = [_ep(_TS_SPAN_START, "first new"), _ep(_TS_SPAN_END, "last new")]
+        result = await EpisodeReflector(llm=fake).areflect(new_episodes, old_episode=old)
+
+        expected_prefix = _format_episode_prefix(_TS_SPAN_START)
+        assert result.episode == f"{expected_prefix} — Updated."
+        assert result.timestamp == _TS_SPAN_END
 
 
 class TestReflectErrors:
@@ -190,7 +236,7 @@ class TestReflectMisc:
         from everalgo.user_memory.reflect import EpisodeReflector
 
         result = EpisodeReflector(llm=fake).reflect([_ep(1000), _ep(2000)])
-        assert result.episode == "synced"
+        assert result.episode.endswith("synced")
 
     async def test_prompt_override_init(self) -> None:
         fake = FakeLLMClient(responses=['{"content": "ok", "title": "t"}'])
@@ -218,3 +264,53 @@ class TestReflectMisc:
         assert "old stuff" in prompt_text
         assert "new stuff" in prompt_text
         assert "updating an existing" not in prompt_text.lower()
+
+
+# ==========================================================================
+# Language rule — reflect inherits the merged episodes' language
+# ==========================================================================
+
+
+def test_reflect_prompts_state_the_language_rule_at_both_ends() -> None:
+    """Long prompts lose middle instructions, so each rule appears at head and tail."""
+    import everalgo.user_memory.prompts.en.reflect as en_mod
+    import everalgo.user_memory.prompts.zh.reflect as zh_mod
+
+    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
+        assert getattr(en_mod, name).count("CRITICAL LANGUAGE RULE") == 2, name
+        assert getattr(zh_mod, name).count("关键语言规则") == 2, name
+
+
+def test_reflect_prompts_carry_no_mixed_input_judgement() -> None:
+    """Reflect merges already-extracted episodes, so it inherits rather than judges the language.
+
+    Judgement belongs to the extractor that reads the raw conversation. Re-judging here would be
+    inert on single-language narratives, and a disagreeing judgement would translate a merged
+    episode out of the language its sources were written in.
+    """
+    import everalgo.user_memory.prompts.en.reflect as en_mod
+    import everalgo.user_memory.prompts.zh.reflect as zh_mod
+
+    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
+        assert "dominate" not in getattr(en_mod, name), name
+        assert "篇幅上占据对话主体" not in getattr(zh_mod, name), name
+
+
+def test_zh_reflect_is_no_longer_a_re_export_of_en() -> None:
+    """`zh/reflect.py` used to re-export the English constants verbatim — a placeholder, not a translation."""
+    import everalgo.user_memory.prompts.en.reflect as en_mod
+    import everalgo.user_memory.prompts.zh.reflect as zh_mod
+
+    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
+        assert getattr(en_mod, name) != getattr(zh_mod, name), name
+
+
+def test_zh_reflect_keeps_the_same_placeholders_as_en() -> None:
+    """A translated prompt that drops a placeholder would render with a literal `{timeline}` in it."""
+    import everalgo.user_memory.prompts.en.reflect as en_mod
+    import everalgo.user_memory.prompts.zh.reflect as zh_mod
+
+    assert "{timeline}" in zh_mod.REFLECT_EPISODE_PROMPT
+    for placeholder in ("{old_episode}", "{new_episodes}"):
+        assert placeholder in zh_mod.REFLECT_EPISODE_UPDATE_PROMPT
+        assert placeholder in en_mod.REFLECT_EPISODE_UPDATE_PROMPT

@@ -40,7 +40,7 @@ uv run python -m benchmarks.cli --dataset locomo --run-name v1 --stages 5 6 7
 | Stage | Output directory | What it does |
 |-------|------------------|--------------|
 | 1 Extract Base | `stage1_extract_base/` | Boundary detection, MemCell segmentation, Episode extraction, Episode embedding, Clustering |
-| 2 Reflect | `stage2_reflect/` | Merge episodes within 2+ member clusters (optional, `enable_reflection=true`) |
+| 2 Reflect | `stage2_reflect/` | Merge episodes within 2+ member clusters (optional, off by default — set `enable_reflection=true`) |
 | 3 Enrich | `stage3_enrich/` | Extract atomic facts + embeddings from final episodes |
 | 4 Index | `stage4_index/` | Build BM25 + embedding + cluster indices |
 | 5 Search | `stage5_search/` | Agentic multi-round retrieval |

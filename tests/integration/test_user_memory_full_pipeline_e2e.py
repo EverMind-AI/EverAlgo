@@ -187,24 +187,25 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     # Placeholder substitution: literal labels rendered, no raw `{conversation_start_time}` / `{conversation}` /
     # `{custom_instructions}` left behind.
     assert "Conversation start time:" in episode_prompt
-    # Episode renders the start time as a natural-language label (not ISO) — pin the date portion only.
-    assert "November 14, 2023" in episode_prompt, "episode prompt missing rendered conversation_start_time"
+    # Episode renders the start time in YYYY-MM-DD HH:MM UTC (Weekday) format — pin the date portion only.
+    assert "2023-11-14" in episode_prompt, "episode prompt missing rendered conversation_start_time"
     assert "{conversation_start_time}" not in episode_prompt
     assert "{conversation}" not in episode_prompt
     assert "{custom_instructions}" not in episode_prompt
     # Conversation is rendered as pseudo-JSON objects: field names quoted, values unquoted
-    # (not strictly valid JSON but LLM-readable). Timestamps emitted in natural-language via
-    # ``format_natural_language_time`` so LLM can resolve relative time references per message.
-    assert '"timestamp": November 14, 2023 (Tuesday) at 10:13 PM UTC' in episode_prompt, (
-        "episode conversation missing Alice timestamp in natural-language format"
+    # (not strictly valid JSON but LLM-readable). Timestamps emitted in YYYY-MM-DD HH:MM UTC (Weekday) format
+    # via ``_format_prompt_time`` so LLM can resolve relative time references per message.
+    assert '"timestamp": 2023-11-14 22:13 UTC (Tuesday)' in episode_prompt, (
+        "episode conversation missing Alice timestamp in prompt format"
     )
     assert '"speaker": Alice' in episode_prompt, "episode conversation missing Alice speaker"
-    assert '"timestamp": November 14, 2023 (Tuesday) at 10:13 PM UTC' in episode_prompt, (
-        "episode conversation missing assistant timestamp in natural-language format"
+    assert '"timestamp": 2023-11-14 22:13 UTC (Tuesday)' in episode_prompt, (
+        "episode conversation missing assistant timestamp in prompt format"
     )
     assert '"speaker": assistant' in episode_prompt, "episode conversation missing assistant speaker"
     assert "Python async" in episode_prompt
-    # EpisodeExtractor defaults to USER_EPISODE_GENERATION_PROMPT (user-centred variant).
+    # sender_id is a required keyword argument (no default); passing a non-None value selects
+    # USER_EPISODE_GENERATION_PROMPT, while sender_id=None selects the generic variant.
     # The `{user_name}` placeholder is substituted with the resolved sender_name "Alice"; the raw
     # placeholder string must no longer appear in the rendered prompt.
     assert "{user_name}" not in episode_prompt

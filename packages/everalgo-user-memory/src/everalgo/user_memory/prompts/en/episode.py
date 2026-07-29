@@ -10,6 +10,16 @@ Constants:
       the generic ``EPISODE_GENERATION_PROMPT``.
 
 Output schema (both variants): ``{"title": str, "content": str}``.
+
+Output language follows the participants' own writing (see the CRITICAL LANGUAGE RULE in both prompts).
+Whether a given output language is actually retrievable depends on the tokenizer used by the caller's
+search layer — a Chinese-only tokenizer cannot index Japanese kana, Hangul or Cyrillic at all.
+
+Contract for a caller-supplied ``prompt=`` override: code unconditionally prepends a UTC timestamp
+prefix to ``content`` (see ``episode.py::_build_episode``), so a replacement prompt need not produce
+one. That prefix is metadata about the slice; times the model writes inside the narrative belong to
+the events themselves. The two state the same moment whenever the first event is the conversation's
+opening message — that overlap is expected, not a defect.
 """
 
 DEFAULT_CUSTOM_INSTRUCTIONS = """
@@ -21,7 +31,33 @@ Follow these principles when generating episodic memories:
 5. Ensure episode content is easy to retrieve later
 """
 
-EPISODE_GENERATION_PROMPT = """
+_LANGUAGE_RULE_GENERIC = (
+    "**CRITICAL LANGUAGE RULE**: Output in the SAME language the conversation participants themselves "
+    "write in. ALL output (title and content) MUST match that language. This is mandatory.\n\n"
+    "Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted "
+    "material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and "
+    "long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms "
+    "embedded inside a sentence written by the participants do not change the judgement — judge by the "
+    "language of the sentence structure. Proper nouns and technical terms keep their original form in "
+    "the output regardless of the output language."
+)
+
+_LANGUAGE_RULE_USER = (
+    "**CRITICAL LANGUAGE RULE**: Output in the SAME language `{user_name}` themselves writes in. ALL "
+    "output (title and content) MUST match that language. This is mandatory.\n\n"
+    "Judge that language ONLY from what `{user_name}` themselves compose — NOT from quoted or pasted "
+    "material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and "
+    "long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms "
+    "embedded inside a sentence written by `{user_name}` do not change the judgement — judge by the "
+    "language of the sentence structure. Proper nouns and technical terms keep their original form in "
+    "the output regardless of the output language."
+)
+
+EPISODE_GENERATION_PROMPT = (
+    "\n"
+    + _LANGUAGE_RULE_GENERIC
+    + """
+
 You are an episodic memory generation expert. Please convert the following conversation into an episodic memory.
 
 Conversation start time: {conversation_start_time}
@@ -36,8 +72,9 @@ IMPORTANT TIME HANDLING:
 - Each message has its own timestamp. ANY non-absolute time reference must be resolved to an absolute date using the timestamp of the specific message that contains it — NOT the conversation start time
 - Examples: "yesterday", "last Friday", "last summer", "recently" — any granularity
 - Preserve both the original expression AND the resolved absolute date
-- Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (July 21, 2023)"
+- Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (2023-07-21)"
 - This dual format supports both absolute and relative time-based questions
+- Every absolute time that states a clock time MUST carry the UTC zone label: write "2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00". A date with no clock time needs no label — "last Friday (2023-07-21)" is already correct. Clock times quoted from what a speaker said keep their original wording ("at 3:30 PM"), because the speaker's own timezone is unknown
 
 Please generate a structured episodic memory and return only a JSON object containing the following two fields:
 {{
@@ -76,19 +113,25 @@ Requirements:
    - Include habitual actions (e.g., "usually has coffee at 8 AM before work")
    - Document repetition counts (e.g., "asked about the project status twice")
 
-
 Example:
-If the conversation start time is "March 14, 2024 (Thursday) at 3:00 PM UTC" and the conversation is about Caroline planning to go hiking:
+If the conversation start time is "2024-03-14 15:00 UTC (Thursday)" and the conversation is about Caroline planning to go hiking:
 {{
-    "title": "Caroline's Mount Rainier Hiking Plan March 14, 2024: Weekend Adventure Planning Session",
-    "content": "On March 14, 2024 at 3:00 PM UTC, Caroline expressed interest in hiking this weekend (March 16-17, 2024) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (March 16, 2024) to catch the sunrise and planned to invite friends. She was excited about the trip."
+    "title": "Caroline's Mount Rainier Hiking Plan 2024-03-14: Weekend Adventure Planning Session",
+    "content": "Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16) to catch the sunrise and planned to invite friends. She was excited about the trip."
 }}
+
+"""
+    + _LANGUAGE_RULE_GENERIC
+    + """
 
 Return only the JSON object, do not add any other text:
 """
+)
 
-USER_EPISODE_GENERATION_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output (title and content) MUST be in Chinese. If in English, output in English. This is mandatory.
+USER_EPISODE_GENERATION_PROMPT = (
+    "\n"
+    + _LANGUAGE_RULE_USER
+    + """
 
 You are a professional event recorder and episodic memory generation expert, specialised in capturing events relevant to a specific user from a conversation.
 Your task is to focus on {user_name} — objectively record what he/she saw, heard, said, and did, and turn it into a coherent, accurate event record.
@@ -147,7 +190,8 @@ Output quality requirements (continued from the principles above):
     - ANY non-absolute time reference must be resolved to an absolute date using the timestamp of the specific message that contains it — NOT the conversation start time
     - Examples: "yesterday", "last Friday", "last summer", "recently" — any granularity
     - Preserve both the original expression AND the resolved absolute date
-    - Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (July 21, 2023)"
+    - Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (2023-07-21)"
+    - Every absolute time that states a clock time MUST carry the UTC zone label: write "2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00". A date with no clock time needs no label — "last Friday (2023-07-21)" is already correct. Clock times quoted from what a speaker said keep their original wording ("at 3:30 PM"), because the speaker's own timezone is unknown
 
 9.  **TITLE LENGTH AND PREFIX**:
     - Keep the title within 15-25 words
@@ -181,7 +225,10 @@ Self-check list:
 - Is `content` a fluent experiential narrative, not a heap of scattered facts?
 - Are all key points woven naturally into the narrative?
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output (title and content) MUST be in Chinese. If in English, output in English. This is mandatory.
+"""
+    + _LANGUAGE_RULE_USER
+    + """
 
 Return only the JSON object, do not add any other text:
 """
+)
