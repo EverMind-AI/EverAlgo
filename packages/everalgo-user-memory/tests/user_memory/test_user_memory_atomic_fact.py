@@ -248,7 +248,11 @@ async def test_extract_generic_when_sender_id_is_none() -> None:
 
 _MIXED_INPUT_CLAUSES_EN = (
     "themselves compose",  # judgement source restricted to participants' own writing
-    "dominate the conversation by volume",  # long quoted material must not flip the judgement
+    "dominates the conversation by volume",  # long quoted material must not flip the judgement
+    # An operational test for "is this pasted" — the negative instruction alone left the model unable to
+    # recognise unmarked prose as pasted, which cost ~35% of judgements on that shape of input.
+    "Apply this test to decide what is pasted",
+    "whether or not it is wrapped in quotation marks or a code fence",
     "sentence structure",  # embedded foreign terms do not flip the judgement
     "keep their original form",  # proper nouns / technical terms stay untranslated
 )
@@ -257,6 +261,8 @@ _MIXED_INPUT_CLAUSES_EN = (
 _MIXED_INPUT_CLAUSES_ZH = (
     "本人撰写的内容",  # judgement source restricted to participants' own writing
     "在篇幅上占据对话主体",  # long quoted material must not flip the judgement
+    "判断何为粘贴材料时适用以下检验",  # operational test, mirrors the en clause above
+    "也无论是否被引号或代码块包裹",
     "句子结构",  # embedded foreign terms do not flip the judgement
     "保留原文形式",  # proper nouns / technical terms stay untranslated
 )
@@ -286,7 +292,7 @@ def test_en_prompt_covers_mixed_input(clause: str) -> None:
 
 @pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
 def test_zh_prompt_covers_mixed_input(clause: str) -> None:
-    """The zh prompt carries the same four judgement clauses as en."""
+    """The zh prompt carries the same judgement clauses as en."""
     from everalgo.user_memory.prompts.zh.atomic_fact import ATOMIC_FACT_PROMPT
 
     assert clause in ATOMIC_FACT_PROMPT

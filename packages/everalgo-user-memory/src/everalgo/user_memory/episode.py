@@ -46,11 +46,11 @@ class EpisodeExtractor:
             sender_id: Specific chat sender to centre the episode on (uses USER_EPISODE_GENERATION_PROMPT);
                 pass ``None`` to extract one whole-memcell generic episode (uses EPISODE_GENERATION_PROMPT)
                 — cheaper than per-user fan-out.
-            prompt: Prompt override; ``None`` uses the bundled default. Code unconditionally prepends a
-                UTC timestamp prefix to ``content`` regardless of which prompt produced it (see
-                ``_build_episode``), so a custom prompt need not produce one. The prefix is metadata
-                about the slice, while times inside the narrative belong to the events; the two state
-                the same moment when the first event is the opening message, which is expected.
+            prompt: Prompt override; ``None`` uses the bundled default. Code stores ``content`` verbatim,
+                so the times a reader sees are the ones the prompt made the model write. A custom prompt
+                therefore owns that contract: it must require an absolute, ``UTC``-labelled time for the
+                events it narrates, or the stored episode carries no time a downstream LLM can read
+                (``Episode.timestamp`` holds ms since epoch and is not rendered into answer context).
             custom_instructions: Extra instruction block appended to the system prompt; ``None`` uses the default.
 
         Raises:
@@ -138,13 +138,13 @@ def _resolve_user_name(memcell: MemCell, sender_id: str) -> str:
 def _build_episode(data: dict[str, Any], *, sender_id: str | None, memcell: MemCell) -> Episode:
     """Assemble an :class:`Episode` from the parsed LLM payload and memcell metadata.
 
-    The body is prefixed with a code-built UTC timestamp rather than one written by the LLM: the model
-    used to translate the injected anchor into the output language, and that translation step is what
-    produced drifting formats and mistranslated AM/PM markers. ``answer``-stage consumers see only
-    ``subject`` and ``episode``, so the body has to carry the timestamp itself.
+    The body carries the times the model wrote, with no code-built prefix in front of them. The prompt
+    pins their format (24-hour, ``UTC``-labelled), which is what the prefix was introduced to guarantee;
+    a prefix on top of that restated the opening message's time a second time, since the prefix's value
+    was ``items[0].timestamp`` and the narrative's own timeline starts at the same moment.
     """
     title = str(data["title"])
-    body = f"{_format_episode_prefix(memcell.items[0].timestamp)} — {data['content']!s}"
+    body = str(data["content"])
     summary_raw = data.get("summary")
     summary = summary_raw if isinstance(summary_raw, str) and summary_raw.strip() else body[:200]
     return Episode.model_validate(
@@ -168,17 +168,6 @@ def _format_prompt_time(timestamp_ms: int) -> str:
     """
     dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
     return f"{dt:%Y-%m-%d %H:%M} UTC ({dt:%A})"
-
-
-def _format_episode_prefix(timestamp_ms: int) -> str:
-    """Render the timestamp prefix that code prepends to the episode body, e.g. ``2026-05-29 12:25 UTC``.
-
-    Pure ASCII, so a narrative in any language can carry it verbatim and the LLM never has to translate
-    it. No weekday: it would have to be fixed English and reads wrong inside a non-English narrative,
-    while the UI can derive it from ``Episode.timestamp``.
-    """
-    dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
-    return f"{dt:%Y-%m-%d %H:%M} UTC"
 
 
 def _render_conversation(memcell: MemCell) -> str:

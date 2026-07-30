@@ -9,7 +9,6 @@ import pytest
 from everalgo.llm.errors import LLMError
 from everalgo.testing import FakeLLMClient
 from everalgo.types import Episode
-from everalgo.user_memory.episode import _format_episode_prefix
 
 if TYPE_CHECKING:
     from everalgo.llm.types import ChatMessage as LLMChatMessage
@@ -53,7 +52,7 @@ class TestValidateInputs:
 
 class TestRenderTimeline:
     def test_numbered_format_without_bracketed_timestamp(self) -> None:
-        """No bracketed timestamp: the episode body already carries a code-built prefix."""
+        """No bracketed timestamp: ``ep.episode`` already carries the times its own prompt pinned."""
         from everalgo.user_memory.reflect import _render_timeline
 
         result = _render_timeline([_ep(1700000000000, "First event"), _ep(1700100000000, "Second event")])
@@ -87,8 +86,7 @@ class TestReflectInit:
         episodes = [_ep(1000, "Got a dog"), _ep(2000, "Got a cat")]
         result = await reflector.areflect(episodes)
 
-        expected_prefix = _format_episode_prefix(episodes[0].timestamp)
-        assert result.episode == f"{expected_prefix} — Merged narrative."
+        assert result.episode == "Merged narrative."
         assert result.subject == "Pets"
         assert result.timestamp == 2000
         assert result.owner_id is None
@@ -140,8 +138,7 @@ class TestReflectUpdate:
             old_episode=old,
         )
 
-        expected_prefix = _format_episode_prefix(new_episodes[0].timestamp)
-        assert result.episode == f"{expected_prefix} — Updated narrative."
+        assert result.episode == "Updated narrative."
         assert result.subject == "Pets v2"
         assert result.timestamp == 2000
         assert result.owner_id is None
@@ -173,27 +170,26 @@ class TestReflectUpdate:
 
 
 # 2026-05-29 12:25:10 UTC (Friday) .. +70 minutes — mirrors test_user_memory_episode.py's
-# _memcell_spanning_70_minutes, so the prefix (span start) and timestamp field (span end) are
-# pinned to visibly different instants rather than two epoch-adjacent millisecond values.
+# _memcell_spanning_70_minutes, so span start and span end are visibly different instants rather
+# than two epoch-adjacent millisecond values.
 _TS_SPAN_START = 1780057510000
 _TS_SPAN_END = _TS_SPAN_START + 70 * 60 * 1000
 
 
-class TestReflectMergedPrefix:
-    """Finding 1b: the merged episode must carry the same prefix/timestamp split as _build_episode."""
+class TestReflectMergedTimestamp:
+    """The merged episode's ``timestamp`` is the span end, matching ``_build_episode``'s field choice."""
 
-    async def test_init_merge_prefix_is_span_start_not_span_end(self) -> None:
+    async def test_init_merge_timestamp_is_span_end_not_span_start(self) -> None:
         fake = FakeLLMClient(responses=['{"content": "Merged.", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         episodes = [_ep(_TS_SPAN_START, "first"), _ep(_TS_SPAN_END, "last")]
         result = await EpisodeReflector(llm=fake).areflect(episodes)
 
-        expected_prefix = _format_episode_prefix(_TS_SPAN_START)
-        assert result.episode == f"{expected_prefix} — Merged."
+        assert result.episode == "Merged."
         assert result.timestamp == _TS_SPAN_END
 
-    async def test_update_merge_prefix_is_new_episodes_span_start(self) -> None:
+    async def test_update_merge_timestamp_is_new_episodes_span_end(self) -> None:
         fake = FakeLLMClient(responses=['{"content": "Updated.", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
@@ -201,8 +197,7 @@ class TestReflectMergedPrefix:
         new_episodes = [_ep(_TS_SPAN_START, "first new"), _ep(_TS_SPAN_END, "last new")]
         result = await EpisodeReflector(llm=fake).areflect(new_episodes, old_episode=old)
 
-        expected_prefix = _format_episode_prefix(_TS_SPAN_START)
-        assert result.episode == f"{expected_prefix} — Updated."
+        assert result.episode == "Updated."
         assert result.timestamp == _TS_SPAN_END
 
 
@@ -303,6 +298,21 @@ def test_zh_reflect_is_no_longer_a_re_export_of_en() -> None:
 
     for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
         assert getattr(en_mod, name) != getattr(zh_mod, name), name
+
+
+def test_reflect_prompts_pin_the_utc_label_on_carried_over_times() -> None:
+    """Reflection is the one path that can reintroduce time drift, so its prompts must pin the format.
+
+    It rewrites the narrative wholesale, and ``Episode.timestamp`` never reaches answer context, so a
+    time that reflection drops or reformats is not recoverable from anywhere else. Both variants must
+    require the ``UTC`` label and forbid dropping a time the input already carried.
+    """
+    import everalgo.user_memory.prompts.en.reflect as en_mod
+    import everalgo.user_memory.prompts.zh.reflect as zh_mod
+
+    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
+        assert "MUST carry the UTC zone label" in getattr(en_mod, name), name
+        assert "UTC 时区标识" in getattr(zh_mod, name), name
 
 
 def test_zh_reflect_keeps_the_same_placeholders_as_en() -> None:

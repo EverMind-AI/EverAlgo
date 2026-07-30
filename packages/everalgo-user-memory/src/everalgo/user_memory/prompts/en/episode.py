@@ -15,11 +15,11 @@ Output language follows the participants' own writing (see the CRITICAL LANGUAGE
 Whether a given output language is actually retrievable depends on the tokenizer used by the caller's
 search layer — a Chinese-only tokenizer cannot index Japanese kana, Hangul or Cyrillic at all.
 
-Contract for a caller-supplied ``prompt=`` override: code unconditionally prepends a UTC timestamp
-prefix to ``content`` (see ``episode.py::_build_episode``), so a replacement prompt need not produce
-one. That prefix is metadata about the slice; times the model writes inside the narrative belong to
-the events themselves. The two state the same moment whenever the first event is the conversation's
-opening message — that overlap is expected, not a defect.
+Contract for a caller-supplied ``prompt=`` override: code stores ``content`` verbatim (see
+``episode.py::_build_episode``), so every time a reader sees is one these prompts made the model write
+— which is why the time rules below are load-bearing rather than cosmetic. A replacement prompt takes
+over that contract: it must require an absolute, ``UTC``-labelled time for the events it narrates, or
+the stored episode carries no time a downstream LLM can read.
 """
 
 DEFAULT_CUSTOM_INSTRUCTIONS = """
@@ -35,8 +35,11 @@ _LANGUAGE_RULE_GENERIC = (
     "**CRITICAL LANGUAGE RULE**: Output in the SAME language the conversation participants themselves "
     "write in. ALL output (title and content) MUST match that language. This is mandatory.\n\n"
     "Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted "
-    "material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and "
-    "long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms "
+    "material. Apply this test to decide what is pasted: a run of two or more consecutive sentences that "
+    "reads as finished prose from elsewhere — explanatory or documentary in tone, addressed to no one in "
+    "the conversation, advancing no request, answer or decision of its own — is pasted material, whatever "
+    "language it is in and whether or not it is wrapped in quotation marks or a code fence. Exclude it "
+    "from the judgement EVEN IF it dominates the conversation by volume. Foreign-language terms "
     "embedded inside a sentence written by the participants do not change the judgement — judge by the "
     "language of the sentence structure. Proper nouns and technical terms keep their original form in "
     "the output regardless of the output language."
@@ -46,8 +49,11 @@ _LANGUAGE_RULE_USER = (
     "**CRITICAL LANGUAGE RULE**: Output in the SAME language `{user_name}` themselves writes in. ALL "
     "output (title and content) MUST match that language. This is mandatory.\n\n"
     "Judge that language ONLY from what `{user_name}` themselves compose — NOT from quoted or pasted "
-    "material. When judging, explicitly ignore: pasted documents, code blocks, logs, error messages, and "
-    "long verbatim excerpts, EVEN IF they dominate the conversation by volume. Foreign-language terms "
+    "material. Apply this test to decide what is pasted: a run of two or more consecutive sentences that "
+    "reads as finished prose from elsewhere — explanatory or documentary in tone, addressed to no one in "
+    "the conversation, advancing no request, answer or decision of its own — is pasted material, whatever "
+    "language it is in and whether or not it is wrapped in quotation marks or a code fence. Exclude it "
+    "from the judgement EVEN IF it dominates the conversation by volume. Foreign-language terms "
     "embedded inside a sentence written by `{user_name}` do not change the judgement — judge by the "
     "language of the sentence structure. Proper nouns and technical terms keep their original form in "
     "the output regardless of the output language."

@@ -126,7 +126,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 ]
 ```
 
-字段名是 **`episode`**（算法命名），不是 `content`。没有 `summary` 字段。正文以代码固定拼接的 UTC 时间戳开头（`YYYY-MM-DD HH:MM UTC — `，取自该 MemCell 首条消息的时间，见 `everalgo.user_memory.episode._build_episode`）。这个前缀是**该切片的元数据**，格式由代码保证；叙述内部各事件自带的时间由模型书写，属于事件要素，prompt 只要求带钟点的绝对时间必须标 `UTC`。当首个事件就是对话首条消息时，两者表述同一时刻，属预期重合。
+字段名是 **`episode`**（算法命名），不是 `content`。没有 `summary` 字段。正文由 LLM 原样产出、代码不做任何拼接（`everalgo.user_memory.episode._build_episode`）。正文里的时间全部由模型书写，属于事件要素，格式由 prompt 约束：带钟点的绝对时间必须标 `UTC`（`2024-03-14 15:00 UTC`），不含钟点的日期无需标注。`timestamp` 字段（ms epoch）另行保存该切片的关闭时间，但**不进答题上下文** —— 答题阶段只取 `subject` 与 `episode` 两个字段（见 `common/stages/answer.py`），所以正文是答题模型能读到的唯一时间来源。
 
 #### `clusters_conv_<i>.json` —— 簇信息
 
