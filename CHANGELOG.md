@@ -17,10 +17,18 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.2.1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.3.2 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.4.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.3.1 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Minor release — 2026-07-30
+
+One distribution updated. Every prompt in `everalgo-user-memory` now judges output language from what the conversation participants themselves write — with an operational test for what counts as pasted material — and every absolute clock time an extractor emits carries the `UTC` label in a 24-hour format. The `zh` prompt set reached parity with `en`, which is what makes this a minor rather than a patch. Detail in [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md).
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-user-memory` | 0.4.0 | minor — participant-anchored output language; `UTC`-labelled 24-hour times; `prompts/zh/atomic_fact_from_text.py` added |
 
 ## Patch release — 2026-07-21
 

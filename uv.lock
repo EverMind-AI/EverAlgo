@@ -596,12 +596,13 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.3.2"
+version = "0.4.0"
 source = { editable = "packages/everalgo-user-memory" }
 dependencies = [
     { name = "asgiref" },
     { name = "everalgo-boundary" },
     { name = "everalgo-core" },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
@@ -609,6 +610,7 @@ requires-dist = [
     { name = "asgiref", specifier = ">=3.0" },
     { name = "everalgo-boundary", editable = "packages/everalgo-boundary" },
     { name = "everalgo-core", editable = "packages/everalgo-core" },
+    { name = "pydantic", specifier = ">=2.7" },
 ]
 
 [[package]]
