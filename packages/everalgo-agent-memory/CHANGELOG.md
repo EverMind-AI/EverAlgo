@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-30
+
 ### Added
 
 - **`aextract_with_reason` on `AgentCaseExtractor` and `AgentSkillExtractor`** (plus `extract_with_reason` sync bridges) — same algorithm as `aextract`, but a rejection comes back as a typed reason instead of only reaching the log. Callers that serve "why is this session's memory empty?" no longer have to scrape log lines to attribute an empty result.
@@ -17,6 +19,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - `aextract` on both extractors is now a thin wrapper over `aextract_with_reason`. Signatures, return types, and behaviour are unchanged.
 - Internal (underscore-prefixed) helpers now return their rejection reason: `_should_skip` returns `(reason, detail) | None` rather than a prose string, `_is_worth_extracting` returns `(worth, llm_reason)`, `_compress_experience` returns `(data, reason)`, and `_apply_add` / `_apply_update` return an `OpOutcome` and take a required `op_index` keyword.
+
+### Fixed
+
+- `asgiref` is now declared in `[project.dependencies]`. All four extractor facades derive their sync bridges with `asgiref.sync.async_to_sync`, but the dependency had only ever been satisfied transitively via `everalgo-boundary` — so a resolver that dropped or replaced that path would break `import everalgo.agent_memory` at runtime.
 
 ## [0.3.1] - 2026-06-15
 
@@ -56,7 +62,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.4.0...HEAD
+[0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.1...everalgo-agent-memory/v0.4.0
 [0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.0...everalgo-agent-memory/v0.3.1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.2.0...everalgo-agent-memory/v0.3.0
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-agent-memory/v0.2.0
