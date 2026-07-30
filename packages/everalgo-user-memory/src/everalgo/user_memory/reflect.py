@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode
-from everalgo.user_memory.episode import _format_episode_prefix
 from everalgo.user_memory.prompts.en.reflect import REFLECT_EPISODE_PROMPT, REFLECT_EPISODE_UPDATE_PROMPT
 
 if TYPE_CHECKING:
@@ -40,10 +39,10 @@ def _validate_inputs(episodes: list[Episode], *, min_count: int) -> None:
 def _render_timeline(episodes: list[Episode]) -> str:
     """Render numbered chronological timeline for LLM prompt.
 
-    No bracketed timestamp: ``ep.episode`` already opens with a code-built, format-stable UTC
-    prefix (see ``episode.py::_build_episode``). Rendering ``ep.timestamp`` here too would add a
-    second, disagreeing time source — a different instant (closing time vs. the body prefix's
-    span-start time) in a conflicting 12-hour format — with no basis for the LLM to prefer one.
+    No bracketed timestamp: ``ep.episode`` already carries the times the extractor's prompt made the
+    model write, in a pinned 24-hour ``UTC`` format. Rendering ``ep.timestamp`` here too would add a
+    second, disagreeing time source — the span's closing time rather than the events' own — with no
+    basis for the LLM to prefer one.
     """
     lines: list[str] = []
     for i, ep in enumerate(episodes, 1):
@@ -125,14 +124,9 @@ class EpisodeReflector:
         if response.parsed is None:
             raise ValueError("LLM returned no parsed structured output")
         output: _ReflectOutput = response.parsed  # type: ignore[assignment]
-        # Mirrors _build_episode's start/end split: prefix = span start (episodes[0]), the
-        # `timestamp` field = span end (episodes[-1]). Episode exposes no `items`, so
-        # episodes[0].timestamp is the closest available start anchor, and it is monotonically
-        # correct because `episodes` is validated chronological in _validate_inputs.
-        prefix = _format_episode_prefix(episodes[0].timestamp)
         return Episode(
             owner_id=None,
-            episode=f"{prefix} — {output.content}",
+            episode=output.content,
             subject=output.title,
             timestamp=episodes[-1].timestamp,
         )

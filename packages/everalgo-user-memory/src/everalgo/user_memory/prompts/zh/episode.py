@@ -16,11 +16,11 @@ and tail of both prompts).
 Whether a given output language is actually retrievable depends on the tokenizer used by the caller's
 search layer — a Chinese-only tokenizer cannot index Japanese kana, Hangul or Cyrillic at all.
 
-Contract for a caller-supplied ``prompt=`` override: code unconditionally prepends a UTC timestamp
-prefix to ``content`` (see ``episode.py::_build_episode``), so a replacement prompt need not produce
-one. That prefix is metadata about the slice; times the model writes inside the narrative belong to
-the events themselves. The two state the same moment whenever the first event is the conversation's
-opening message — that overlap is expected, not a defect.
+Contract for a caller-supplied ``prompt=`` override: code stores ``content`` verbatim (see
+``episode.py::_build_episode``), so every time a reader sees is one these prompts made the model write
+— which is why the time rules below are load-bearing rather than cosmetic. A replacement prompt takes
+over that contract: it must require an absolute, ``UTC``-labelled time for the events it narrates, or
+the stored episode carries no time a downstream LLM can read.
 """
 
 DEFAULT_CUSTOM_INSTRUCTIONS = """
@@ -35,18 +35,20 @@ DEFAULT_CUSTOM_INSTRUCTIONS = """
 _LANGUAGE_RULE_GENERIC = (
     "**关键语言规则**：使用与对话参与者本人撰写内容**相同**的语言输出。所有输出（标题和内容）**必须**"
     "与该语言保持一致。此规则强制执行。\n\n"
-    "判定语言时**仅依据对话参与者本人撰写的内容**，不依据引用或粘贴的材料。判定时必须明确忽略：粘贴的文档、"
-    "代码块、日志、报错信息，以及大段原文摘录——**即使这些内容在篇幅上占据对话主体**。对话参与者的句子中夹杂"
-    "的外语词汇不改变判定结果，判定依据是该句子结构所使用的语言。专有名词与技术术语在输出中保留原文形式，"
+    "判定语言时**仅依据对话参与者本人撰写的内容**，不依据引用或粘贴的材料。判断何为粘贴材料时适用以下检验：连续"
+    "两句及以上、读起来像是别处写好的成品文字——语气偏解释性或文献性、不对话中任何人说话、自身不提出请求、回答"
+    "或决定——即为粘贴材料，无论其使用何种语言，也无论是否被引号或代码块包裹。判定时必须排除这部分内容，"
+    "**即使它在篇幅上占据对话主体**。对话参与者的句子中夹杂的外语词汇不改变判定结果，判定依据是该句子结构所使用的语言。专有名词与技术术语在输出中保留原文形式，"
     "不因输出语言而被翻译。"
 )
 
 _LANGUAGE_RULE_USER = (
     "**关键语言规则**：使用与 `{user_name}` 本人撰写内容**相同**的语言输出。所有输出（标题和内容）**必须**"
     "与该语言保持一致。此规则强制执行。\n\n"
-    "判定语言时**仅依据`{user_name}`本人撰写的内容**，不依据引用或粘贴的材料。判定时必须明确忽略：粘贴的文档、"
-    "代码块、日志、报错信息，以及大段原文摘录——**即使这些内容在篇幅上占据对话主体**。`{user_name}`的句子中夹杂"
-    "的外语词汇不改变判定结果，判定依据是该句子结构所使用的语言。专有名词与技术术语在输出中保留原文形式，"
+    "判定语言时**仅依据`{user_name}`本人撰写的内容**，不依据引用或粘贴的材料。判断何为粘贴材料时适用以下检验：连续"
+    "两句及以上、读起来像是别处写好的成品文字——语气偏解释性或文献性、不对话中任何人说话、自身不提出请求、回答"
+    "或决定——即为粘贴材料，无论其使用何种语言，也无论是否被引号或代码块包裹。判定时必须排除这部分内容，"
+    "**即使它在篇幅上占据对话主体**。`{user_name}`的句子中夹杂的外语词汇不改变判定结果，判定依据是该句子结构所使用的语言。专有名词与技术术语在输出中保留原文形式，"
     "不因输出语言而被翻译。"
 )
 

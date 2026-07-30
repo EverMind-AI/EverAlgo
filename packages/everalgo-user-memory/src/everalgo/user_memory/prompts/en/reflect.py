@@ -26,6 +26,7 @@ Merge them into a single coherent narrative that:
 - Preserves ALL factual details: names, dates, locations, specific actions, quantities, and status changes
 - Resolves contradictions by keeping the latest state
 - Maintains chronological flow with dates preserved
+- Keeps every time exactly as the episodes wrote it. Every absolute time that states a clock time MUST carry the UTC zone label ("2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00"); a date with no clock time needs none. Do NOT reformat, convert, or drop a time the episodes already carry — no episode may lose its time in the merge
 - Removes redundant information
 - Ends with a brief summary of the current state as of the latest episode
 
@@ -50,6 +51,7 @@ Update the narrative to incorporate the new information:
 - Append new events in chronological position
 - Preserve content that is still accurate
 - Maintain all factual details: names, dates, locations, specific actions
+- Keep every time exactly as the narrative and the new episodes wrote it. Every absolute time that states a clock time MUST carry the UTC zone label ("2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00"); a date with no clock time needs none. Do NOT reformat, convert, or drop a time that is already there
 - End with an updated summary of the current state
 
 **CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing narrative you are updating. Updating never changes the language — do not translate, even if the new episodes are written in a different language. This is mandatory."""
