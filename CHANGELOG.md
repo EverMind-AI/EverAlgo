@@ -17,10 +17,18 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.2.1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.4.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.4.1 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.4.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Patch release — 2026-08-04
+
+One distribution updated. `ProfileExtractor`'s UPDATE path applied each operation to a list it was mutating as it went, so a delete shifted the index every later operation addressed — silently editing or removing the wrong profile item and returning a structurally valid profile with wrong contents that a caller could not detect, work around, or recover from. Indices now resolve against the profile snapshot the model was actually shown. The same release closes five routes to duplicate profile items, including two that no operation could reach before: the INIT path, which wrote the LLM's output through unchecked, and compaction, the very mechanism meant to collapse duplication. Because an update now deduplicates the whole bucket, a profile already polluted before this release heals on its next update. Per-distribution detail in the package CHANGELOG.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-user-memory` | 0.4.1 | patch — profile update indices resolved against the original snapshot; duplicate items removed on every write path; per-op rejection warnings |
 
 ## Minor release — 2026-07-30
 

@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-04
+
 ### Fixed
 
 - `ProfileExtractor`'s UPDATE path no longer edits or deletes the wrong profile item when one batch of operations contains a `delete` followed by an operation on a higher index. `_apply_ops` used to apply each operation to a list it was mutating as it went, so a `target.pop(idx)` shifted every larger index by one: ops meaning "drop B, edit D" over `A B C D E` edited E and left D, and "drop B and D" deleted E and left D. The indices come from `_render_profile_for_update`, which numbers the profile with `enumerate` before any operation runs, so that snapshot is the only numbering the model can see and every index must resolve against it. Collection is now separated from application — indices are validated and grouped first, updates are applied by original index, deletes are then removed in one filtering pass rather than by repeated `pop`, and additions are appended last. The old behaviour produced a structurally valid, self-consistent profile with wrong contents and emitted nothing, so a caller could neither detect nor recover from it; that made it the one defect in this batch a caller could not work around downstream. Reported by EverOS.
@@ -91,7 +93,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.1...HEAD
+[0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.0...everalgo-user-memory/v0.4.1
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.2...everalgo-user-memory/v0.4.0
 [0.3.2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.1...everalgo-user-memory/v0.3.2
 [0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.0...everalgo-user-memory/v0.3.1
