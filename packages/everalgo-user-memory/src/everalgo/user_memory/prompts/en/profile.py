@@ -47,6 +47,7 @@ Analyze conversations and output a list of operations (can have multiple). Avail
 3. evidence should include time info - e.g., "In Oct 2024 user mentioned..."
 4. Index numbers for explicit_info and implicit_traits are independent
 5. **Deduplication**: Before using "add", carefully check ALL existing items. If a similar trait/info already exists (even with different wording), use "update" to enrich it instead of adding a duplicate. Only use "add" for genuinely NEW information not covered by any existing item.
+6. **Index semantics**: Every index you emit is resolved against the profile snapshot shown above, numbered exactly as it appears there. Operations within one response never shift each other's indices — do not adjust an index to compensate for another operation in the same list. Do not emit an index for an item you are adding in this response; "add" takes no index.
 
 【Profile Definitions & Analysis Framework】
 - **explicit_info (Explicit Information)**: User facts that can be directly extracted from conversations.

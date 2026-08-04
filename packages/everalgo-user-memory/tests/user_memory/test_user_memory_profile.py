@@ -12,6 +12,7 @@ UPDATE-mode tests cover:
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, cast
 
 import pytest
@@ -23,6 +24,7 @@ from everalgo.types import ChatMessage, MemCell, Profile, ToolCall, ToolCallFunc
 from everalgo.user_memory.profile import (
     _PROFILE_COMPACT_THRESHOLD,
     ProfileExtractor,
+    _apply_ops,
     _build_summary,
     _render_conversation,
 )
@@ -667,3 +669,380 @@ def test_profile_prompts_mention_tags_follow_the_output_language() -> None:
     for name in ("PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT", "PROFILE_INITIAL_EXTRACTION_PROMPT"):
         assert "personality tag" in getattr(en_mod, name), name
         assert "性格标签" in getattr(zh_mod, name), name
+
+
+# The UPDATE prompt used to say nothing at all about how an index is resolved, while its own example
+# output puts update and delete in one array — the shape that silently corrupted a profile.
+_INDEX_SEMANTICS_CLAUSES_EN = (
+    "resolved against the profile snapshot shown above",
+    "never shift each other's indices",
+    '"add" takes no index',
+)
+
+_INDEX_SEMANTICS_CLAUSES_ZH = (
+    "以上方展示的画像快照为准",
+    "绝不会互相移动索引",
+    '"add" 不接受 index',
+)
+
+
+@pytest.mark.parametrize("clause", _INDEX_SEMANTICS_CLAUSES_EN)
+def test_en_update_prompt_states_the_index_semantics(clause: str) -> None:
+    """Index semantics must be explicit, so a model cannot read sequential-mutation into them."""
+    from everalgo.user_memory.prompts.en.profile import PROFILE_UPDATE_PROMPT
+
+    assert clause in PROFILE_UPDATE_PROMPT
+
+
+@pytest.mark.parametrize("clause", _INDEX_SEMANTICS_CLAUSES_ZH)
+def test_zh_update_prompt_states_the_index_semantics(clause: str) -> None:
+    """The zh UPDATE prompt carries the same index-semantics rule as en."""
+    from everalgo.user_memory.prompts.zh.profile import PROFILE_UPDATE_PROMPT
+
+    assert clause in PROFILE_UPDATE_PROMPT
+
+
+# ==========================================================================
+# _apply_ops — index semantics, op validation, add dedup
+#
+# _render_profile_for_update numbers items with enumerate over the profile it is
+# handed, so that snapshot is the only index base a model can see. Every op must
+# therefore resolve against it, unaffected by the other ops in the same batch.
+# ==========================================================================
+
+_BASE = ["A", "B", "C", "D", "E"]
+_PROFILE_LOGGER = "everalgo.user_memory.profile"
+
+
+def _profile_of(descriptions: list[str], *, bucket: str = "explicit_info") -> Profile:
+    """Profile holding one item per description in ``bucket``; the other bucket stays empty."""
+    identity = "category" if bucket == "explicit_info" else "trait"
+    other = "implicit_traits" if bucket == "explicit_info" else "explicit_info"
+    return Profile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "s",
+            "timestamp": _TS_OLD_1,
+            bucket: [{identity: "c", "description": d, "evidence": "e"} for d in descriptions],
+            other: [],
+        }
+    )
+
+
+def _descriptions(profile: Profile, bucket: str = "explicit_info") -> list[str]:
+    items = cast("list[dict[str, Any]]", getattr(profile, bucket))
+    return [item["description"] for item in items]
+
+
+def test_delete_then_update_both_resolve_against_the_original_snapshot() -> None:
+    """A delete must not shift the index a later update refers to.
+
+    Sequential mutation made this edit land on E while D survived — a self-consistent but wrong
+    profile the caller had no way to detect afterwards.
+    """
+    ops: list[dict[str, Any]] = [
+        {"action": "delete", "type": "explicit_info", "index": 1},
+        {"action": "update", "type": "explicit_info", "index": 3, "data": {"description": "D-updated"}},
+    ]
+    assert _descriptions(_apply_ops(_profile_of(_BASE), ops, timestamp=_TS)) == ["A", "C", "D-updated", "E"]
+
+
+def test_two_deletes_both_resolve_against_the_original_snapshot() -> None:
+    """Two deletes in one batch each address the original numbering, not the shrinking list."""
+    ops: list[dict[str, Any]] = [
+        {"action": "delete", "type": "explicit_info", "index": 1},
+        {"action": "delete", "type": "explicit_info", "index": 3},
+    ]
+    assert _descriptions(_apply_ops(_profile_of(_BASE), ops, timestamp=_TS)) == ["A", "C", "E"]
+
+
+def test_add_does_not_widen_the_index_bound(caplog: pytest.LogCaptureFixture) -> None:
+    """An index past the snapshot's end stays out of range however many items this batch adds."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "explicit_info", "data": {"category": "c", "description": "F-new"}},
+        {"action": "update", "type": "explicit_info", "index": 5, "data": {"description": "CLOBBERED"}},
+    ]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == [*_BASE, "F-new"]
+    assert "index out of range" in caplog.text
+
+
+def test_unknown_type_is_rejected_rather_than_routed_to_implicit_traits(caplog: pytest.LogCaptureFixture) -> None:
+    """A misspelt bucket name used to fall through to implicit_traits by way of an else branch."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "explicit", "data": {"category": "c", "description": "X"}},
+    ]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+    assert _descriptions(result, "implicit_traits") == []
+    assert "unknown type" in caplog.text
+
+
+def test_add_skips_an_item_the_profile_already_holds() -> None:
+    """Dedup is a correctness property of the merge, not something the prompt can be trusted with."""
+    item = {"category": "diet", "description": "loves kiwifruit", "evidence": "e"}
+    ops: list[dict[str, Any]] = [{"action": "add", "type": "explicit_info", "data": dict(item)} for _ in range(3)]
+    result = _apply_ops(_profile_of(["loves kiwifruit"]), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["loves kiwifruit"]
+
+
+def test_dedup_ignores_the_category_label() -> None:
+    """The label is LLM-authored and drifts between rounds, so keying on it would let dupes through."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "explicit_info", "data": {"category": "preferences", "description": "A"}},
+    ]
+    result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+
+
+def test_dedup_ignores_case_and_whitespace_differences() -> None:
+    """A model restating an item rarely reproduces its spacing and casing byte for byte."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "explicit_info", "data": {"category": " C ", "description": "Loves   Kiwifruit"}},
+    ]
+    result = _apply_ops(_profile_of(["loves kiwifruit"]), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["loves kiwifruit"]
+
+
+def test_dedup_ignores_evidence_because_it_is_provenance_not_identity() -> None:
+    """The same fact cited from a second conversation is still the same fact."""
+    ops: list[dict[str, Any]] = [
+        {
+            "action": "add",
+            "type": "explicit_info",
+            "data": {"category": "c", "description": "loves kiwifruit", "evidence": "a different quote"},
+        },
+    ]
+    result = _apply_ops(_profile_of(["loves kiwifruit"]), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["loves kiwifruit"]
+
+
+def test_dedup_keeps_the_earliest_item_so_the_summary_stays_stable() -> None:
+    """_build_summary reads explicit_info[0], so dropping the later copy keeps summary steady."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "explicit_info", "data": {"category": "c", "description": "A"}},
+    ]
+    result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+    assert result.summary == "A"
+
+
+def test_implicit_traits_dedup_reads_description_like_explicit_info_does() -> None:
+    """`description` is the field both buckets share, so one identity rule covers both."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "implicit_traits", "data": {"trait": "[Different-Tag]", "description": "A"}},
+    ]
+    result = _apply_ops(_profile_of(["A"], bucket="implicit_traits"), ops, timestamp=_TS)
+
+    assert _descriptions(result, "implicit_traits") == ["A"]
+
+
+def test_delete_wins_when_one_index_is_both_updated_and_deleted(caplog: pytest.LogCaptureFixture) -> None:
+    """A delete answers to an explicit negation or a contradiction, which outranks a correction."""
+    ops: list[dict[str, Any]] = [
+        {"action": "update", "type": "explicit_info", "index": 1, "data": {"description": "B-updated"}},
+        {"action": "delete", "type": "explicit_info", "index": 1},
+    ]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["A", "C", "D", "E"]
+    assert "superseded by delete" in caplog.text
+
+
+def test_two_updates_on_one_index_merge_in_order() -> None:
+    """A single update is a partial merge, so two of them must accumulate rather than overwrite."""
+    ops: list[dict[str, Any]] = [
+        {"action": "update", "type": "explicit_info", "index": 0, "data": {"description": "A-updated"}},
+        {"action": "update", "type": "explicit_info", "index": 0, "data": {"category": "Skills"}},
+    ]
+    result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+    first = cast("list[dict[str, Any]]", result.explicit_info)[0]  # type: ignore[attr-defined]
+
+    assert first["description"] == "A-updated"  # first patch survives the second
+    assert first["category"] == "Skills"
+    assert first["evidence"] == "e"  # untouched field preserved
+
+
+def test_unknown_action_is_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    """An action outside the documented four is a malformed response, not a no-op."""
+    ops: list[dict[str, Any]] = [
+        {"action": "replace", "type": "explicit_info", "index": 0, "data": {"description": "X"}},
+    ]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+    assert "unknown action" in caplog.text
+
+
+@pytest.mark.parametrize("action", ["add", "update"])
+def test_non_object_data_is_rejected(action: str, caplog: pytest.LogCaptureFixture) -> None:
+    """`data` is merged into an item with `**`, so a non-object is unusable either way."""
+    ops: list[dict[str, Any]] = [{"action": action, "type": "explicit_info", "index": 0, "data": "not an object"}]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+    assert "data is not an object" in caplog.text
+
+
+@pytest.mark.parametrize("data", [{"category": "c"}, {"category": "c", "description": "   "}])
+def test_add_without_a_usable_description_is_rejected(data: dict[str, Any], caplog: pytest.LogCaptureFixture) -> None:
+    """An item with no description cannot be retrieved and cannot be deduplicated against."""
+    ops: list[dict[str, Any]] = [{"action": "add", "type": "explicit_info", "data": data}]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+    assert "missing description" in caplog.text
+
+
+def test_update_of_a_non_object_item_is_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    """`Profile` allows non-object items through `extra="allow"`, and merging into one used to raise."""
+    profile = Profile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "s",
+            "timestamp": _TS_OLD_1,
+            "explicit_info": ["not an object"],
+            "implicit_traits": [],
+        }
+    )
+    ops: list[dict[str, Any]] = [
+        {"action": "update", "type": "explicit_info", "index": 0, "data": {"description": "X"}},
+    ]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(profile, ops, timestamp=_TS)
+
+    assert cast("list[Any]", result.explicit_info) == ["not an object"]  # type: ignore[attr-defined]
+    assert "target item is not an object" in caplog.text
+
+
+def test_boolean_index_is_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    """JSON `true` is an `int` subclass in Python, so it would otherwise address item 1."""
+    ops: list[dict[str, Any]] = [{"action": "delete", "type": "explicit_info", "index": True}]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+    assert "index out of range" in caplog.text
+
+
+def test_none_action_is_silent_because_it_is_the_documented_no_op(caplog: pytest.LogCaptureFixture) -> None:
+    """The prompt tells the model to emit `none` when a conversation carries no user info."""
+    ops: list[dict[str, Any]] = [{"action": "none"}]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(_BASE), ops, timestamp=_TS)
+
+    assert _descriptions(result) == _BASE
+    assert caplog.text == ""
+
+
+def test_update_rewriting_an_item_into_a_copy_of_another_leaves_one(caplog: pytest.LogCaptureFixture) -> None:
+    """An update can mint a duplicate just as an add can, so dedup covers the whole bucket."""
+    ops: list[dict[str, Any]] = [
+        {"action": "update", "type": "explicit_info", "index": 0, "data": {"description": "B"}},
+    ]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(["A", "B"]), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["B"]  # the updated item is the earlier one, so it is the survivor
+    assert "duplicate item dropped" in caplog.text
+
+
+def test_update_heals_duplicates_already_stored_in_the_profile(caplog: pytest.LogCaptureFixture) -> None:
+    """Profiles written before dedup existed carry duplicates; an update is their only way out.
+
+    `_compact` is the sole other backstop and does not run until the item count passes its threshold,
+    so without this a polluted profile stayed polluted for as long as it sat below that line.
+    """
+    ops: list[dict[str, Any]] = [{"action": "none"}]
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        result = _apply_ops(_profile_of(["A", "A", "A", "B"]), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["A", "B"]
+    assert "duplicate item dropped" in caplog.text
+
+
+def test_dedup_keeps_items_that_have_no_identity_rather_than_dropping_them() -> None:
+    """A stored item with no description cannot be compared, and discarding it would lose data."""
+    profile = Profile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "s",
+            "timestamp": _TS_OLD_1,
+            "explicit_info": [{"category": "c"}, {"category": "d"}, "not an object"],
+            "implicit_traits": [],
+        }
+    )
+    result = _apply_ops(profile, [{"action": "none"}], timestamp=_TS)
+
+    assert len(cast("list[Any]", result.explicit_info)) == 3  # type: ignore[attr-defined]
+
+
+async def test_init_deduplicates_what_the_llm_returns(caplog: pytest.LogCaptureFixture) -> None:
+    """INIT had no dedup at all, so a profile could be born dirty and stay that way."""
+    payload = _payload(
+        explicit_info=[
+            {"category": "c", "description": "loves kiwifruit"},
+            {"category": "other", "description": "Loves   Kiwifruit"},
+            {"category": "c", "description": "loves kiwifruit"},
+        ],
+        implicit_traits=[_implicit_trait(description="dup"), _implicit_trait(description="dup")],
+    )
+    fake = FakeLLMClient(responses=[ChatResponse(content=payload, model="fake")])
+
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
+
+    assert _descriptions(profile) == ["loves kiwifruit"]
+    assert _descriptions(profile, "implicit_traits") == ["dup"]
+    assert "duplicate item dropped" in caplog.text
+
+
+async def test_compact_deduplicates_its_own_result(caplog: pytest.LogCaptureFixture) -> None:
+    """Compaction is the backstop for duplicate accumulation, so its output cannot carry duplicates."""
+    old_p = _old_profile(
+        explicit_info=[{"category": f"C{i}", "description": f"D{i}."} for i in range(_PROFILE_COMPACT_THRESHOLD)],
+        implicit_traits=[],
+    )
+    ops_json = json.dumps(
+        {"operations": [{"action": "add", "type": "explicit_info", "data": {"category": "New", "description": "N."}}]}
+    )
+    compact_json = json.dumps(
+        {
+            "explicit_info": [{"category": "c", "description": "same"}, {"category": "c", "description": "same"}],
+            "implicit_traits": [],
+        }
+    )
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(content=ops_json, model="fake"),
+            ChatResponse(content=compact_json, model="fake"),
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_p)
+
+    assert fake.call_count == 2
+    assert _descriptions(profile) == ["same"]
+    assert "duplicate item dropped" in caplog.text
+
+
+def test_apply_ops_carries_owner_id_and_takes_the_given_timestamp() -> None:
+    """The merged profile keeps its owner and adopts the newest memcell's timestamp."""
+    result = _apply_ops(_profile_of(_BASE), [], timestamp=_TS)
+
+    assert result.owner_id == "u_alice"
+    assert result.timestamp == _TS

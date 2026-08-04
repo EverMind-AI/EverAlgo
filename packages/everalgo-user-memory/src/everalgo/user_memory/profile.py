@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import async_to_sync
@@ -108,8 +109,8 @@ class ProfileExtractor:
         )
 
         data = await _call_llm_for_profile_init(self._llm, rendered)
-        explicit_info = data["explicit_info"]
-        implicit_traits = data["implicit_traits"]
+        explicit_info = _dedupe(data["explicit_info"], source="init")
+        implicit_traits = _dedupe(data["implicit_traits"], source="init")
         summary = _build_summary(explicit_info, implicit_traits)
         return Profile.model_validate(
             {
@@ -172,8 +173,8 @@ class ProfileExtractor:
         )
 
         data = await _call_llm_for_profile_compact(self._llm, rendered)
-        new_explicit = data["explicit_info"]
-        new_implicit = data["implicit_traits"]
+        new_explicit = _dedupe(data["explicit_info"], source="compact")
+        new_implicit = _dedupe(data["implicit_traits"], source="compact")
         summary = _build_summary(new_explicit, new_implicit)
         return Profile.model_validate(
             {
@@ -289,48 +290,199 @@ def _render_profile_for_update(profile: Profile) -> str:
     return "\n".join(parts)
 
 
-def _to_list(value: object) -> list[Any]:  # pyright: ignore[reportUnusedFunction]
-    """Coerce to list[Any]; returns [] for non-list values."""
-    return cast("list[Any]", value) if isinstance(value, list) else []  # type: ignore[redundant-cast]
+@dataclass
+class _BucketOps:
+    """One bucket's ops after validation, keyed by the index numbering the LLM was shown."""
+
+    updates: dict[int, dict[str, Any]] = field(default_factory=dict)
+    deletes: set[int] = field(default_factory=set)
+    adds: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: int) -> Profile:
-    """Apply add/update/delete ops to old_profile and return a new Profile."""
-    explicit_info: list[Any] = list(getattr(old_profile, "explicit_info", []) or [])
-    implicit_traits: list[Any] = list(getattr(old_profile, "implicit_traits", []) or [])
+    """Apply add/update/delete ops to old_profile and return a new Profile.
 
-    for op in ops:
-        action = op.get("action")
-        if action == "none":
-            continue
-        op_type = op.get("type")
-        target = explicit_info if op_type == "explicit_info" else implicit_traits
+    Collection is separated from application so that every ``index`` resolves against ``old_profile``
+    exactly as ``_render_profile_for_update`` numbered it for the LLM. Applying ops one at a time to a
+    mutating list would shift the indices of every op that follows a delete, and would let an ``add``
+    widen the bound an out-of-range index is checked against. Ops that fail validation are dropped
+    with a warning instead of landing on a neighbouring item.
 
-        if action == "add":
-            data = op.get("data")
-            if isinstance(data, dict):
-                target.append(data)
-        elif action == "update":
-            idx = op.get("index")
-            data = op.get("data")
-            if isinstance(idx, int) and isinstance(data, dict) and 0 <= idx < len(target):
-                merged = dict(target[idx])
-                merged.update(cast("dict[str, Any]", data))
-                target[idx] = merged
-        elif action == "delete":
-            idx = op.get("index")
-            if isinstance(idx, int) and 0 <= idx < len(target):
-                target.pop(idx)
+    Args:
+        old_profile: Profile the ops were generated against; supplies the index numbering.
+        ops: Raw ``operations`` payload from the LLM, unvalidated.
+        timestamp: Timestamp for the merged Profile, normally the newest MemCell's.
 
-    summary = _build_summary(explicit_info, implicit_traits)
+    Returns:
+        A new Profile; ``old_profile`` is left untouched.
+    """
+    buckets = {
+        "explicit_info": list(getattr(old_profile, "explicit_info", []) or []),
+        "implicit_traits": list(getattr(old_profile, "implicit_traits", []) or []),
+    }
+    collected = _collect_ops(ops, buckets)
+    explicit_info = _apply_bucket_ops(buckets["explicit_info"], collected["explicit_info"])
+    implicit_traits = _apply_bucket_ops(buckets["implicit_traits"], collected["implicit_traits"])
+
     return Profile.model_validate(
         {
             "owner_id": old_profile.owner_id,
-            "summary": summary,
+            "summary": _build_summary(explicit_info, implicit_traits),
             "timestamp": timestamp,
             "explicit_info": explicit_info,
             "implicit_traits": implicit_traits,
         }
+    )
+
+
+def _collect_ops(ops: list[dict[str, Any]], buckets: dict[str, list[Any]]) -> dict[str, _BucketOps]:
+    """Group ops by bucket, validating each against ``buckets`` without modifying it.
+
+    ``buckets`` doubles as the bucket-name whitelist, so an unrecognised ``type`` cannot fall through
+    to whichever bucket an ``if/else`` happened to leave as the default.
+    """
+    collected = {name: _BucketOps() for name in buckets}
+    for op in ops:
+        action = op.get("action")
+        if action == "none":  # documented no-op: the conversation carried no user info
+            continue
+        op_type = op.get("type")
+        if op_type not in collected:
+            _log_rejected_op(op, "unknown type")
+        elif action == "add":
+            _collect_add(op, collected[op_type])
+        elif action in ("update", "delete"):
+            _collect_indexed(op, collected[op_type], items=buckets[op_type])
+        else:
+            _log_rejected_op(op, "unknown action")
+
+    for slot in collected.values():
+        _drop_updates_superseded_by_delete(slot)
+    return collected
+
+
+def _collect_add(op: dict[str, Any], slot: _BucketOps) -> None:
+    """Queue an add, rejecting a payload that is unusable or has no identity to deduplicate on."""
+    data = op.get("data")
+    if not isinstance(data, dict):
+        _log_rejected_op(op, "data is not an object")
+        return
+    item = cast("dict[str, Any]", data)
+    if _identity_key(item) is None:
+        _log_rejected_op(op, "missing description")
+        return
+    slot.adds.append(item)
+
+
+def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: list[Any]) -> None:
+    """Queue an update or delete whose index falls inside the original snapshot."""
+    idx = op.get("index")
+    # bool is an int subclass, so a JSON `true` would otherwise address item 1.
+    if not isinstance(idx, int) or isinstance(idx, bool) or not 0 <= idx < len(items):
+        _log_rejected_op(op, "index out of range")
+        return
+    if op.get("action") == "delete":
+        slot.deletes.add(idx)
+        return
+    data = op.get("data")
+    if not isinstance(data, dict):
+        _log_rejected_op(op, "data is not an object")
+        return
+    if not isinstance(items[idx], dict):
+        _log_rejected_op(op, "target item is not an object")
+        return
+    # An update is a partial merge, so two of them on one index accumulate rather than replace.
+    slot.updates[idx] = {**slot.updates.get(idx, {}), **cast("dict[str, Any]", data)}
+
+
+def _drop_updates_superseded_by_delete(slot: _BucketOps) -> None:
+    """Resolve an index that is both updated and deleted in favour of the delete.
+
+    ``delete`` answers to an explicit negation, an expiry, or a contradiction, so keeping a rewritten
+    copy of something the user has disowned is worse than losing one correction.
+    """
+    for idx in sorted(slot.updates.keys() & slot.deletes):  # sorted so the warnings come out in a fixed order
+        del slot.updates[idx]
+        logger.warning("profile update op rejected: action=update index=%d reason=superseded by delete", idx)
+
+
+def _apply_bucket_ops(items: list[Any], bucket_ops: _BucketOps) -> list[Any]:
+    """Apply one bucket's ops: patch by original index, drop deletes, then append the new items.
+
+    Deletes are removed in a single filtering pass rather than by repeated ``pop``, which is what kept
+    the surviving indices aligned with the numbering every op was validated against. Every index here
+    was validated during collection, including that the item it addresses is an object.
+    """
+    for idx, patch in bucket_ops.updates.items():
+        items[idx] = {**cast("dict[str, Any]", items[idx]), **patch}
+    kept = [item for i, item in enumerate(items) if i not in bucket_ops.deletes]
+    kept.extend(bucket_ops.adds)
+    return _dedupe(kept, source="update")
+
+
+def _dedupe(items: list[Any], *, source: str) -> list[Any]:
+    """Drop items whose identity has already appeared, keeping the earliest.
+
+    Applied to the whole bucket rather than only to newly added items, which covers three ways a
+    duplicate arises: an ``add`` of something already stored, an ``update`` that rewrites one item
+    into a copy of another, and duplicates already sitting in a profile written before this check
+    existed. That last one matters because ``_compact`` is the only other backstop and does not run
+    until the item count passes ``_PROFILE_COMPACT_THRESHOLD``, so an update is a polluted profile's
+    one route back. Discarding an exact duplicate loses no information; an item with no identity is
+    kept untouched, since it cannot be compared and dropping it would lose data.
+
+    Args:
+        items: Bucket contents in order; the earliest occurrence of each identity survives.
+        source: Which path is deduplicating, for the warning only.
+
+    Returns:
+        A new list preserving the original order.
+    """
+    kept: list[Any] = []
+    seen: set[str] = set()
+    for item in items:
+        key = _identity_key(cast("dict[str, Any]", item)) if isinstance(item, dict) else None
+        if key is None:
+            kept.append(item)
+            continue
+        if key in seen:
+            logger.warning("profile duplicate item dropped: source=%s", source)
+            continue
+        seen.add(key)
+        kept.append(item)
+    return kept
+
+
+def _identity_key(item: dict[str, Any]) -> str | None:
+    """Semantic identity of a profile item, or None when it carries none.
+
+    Identity is the ``description`` alone, which is the item's content and the field both buckets
+    share. The label (``category`` for ``explicit_info``, ``trait`` for ``implicit_traits``) stays out
+    because the LLM writes it freely — the same fact reaches ``diet`` one round and ``preferences`` the
+    next — and a label that drifts would be a way around the very dedup this guards. ``evidence`` /
+    ``basis`` stay out as provenance: the same fact quoted from a second conversation is still the
+    same fact.
+    """
+    description = item.get("description")
+    if not isinstance(description, str):
+        return None
+    # An empty description is no identity: it would match every other item that is missing one.
+    return _normalize(description) or None
+
+
+def _normalize(text: str) -> str:
+    """Fold whitespace runs and case, so a restated item still matches the copy already stored."""
+    return " ".join(text.split()).casefold()
+
+
+def _log_rejected_op(op: dict[str, Any], reason: str) -> None:
+    """Report a dropped op. ``data`` is never logged — it holds LLM-authored profile content."""
+    logger.warning(
+        "profile update op rejected: action=%s type=%s index=%s reason=%s",
+        op.get("action"),
+        op.get("type"),
+        op.get("index"),
+        reason,
     )
 
 
