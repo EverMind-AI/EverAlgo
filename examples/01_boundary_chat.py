@@ -81,6 +81,9 @@ async def main() -> None:
 
     print(f"cells produced : {len(result.cells)}")
     print(f"tail (held back): {len(result.tail)} messages")
+    # The LLM's verdict on the tail, not a restatement of its length: True means the trailing segment
+    # is too thin to place in an episode yet. None means no path judged it.
+    print(f"should_wait    : {result.should_wait}")
 
     if result.cells:
         first_cell = result.cells[0]

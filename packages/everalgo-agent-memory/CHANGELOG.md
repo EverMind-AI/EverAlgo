@@ -6,6 +6,11 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `AgentBoundaryDetector.adetect` returns the three-field `DetectionResult`** (see `everalgo-boundary` 0.3.0). Two-value unpacking of its result no longer works.
+- `should_wait` is forwarded from the underlying chat-message detection rather than dropped by the trajectory remapping. A trajectory with no `ChatMessage` at all reaches no LLM and returns `None`, matching the semantics its own short-circuit comment already claimed.
+
 ## [0.4.0] - 2026-07-30
 
 ### Added

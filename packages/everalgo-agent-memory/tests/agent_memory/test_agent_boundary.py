@@ -227,3 +227,38 @@ async def test_adetect_invariant_total_count_preserved(
         f"invariant broken: cells={[len(c.items) for c in result.cells]}, tail={len(result.tail)}, "
         f"expected {len(items)}"
     )
+
+
+# ===========================================================================
+# should_wait — forwarded from the underlying chat detection
+# ===========================================================================
+
+
+async def _forwarded_should_wait(*, should_wait: bool) -> bool | None:
+    """Run the wrapper over a chat-only trajectory and return whatever verdict came back."""
+    items: list[ConversationItem] = [_chat("user", "hello", idx=0), _chat("assistant", "hi there", idx=1)]
+    fake = FakeLLMClient(responses=[_boundary_response([], should_wait=should_wait)])
+    result = await AgentBoundaryDetector(llm=fake).adetect(items)
+    return result.should_wait
+
+
+async def test_should_wait_true_is_forwarded_from_the_chat_detection() -> None:
+    """The trajectory wrapper must not swallow the verdict its inner chat detection produced."""
+    assert await _forwarded_should_wait(should_wait=True) is True
+
+
+async def test_should_wait_false_is_forwarded_from_the_chat_detection() -> None:
+    """False must arrive as False, not collapse into the ``None`` that means "nobody judged"."""
+    assert await _forwarded_should_wait(should_wait=False) is False
+
+
+async def test_should_wait_is_none_when_no_chat_message_reaches_the_llm() -> None:
+    """A tool-only trajectory short-circuits before the LLM, so nothing judged the tail."""
+    items: list[ConversationItem] = [_tool_req(), _tool_res()]
+    fake = FakeLLMClient(responses=[])
+
+    result = await AgentBoundaryDetector(llm=fake).adetect(items)
+
+    assert result.cells == []
+    assert result.should_wait is None
+    assert fake.call_count == 0

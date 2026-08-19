@@ -94,7 +94,7 @@ def _resp_boundaries(indices: list[int], *, should_wait: bool = False) -> ChatRe
 async def test_empty_messages_short_circuits_without_calling_llm() -> None:
     fake = FakeLLMClient(responses=[])
     result = await detect_boundaries([], llm=fake)
-    assert result == DetectionResult(cells=[], tail=[])
+    assert result == DetectionResult(cells=[], tail=[], should_wait=None)
     assert fake.call_count == 0
 
 
@@ -371,10 +371,12 @@ async def test_tail_cell_timestamp_when_is_final_matches_last_message() -> None:
 
 
 async def test_detection_result_supports_positional_unpacking() -> None:
+    """Three fields now, so two-value unpacking no longer works — 0.3.0 states this as breaking."""
     fake = FakeLLMClient(responses=[_resp_no_boundary()])
-    cells, tail = await detect_boundaries(_dialogue(2), llm=fake)
+    cells, tail, should_wait = await detect_boundaries(_dialogue(2), llm=fake)
     assert isinstance(cells, list)
     assert isinstance(tail, list)
+    assert isinstance(should_wait, bool)
 
 
 async def test_detection_result_named_field_access() -> None:
@@ -385,9 +387,64 @@ async def test_detection_result_named_field_access() -> None:
 
 
 def test_detection_result_index_access() -> None:
-    r = DetectionResult(cells=[], tail=[])
+    r = DetectionResult(cells=[], tail=[], should_wait=None)
     assert r[0] == []
     assert r[1] == []
+    assert r[2] is None
+
+
+# ===========================================================================
+# should_wait — the LLM's verdict on the tail, previously parsed and then dropped
+# ===========================================================================
+
+
+async def test_should_wait_true_is_surfaced_to_the_caller() -> None:
+    """It was validated as a mandatory key and then discarded; nothing upstream could see it."""
+    fake = FakeLLMClient(responses=[_resp_no_boundary(should_wait=True)])
+
+    result = await detect_boundaries(_dialogue(2), llm=fake)
+
+    assert result.should_wait is True
+
+
+async def test_should_wait_false_is_surfaced_to_the_caller() -> None:
+    fake = FakeLLMClient(responses=[_resp_no_boundary(should_wait=False)])
+
+    result = await detect_boundaries(_dialogue(2), llm=fake)
+
+    assert result.should_wait is False
+
+
+async def test_should_wait_is_independent_of_whether_the_tail_is_empty() -> None:
+    """A non-empty tail is the normal case; should_wait is a narrower claim about that tail.
+
+    If the two moved together the field would carry no information a caller could not already read off
+    ``tail``, which is exactly the confusion that made it look droppable.
+    """
+    waiting = await detect_boundaries(_dialogue(2), llm=FakeLLMClient(responses=[_resp_no_boundary(should_wait=True)]))
+    not_waiting = await detect_boundaries(
+        _dialogue(2), llm=FakeLLMClient(responses=[_resp_no_boundary(should_wait=False)])
+    )
+
+    assert waiting.tail == not_waiting.tail
+    assert waiting.should_wait != not_waiting.should_wait
+
+
+async def test_should_wait_survives_is_final_closure() -> None:
+    """``is_final=True`` empties the tail, but the LLM's verdict is still what it was."""
+    fake = FakeLLMClient(responses=[_resp_no_boundary(should_wait=True)])
+
+    result = await detect_boundaries(_dialogue(2), llm=fake, is_final=True)
+
+    assert result.tail == []
+    assert result.should_wait is True
+
+
+async def test_empty_input_reports_no_verdict_rather_than_false() -> None:
+    """No LLM call happened, so nothing judged the tail — ``None``, not a fabricated ``False``."""
+    result = await detect_boundaries([], llm=FakeLLMClient(responses=[]))
+
+    assert result.should_wait is None
 
 
 def test_default_hard_limits_match_design_spec() -> None:

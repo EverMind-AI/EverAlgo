@@ -37,13 +37,13 @@ class _BatchBoundaryResult:
 class DetectionResult(NamedTuple):
     """Return type of :func:`detect_boundaries`.
 
-    NamedTuple subclass of ``tuple`` — supports positional unpacking, named access, and index access::
+    NamedTuple subclass of ``tuple`` — named access and index access::
 
-        cells, tail = await detect_boundaries(messages, llm=client)
         result = await detect_boundaries(messages, llm=client)
         result.cells  # list[MemCell]
         result.tail  # list[ChatMessage]
-        result[0], result[1]
+        result.should_wait  # bool | None
+        result[0], result[1], result[2]
 
     Attributes:
         cells: Zero or more :class:`~everalgo.types.MemCell` instances the algorithm has confidently
@@ -52,10 +52,27 @@ class DetectionResult(NamedTuple):
             conversation continues beyond the last seen message, so the trailing segment is left as a
             tail for the caller's state machine.  When ``is_final=True``, tail is forced into the final
             MemCell and this field is guaranteed empty.
+        should_wait: Whether ``tail`` is too thin to interpret yet — the LLM's own verdict on it, not a
+            restatement of ``tail`` being non-empty. A non-empty tail is the normal case for
+            ``is_final=False``; ``should_wait`` says something narrower: the trailing segment carries too
+            little to place in an episode at all (only media placeholders, an intent-free "ok", a system
+            notification, or an ambiguous 30-minute-to-4-hour gap). A caller that extracts on every
+            non-empty tail will extract from those; one that waits on every non-empty tail never extracts.
+
+            ``None`` means no path judged it, and it is not interchangeable with ``False``:
+
+            * :func:`detect_boundaries` (batch) returns ``bool`` — the LLM's answer.
+            * :meth:`~everalgo.user_memory.BoundaryDetector.adetect_step` (single-step) returns ``None``.
+              Its prompt answers a different question — has a new episode begun — and never evaluates the
+              trailing segment's interpretability. Deriving one from the other does not work: both default
+              to "no" for opposite reasons, so inverting ``should_end`` would report "wait" on nearly every
+              step, and would claim "no need to wait" about a tail that path never looked at.
+            * Inputs that reach no LLM at all (empty message list) return ``None``.
     """
 
     cells: list[MemCell]
     tail: list[ChatMessage]
+    should_wait: bool | None
 
 
 async def detect_boundaries(
@@ -84,7 +101,7 @@ async def detect_boundaries(
     """
     # Phase 1 — Input validation
     if not messages:
-        return DetectionResult(cells=[], tail=[])
+        return DetectionResult(cells=[], tail=[], should_wait=None)
 
     # Phase 2 — Default resolution
     prompt_template = prompt or BATCH_BOUNDARY_DETECT_PROMPT_EN
@@ -103,9 +120,11 @@ async def detect_boundaries(
 
     # Phase 4 — LLM batch detection (single call, multi-boundary).
     boundaries: list[int] = []
+    should_wait: bool | None = None
     if remaining:
         batch = await _detect_boundaries(remaining, llm, prompt_template)
         boundaries = batch.boundaries
+        should_wait = batch.should_wait
 
     # Phase 5 — Slice by boundaries + is_final closure.
     prev = 0
@@ -122,7 +141,7 @@ async def detect_boundaries(
     else:
         tail = tail_msgs
 
-    return DetectionResult(cells=cells, tail=tail)
+    return DetectionResult(cells=cells, tail=tail, should_wait=should_wait)
 
 
 # ---------------------------------------------------------------------------
