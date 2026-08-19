@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-19
+
 ### Changed
 
 - **BREAKING: `BoundaryDetector.adetect` and `adetect_step` return the three-field `DetectionResult`** (see `everalgo-boundary` 0.3.0). Two-value unpacking of their result no longer works.
@@ -136,7 +138,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.5.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.6.0...HEAD
+[0.6.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.5.0...everalgo-user-memory/v0.6.0
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.1...everalgo-user-memory/v0.5.0
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.0...everalgo-user-memory/v0.4.1
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.2...everalgo-user-memory/v0.4.0

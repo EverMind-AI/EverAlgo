@@ -14,15 +14,43 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | Distribution | Version | Changelog |
 |---|---|---|
 | `everalgo-core` | 0.5.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.2.1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.5.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.4.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.6.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
 
-## Minor release — 2026-08-19
+## Minor release — 2026-08-19 (boundary)
+
+Three distributions, one change. Boundary detection asks the model whether the trailing segment it could
+not close is even interpretable yet — `should_wait` — and has always required the answer to be present,
+rejecting a response that omits it. `detect_boundaries` then read the boundary indices and dropped that
+answer on the floor, so no caller since 0.1 could see a verdict the model was computing and the library
+was enforcing. It matters because a non-empty tail is the ordinary case, while `should_wait` marks the
+narrower one: a trailing segment holding only a media placeholder, a bare "ok", or a system notification,
+which a caller should not extract from and cannot otherwise distinguish.
+
+`DetectionResult` therefore gains a third field, which breaks two-value unpacking — `cells, tail = ...`
+now raises. Named access is unaffected. The field is `bool | None` rather than `bool`: the single-step
+detection path answers a different question and never evaluates the trailing segment, so it reports
+`None` instead of guessing. Inverting its `should_end` was considered and rejected — both flags default to
+"no" for unrelated reasons, so the inversion would report "wait" on nearly every step and, on the steps
+that do close an episode, claim "no need to wait" about a tail it never looked at.
+
+The two consumer distributions move for the same reason and raise their `everalgo-boundary` floor to
+`>=0.3.0`. Unlike the previous release, an older boundary here is a hard failure rather than something
+absorbed silently: `DetectionResult` is a `NamedTuple`, and the arity mismatch raises. Per-distribution
+detail in each package's CHANGELOG.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-boundary` | 0.3.0 | minor (breaking) — `DetectionResult.should_wait`; two-value unpacking removed |
+| `everalgo-user-memory` | 0.6.0 | minor (breaking) — three-field `DetectionResult`; `adetect_step` reports `should_wait=None` |
+| `everalgo-agent-memory` | 0.5.0 | minor (breaking) — three-field `DetectionResult`; verdict forwarded through trajectory remapping |
+
+## Minor release — 2026-08-19 (episode summary)
 
 Two distributions updated together, because the change spans both. `Episode.summary` was supposed to be a
 short preview of an episode; nothing ever wrote one. The consumer side was ported from an opensource

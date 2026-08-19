@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-19
+
 ### Changed
 
 - **BREAKING: `AgentBoundaryDetector.adetect` returns the three-field `DetectionResult`** (see `everalgo-boundary` 0.3.0). Two-value unpacking of its result no longer works.
@@ -67,7 +69,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.4.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.0...HEAD
+[0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.4.0...everalgo-agent-memory/v0.5.0
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.1...everalgo-agent-memory/v0.4.0
 [0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.0...everalgo-agent-memory/v0.3.1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.2.0...everalgo-agent-memory/v0.3.0

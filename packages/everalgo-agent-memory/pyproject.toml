@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-agent-memory"
-version = "0.4.0"
+version = "0.5.0"
 description = "EverAlgo agent memory: AgentCase / AgentSkill extractors and AgentBoundaryDetector facade."
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -24,7 +24,7 @@ dependencies = [
   # it explicitly rather than relying on the transitive pull-in via everalgo-boundary.
   "asgiref>=3.0",
   "everalgo-core>=0.2.1,<2.0.0",
-  "everalgo-boundary>=0.2.0,<2.0.0",
+  "everalgo-boundary>=0.3.0,<2.0.0",
   # Declared without an import on purpose: ``AgentSkill.cluster_id`` binds skills to clusters this
   # package never computes, and the dependency reserves that pairing for callers.
   "everalgo-clustering>=0.2.0,<2.0.0",
