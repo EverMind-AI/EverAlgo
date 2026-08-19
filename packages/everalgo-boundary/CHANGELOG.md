@@ -6,6 +6,18 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `DetectionResult` gained a third field, `should_wait`, so two-value unpacking no longer works.** `cells, tail = await detect_boundaries(...)` now raises `ValueError`; use `cells, tail, should_wait = ...` or named access. The field was already being produced and thrown away: the batch prompt has always asked for it, `_call_llm_for_batch_boundary` has always rejected a response that omits it, and `detect_boundaries` then read only `batch.boundaries` — so every caller since 0.1 has been unable to see a verdict the model was computing and the library was validating.
+
+  `should_wait` answers a narrower question than "is the tail non-empty". A non-empty tail is the normal case for `is_final=False`; `should_wait` says the trailing segment carries too little to place in an episode at all — only media placeholders, an intent-free "ok", a system notification, or an ambiguous 30-minute-to-4-hour gap. Without it a caller has to treat every tail the same way: extract on all of them and it extracts those, or wait on all of them and it never extracts. The prompt's `### should_wait` section has specified these cases all along.
+
+- `should_wait` is `bool | None`, and `None` is not interchangeable with `False`. `detect_boundaries` returns the LLM's `bool`. An empty message list returns `None` — no LLM was called, so nothing judged the tail, and reporting `False` there would be a fabricated verdict.
+
+### Fixed
+
+- The `DetectionResult` docstring no longer advertises `cells, tail = ...` two-value unpacking as a supported form.
+
 ## [0.2.1] - 2026-06-15
 
 ### Changed

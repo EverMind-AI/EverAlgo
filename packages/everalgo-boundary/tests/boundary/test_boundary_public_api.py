@@ -47,10 +47,14 @@ def test_detection_result_is_importable_as_top_level_symbol() -> None:
 
 
 def test_detection_result_is_named_tuple_subclass() -> None:
-    """DetectionResult must be a NamedTuple so callers can unpack ``cells, tail = ...``."""
-    r = DetectionResult(cells=[], tail=[])
+    """Still a NamedTuple, now three fields wide.
+
+    The field order is part of the public surface — index and positional access are documented — so it is
+    pinned here rather than left to whichever order a future edit happens to leave.
+    """
+    r = DetectionResult(cells=[], tail=[], should_wait=None)
     assert isinstance(r, tuple)
-    assert r._fields == ("cells", "tail")
+    assert r._fields == ("cells", "tail", "should_wait")
 
 
 def test_workspace_extractor_is_not_in_public_api() -> None:

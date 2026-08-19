@@ -70,6 +70,8 @@ class AgentBoundaryDetector:
         Returns:
             ``cells`` — remapped ``MemCell`` list preserving tool calls inside each cell.
             ``tail`` — remainder items (not yet committed to a cell) for the non-final case.
+            ``should_wait`` — forwarded from the underlying chat-message detection, or ``None`` when the
+            trajectory held no ``ChatMessage`` at all and no LLM was called.
         """
         chat_items: list[ChatMessage] = []
         chat_to_orig: list[int] = []
@@ -81,7 +83,11 @@ class AgentBoundaryDetector:
         if not chat_items:
             # No chat messages → no LLM signal; everything goes to tail per should_wait semantics.
             logger.debug("adetect: no ChatMessage items in trajectory (n_items=%d)", len(items))
-            return DetectionResult(cells=[], tail=list(items))  # type: ignore[arg-type]
+            return DetectionResult(
+                cells=[],
+                tail=list(items),  # type: ignore[arg-type]  # trajectory tail holds ConversationItem
+                should_wait=None,
+            )
 
         chat_result = await detect_boundaries(chat_items, llm=self._llm, is_final=is_final, prompt=prompt)
 
@@ -123,7 +129,11 @@ class AgentBoundaryDetector:
             # detect_boundaries returned no cells — everything is tail.
             tail = list(items)
 
-        return DetectionResult(cells=remapped_cells, tail=tail)  # type: ignore[arg-type]
+        return DetectionResult(
+            cells=remapped_cells,
+            tail=tail,  # type: ignore[arg-type]  # trajectory tail holds ConversationItem
+            should_wait=chat_result.should_wait,
+        )
 
     detect = async_to_sync(adetect)
     """Sync bridge — only callable from non-event-loop contexts."""

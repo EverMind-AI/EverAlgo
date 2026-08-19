@@ -46,7 +46,13 @@ async def main() -> None:
 
     # Streaming: hold `tail` between calls; pass prior tail + new messages each time.
     result = await detect_boundaries(messages, llm=fake)
-    cells, tail = result  # NamedTuple unpacking
+    cells, tail, should_wait = result  # NamedTuple unpacking
+
+    # `should_wait` is the LLM's verdict on the tail, not a restatement of it being non-empty: True
+    # means the trailing segment carries too little to place in an episode yet (media placeholders
+    # only, a bare "ok", a system notification, an ambiguous 30-min-to-4-hour gap). A caller that
+    # extracts on every non-empty tail extracts from those; one that waits on every non-empty tail
+    # never extracts at all. `None` means no path judged it — see the DetectionResult docstring.
 
     # End-of-session: tail is forced into the last cell.
     result = await detect_boundaries(messages, llm=fake, is_final=True)

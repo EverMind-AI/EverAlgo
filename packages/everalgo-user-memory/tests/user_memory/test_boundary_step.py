@@ -1,11 +1,12 @@
 """Tests for BoundaryDetector.adetect_step — 93 incremental mirror.
 
-``adetect_step`` returns :class:`DetectionResult` (``cells, tail``):
+``adetect_step`` returns :class:`DetectionResult` (``cells, tail, should_wait``):
 
 - ``cells`` carries the 0-or-1 closed MemCell.
 - ``tail`` carries the new history the caller must feed back into the next call,
   encapsulating the cut-and-bridge (``[history[-1], new]`` under smart-mask,
   ``[new]`` for a clean cut) or the accumulation (``[*history, new]``).
+- ``should_wait`` is always ``None`` — this path's prompt never judges it.
 """
 
 from __future__ import annotations
@@ -164,3 +165,46 @@ def test_sync_bridge_exists() -> None:
     detector = BoundaryDetector(llm=FakeLLMClient(responses=[]))
     assert hasattr(detector, "detect_step")
     assert callable(detector.detect_step)
+
+
+# ===========================================================================
+# should_wait — this path does not judge it, and says so
+# ===========================================================================
+
+
+async def test_should_wait_is_none_when_accumulating() -> None:
+    payload = _ok_response(should_end=False)
+    detector = BoundaryDetector(llm=FakeLLMClient(responses=[payload]))
+
+    result = await detector.adetect_step([_msg(0), _msg(1)], _msg(2))
+
+    assert result.should_wait is None
+
+
+async def test_should_wait_is_none_when_the_episode_closes() -> None:
+    payload = _ok_response(should_end=True, topic_summary="Topic")
+    detector = BoundaryDetector(llm=FakeLLMClient(responses=[payload]))
+
+    result = await detector.adetect_step([_msg(0), _msg(1)], _msg(2))
+
+    assert len(result.cells) == 1
+    assert result.should_wait is None
+
+
+async def test_should_wait_is_not_the_inverse_of_should_end() -> None:
+    """Inverting ``should_end`` would make the common case report "wait" and is not what the field means.
+
+    ``should_end`` answers whether a new episode began; ``should_wait`` answers whether the trailing
+    segment carries enough to be placed in one. Both default to false for unrelated reasons, so an
+    inversion reports "wait" on nearly every step — the step prompt's own principle is to keep related
+    content together — and claims "no need to wait" about a tail this path never evaluated.
+    """
+    accumulating = await BoundaryDetector(llm=FakeLLMClient(responses=[_ok_response(should_end=False)])).adetect_step(
+        [_msg(0), _msg(1)], _msg(2)
+    )
+    closing = await BoundaryDetector(
+        llm=FakeLLMClient(responses=[_ok_response(should_end=True, topic_summary="T")])
+    ).adetect_step([_msg(0), _msg(1)], _msg(2))
+
+    assert accumulating.should_wait is None
+    assert closing.should_wait is None

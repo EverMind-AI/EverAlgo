@@ -2,7 +2,7 @@
 
 Public surface:
 - detect_boundaries — async function: split chat messages into MemCells
-- DetectionResult    — ``(cells, tail)`` NamedTuple returned by detect_boundaries
+- DetectionResult    — ``(cells, tail, should_wait)`` NamedTuple returned by detect_boundaries
 
 ``WorkspaceMemCellExtractor`` (Jira / Email / Confluence) is NOT YET IMPLEMENTED and is
 deliberately omitted from the public API — its methods raise ``NotImplementedError``. Import it

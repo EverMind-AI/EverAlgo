@@ -424,14 +424,14 @@ async def test_detect_all_boundaries_buffers_first_two_messages() -> None:
 async def test_detect_all_boundaries_should_wait_accumulates_without_emit() -> None:
     """When every adetect_step returns empty cells, only the final-flush cell is emitted.
 
-    Each should_wait call returns ``DetectionResult(cells=[], tail=[*history, new])``.
+    Each should_wait call returns ``DetectionResult(cells=[], tail=[*history, new], should_wait=None)``.
     The outer loop replaces history with the returned tail.
     """
     mock_llm = AsyncMock()
     msgs = [_make_chat_msg(i) for i in range(6)]
 
     async def step_wait(history: list[Any], new: Any, **_: Any) -> DetectionResult:
-        return DetectionResult(cells=[], tail=[*history, new])
+        return DetectionResult(cells=[], tail=[*history, new], should_wait=None)
 
     mock_step = AsyncMock(side_effect=step_wait)
     with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
@@ -455,10 +455,10 @@ async def test_detect_all_boundaries_flushes_final_tail() -> None:
 
     # msg 2 → wait; msg 3 → cut (clean cut, tail=[msg3]); msgs 4-5 → wait.
     side_effects = [
-        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]]),
-        DetectionResult(cells=[closed_cell], tail=[msgs[3]]),
-        DetectionResult(cells=[], tail=[msgs[3], msgs[4]]),
-        DetectionResult(cells=[], tail=[msgs[3], msgs[4], msgs[5]]),
+        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]], should_wait=None),
+        DetectionResult(cells=[closed_cell], tail=[msgs[3]], should_wait=None),
+        DetectionResult(cells=[], tail=[msgs[3], msgs[4]], should_wait=None),
+        DetectionResult(cells=[], tail=[msgs[3], msgs[4], msgs[5]], should_wait=None),
     ]
     mock_step = AsyncMock(side_effect=side_effects)
 
@@ -491,9 +491,9 @@ async def test_detect_all_boundaries_threads_returned_tail_into_next_call() -> N
     #   call2: history=[2,3],   new=4 → wait, tail=[2,3,4]
     closed_cell = MemCell(items=cast("list[ConversationItem]", msgs[:3]), timestamp=msgs[2].timestamp)
     side_effects = [
-        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]]),
-        DetectionResult(cells=[closed_cell], tail=[msgs[2], msgs[3]]),
-        DetectionResult(cells=[], tail=[msgs[2], msgs[3], msgs[4]]),
+        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]], should_wait=None),
+        DetectionResult(cells=[closed_cell], tail=[msgs[2], msgs[3]], should_wait=None),
+        DetectionResult(cells=[], tail=[msgs[2], msgs[3], msgs[4]], should_wait=None),
     ]
 
     captured_histories: list[list[Any]] = []

@@ -55,7 +55,8 @@ class BoundaryDetector:
             prompt: Optional prompt template override passed through to ``detect_boundaries``.
 
         Returns:
-            Named tuple ``(cells, tail)`` — ``cells`` contains completed :class:`~everalgo.types.MemCell`
+            Named tuple ``(cells, tail, should_wait)`` — ``cells`` contains completed
+            :class:`~everalgo.types.MemCell`
             slices; ``tail`` carries any unconfirmed trailing messages.
         """
         return await detect_boundaries(messages, llm=self._llm, is_final=is_final, prompt=prompt)
@@ -106,6 +107,13 @@ class BoundaryDetector:
               * ``should_end`` with smart-mask active: ``[history[-1], new]`` (bridge).
               * ``should_end`` without smart-mask: ``[new]`` (clean cut).
               * ``not should_end``: ``[*history, new]`` (accumulate).
+
+            - ``should_wait`` — always ``None`` on this path. The step prompt answers whether a new
+              episode has begun, and never evaluates whether the trailing segment carries enough to be
+              placed in one; ``None`` says so rather than guessing. Only
+              :meth:`adetect` returns a ``bool`` here. See
+              :class:`~everalgo.boundary.DetectionResult` for why inverting ``should_end`` is not a
+              substitute.
         """
         # Smart-mask threshold gating — computed up-front so force-split also bridges.
         smart_mask_flag = smart_mask and len(history) > smart_mask_threshold
@@ -118,7 +126,7 @@ class BoundaryDetector:
         needs_force_split = total_tokens >= hard_token_limit or total_messages >= hard_message_limit
         if needs_force_split and len(history) >= 2:
             new_history = [history[-1], new] if smart_mask_flag else [new]
-            return DetectionResult(cells=[_make_step_cell(history)], tail=new_history)
+            return DetectionResult(cells=[_make_step_cell(history)], tail=new_history, should_wait=None)
         # else: needs_force_split but history too short → fall through to LLM
 
         # Phase 2: LLM decision
@@ -137,10 +145,10 @@ class BoundaryDetector:
                 logger.warning("BoundaryDetector: should_end=True but topic_summary is empty; using fallback")
             cell = _make_step_cell(history)
             new_history = [history[-1], new] if smart_mask_flag else [new]
-            return DetectionResult(cells=[cell], tail=new_history)
+            return DetectionResult(cells=[cell], tail=new_history, should_wait=None)
 
         # not should_end: caller keeps accumulating.
-        return DetectionResult(cells=[], tail=[*history, new])
+        return DetectionResult(cells=[], tail=[*history, new], should_wait=None)
 
     detect_step = async_to_sync(adetect_step)
     """Sync bridge — only callable from non-event-loop contexts."""

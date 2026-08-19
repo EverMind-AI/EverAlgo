@@ -6,6 +6,11 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `BoundaryDetector.adetect` and `adetect_step` return the three-field `DetectionResult`** (see `everalgo-boundary` 0.3.0). Two-value unpacking of their result no longer works.
+- `adetect` forwards the LLM's `should_wait` verdict. `adetect_step` returns `should_wait=None` on every path, and that is the honest answer rather than a gap: its prompt asks whether a new episode has begun and never evaluates whether the trailing segment carries enough to be placed in one. Deriving one from the other does not work in either direction — both `should_end` and `should_wait` default to "no" for unrelated reasons, so inverting `should_end` would report "wait" on nearly every step (the step prompt's own principle is to keep related content together), and on the steps that do close an episode it would claim "no need to wait" about a tail that path never looked at. A test pins this so the inversion is not introduced later as a convenience.
+
 ## [0.5.0] - 2026-08-19
 
 ### Added
