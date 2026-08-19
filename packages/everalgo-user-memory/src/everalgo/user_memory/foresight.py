@@ -14,6 +14,7 @@ from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Foresight, MemCell
+from everalgo.user_memory._language import OutputLanguage, build_language_rule
 from everalgo.user_memory._render import chat_messages, render_content
 from everalgo.user_memory.prompts.en.foresight import FORESIGHT_GENERATION_PROMPT
 
@@ -43,6 +44,7 @@ class ForesightExtractor:
         *,
         sender_id: str,
         prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,
     ) -> list[Foresight]:
         """Extract foresights for ``sender_id`` from ``memcell``.
 
@@ -50,10 +52,16 @@ class ForesightExtractor:
             memcell: Source slice from boundary detection.
             sender_id: Must be one of memcell's chat senders; not inferred.
             prompt: Prompt override; ``None`` uses the bundled default.
+            output_language: Language to write the foresights in, as an :class:`OutputLanguage` member
+                or equivalent string in any casing. Naming one removes the decision from the model, which
+                measured zero wrong languages; leaving it ``None`` asks the model to follow the
+                participants, which costs roughly one extraction in thirteen and fails towards Chinese.
+                See ``prompts/en/_language.py`` for the measurements.
 
         Raises:
             LLMError: From the LLM call.
             json.JSONDecodeError: On unparseable response.
+            ValueError: If ``output_language`` names no supported language.
         """
         user_name = _resolve_user_name(memcell, sender_id)
         rendered = render_prompt(
@@ -62,6 +70,7 @@ class ForesightExtractor:
             USER_ID=sender_id,
             USER_NAME=user_name,
             CONVERSATION_TEXT=_render_conversation(memcell),
+            language_rule=build_language_rule(output_language),
         )
 
         start_time_fallback = _format_start_time_from_timestamp(memcell.items[0].timestamp)

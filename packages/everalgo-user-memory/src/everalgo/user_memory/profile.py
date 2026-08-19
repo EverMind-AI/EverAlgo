@@ -13,6 +13,13 @@ from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import MemCell, Profile
+from everalgo.user_memory._language import (
+    COMPACTED_PROFILE_LANGUAGE_RULE,
+    EXISTING_PROFILE_LANGUAGE_RULE,
+    PROFILE_INIT_LANGUAGE_RULE,
+    OutputLanguage,
+    build_language_rule,
+)
 from everalgo.user_memory._render import chat_messages, render_content
 from everalgo.user_memory.prompts.en.profile import (
     PROFILE_COMPACT_PROMPT,
@@ -50,6 +57,7 @@ class ProfileExtractor:
         sender_id: str,
         old_profile: Profile | None = None,
         prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,
     ) -> Profile:
         """Extract one Profile for ``sender_id`` from ``memcells``.
 
@@ -69,10 +77,20 @@ class ProfileExtractor:
                 in multi-party conversations.
             old_profile: Existing profile for UPDATE mode; None triggers INIT mode.
             prompt: Prompt override; None uses the bundled default for the selected mode.
+            output_language: Language to write the profile in, as an :class:`OutputLanguage` member or
+                equivalent string in any casing. Honoured by all three modes; pass the same language on every
+                call and a profile's language is fixed by the caller for its whole life, with no inference
+                anywhere. Left ``None`` each mode falls back to its own judgement: INIT follows the
+                participants, which measured 18% wrong over four models against 0% when the language is
+                named, while UPDATE and COMPACT inherit the language the profile is already written in —
+                safe against a later conversation in another language splitting a profile in half, but
+                unrecoverable if the language it inherits is already wrong. Naming a language on an update
+                is also how such a profile gets corrected. See ``prompts/en/_language.py`` for the
+                measurements.
 
         Raises:
             ValueError: If ``memcells`` is empty, ``sender_id`` is not a user speaker in ``memcells``,
-                or the LLM response is malformed.
+                the LLM response is malformed, or ``output_language`` names no supported language.
             LLMError: From the LLM call.
             json.JSONDecodeError: On unparseable response.
         """
@@ -87,8 +105,16 @@ class ProfileExtractor:
             )
 
         if old_profile is None:
-            return await self._init_extract(memcells, sender_id=sender_id, prompt=prompt)
-        return await self._update_extract(memcells, sender_id=sender_id, old_profile=old_profile, prompt=prompt)
+            return await self._init_extract(
+                memcells, sender_id=sender_id, prompt=prompt, output_language=output_language
+            )
+        return await self._update_extract(
+            memcells,
+            sender_id=sender_id,
+            old_profile=old_profile,
+            prompt=prompt,
+            output_language=output_language,
+        )
 
     extract = async_to_sync(aextract)
 
@@ -102,10 +128,15 @@ class ProfileExtractor:
         *,
         sender_id: str,
         prompt: str | None,
+        output_language: OutputLanguage | str | None,
     ) -> Profile:
         conversation_text = _render_conversation(memcells)
         rendered = render_prompt(
-            PROFILE_INITIAL_EXTRACTION_PROMPT, prompt, conversation_text=conversation_text, target_user=sender_id
+            PROFILE_INITIAL_EXTRACTION_PROMPT,
+            prompt,
+            conversation_text=conversation_text,
+            target_user=sender_id,
+            language_rule=build_language_rule(output_language, fallback=PROFILE_INIT_LANGUAGE_RULE),
         )
 
         data = await _call_llm_for_profile_init(self._llm, rendered)
@@ -133,6 +164,7 @@ class ProfileExtractor:
         sender_id: str,
         old_profile: Profile,
         prompt: str | None,
+        output_language: OutputLanguage | str | None,
     ) -> Profile:
         current_profile_text = _render_profile_for_update(old_profile)
         conversation_text = _render_conversation(memcells)
@@ -142,6 +174,7 @@ class ProfileExtractor:
             current_profile=current_profile_text,
             conversations=conversation_text,
             target_user=sender_id,
+            language_rule=build_language_rule(output_language, fallback=EXISTING_PROFILE_LANGUAGE_RULE),
         )
 
         data = await _call_llm_for_profile_update(self._llm, rendered)
@@ -152,10 +185,10 @@ class ProfileExtractor:
         implicit_traits: list[Any] = list(getattr(merged_profile, "implicit_traits", []) or [])
         total_items = len(explicit_info) + len(implicit_traits)
         if total_items > _PROFILE_COMPACT_THRESHOLD:
-            return await self._compact(merged_profile)
+            return await self._compact(merged_profile, output_language=output_language)
         return merged_profile
 
-    async def _compact(self, profile: Profile) -> Profile:
+    async def _compact(self, profile: Profile, *, output_language: OutputLanguage | str | None = None) -> Profile:
         explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
         implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
         total_items = len(explicit_info) + len(implicit_traits)
@@ -170,6 +203,7 @@ class ProfileExtractor:
             total_items=total_items,
             max_items=_PROFILE_MAX_ITEMS,
             profile_text=profile_text,
+            language_rule=build_language_rule(output_language, fallback=COMPACTED_PROFILE_LANGUAGE_RULE),
         )
 
         data = await _call_llm_for_profile_compact(self._llm, rendered)

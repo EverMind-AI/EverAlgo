@@ -21,6 +21,7 @@ from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, Profile, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
+from everalgo.user_memory import OutputLanguage
 from everalgo.user_memory.profile import (
     _PROFILE_COMPACT_THRESHOLD,
     ProfileExtractor,
@@ -587,61 +588,86 @@ async def test_aextract_rejects_assistant_as_target() -> None:
 # Language rules — INIT decides the language, UPDATE / COMPACT preserve it
 # ==========================================================================
 
-_MIXED_INPUT_CLAUSES_EN = (
-    "themselves compose",  # judgement source restricted to participants' own writing
-    "dominates the conversation by volume",  # long quoted material must not flip the judgement
-    # An operational test for "is this pasted" — the negative instruction alone left the model unable to
-    # recognise unmarked prose as pasted, which cost ~35% of judgements on that shape of input.
-    "Apply this test to decide what is pasted",
-    "whether or not it is wrapped in quotation marks or a code fence",
-    "sentence structure",  # embedded foreign terms do not flip the judgement
-    "keep their original form",  # proper nouns / technical terms stay untranslated
-)
 
-# zh must not rot relative to en — these prompts are public and selectable via `prompt=`.
-_MIXED_INPUT_CLAUSES_ZH = (
-    "本人撰写的内容",
-    "在篇幅上占据对话主体",
-    "判断何为粘贴材料时适用以下检验",  # operational test, mirrors the en clause list
-    "也无论是否被引号或代码块包裹",
-    "句子结构",
-    "保留原文形式",
-)
-
-
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
-def test_en_init_prompt_covers_mixed_input(clause: str) -> None:
-    """INIT reads the raw conversation, so it carries the full judgement guidance."""
+def test_init_prompt_carries_the_language_placeholder_at_both_ends() -> None:
+    """Long prompts lose middle instructions, so the rule is spliced at head and tail."""
     from everalgo.user_memory.prompts.en.profile import PROFILE_INITIAL_EXTRACTION_PROMPT
 
-    assert clause in PROFILE_INITIAL_EXTRACTION_PROMPT
+    assert PROFILE_INITIAL_EXTRACTION_PROMPT.count("{language_rule}") == 2
 
 
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
-def test_zh_init_prompt_covers_mixed_input(clause: str) -> None:
-    """The zh INIT prompt carries the same judgement clauses as en."""
-    from everalgo.user_memory.prompts.zh.profile import PROFILE_INITIAL_EXTRACTION_PROMPT
+def test_all_three_prompts_carry_the_language_placeholder_at_both_ends() -> None:
+    """Every mode honours ``output_language``, so every prompt takes its rule at render time.
 
-    assert clause in PROFILE_INITIAL_EXTRACTION_PROMPT
-
-
-def test_update_and_compact_preserve_the_existing_language() -> None:
-    """UPDATE / COMPACT inherit the language INIT fixed; they must not re-judge it.
-
-    Re-judging downstream is how an update in a second language would silently split a
-    profile's language, so these two prompts deliberately carry no judgement clauses.
+    Long prompts lose middle instructions, hence head and tail rather than once.
     """
-    from everalgo.user_memory.prompts.en.profile import PROFILE_COMPACT_PROMPT, PROFILE_UPDATE_PROMPT
-    from everalgo.user_memory.prompts.zh.profile import PROFILE_COMPACT_PROMPT as ZH_COMPACT
-    from everalgo.user_memory.prompts.zh.profile import PROFILE_UPDATE_PROMPT as ZH_UPDATE
+    from everalgo.user_memory.prompts.en.profile import (
+        PROFILE_COMPACT_PROMPT,
+        PROFILE_INITIAL_EXTRACTION_PROMPT,
+        PROFILE_UPDATE_PROMPT,
+    )
 
-    assert "as the existing profile you are updating" in PROFILE_UPDATE_PROMPT
-    assert "as the profile you are compacting" in PROFILE_COMPACT_PROMPT
-    assert "正在更新的已有画像" in ZH_UPDATE
-    assert "正在精简的画像" in ZH_COMPACT
-    for prompt in (PROFILE_UPDATE_PROMPT, PROFILE_COMPACT_PROMPT, ZH_UPDATE, ZH_COMPACT):
-        assert "dominate" not in prompt
-        assert "篇幅上占据对话主体" not in prompt
+    for prompt in (PROFILE_INITIAL_EXTRACTION_PROMPT, PROFILE_UPDATE_PROMPT, PROFILE_COMPACT_PROMPT):
+        assert prompt.count("{language_rule}") == 2
+        assert "CRITICAL LANGUAGE RULE" not in prompt
+
+
+async def test_init_rendering_injects_the_participant_rule_when_no_language_is_named() -> None:
+    rendered = await _render_init_prompt()
+
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "the language the participants use" in rendered
+    assert "{language_rule}" not in rendered
+
+
+async def test_init_rendering_injects_the_named_language() -> None:
+    rendered = await _render_init_prompt(output_language=OutputLanguage.GERMAN)
+
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "Write ALL output fields in German." in rendered
+    assert "the language the participants use" not in rendered
+
+
+async def _render_init_prompt(**kwargs: object) -> str:
+    """Capture what the extractor hands the LLM; the rule only exists after rendering."""
+    captured: list[str] = []
+
+    class Capture:
+        async def chat(self, messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+            assert isinstance(messages[0].content, str)  # narrow for test
+            captured.append(messages[0].content)
+            raise _PromptCapturedError
+
+    with pytest.raises(_PromptCapturedError):
+        await ProfileExtractor(llm=Capture()).aextract([_memcell()], sender_id="u_alice", **kwargs)  # type: ignore[arg-type]
+    return captured[0]
+
+
+class _PromptCapturedError(Exception):
+    """Ends the call once the prompt has been captured — no LLM response is needed."""
+
+
+def test_update_and_compact_fall_back_to_inheriting_the_profiles_language() -> None:
+    """Without a named language those two inherit rather than re-judge, and carry no judgement clauses.
+
+    Re-judging downstream is how an update in a second language would split a profile's language in half.
+    The fallbacks differ from INIT's for that reason — the conversation rule's paragraphs would invite
+    exactly the judgement these paths must not make.
+    """
+    from everalgo.user_memory._language import (
+        COMPACTED_PROFILE_LANGUAGE_RULE,
+        EXISTING_PROFILE_LANGUAGE_RULE,
+        build_language_rule,
+    )
+
+    update = build_language_rule(None, fallback=EXISTING_PROFILE_LANGUAGE_RULE)
+    compact = build_language_rule(None, fallback=COMPACTED_PROFILE_LANGUAGE_RULE)
+
+    assert "as the existing profile you are updating" in update
+    assert "as the profile you are compacting" in compact
+    for rule in (update, compact):
+        assert "dominate" not in rule
+        assert "the language the participants use" not in rule
 
 
 def test_compact_prompt_no_longer_references_a_conversation_it_never_receives() -> None:
@@ -651,24 +677,77 @@ def test_compact_prompt_no_longer_references_a_conversation_it_never_receives() 
     assert "input conversation content" not in PROFILE_COMPACT_PROMPT
 
 
-def test_all_profile_prompts_state_the_language_rule_at_both_ends() -> None:
-    """Long prompts lose middle instructions, so each rule appears at head and tail."""
+def test_every_profile_fallback_binds_the_personality_tags() -> None:
+    """Tags are the one part of a profile a language rule can miss, so all three paths must name them.
+
+    They appear in the prompts only as English examples, and they are model-authored free text, so a rule
+    that binds the descriptions without naming the tags leaves them free to stay English. INIT is included
+    deliberately: it is the call that sets the language the other two inherit.
+    """
+    from everalgo.user_memory._language import (
+        COMPACTED_PROFILE_LANGUAGE_RULE,
+        EXISTING_PROFILE_LANGUAGE_RULE,
+        PROFILE_INIT_LANGUAGE_RULE,
+    )
+
+    for rule in (PROFILE_INIT_LANGUAGE_RULE, EXISTING_PROFILE_LANGUAGE_RULE, COMPACTED_PROFILE_LANGUAGE_RULE):
+        assert "personality tag" in rule
+
+
+def test_init_fallback_says_it_is_the_call_that_fixes_the_language() -> None:
+    """Only INIT chooses; UPDATE and COMPACT inherit. The prompt has to say which call it is."""
+    from everalgo.user_memory._language import PROFILE_INIT_LANGUAGE_RULE
+
+    assert "fixes the profile's language" in PROFILE_INIT_LANGUAGE_RULE
+
+
+def test_init_fallback_extends_the_measured_participant_rule_verbatim() -> None:
+    """The eight-arm measurement describes the participant rule, so INIT must add to it, not reword it."""
+    from everalgo.user_memory._language import PROFILE_INIT_LANGUAGE_RULE
+    from everalgo.user_memory.prompts.en._language import PARTICIPANT_LANGUAGE_RULE
+
+    assert PROFILE_INIT_LANGUAGE_RULE.startswith(PARTICIPANT_LANGUAGE_RULE)
+
+
+# ==========================================================================
+# INIT language rule — shape guards
+#
+# 0.4.0 rewrote the INIT rule from a concrete enumeration to an abstract statement and shipped it
+# with experimental backing — but the experiments only covered the case that release set out to fix
+# (pasted material), never the baseline. On low-information English input the abstract form produced
+# whole-profile foreign-language output, and since UPDATE / COMPACT faithfully preserve whatever
+# language INIT picked, a mislabelled profile could never recover.
+#
+# These assertions cost nothing and run on every commit. Had they existed, that release would have
+# failed here instead of in production.
+# ==========================================================================
+
+# Phrasing that frames the output language as something the model decides. The abstract rule paired
+# with "whatever language you choose here" is what turned language into an open variable; once it is
+# open, every additional language sentence argues into it rather than closing it down.
+_OPEN_VARIABLE_PHRASES_EN = ("whatever language you choose", "language you choose here")
+
+
+async def test_init_rule_keeps_the_concrete_language_enumeration_at_both_ends() -> None:
+    """An abstract "match that language" rule is not enough — name the languages.
+
+    Counted rather than merely present: the rule is spliced at head and tail, and weakening only one
+    of the two would otherwise slip past. The rule text itself is guarded in
+    ``test_user_memory_language.py``; what this checks is that INIT gets both copies.
+    """
+    rendered = await _render_init_prompt()
+
+    assert rendered.count("write in Chinese") == 2
+    assert rendered.count("if in English, write in English") == 2
+
+
+@pytest.mark.parametrize("phrase", _OPEN_VARIABLE_PHRASES_EN)
+def test_en_profile_prompts_never_frame_language_as_a_choice(phrase: str) -> None:
+    """No prompt may describe the output language as the model's to pick."""
     import everalgo.user_memory.prompts.en.profile as en_mod
-    import everalgo.user_memory.prompts.zh.profile as zh_mod
 
     for name in ("PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT", "PROFILE_INITIAL_EXTRACTION_PROMPT"):
-        assert getattr(en_mod, name).count("CRITICAL LANGUAGE RULE") == 2, name
-        assert getattr(zh_mod, name).count("关键语言规则") == 2, name
-
-
-def test_profile_prompts_mention_tags_follow_the_output_language() -> None:
-    """Personality tags used to be shown only as English examples; every rule now binds them."""
-    import everalgo.user_memory.prompts.en.profile as en_mod
-    import everalgo.user_memory.prompts.zh.profile as zh_mod
-
-    for name in ("PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT", "PROFILE_INITIAL_EXTRACTION_PROMPT"):
-        assert "personality tag" in getattr(en_mod, name), name
-        assert "性格标签" in getattr(zh_mod, name), name
+        assert phrase not in getattr(en_mod, name), name
 
 
 # The UPDATE prompt used to say nothing at all about how an index is resolved, while its own example
@@ -690,14 +769,6 @@ _INDEX_SEMANTICS_CLAUSES_ZH = (
 def test_en_update_prompt_states_the_index_semantics(clause: str) -> None:
     """Index semantics must be explicit, so a model cannot read sequential-mutation into them."""
     from everalgo.user_memory.prompts.en.profile import PROFILE_UPDATE_PROMPT
-
-    assert clause in PROFILE_UPDATE_PROMPT
-
-
-@pytest.mark.parametrize("clause", _INDEX_SEMANTICS_CLAUSES_ZH)
-def test_zh_update_prompt_states_the_index_semantics(clause: str) -> None:
-    """The zh UPDATE prompt carries the same index-semantics rule as en."""
-    from everalgo.user_memory.prompts.zh.profile import PROFILE_UPDATE_PROMPT
 
     assert clause in PROFILE_UPDATE_PROMPT
 

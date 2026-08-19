@@ -7,6 +7,8 @@ import pytest
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.user_memory import OutputLanguage
+from everalgo.user_memory._language import SOURCE_TEXT_LANGUAGE_RULE
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.prompts.en.atomic_fact_from_text import ATOMIC_FACT_FROM_TEXT_PROMPT_EN
 
@@ -163,11 +165,13 @@ async def test_default_prompt_is_atomic_fact_from_text_prompt_en() -> None:
         ATOMIC_FACT_FROM_TEXT_PROMPT_EN.replace("{{EPISODE_TEXT}}", marker)
         .replace("{{TEXT}}", marker)
         .replace("{{TIME}}", _EXPECTED_TIME_STR)
+        .replace("{{LANGUAGE_RULE}}", SOURCE_TEXT_LANGUAGE_RULE)
     )
     assert captured[0] == expected_body
     # Sanity: no un-substituted placeholders remain
     assert "{{EPISODE_TEXT}}" not in captured[0]
     assert "{{TIME}}" not in captured[0]
+    assert "{{LANGUAGE_RULE}}" not in captured[0]
 
 
 # ---------------------------------------------------------------------------
@@ -189,48 +193,59 @@ def test_sync_bridge_extract_from_text_works() -> None:
 # ==========================================================================
 
 
-def test_from_text_prompts_state_the_language_rule_at_both_ends() -> None:
-    """Long prompts lose middle instructions, so each rule appears at head and tail."""
-    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
-    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
+def test_from_text_prompts_carry_the_language_placeholder_at_both_ends() -> None:
+    """Long prompts lose middle instructions, so the rule is spliced at head and tail.
 
-    assert en_mod.EVENT_LOG_PROMPT.count("CRITICAL LANGUAGE RULE") == 2
-    assert en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN.count("CRITICAL LANGUAGE RULE") == 2
-    assert zh_mod.EVENT_LOG_PROMPT.count("关键语言规则") == 2
-    assert zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH.count("关键语言规则") == 2
-
-
-def test_from_text_prompts_carry_no_mixed_input_judgement() -> None:
-    """EPISODE_TEXT is already extracted, so this prompt inherits rather than judges the language.
-
-    Judgement belongs to episode extraction, where the mixed-input problem (pasted logs, code blocks,
-    quoted foreign-language material) actually exists.
+    Double braces, unlike the other operators: this module substitutes by hand rather than through
+    ``render_prompt``, so its slot follows its own convention.
     """
     import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
-    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
 
-    assert "dominate" not in en_mod.EVENT_LOG_PROMPT
-    assert "dominate" not in en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN
-    assert "篇幅" not in zh_mod.EVENT_LOG_PROMPT
-    assert "篇幅" not in zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH
+    assert en_mod.EVENT_LOG_PROMPT.count("{{LANGUAGE_RULE}}") == 2
+    assert en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN.count("{{LANGUAGE_RULE}}") == 2
 
 
-def test_zh_from_text_prompts_are_not_byte_identical_to_en() -> None:
-    """A real translation, not a placeholder re-export of the English constants."""
-    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
-    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
+async def test_rendering_inherits_the_source_text_language_when_none_is_named() -> None:
+    """``text`` is normally an already-extracted narrative, so the fallback inherits instead of judging.
 
-    assert en_mod.EVENT_LOG_PROMPT != zh_mod.EVENT_LOG_PROMPT
-    assert en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN != zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH
+    The conversation rule's paragraphs — pasted material, a second speaker, a contradicting identifier —
+    have nothing to adjudicate here, and asking for that judgement again could only disagree with the
+    extraction that already made it.
+    """
+    rendered = await _render_from_text_prompt()
+
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "SAME language EPISODE_TEXT itself is written in" in rendered
+    assert "dominate" not in rendered
+    assert "{{LANGUAGE_RULE}}" not in rendered
 
 
-def test_zh_from_text_prompts_keep_the_same_placeholders_as_en() -> None:
-    """A translated prompt that drops a placeholder would render with a literal `{{TIME}}` in it."""
-    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
-    import everalgo.user_memory.prompts.zh.atomic_fact_from_text as zh_mod
+async def test_rendering_injects_the_named_language() -> None:
+    rendered = await _render_from_text_prompt(output_language=OutputLanguage.GERMAN)
 
-    for placeholder in ("{{EPISODE_TEXT}}", "{{TIME}}"):
-        assert placeholder in en_mod.EVENT_LOG_PROMPT
-        assert placeholder in zh_mod.EVENT_LOG_PROMPT
-        assert placeholder in en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN
-        assert placeholder in zh_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_ZH
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "Write ALL output fields in German." in rendered
+    assert "SAME language EPISODE_TEXT itself is written in" not in rendered
+
+
+async def _render_from_text_prompt(output_language: OutputLanguage | str | None = None) -> str:
+    """Capture what the extractor hands the LLM; the rule only exists after rendering."""
+    captured: list[str] = []
+
+    class Capture:
+        async def chat(self, messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+            assert isinstance(messages[0].content, str)  # narrow for test
+            captured.append(messages[0].content)
+            raise _PromptCapturedError
+
+    with pytest.raises(_PromptCapturedError):
+        await AtomicFactExtractor(llm=Capture()).aextract_from_text(  # type: ignore[arg-type]
+            "li moved to Hangzhou last month.",
+            timestamp=1700000000000,
+            output_language=output_language,
+        )
+    return captured[0]
+
+
+class _PromptCapturedError(Exception):
+    """Ends the call once the prompt has been captured — no LLM response is needed."""

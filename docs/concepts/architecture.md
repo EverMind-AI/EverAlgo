@@ -114,7 +114,7 @@ Sibling distributions at the same layer do not depend on each other (e.g. `user-
 |---|---|
 | `types` | Shared data contracts: `ChatMessage`, `MemCell`, `Episode`, `RankInput`, `RankOutput`, etc. |
 | `llm` | `LLMClient` Protocol, `LLMConfig`, provider routing, `LLMError` hierarchy |
-| `prompts` | Prompt validator; prompt strings live as module-level constants in each subpackage's `prompts/en/` and `prompts/zh/` |
+| `prompts` | Prompt validator; prompt strings live as module-level constants in each subpackage's `prompts/en/` (and `prompts/zh/` where a package still ships translations — `user_memory` dropped its tree in favour of an `output_language` argument) |
 | `testing` | `FakeLLMClient`, `CallRecord`, structural assertion helpers |
 
 ---

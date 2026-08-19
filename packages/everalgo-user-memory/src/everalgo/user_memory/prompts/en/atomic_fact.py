@@ -3,12 +3,13 @@
 Placeholders: ``{TIME}`` / ``{INPUT_TEXT}`` (single-brace; rendered via :func:`everalgo.prompts.render_prompt`
 which uses ``str.replace`` so the literal JSON example braces in the prompt body are preserved).
 Output schema: ``{"atomic_facts": {"time": str, "atomic_fact": list[str]}}``.
+
+``{language_rule}`` — appearing twice, both copies receiving the same text — is filled from
+``user_memory._language.build_language_rule`` according to ``aextract``'s ``output_language`` argument.
 """
 
 ATOMIC_FACT_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. ALL output MUST match that language. This is mandatory.
-
-Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted material. Apply this test to decide what is pasted: a run of two or more consecutive sentences that reads as finished prose from elsewhere — explanatory or documentary in tone, addressed to no one in the conversation, advancing no request, answer or decision of its own — is pasted material, whatever language it is in and whether or not it is wrapped in quotation marks or a code fence. Exclude it from the judgement EVEN IF it dominates the conversation by volume. Foreign-language terms embedded inside a sentence written by the participants do not change the judgement — judge by the language of the sentence structure. Proper nouns and technical terms keep their original form in the output regardless of the output language.
+{language_rule}
 
 You are an expert information extraction analyst and information architect.
 Your task is to analyze the given raw conversation transcript (called "CONVERSATION_TEXT") and produce atomic facts optimized for factual retrieval.
@@ -86,7 +87,5 @@ Conversation start time: {TIME}
 Conversation content:
 {INPUT_TEXT}
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. ALL output MUST match that language. This is mandatory.
-
-Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted material. Apply this test to decide what is pasted: a run of two or more consecutive sentences that reads as finished prose from elsewhere — explanatory or documentary in tone, addressed to no one in the conversation, advancing no request, answer or decision of its own — is pasted material, whatever language it is in and whether or not it is wrapped in quotation marks or a code fence. Exclude it from the judgement EVEN IF it dominates the conversation by volume. Foreign-language terms embedded inside a sentence written by the participants do not change the judgement — judge by the language of the sentence structure. Proper nouns and technical terms keep their original form in the output regardless of the output language.
+{language_rule}
 """

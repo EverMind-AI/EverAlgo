@@ -11,6 +11,7 @@ from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
+from everalgo.user_memory import OutputLanguage
 from everalgo.user_memory.episode import (
     EpisodeExtractor,
     _format_prompt_time,
@@ -47,86 +48,52 @@ def _memcell() -> MemCell:
 # Language rules — both variants, both languages, mixed-input clauses
 # ==========================================================================
 
-_MIXED_INPUT_CLAUSES_EN = (
-    "themselves compose",  # judgement source restricted to participants' own writing
-    "dominates the conversation by volume",  # long quoted material must not flip the judgement
-    # An operational test for "is this pasted" — the negative instruction alone left the model unable to
-    # recognise unmarked prose as pasted, which cost ~35% of judgements on that shape of input.
-    "Apply this test to decide what is pasted",
-    "whether or not it is wrapped in quotation marks or a code fence",
-    "sentence structure",  # embedded foreign terms do not flip the judgement
-    "keep their original form",  # proper nouns / technical terms stay untranslated
-)
+_LANGUAGE_PROMPTS = ("EPISODE_GENERATION_PROMPT", "USER_EPISODE_GENERATION_PROMPT")
 
 
-def test_en_generic_variant_has_language_rule() -> None:
-    """The generic variant had no language rule at all — that was the main source of mixed output."""
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
+def test_both_variants_carry_the_language_placeholder_at_both_ends(name: str) -> None:
+    """Long prompts lose middle instructions, so the rule is spliced at head and tail."""
+    import everalgo.user_memory.prompts.en.episode as mod
 
-    assert "CRITICAL LANGUAGE RULE" in EPISODE_GENERATION_PROMPT
-
-
-def test_en_generic_variant_states_language_rule_at_both_ends() -> None:
-    """Long prompts lose middle instructions; the rule is repeated at head and tail."""
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
-
-    assert EPISODE_GENERATION_PROMPT.count("CRITICAL LANGUAGE RULE") == 2
+    assert getattr(mod, name).count("{language_rule}") == 2
 
 
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
-def test_en_generic_variant_covers_mixed_input(clause: str) -> None:
-    """Chinese question plus long English pasted material must still yield Chinese output."""
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+@pytest.mark.parametrize("sender_id", [None, "u_alice"])
+async def test_rendering_injects_the_participant_rule_when_no_language_is_named(sender_id: str | None) -> None:
+    rendered = await _render_episode_prompt(sender_id=sender_id)
 
-    assert clause in EPISODE_GENERATION_PROMPT
-
-
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
-def test_en_user_variant_covers_mixed_input(clause: str) -> None:
-    """The user variant already had a rule, but it never defined what to judge the language from."""
-    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT
-
-    assert clause in USER_EPISODE_GENERATION_PROMPT
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "the language the participants use" in rendered
+    assert "{language_rule}" not in rendered
 
 
-# zh must not rot relative to en — it is a public prompt selectable via `prompt=` (see README.md).
-# Each substring sits after the subject noun phrase in the mixed-input judgement clause, so it is
-# invariant across both the generic ("对话参与者") and user (`` `{user_name}` ``) variants.
-_MIXED_INPUT_CLAUSES_ZH = (
-    "本人撰写的内容",  # judgement source restricted to participants' own writing
-    "在篇幅上占据对话主体",  # long quoted material must not flip the judgement
-    "判断何为粘贴材料时适用以下检验",  # operational test, mirrors the en clause above
-    "也无论是否被引号或代码块包裹",
-    "句子结构",  # embedded foreign terms do not flip the judgement
-    "保留原文形式",  # proper nouns / technical terms stay untranslated
-)
+@pytest.mark.parametrize("sender_id", [None, "u_alice"])
+async def test_rendering_injects_the_named_language(sender_id: str | None) -> None:
+    rendered = await _render_episode_prompt(sender_id=sender_id, output_language=OutputLanguage.GERMAN)
+
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "Write ALL output fields in German." in rendered
+    assert "the language the participants use" not in rendered
 
 
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
-def test_zh_generic_variant_covers_mixed_input(clause: str) -> None:
-    """The zh prompt must not rot relative to en — it is a public prompt selectable via `prompt=`."""
-    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
+async def _render_episode_prompt(*, sender_id: str | None, **kwargs: object) -> str:
+    """Capture what the extractor hands the LLM; the rule only exists after rendering."""
+    captured: list[str] = []
 
-    assert clause in EPISODE_GENERATION_PROMPT
+    class Capture:
+        async def chat(self, messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+            assert isinstance(messages[0].content, str)  # narrow for test
+            captured.append(messages[0].content)
+            raise _PromptCapturedError
+
+    with pytest.raises(_PromptCapturedError):
+        await EpisodeExtractor(llm=Capture()).aextract(_memcell(), sender_id=sender_id, **kwargs)  # type: ignore[arg-type]
+    return captured[0]
 
 
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
-def test_zh_user_variant_covers_mixed_input(clause: str) -> None:
-    """Same mixed-input clauses as the generic variant."""
-    from everalgo.user_memory.prompts.zh.episode import USER_EPISODE_GENERATION_PROMPT
-
-    assert clause in USER_EPISODE_GENERATION_PROMPT
-
-
-def test_zh_and_en_have_same_language_rule_count() -> None:
-    """Structural parity guard: each variant states its rule at head and tail in both languages."""
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT as EN_GENERIC
-    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT as EN_USER
-    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT as ZH_GENERIC
-    from everalgo.user_memory.prompts.zh.episode import USER_EPISODE_GENERATION_PROMPT as ZH_USER
-
-    assert EN_GENERIC.count("CRITICAL LANGUAGE RULE") == ZH_GENERIC.count("关键语言规则") == 2
-    assert EN_USER.count("CRITICAL LANGUAGE RULE") == ZH_USER.count("关键语言规则") == 2
+class _PromptCapturedError(Exception):
+    """Ends the call once the prompt has been captured — no LLM response is needed."""
 
 
 # ==========================================================================
@@ -751,27 +718,7 @@ def test_all_variants_require_utc_label_on_absolute_clock_times() -> None:
     since the narrative's times belong to the events. Do not reintroduce it.
     """
     import everalgo.user_memory.prompts.en.episode as en_mod
-    import everalgo.user_memory.prompts.zh.episode as zh_mod
 
     for name in ("EPISODE_GENERATION_PROMPT", "USER_EPISODE_GENERATION_PROMPT"):
         assert "MUST carry the UTC zone label" in getattr(en_mod, name)
-        assert "UTC 时区标识" in getattr(zh_mod, name)
         assert "must NOT begin with a timestamp" not in getattr(en_mod, name)
-        assert "不要以时间戳开头" not in getattr(zh_mod, name)
-
-
-def test_zh_example_start_time_uses_input_side_format() -> None:
-    """The zh example's conversation-start-time value must match what the code now injects."""
-    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
-
-    assert "2024-03-14 15:00 UTC (Thursday)" in EPISODE_GENERATION_PROMPT
-    assert "3:00 PM" not in EPISODE_GENERATION_PROMPT
-
-
-def test_zh_generic_example_content_uses_iso_dates() -> None:
-    """The zh generic example content used Chinese month-name dates; unify on YYYY-MM-DD."""
-    from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
-
-    content = _extract_example_field(EPISODE_GENERATION_PROMPT, "如果对话开始时间为", "content")
-    assert "2024-03-16" in content
-    assert "2024 年 3 月" not in content

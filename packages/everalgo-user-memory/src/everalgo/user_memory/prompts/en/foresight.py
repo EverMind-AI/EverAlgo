@@ -3,26 +3,13 @@
 Placeholders: ``{USER_ID}`` / ``{USER_NAME}`` / ``{CONVERSATION_TEXT}`` (uppercase). Rendered via
 :py:meth:`str.format`.
 Output schema: JSON object ``{"foresights": [{content, evidence, start_time, end_time, duration_days}, ...]}``.
+
+``{language_rule}`` — appearing twice, both copies receiving the same text — is filled from
+``user_memory._language.build_language_rule`` according to ``aextract``'s ``output_language`` argument.
 """
 
-_LANGUAGE_RULE = (
-    "**CRITICAL LANGUAGE RULE**: Output in the SAME language the conversation participants themselves "
-    "write in. ALL output MUST match that language. This is mandatory.\n\n"
-    "Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted "
-    "material. Apply this test to decide what is pasted: a run of two or more consecutive sentences that "
-    "reads as finished prose from elsewhere — explanatory or documentary in tone, addressed to no one in "
-    "the conversation, advancing no request, answer or decision of its own — is pasted material, whatever "
-    "language it is in and whether or not it is wrapped in quotation marks or a code fence. Exclude it "
-    "from the judgement EVEN IF it dominates the conversation by volume. Foreign-language terms "
-    "embedded inside a sentence written by the participants do not change the judgement — judge by the "
-    "language of the sentence structure. Proper nouns and technical terms keep their original form in "
-    "the output regardless of the output language."
-)
-
-FORESIGHT_GENERATION_PROMPT = (
-    "\n"
-    + _LANGUAGE_RULE
-    + """
+FORESIGHT_GENERATION_PROMPT = """
+{language_rule}
 
 You are an advanced personal foresight analysis agent. Your task is to predict the specific impacts that a user's latest MemCell event might have on their future personal behaviors, habits, decisions, and lifestyle.
 
@@ -165,11 +152,8 @@ You will receive the following Markdown structure:
 {CONVERSATION_TEXT}
 ```
 
-"""
-    + _LANGUAGE_RULE
-    + """
+{language_rule}
 
 ## Please generate 4-8 (up to 10) associations that may impact the user's future life and decisions based on the above content:
 
 """
-)

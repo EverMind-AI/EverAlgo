@@ -11,6 +11,7 @@ from asgiref.sync import async_to_sync
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
+from everalgo.user_memory._language import OutputLanguage, build_language_rule
 from everalgo.user_memory._render import chat_messages, render_content
 from everalgo.user_memory.prompts.en.episode import (
     DEFAULT_CUSTOM_INSTRUCTIONS,
@@ -38,6 +39,7 @@ class EpisodeExtractor:
         sender_id: str | None,
         prompt: str | None = None,
         custom_instructions: str | None = None,
+        output_language: OutputLanguage | str | None = None,
     ) -> Episode:
         """Extract one Episode from ``memcell``.
 
@@ -52,14 +54,21 @@ class EpisodeExtractor:
                 events it narrates, or the stored episode carries no time a downstream LLM can read
                 (``Episode.timestamp`` holds ms since epoch and is not rendered into answer context).
             custom_instructions: Extra instruction block appended to the system prompt; ``None`` uses the default.
+            output_language: Language to write the episode in, as an :class:`OutputLanguage` member or
+                equivalent string in any casing. Naming one removes the decision from the model, which measured zero wrong
+                languages; leaving it ``None`` asks the model to follow the participants, which costs roughly
+                one episode in thirteen and fails towards Chinese. See
+                ``prompts/en/_language.py`` for the measurements.
 
         Raises:
             LLMError: From the LLM call.
-            ValueError: If the LLM returns no parsed structured output.
+            ValueError: If the LLM returns no parsed structured output, or ``output_language``
+                names no supported language.
         """
         custom_instr = custom_instructions or DEFAULT_CUSTOM_INSTRUCTIONS
         conv_start = _format_prompt_time(memcell.items[0].timestamp)
         conversation = _render_conversation(memcell)
+        language_rule = build_language_rule(output_language)
 
         if sender_id is None:
             rendered = render_prompt(
@@ -68,6 +77,7 @@ class EpisodeExtractor:
                 conversation_start_time=conv_start,
                 conversation=conversation,
                 custom_instructions=custom_instr,
+                language_rule=language_rule,
             )
         else:
             user_name = _resolve_user_name(memcell, sender_id)
@@ -78,6 +88,7 @@ class EpisodeExtractor:
                 conversation=conversation,
                 custom_instructions=custom_instr,
                 user_name=user_name,
+                language_rule=language_rule,
             )
 
         data = await _call_llm_for_episode(self._llm, rendered)
