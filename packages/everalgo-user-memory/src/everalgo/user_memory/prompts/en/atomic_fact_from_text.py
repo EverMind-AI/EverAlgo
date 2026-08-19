@@ -7,17 +7,8 @@ Event Log Extraction Prompts - English Version
 This module contains prompts for extracting structured event logs from episodic memory text.
 """
 
-# No mixed-input judgement here, unlike ``prompts/en/episode.py``'s language rules: EPISODE_TEXT is
-# already an extracted, single-language narrative, not a live multi-party conversation carrying pasted logs,
-# code blocks, or quoted foreign-language material. That judgement belongs to episode extraction, where the
-# mixed-input problem actually exists; this prompt simply inherits whatever language episode extraction decided.
-_LANGUAGE_RULE = (
-    "**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language EPISODE_TEXT itself is written in. "
-    "ALL output MUST match that language. This is mandatory."
-)
-
 EVENT_LOG_PROMPT = (
-    _LANGUAGE_RULE
+    "{{LANGUAGE_RULE}}"
     + """
 
 You are an expert episodic memory extraction analyst and information architect.
@@ -129,13 +120,13 @@ Now analyze the provided EPISODE_TEXT and TIME carefully, apply all rules above,
 - TIME: "{{TIME}}"  (the start time of the episode, e.g., "March 10, 2024(Sunday) at 2:00 PM")
 
 """
-    + _LANGUAGE_RULE
+    + "{{LANGUAGE_RULE}}"
     + "\n"
 )
 
 
 ATOMIC_FACT_FROM_TEXT_PROMPT_EN = (
-    _LANGUAGE_RULE
+    "{{LANGUAGE_RULE}}"
     + """
 
 You are an expert episodic memory extraction analyst and information architect.
@@ -247,6 +238,6 @@ Now analyze the provided EPISODE_TEXT and TIME carefully, apply all rules above,
 - TIME: "{{TIME}}"  (the start time of the episode, e.g., "March 10, 2024(Sunday) at 2:00 PM")
 
 """
-    + _LANGUAGE_RULE
+    + "{{LANGUAGE_RULE}}"
     + "\n"
 )

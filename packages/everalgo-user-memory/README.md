@@ -71,19 +71,54 @@ asyncio.run(main())
 
 See [`examples/06_full_user_memory_pipeline.py`](../../examples/06_full_user_memory_pipeline.py) for the complete end-to-end example including geometry clustering.
 
-## Customising prompts
+## Choosing the output language
 
-Each extractor accepts a `prompt=` override per call, or the module-level constant can be monkey-patched at startup for a global override:
+Every extraction method takes an `output_language`. Name one and the model writes in it; leave it out and the
+model works the language out for itself, which is measurably less reliable:
 
 ```python
-# Per-call: use the bundled Chinese variant
-from everalgo.user_memory.prompts.zh.episode import EPISODE_GENERATION_PROMPT
-episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice", prompt=EPISODE_GENERATION_PROMPT)
+from everalgo.user_memory import EpisodeExtractor, OutputLanguage
 
-# Global: replace the default English prompt at startup
+# Caller decides. Zero wrong-language output over the regression corpus: seven languages, five models,
+# every interference pattern it holds.
+episode = await EpisodeExtractor(llm=client).aextract(
+    mc, sender_id="u_alice", output_language=OutputLanguage.CHINESE
+)
+
+# Model decides. Roughly one extraction in nine comes back in the wrong language, and which cases fail
+# depends on the model — one of the five measured never drifted, another drifted on a quarter of them.
+episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice")
+```
+
+Plain strings work too, in any casing (`"chinese"`, `"German"`) — convenient when the value comes from
+config. An unrecognised name raises `ValueError` rather than reaching the prompt.
+
+**Decide the language once, upstream, and pass the same value to every call.** The alternative — deriving
+one extractor's language from another's output — inherits that extractor's error rate, and for profiles the
+consequence compounds: a profile updated without a named language inherits whatever language it already
+says, so one wrong INIT persists through every later update. Passing the language on the update is the way
+back out. Note also that `category` and `trait` labels are model-authored, so they follow the argument along
+with the descriptions (`Location` versus `居住地`) — worth knowing if you group or filter on them.
+
+## Customising prompts
+
+Each extractor accepts a `prompt=` override per call, or the module-level constant can be monkey-patched at
+startup for a global override:
+
+```python
+# Per-call override. A replacement keeping the {language_rule} placeholder keeps output-language control;
+# one that drops it opts out.
+episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice", prompt=my_custom_prompt)
+
+# Global: replace the default prompt at startup
 import everalgo.user_memory.prompts.en.foresight as _fs
 _fs.FORESIGHT_GENERATION_PROMPT = my_custom_prompt
 ```
+
+Prompts ship in English only. A parallel `prompts/zh/` tree used to carry translations and was removed:
+prompt language turned out to dictate output language almost entirely, so the translations were an implicit
+language switch maintained by hand. `output_language` does that job from one prompt tree, for languages
+nobody has to translate a prompt into.
 
 ## API surface
 

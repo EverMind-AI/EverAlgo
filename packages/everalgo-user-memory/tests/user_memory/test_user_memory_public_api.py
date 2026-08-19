@@ -4,8 +4,8 @@ import everalgo.user_memory
 from everalgo.testing.fake_llm import FakeLLMClient
 
 
-def test_seven_symbols_exported() -> None:
-    """user_memory exposes 4 Extractors + EpisodeReflector + BoundaryDetector + DetectionResult re-export."""
+def test_public_symbols_exported() -> None:
+    """4 Extractors + EpisodeReflector + BoundaryDetector + OutputLanguage + DetectionResult re-export."""
     for name in (
         "AtomicFactExtractor",
         "BoundaryDetector",
@@ -13,13 +13,14 @@ def test_seven_symbols_exported() -> None:
         "EpisodeExtractor",
         "EpisodeReflector",
         "ForesightExtractor",
+        "OutputLanguage",
         "ProfileExtractor",
     ):
         assert hasattr(everalgo.user_memory, name)
 
 
-def test_dunder_all_lists_seven_symbols() -> None:
-    """__all__ exposes exactly 7 symbols (4 Extractors + EpisodeReflector + BoundaryDetector + DetectionResult)."""
+def test_dunder_all_lists_exactly_the_public_symbols() -> None:
+    """__all__ exposes 4 Extractors + EpisodeReflector + BoundaryDetector + OutputLanguage + DetectionResult."""
     assert sorted(everalgo.user_memory.__all__) == sorted(
         [
             "AtomicFactExtractor",
@@ -28,6 +29,7 @@ def test_dunder_all_lists_seven_symbols() -> None:
             "EpisodeExtractor",
             "EpisodeReflector",
             "ForesightExtractor",
+            "OutputLanguage",
             "ProfileExtractor",
         ]
     )

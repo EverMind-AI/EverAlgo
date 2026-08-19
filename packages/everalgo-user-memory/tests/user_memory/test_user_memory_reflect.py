@@ -269,11 +269,9 @@ class TestReflectMisc:
 def test_reflect_prompts_state_the_language_rule_at_both_ends() -> None:
     """Long prompts lose middle instructions, so each rule appears at head and tail."""
     import everalgo.user_memory.prompts.en.reflect as en_mod
-    import everalgo.user_memory.prompts.zh.reflect as zh_mod
 
     for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
         assert getattr(en_mod, name).count("CRITICAL LANGUAGE RULE") == 2, name
-        assert getattr(zh_mod, name).count("关键语言规则") == 2, name
 
 
 def test_reflect_prompts_carry_no_mixed_input_judgement() -> None:
@@ -284,20 +282,9 @@ def test_reflect_prompts_carry_no_mixed_input_judgement() -> None:
     episode out of the language its sources were written in.
     """
     import everalgo.user_memory.prompts.en.reflect as en_mod
-    import everalgo.user_memory.prompts.zh.reflect as zh_mod
 
     for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
         assert "dominate" not in getattr(en_mod, name), name
-        assert "篇幅上占据对话主体" not in getattr(zh_mod, name), name
-
-
-def test_zh_reflect_is_no_longer_a_re_export_of_en() -> None:
-    """`zh/reflect.py` used to re-export the English constants verbatim — a placeholder, not a translation."""
-    import everalgo.user_memory.prompts.en.reflect as en_mod
-    import everalgo.user_memory.prompts.zh.reflect as zh_mod
-
-    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
-        assert getattr(en_mod, name) != getattr(zh_mod, name), name
 
 
 def test_reflect_prompts_pin_the_utc_label_on_carried_over_times() -> None:
@@ -308,19 +295,6 @@ def test_reflect_prompts_pin_the_utc_label_on_carried_over_times() -> None:
     require the ``UTC`` label and forbid dropping a time the input already carried.
     """
     import everalgo.user_memory.prompts.en.reflect as en_mod
-    import everalgo.user_memory.prompts.zh.reflect as zh_mod
 
     for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
         assert "MUST carry the UTC zone label" in getattr(en_mod, name), name
-        assert "UTC 时区标识" in getattr(zh_mod, name), name
-
-
-def test_zh_reflect_keeps_the_same_placeholders_as_en() -> None:
-    """A translated prompt that drops a placeholder would render with a literal `{timeline}` in it."""
-    import everalgo.user_memory.prompts.en.reflect as en_mod
-    import everalgo.user_memory.prompts.zh.reflect as zh_mod
-
-    assert "{timeline}" in zh_mod.REFLECT_EPISODE_PROMPT
-    for placeholder in ("{old_episode}", "{new_episodes}"):
-        assert placeholder in zh_mod.REFLECT_EPISODE_UPDATE_PROMPT
-        assert placeholder in en_mod.REFLECT_EPISODE_UPDATE_PROMPT

@@ -12,6 +12,7 @@ from everalgo.llm.format import format_atomic_fact_time, format_message_timestam
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import AtomicFact, MemCell
+from everalgo.user_memory._language import SOURCE_TEXT_LANGUAGE_RULE, OutputLanguage, build_language_rule
 from everalgo.user_memory._render import chat_messages, render_content
 from everalgo.user_memory.prompts.en.atomic_fact import ATOMIC_FACT_PROMPT
 from everalgo.user_memory.prompts.en.atomic_fact_from_text import ATOMIC_FACT_FROM_TEXT_PROMPT_EN
@@ -38,6 +39,7 @@ class AtomicFactExtractor:
         *,
         sender_id: str | None,
         prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,
     ) -> list[AtomicFact]:
         """Extract atomic facts for ``sender_id`` from ``memcell``.
 
@@ -47,16 +49,23 @@ class AtomicFactExtractor:
                 (whole-memcell) facts that do not bind to any user. The prompt itself does not
                 consume sender_id.
             prompt: Prompt override; ``None`` uses the bundled default.
+            output_language: Language to write the facts in, as an :class:`OutputLanguage` member or
+                equivalent string in any casing. Naming one removes the decision from the model, which measured zero wrong
+                languages; leaving it ``None`` asks the model to follow the participants, which costs roughly
+                one extraction in thirteen and fails towards Chinese. See ``prompts/en/_language.py`` for
+                the measurements.
 
         Raises:
             LLMError: From the LLM call.
-            ValueError: If the LLM returns no parsed structured output.
+            ValueError: If the LLM returns no parsed structured output, or ``output_language``
+                names no supported language.
         """
         rendered = render_prompt(
             ATOMIC_FACT_PROMPT,
             prompt,
             INPUT_TEXT=_render_input_text(memcell),
             TIME=format_atomic_fact_time(memcell.items[0].timestamp),
+            language_rule=build_language_rule(output_language),
         )
 
         block = await _call_llm_for_atomic_facts(self._llm, rendered, memcell.timestamp)
@@ -70,6 +79,7 @@ class AtomicFactExtractor:
         *,
         timestamp: int,
         prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,
     ) -> list[AtomicFact]:
         """Extract atomic facts from a piece of text.
 
@@ -83,17 +93,30 @@ class AtomicFactExtractor:
                 ``text`` (e.g. "yesterday" -> "yesterday (March 9, 2024)").
             prompt: Optional prompt template override; default uses
                 ``ATOMIC_FACT_FROM_TEXT_PROMPT_EN``.
+            output_language: Language to write the facts in, as an :class:`OutputLanguage` member or
+                equivalent string in any casing. ``None`` tells the model to follow ``text``'s own language,
+                which is a far easier judgement than the one :meth:`aextract` faces — ``text`` is normally an
+                already-extracted single-language narrative, with no pasted material or second speaker to
+                adjudicate. Name a language to override that inheritance.
 
         Returns:
             List of atomic-fact sentences. Empty list if text yields no facts.
 
         Raises:
-            ValueError: If the LLM returns no parsed structured output.
+            ValueError: If the LLM returns no parsed structured output, or ``output_language`` names no
+                supported language.
             LLMError: Propagated from LLM client.
         """
         time_str = format_atomic_fact_time(timestamp)
         template = prompt if prompt is not None else ATOMIC_FACT_FROM_TEXT_PROMPT_EN
-        rendered = template.replace("{{EPISODE_TEXT}}", text).replace("{{TEXT}}", text).replace("{{TIME}}", time_str)
+        rendered = (
+            template.replace("{{EPISODE_TEXT}}", text)
+            .replace("{{TEXT}}", text)
+            .replace("{{TIME}}", time_str)
+            # Double braces, unlike the other operators: this prompt predates `render_prompt` and substitutes
+            # by hand, so its language slot follows its own convention rather than the single-brace one.
+            .replace("{{LANGUAGE_RULE}}", build_language_rule(output_language, fallback=SOURCE_TEXT_LANGUAGE_RULE))
+        )
 
         block = await _call_llm_for_atomic_facts(self._llm, rendered, timestamp)
         facts: list[str] = block["atomic_fact"]

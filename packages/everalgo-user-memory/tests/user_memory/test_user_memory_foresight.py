@@ -14,6 +14,7 @@ from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
+from everalgo.user_memory import OutputLanguage
 from everalgo.user_memory.foresight import (
     ForesightExtractor,
     _calculate_duration_days,
@@ -44,39 +45,47 @@ def _memcell() -> MemCell:
 # Language rules — mixed-input clauses (mirrors test_user_memory_episode.py)
 # ==========================================================================
 
-_MIXED_INPUT_CLAUSES_EN = (
-    "themselves compose",  # judgement source restricted to participants' own writing
-    "dominates the conversation by volume",  # long quoted material must not flip the judgement
-    # An operational test for "is this pasted" — the negative instruction alone left the model unable to
-    # recognise unmarked prose as pasted, which cost ~35% of judgements on that shape of input.
-    "Apply this test to decide what is pasted",
-    "whether or not it is wrapped in quotation marks or a code fence",
-    "sentence structure",  # embedded foreign terms do not flip the judgement
-    "keep their original form",  # proper nouns / technical terms stay untranslated
-)
 
-
-def test_en_prompt_has_language_rule() -> None:
-    """The old rule enumerated only Chinese/English; the new rule is language-agnostic."""
+def test_prompt_carries_the_language_placeholder_at_both_ends() -> None:
+    """Long prompts lose middle instructions, so the rule is spliced at head and tail."""
     from everalgo.user_memory.prompts.en.foresight import FORESIGHT_GENERATION_PROMPT
 
-    assert "CRITICAL LANGUAGE RULE" in FORESIGHT_GENERATION_PROMPT
-    assert "in Chinese" not in FORESIGHT_GENERATION_PROMPT
+    assert FORESIGHT_GENERATION_PROMPT.count("{language_rule}") == 2
 
 
-def test_en_prompt_states_language_rule_at_both_ends() -> None:
-    """Long prompts lose middle instructions; the rule is repeated at head and tail."""
-    from everalgo.user_memory.prompts.en.foresight import FORESIGHT_GENERATION_PROMPT
+async def test_rendering_injects_the_participant_rule_when_no_language_is_named() -> None:
+    rendered = await _render_foresight_prompt()
 
-    assert FORESIGHT_GENERATION_PROMPT.count("CRITICAL LANGUAGE RULE") == 2
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "the language the participants use" in rendered
+    assert "{language_rule}" not in rendered
 
 
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_EN)
-def test_en_prompt_covers_mixed_input(clause: str) -> None:
-    """Chinese question plus long English pasted material must still yield Chinese output."""
-    from everalgo.user_memory.prompts.en.foresight import FORESIGHT_GENERATION_PROMPT
+async def test_rendering_injects_the_named_language() -> None:
+    rendered = await _render_foresight_prompt(output_language=OutputLanguage.GERMAN)
 
-    assert clause in FORESIGHT_GENERATION_PROMPT
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "Write ALL output fields in German." in rendered
+    assert "the language the participants use" not in rendered
+
+
+async def _render_foresight_prompt(**kwargs: object) -> str:
+    """Capture what the extractor hands the LLM; the rule only exists after rendering."""
+    captured: list[str] = []
+
+    class Capture:
+        async def chat(self, messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+            assert isinstance(messages[0].content, str)  # narrow for test
+            captured.append(messages[0].content)
+            raise _PromptCapturedError
+
+    with pytest.raises(_PromptCapturedError):
+        await ForesightExtractor(llm=Capture()).aextract(_memcell(), sender_id="u_alice", **kwargs)  # type: ignore[arg-type]
+    return captured[0]
+
+
+class _PromptCapturedError(Exception):
+    """Ends the call once the prompt has been captured — no LLM response is needed."""
 
 
 # zh must not rot relative to en — it is a public prompt selectable via `prompt=` (see README.md).
@@ -88,29 +97,6 @@ _MIXED_INPUT_CLAUSES_ZH = (
     "句子结构",  # embedded foreign terms do not flip the judgement
     "保留原文形式",  # proper nouns / technical terms stay untranslated
 )
-
-
-def test_zh_prompt_states_language_rule_at_both_ends() -> None:
-    """The zh prompt previously had no standalone language rule at all."""
-    from everalgo.user_memory.prompts.zh.foresight import FORESIGHT_GENERATION_PROMPT
-
-    assert FORESIGHT_GENERATION_PROMPT.count("关键语言规则") == 2
-
-
-@pytest.mark.parametrize("clause", _MIXED_INPUT_CLAUSES_ZH)
-def test_zh_prompt_covers_mixed_input(clause: str) -> None:
-    """Same mixed-input clauses as the en prompt."""
-    from everalgo.user_memory.prompts.zh.foresight import FORESIGHT_GENERATION_PROMPT
-
-    assert clause in FORESIGHT_GENERATION_PROMPT
-
-
-def test_zh_no_longer_has_redundant_language_clause() -> None:
-    """The closing-instruction clause is redundant once the head/tail rule is in place."""
-    from everalgo.user_memory.prompts.zh.foresight import FORESIGHT_GENERATION_PROMPT
-
-    assert "语言类型必须与" not in FORESIGHT_GENERATION_PROMPT
-    assert "语言风格必须与事件场景匹配" in FORESIGHT_GENERATION_PROMPT
 
 
 async def test_aextract_parses_wrapped_foresight_payload() -> None:

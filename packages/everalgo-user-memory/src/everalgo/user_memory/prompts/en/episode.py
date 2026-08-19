@@ -3,17 +3,21 @@
 Constants:
     - ``DEFAULT_CUSTOM_INSTRUCTIONS`` — block of instructions injected into the {custom_instructions} slot.
     - ``EPISODE_GENERATION_PROMPT`` — generic retrieval-optimised episode generation. Placeholders:
-      ``{conversation_start_time}`` / ``{conversation}`` / ``{custom_instructions}``.
+      ``{conversation_start_time}`` / ``{conversation}`` / ``{custom_instructions}`` / ``{language_rule}``.
     - ``USER_EPISODE_GENERATION_PROMPT`` — user-centred variant focused on a specific ``{user_name}``;
-      additional placeholder ``{user_name}`` on top of the three above. Used by
+      additional placeholder ``{user_name}`` on top of the four above. Used by
       ``EpisodeExtractor`` when ``sender_id`` is provided. Pass ``sender_id=None`` to fall back to
       the generic ``EPISODE_GENERATION_PROMPT``.
 
 Output schema (both variants): ``{"title": str, "content": str}``.
 
-Output language follows the participants' own writing (see the CRITICAL LANGUAGE RULE in both prompts).
-Whether a given output language is actually retrievable depends on the tokenizer used by the caller's
-search layer — a Chinese-only tokenizer cannot index Japanese kana, Hangul or Cyrillic at all.
+``{language_rule}`` — appears twice in each prompt and both copies receive the same text — is filled from
+``user_memory._language.build_language_rule`` according to ``aextract``'s ``output_language`` argument:
+the caller's language when one is named, otherwise a rule asking the model to follow the participants.
+A replacement prompt that drops the placeholder silently opts out of output-language control; one that
+keeps it inherits the behaviour. Whether a given output language is actually retrievable depends on the
+tokenizer used by the caller's search layer — a Chinese-only tokenizer cannot index Japanese kana, Hangul
+or Cyrillic at all.
 
 Contract for a caller-supplied ``prompt=`` override: code stores ``content`` verbatim (see
 ``episode.py::_build_episode``), so every time a reader sees is one these prompts made the model write
@@ -31,38 +35,8 @@ Follow these principles when generating episodic memories:
 5. Ensure episode content is easy to retrieve later
 """
 
-_LANGUAGE_RULE_GENERIC = (
-    "**CRITICAL LANGUAGE RULE**: Output in the SAME language the conversation participants themselves "
-    "write in. ALL output (title and content) MUST match that language. This is mandatory.\n\n"
-    "Judge that language ONLY from what the participants themselves compose — NOT from quoted or pasted "
-    "material. Apply this test to decide what is pasted: a run of two or more consecutive sentences that "
-    "reads as finished prose from elsewhere — explanatory or documentary in tone, addressed to no one in "
-    "the conversation, advancing no request, answer or decision of its own — is pasted material, whatever "
-    "language it is in and whether or not it is wrapped in quotation marks or a code fence. Exclude it "
-    "from the judgement EVEN IF it dominates the conversation by volume. Foreign-language terms "
-    "embedded inside a sentence written by the participants do not change the judgement — judge by the "
-    "language of the sentence structure. Proper nouns and technical terms keep their original form in "
-    "the output regardless of the output language."
-)
-
-_LANGUAGE_RULE_USER = (
-    "**CRITICAL LANGUAGE RULE**: Output in the SAME language `{user_name}` themselves writes in. ALL "
-    "output (title and content) MUST match that language. This is mandatory.\n\n"
-    "Judge that language ONLY from what `{user_name}` themselves compose — NOT from quoted or pasted "
-    "material. Apply this test to decide what is pasted: a run of two or more consecutive sentences that "
-    "reads as finished prose from elsewhere — explanatory or documentary in tone, addressed to no one in "
-    "the conversation, advancing no request, answer or decision of its own — is pasted material, whatever "
-    "language it is in and whether or not it is wrapped in quotation marks or a code fence. Exclude it "
-    "from the judgement EVEN IF it dominates the conversation by volume. Foreign-language terms "
-    "embedded inside a sentence written by `{user_name}` do not change the judgement — judge by the "
-    "language of the sentence structure. Proper nouns and technical terms keep their original form in "
-    "the output regardless of the output language."
-)
-
-EPISODE_GENERATION_PROMPT = (
-    "\n"
-    + _LANGUAGE_RULE_GENERIC
-    + """
+EPISODE_GENERATION_PROMPT = """
+{language_rule}
 
 You are an episodic memory generation expert. Please convert the following conversation into an episodic memory.
 
@@ -126,18 +100,13 @@ If the conversation start time is "2024-03-14 15:00 UTC (Thursday)" and the conv
     "content": "Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16) to catch the sunrise and planned to invite friends. She was excited about the trip."
 }}
 
-"""
-    + _LANGUAGE_RULE_GENERIC
-    + """
+{language_rule}
 
 Return only the JSON object, do not add any other text:
 """
-)
 
-USER_EPISODE_GENERATION_PROMPT = (
-    "\n"
-    + _LANGUAGE_RULE_USER
-    + """
+USER_EPISODE_GENERATION_PROMPT = """
+{language_rule}
 
 You are a professional event recorder and episodic memory generation expert, specialised in capturing events relevant to a specific user from a conversation.
 Your task is to focus on {user_name} — objectively record what he/she saw, heard, said, and did, and turn it into a coherent, accurate event record.
@@ -231,10 +200,7 @@ Self-check list:
 - Is `content` a fluent experiential narrative, not a heap of scattered facts?
 - Are all key points woven naturally into the narrative?
 
-"""
-    + _LANGUAGE_RULE_USER
-    + """
+{language_rule}
 
 Return only the JSON object, do not add any other text:
 """
-)

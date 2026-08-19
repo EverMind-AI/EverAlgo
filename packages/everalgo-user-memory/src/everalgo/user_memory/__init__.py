@@ -7,6 +7,7 @@ boundary detection will be added to ``everalgo.agent_memory`` in Stage 4.
 import logging
 
 from everalgo.boundary import DetectionResult
+from everalgo.user_memory._language import OutputLanguage
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.boundary import BoundaryDetector
 from everalgo.user_memory.episode import EpisodeExtractor
@@ -21,6 +22,7 @@ __all__ = [
     "EpisodeExtractor",
     "EpisodeReflector",
     "ForesightExtractor",
+    "OutputLanguage",
     "ProfileExtractor",
 ]
 
