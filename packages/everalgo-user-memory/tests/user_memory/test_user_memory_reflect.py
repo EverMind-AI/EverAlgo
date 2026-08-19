@@ -266,25 +266,106 @@ class TestReflectMisc:
 # ==========================================================================
 
 
-def test_reflect_prompts_state_the_language_rule_at_both_ends() -> None:
-    """Long prompts lose middle instructions, so each rule appears at head and tail."""
+_LANGUAGE_PROMPTS = ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT")
+
+
+class _PromptCapturedError(Exception):
+    """Ends the call once the prompt has been captured — no LLM response is needed."""
+
+
+async def _render_reflect_prompt(
+    *,
+    old_episode: Episode | None = None,
+    output_language: str | None = None,
+) -> str:
+    """Return the prompt ``areflect`` actually sends, so the language rule is checked after splicing."""
+    from everalgo.user_memory.reflect import EpisodeReflector
+
+    captured: list[str] = []
+
+    class _Capture:
+        async def chat(self, *, messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+            content = messages[0].content
+            assert isinstance(content, str)  # narrow for test
+            captured.append(content)
+            raise _PromptCapturedError
+
+    kwargs: dict[str, Any] = {"old_episode": old_episode}
+    if output_language is not None:
+        kwargs["output_language"] = output_language
+
+    with pytest.raises(_PromptCapturedError):
+        await EpisodeReflector(llm=_Capture()).areflect([_ep(1000), _ep(2000)], **kwargs)  # type: ignore[arg-type]
+    return captured[0]
+
+
+@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
+def test_reflect_prompts_carry_the_language_placeholder_at_both_ends(name: str) -> None:
+    """Long prompts lose middle instructions, so the rule is spliced at head and tail."""
     import everalgo.user_memory.prompts.en.reflect as en_mod
 
-    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
-        assert getattr(en_mod, name).count("CRITICAL LANGUAGE RULE") == 2, name
+    assert getattr(en_mod, name).count("{language_rule}") == 2
 
 
-def test_reflect_prompts_carry_no_mixed_input_judgement() -> None:
+async def test_init_inherits_the_merged_episodes_language_when_none_is_named() -> None:
+    rendered = await _render_reflect_prompt()
+
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "as the episodes you are merging" in rendered
+    assert "{language_rule}" not in rendered
+
+
+async def test_update_inherits_the_existing_narratives_language_when_none_is_named() -> None:
+    rendered = await _render_reflect_prompt(old_episode=_ep(500, "existing narrative"))
+
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "as the existing narrative you are updating" in rendered
+    assert "{language_rule}" not in rendered
+
+
+@pytest.mark.parametrize("old_episode", [None, _ep(500, "existing narrative")])
+async def test_both_modes_honour_a_named_language(old_episode: Episode | None) -> None:
+    rendered = await _render_reflect_prompt(old_episode=old_episode, output_language="German")
+
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert "Write ALL output fields in German." in rendered
+    assert "as the episodes you are merging" not in rendered
+    assert "as the existing narrative you are updating" not in rendered
+
+
+@pytest.mark.parametrize("old_episode", [None, _ep(500, "existing narrative")])
+async def test_an_unsupported_language_is_rejected_before_the_llm_is_called(old_episode: Episode | None) -> None:
+    """The value is interpolated into prompt text, so it must never reach the model unvalidated."""
+    from everalgo.user_memory.reflect import EpisodeReflector
+
+    class _NeverCalled:
+        async def chat(self, **kwargs: Any) -> ChatResponse:
+            raise AssertionError("LLM must not be called")
+
+    with pytest.raises(ValueError, match="unsupported output_language"):
+        await EpisodeReflector(llm=_NeverCalled()).areflect(  # type: ignore[arg-type]
+            [_ep(1000), _ep(2000)], old_episode=old_episode, output_language="Klingon"
+        )
+
+
+@pytest.mark.parametrize(
+    "rule_name",
+    ["MERGED_EPISODES_LANGUAGE_RULE", "EXISTING_NARRATIVE_LANGUAGE_RULE"],
+)
+def test_reflect_fallbacks_inherit_rather_than_judge(rule_name: str) -> None:
     """Reflect merges already-extracted episodes, so it inherits rather than judges the language.
 
-    Judgement belongs to the extractor that reads the raw conversation. Re-judging here would be
-    inert on single-language narratives, and a disagreeing judgement would translate a merged
-    episode out of the language its sources were written in.
+    Judgement belongs to the extractor that reads the raw conversation. Re-judging here would be inert on
+    single-language narratives, and a disagreeing judgement would translate a merged episode out of the
+    language its sources were written in. Asserted against the rule texts rather than the prompt constants:
+    the rules are spliced in at call time, so a prompt constant cannot show which one was chosen.
     """
-    import everalgo.user_memory.prompts.en.reflect as en_mod
+    from everalgo.user_memory.prompts.en import _language as rules_mod
 
-    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
-        assert "dominate" not in getattr(en_mod, name), name
+    rule = getattr(rules_mod, rule_name)
+    assert "however much of the conversation it occupies" not in rule
+    assert "read only the message contents" not in rule
+    assert "do not translate" in rule
 
 
 def test_reflect_prompts_pin_the_utc_label_on_carried_over_times() -> None:

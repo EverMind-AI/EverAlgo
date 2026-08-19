@@ -7,13 +7,17 @@ Constants:
 
 Output schema (both variants): ``{"content": str, "title": str}`` via Structured Output.
 
-Both variants merge already-extracted episodes, so they inherit the language those episodes were written
-in rather than judging it: the mixed-input judgement belongs to the extractor that read the raw
-conversation. See ``prompts/en/episode.py`` for that judgement.
+``{language_rule}`` — appearing twice in each prompt, both copies receiving the same text — is filled from
+``user_memory._language.build_language_rule`` according to ``areflect``'s ``output_language`` argument.
+Left unset, both variants inherit the language of their input rather than judging it: the mixed-input
+judgement belongs to the extractor that read the raw conversation (see ``prompts/en/episode.py``). That
+inheritance is weaker here than for a single-episode operator, though — merging episodes that disagree on
+language leaves the model to pick one — so a caller who cannot guarantee its episodes agree should name the
+language.
 """
 
 REFLECT_EPISODE_PROMPT = """\
-**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the episodes you are merging. Merging never changes the language — do not translate. This is mandatory.
+{language_rule}
 
 You are a memory consolidation assistant.
 
@@ -30,13 +34,13 @@ Merge them into a single coherent narrative that:
 - Removes redundant information
 - Ends with a brief summary of the current state as of the latest episode
 
-**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the episodes you are merging. Merging never changes the language — do not translate. This is mandatory.
+{language_rule}
 
 Episodes:
 {timeline}"""
 
 REFLECT_EPISODE_UPDATE_PROMPT = """\
-**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing narrative you are updating. Updating never changes the language — do not translate, even if the new episodes are written in a different language. This is mandatory.
+{language_rule}
 
 You are updating an existing memory narrative with new information.
 
@@ -54,4 +58,4 @@ Update the narrative to incorporate the new information:
 - Keep every time exactly as the narrative and the new episodes wrote it. Every absolute time that states a clock time MUST carry the UTC zone label ("2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00"); a date with no clock time needs none. Do NOT reformat, convert, or drop a time that is already there
 - End with an updated summary of the current state
 
-**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing narrative you are updating. Updating never changes the language — do not translate, even if the new episodes are written in a different language. This is mandatory."""
+{language_rule}"""

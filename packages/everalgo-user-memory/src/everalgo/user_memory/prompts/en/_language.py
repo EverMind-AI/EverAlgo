@@ -2,9 +2,12 @@
 
 A prompt receives ``CALLER_CHOSEN_LANGUAGE_RULE`` when the caller named a language, and otherwise the
 fallback its own operator picks: the participant rule for the operators reading a raw conversation, and a
-rule of its own for each operator whose input is already-extracted memory text. The two texts below were
-selected by measurement rather than judgement: eight arms over the same 0.3.2 episode prompt body, 1750
-calls each across five models and thirty-five conversations, differing only in this block.
+rule of its own for each operator whose input is already-extracted memory text — those inherit a language
+rather than judge one, and each names the specific input it inherits from. Two of the texts below,
+``CALLER_CHOSEN_LANGUAGE_RULE`` and ``PARTICIPANT_LANGUAGE_RULE``, were selected by measurement rather than
+judgement: eight arms over the same 0.3.2 episode prompt body, 1750 calls each across five models and
+thirty-five conversations, differing only in this block. The inheriting rules were not measured — they
+predate the argument and are carried over verbatim from the prompts that already used them.
 
 Every rule here is spliced in twice, at the prompt's head and tail, so none of them may refer to its own
 position in the prompt — a sentence pointing above or below is wrong at one of the two ends.
@@ -24,7 +27,7 @@ The residual failures therefore skew one way: a conversation that should yield E
 This rule is nonetheless the best of the self-judging variants, and the only one that never drifted on
 plain single-language conversations, which is why it is the fallback rather than one of the others.
 
-The measurements behind both texts are recorded internally; the corpus and runner live outside the
+The measurements behind those two texts are recorded internally; the corpus and runner live outside the
 repository because they need real models and five-figure call counts.
 """
 
@@ -60,6 +63,30 @@ COMPACTED_PROFILE_LANGUAGE_RULE = (
 
 Compaction rewrites every item, so it is the one path that can change a whole profile's language in a single
 call — which makes it the natural place to correct one, and the worst place to guess.
+"""
+
+MERGED_EPISODES_LANGUAGE_RULE = (
+    "**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the episodes you are "
+    "merging. Merging never changes the language — do not translate. This is mandatory."
+)
+"""Fallback for merging episodes into one narrative.
+
+The episodes were already extracted, so their language was settled upstream and merging inherits it. That
+inheritance is only as good as the episodes agree, though: merging episodes written in different languages
+asks the model to pick one, and nothing here says which. A caller who cannot guarantee its episodes share a
+language should name the output language rather than leave the pick to the model.
+"""
+
+EXISTING_NARRATIVE_LANGUAGE_RULE = (
+    "**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing narrative "
+    "you are updating. Updating never changes the language — do not translate, even if the new episodes are "
+    "written in a different language. This is mandatory."
+)
+"""Fallback for updating a merged narrative. Same shape as the profile update rule.
+
+The narrative already has a language and the incoming episodes may not share it, so the rule pins the
+narrative's own — which is what stops an update in a second language from splitting it in half, and is
+equally unrecoverable when the language it pins is already wrong. Naming a language is the way out.
 """
 
 SOURCE_TEXT_LANGUAGE_RULE = (
