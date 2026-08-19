@@ -11,11 +11,14 @@ def assert_episode_shape(value: dict[str, Any] | Episode) -> Episode:
     """Assert ``value`` satisfies ``Episode`` minimal business invariants and return the validated instance.
 
     Raises:
-        AssertionError: If ``episode`` is empty or ``timestamp <= 0``.
+        AssertionError: If ``episode`` or ``summary`` is empty, or ``timestamp <= 0``.
         pydantic.ValidationError: If type-level validation fails.
     """
     episode = value if isinstance(value, Episode) else Episode.model_validate(value)
     assert episode.episode, "Episode.episode is empty"
+    # Whitespace-only counts as empty: `summary` is a display preview, and a blank one reads as a bug
+    # downstream rather than as an absent field.
+    assert episode.summary.strip(), "Episode.summary is empty"
     assert episode.timestamp > 0, f"Episode.timestamp must be positive (Unix epoch ms), got {episode.timestamp}"
     return episode
 

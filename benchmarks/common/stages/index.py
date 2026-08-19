@@ -55,16 +55,20 @@ def extract_searchable_units(episode: dict[str, Any], episode_facts: list[dict[s
     """Return the list of strings to index for one episode (fact-level granularity).
 
     Each atomic fact's ``content`` becomes one BM25 row, plus the episode's ``subject``
-    and a truncated summary (first 200 chars of the episode body). The summary provides
-    additional keyword-match signal for BM25 recall — its phrasing differs from atomic
-    facts and captures terms that fact extraction may rephrase.
+    and the first 200 chars of the episode body. That head slice provides additional
+    keyword-match signal for BM25 recall — its phrasing differs from atomic facts and
+    captures terms that fact extraction may rephrase.
+
+    Deliberately not the episode's ``summary`` field, despite that being the better-formed
+    text: the two serve different purposes (``summary`` is a display preview) and swapping
+    them would move LoCoMo's recall numbers, which needs its own measured comparison.
 
     Args:
         episode: Episode dict with ``subject`` and ``episode`` fields.
         episode_facts: List of atomic-fact dicts belonging to this episode, each with a ``content`` field.
 
     Returns:
-        List of searchable text strings (facts + subject + summary).
+        List of searchable text strings (facts + subject + body head slice).
 
     Raises:
         ValueError: If no atomic facts exist for this episode.
@@ -78,7 +82,7 @@ def extract_searchable_units(episode: dict[str, Any], episode_facts: list[dict[s
     subject = cast("str", episode.get("subject") or "")
     if subject:
         units.append(subject)
-    # BM25-only summary: first 200 chars of episode body as an additional keyword-match row.
+    # BM25-only head slice: first 200 chars of episode body as an additional keyword-match row.
     episode_body = cast("str", episode.get("episode") or "")
     if episode_body:
         units.append(episode_body[:200])

@@ -45,19 +45,22 @@ _EPISODE_JSON = json.dumps(
     {
         "title": "Alice asks about Python async retry semantics",
         "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",
+        "summary": "Alice raised Python async retry patterns and the assistant offered a follow-up.",
     }
 )
 
 _FORESIGHT_JSON = json.dumps(
-    [
-        {
-            "content": "Alice will read the assistant's follow-up doc on async retries next week",
-            "evidence": "Assistant committed to a follow-up doc next week",
-            "start_time": "2023-11-14",
-            "end_time": "2023-11-21",
-            "duration_days": 7,
-        }
-    ]
+    {
+        "foresights": [
+            {
+                "content": "Alice will read the assistant's follow-up doc on async retries next week",
+                "evidence": "Assistant committed to a follow-up doc next week",
+                "start_time": "2023-11-14",
+                "end_time": "2023-11-21",
+                "duration_days": 7,
+            }
+        ]
+    }
 )
 
 _ATOMIC_FACT_JSON = json.dumps(

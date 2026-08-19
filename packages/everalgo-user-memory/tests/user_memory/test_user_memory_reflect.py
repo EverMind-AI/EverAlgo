@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 def _ep(ts: int, text: str = "some episode text") -> Episode:
     """Minimal Episode fixture."""
-    return Episode(owner_id=None, episode=text, subject="topic", timestamp=ts)
+    return Episode(owner_id=None, episode=text, subject="topic", summary="a preview", timestamp=ts)
 
 
 class TestValidateInputs:
@@ -79,7 +79,9 @@ class TestRenderTimeline:
 
 class TestReflectInit:
     async def test_init_returns_merged_episode(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "Merged narrative.", "title": "Pets"}'])
+        fake = FakeLLMClient(
+            responses=['{"content": "Merged narrative.", "summary": "Preview of Merged narrative.", "title": "Pets"}']
+        )
         from everalgo.user_memory.reflect import EpisodeReflector
 
         reflector = EpisodeReflector(llm=fake)
@@ -92,7 +94,7 @@ class TestReflectInit:
         assert result.owner_id is None
 
     async def test_init_sends_timeline_in_prompt(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "merged", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "merged", "summary": "Preview of merged", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         await EpisodeReflector(llm=fake).areflect([_ep(1000, "Event A"), _ep(2000, "Event B")])
@@ -104,7 +106,7 @@ class TestReflectInit:
         assert "1. Event A" in prompt_text
 
     async def test_init_uses_structured_output(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "merged", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "merged", "summary": "Preview of merged", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)])
@@ -112,14 +114,14 @@ class TestReflectInit:
         assert fake.calls[0].response_format is not None
 
     async def test_init_fewer_than_2_raises(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "x", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "x", "summary": "Preview of x", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         with pytest.raises(ValueError, match="at least 2"):
             await EpisodeReflector(llm=fake).areflect([_ep(1000)])
 
     async def test_init_unsorted_raises(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "x", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "x", "summary": "Preview of x", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         with pytest.raises(ValueError, match=r"sorted.*ascending"):
@@ -128,7 +130,11 @@ class TestReflectInit:
 
 class TestReflectUpdate:
     async def test_update_returns_merged_episode(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "Updated narrative.", "title": "Pets v2"}'])
+        fake = FakeLLMClient(
+            responses=[
+                '{"content": "Updated narrative.", "summary": "Preview of Updated narrative.", "title": "Pets v2"}'
+            ]
+        )
         from everalgo.user_memory.reflect import EpisodeReflector
 
         old = _ep(1000, "Had a dog named Toby.")
@@ -144,7 +150,7 @@ class TestReflectUpdate:
         assert result.owner_id is None
 
     async def test_update_sends_old_episode_in_prompt(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "merged", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "merged", "summary": "Preview of merged", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         old = _ep(1000, "Original narrative about pets.")
@@ -155,14 +161,14 @@ class TestReflectUpdate:
         assert "New info" in prompt_text
 
     async def test_update_single_episode_sufficient(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "ok", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "ok", "summary": "Preview of ok", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         result = await EpisodeReflector(llm=fake).areflect([_ep(2000)], old_episode=_ep(1000))
         assert result.episode.endswith("ok")
 
     async def test_update_empty_raises(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "x", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "x", "summary": "Preview of x", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         with pytest.raises(ValueError, match="at least 1"):
@@ -180,7 +186,7 @@ class TestReflectMergedTimestamp:
     """The merged episode's ``timestamp`` is the span end, matching ``_build_episode``'s field choice."""
 
     async def test_init_merge_timestamp_is_span_end_not_span_start(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "Merged.", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "Merged.", "summary": "Preview of Merged.", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         episodes = [_ep(_TS_SPAN_START, "first"), _ep(_TS_SPAN_END, "last")]
@@ -190,7 +196,7 @@ class TestReflectMergedTimestamp:
         assert result.timestamp == _TS_SPAN_END
 
     async def test_update_merge_timestamp_is_new_episodes_span_end(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "Updated.", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "Updated.", "summary": "Preview of Updated.", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         old = _ep(_TS_SPAN_START - 1, "older narrative")
@@ -227,14 +233,14 @@ class TestReflectErrors:
 
 class TestReflectMisc:
     def test_sync_reflect_works(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "synced", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "synced", "summary": "Preview of synced", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         result = EpisodeReflector(llm=fake).reflect([_ep(1000), _ep(2000)])
         assert result.episode.endswith("synced")
 
     async def test_prompt_override_init(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "ok", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "ok", "summary": "Preview of ok", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         custom = "Custom prompt: {timeline}"
@@ -246,7 +252,7 @@ class TestReflectMisc:
         assert "memory consolidation" not in prompt_text
 
     async def test_prompt_override_update(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "ok", "title": "t"}'])
+        fake = FakeLLMClient(responses=['{"content": "ok", "summary": "Preview of ok", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
         custom = "Update: {old_episode} + {new_episodes}"
@@ -264,6 +270,48 @@ class TestReflectMisc:
 # ==========================================================================
 # Language rule — reflect inherits the merged episodes' language
 # ==========================================================================
+
+
+# ==========================================================================
+# summary — merged episodes are displayed like extracted ones, so they carry a preview too
+# ==========================================================================
+
+
+async def test_init_carries_the_models_summary_onto_the_merged_episode() -> None:
+    fake = FakeLLMClient(responses=['{"content": "Merged.", "summary": "A merged preview.", "title": "t"}'])
+    from everalgo.user_memory.reflect import EpisodeReflector
+
+    result = await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)])
+
+    assert result.summary == "A merged preview."
+
+
+async def test_update_carries_the_models_summary_onto_the_merged_episode() -> None:
+    fake = FakeLLMClient(responses=['{"content": "Updated.", "summary": "An updated preview.", "title": "t"}'])
+    from everalgo.user_memory.reflect import EpisodeReflector
+
+    result = await EpisodeReflector(llm=fake).areflect([_ep(2000)], old_episode=_ep(1000))
+
+    assert result.summary == "An updated preview."
+
+
+def test_summary_is_declared_after_content_in_the_structured_output_schema() -> None:
+    """Structured Output generates fields in schema order, so a preview declared first previews nothing."""
+    from everalgo.user_memory.reflect import _ReflectOutput
+
+    order = list(_ReflectOutput.model_fields)
+    assert order.index("summary") > order.index("content")
+
+
+@pytest.mark.parametrize("name", ["REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"])
+def test_both_reflect_prompts_bound_the_summary(name: str) -> None:
+    """Same three rigid clauses as the extractor's spec, worded for a merged narrative."""
+    import everalgo.user_memory.prompts.en.reflect as en_mod
+
+    prompt = getattr(en_mod, name)
+    assert "Under 50 words" in prompt
+    assert "Introduce no fact the narrative does not already carry" in prompt
+    assert "do not refer to the record itself" in prompt
 
 
 _LANGUAGE_PROMPTS = ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT")

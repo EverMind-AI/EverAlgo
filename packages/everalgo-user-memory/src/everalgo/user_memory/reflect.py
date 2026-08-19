@@ -57,9 +57,14 @@ def _render_timeline(episodes: list[Episode]) -> str:
 
 
 class _ReflectOutput(BaseModel):
-    """Structured Output schema for LLM response."""
+    """Structured Output schema for LLM response.
+
+    ``summary`` is declared after ``content`` deliberately: Structured Output generates fields in schema
+    order, so a ``summary`` declared first would be written before the narrative it previews.
+    """
 
     content: str = Field(description="The merged narrative text")
+    summary: str = Field(description="Display preview of the merged narrative, under 50 words")
     title: str = Field(default="", description="Brief topic title for the merged narrative")
 
 
@@ -165,5 +170,6 @@ class EpisodeReflector:
             owner_id=None,
             episode=output.content,
             subject=output.title,
+            summary=output.summary,
             timestamp=episodes[-1].timestamp,
         )

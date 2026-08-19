@@ -9,7 +9,12 @@ Constants:
       ``EpisodeExtractor`` when ``sender_id`` is provided. Pass ``sender_id=None`` to fall back to
       the generic ``EPISODE_GENERATION_PROMPT``.
 
-Output schema (both variants): ``{"title": str, "content": str}``.
+Output schema (both variants): ``{"title": str, "content": str, "summary": str}``.
+
+``summary`` is a display preview of ``content``, and it is listed after ``content`` in every field
+spec and example on purpose: the model emits JSON left to right, so a ``summary`` placed first would
+be written before the narrative it summarises — a second independent pass over the conversation
+rather than a compression of the record. Keep it last when editing these prompts.
 
 ``{language_rule}`` — appears twice in each prompt and both copies receive the same text — is filled from
 ``user_memory._language.build_language_rule`` according to ``aextract``'s ``output_language`` argument:
@@ -56,10 +61,11 @@ IMPORTANT TIME HANDLING:
 - This dual format supports both absolute and relative time-based questions
 - Every absolute time that states a clock time MUST carry the UTC zone label: write "2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00". A date with no clock time needs no label — "last Friday (2023-07-21)" is already correct. Clock times quoted from what a speaker said keep their original wording ("at 3:30 PM"), because the speaker's own timezone is unknown
 
-Please generate a structured episodic memory and return only a JSON object containing the following two fields:
+Please generate a structured episodic memory and return only a JSON object containing the following three fields:
 {{
     "title": "A concise, descriptive title that accurately summarizes the theme (10-20 words)",
-    "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information. Resolve every non-absolute time reference using the individual message's timestamp, not the conversation start time."
+    "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information. Resolve every non-absolute time reference using the individual message's timestamp, not the conversation start time.",
+    "summary": "A faithful preview of this episode, readable on its own without the content field. Name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses. Under 50 words; use as few as the episode needs."
 }}
 
 Requirements:
@@ -97,7 +103,8 @@ Example:
 If the conversation start time is "2024-03-14 15:00 UTC (Thursday)" and the conversation is about Caroline planning to go hiking:
 {{
     "title": "Caroline's Mount Rainier Hiking Plan 2024-03-14: Weekend Adventure Planning Session",
-    "content": "Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16) to catch the sunrise and planned to invite friends. She was excited about the trip."
+    "content": "Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16) to catch the sunrise and planned to invite friends. She was excited about the trip.",
+    "summary": "Caroline planned a sunrise hike at Mount Rainier for the weekend (2024-03-16 to 2024-03-17) and asked for advice. Melanie suggested boots, warm clothing, a flashlight, water and high-energy food. Caroline settled on an early Saturday start and planned to invite friends, excited for the trip."
 }}
 
 {language_rule}
@@ -176,27 +183,31 @@ Output quality requirements (continued from the principles above):
     - Use third-person throughout (consistent with principle 1)
     - Maintain chronological order and causal relationships between events. Note: this refers to inter-event causality (e.g., "after listening to suggestions → decided to leave Saturday"), not {user_name}'s role in those events (principle 1 still governs role attribution).
 
-Please generate a structured episodic memory and return only a JSON object containing the following two fields:
+Please generate a structured episodic memory and return only a JSON object containing the following three fields:
 {{
     "title": "(Record of [core event] about `{user_name}`, YYYY-MM-DD)",
-    "content": "(A {user_name}-centred objective, coherent narrative.)"
+    "content": "(A {user_name}-centred objective, coherent narrative.)",
+    "summary": "A faithful preview of this episode, readable on its own without the content field. Name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses. Under 50 words; use as few as the episode needs."
 }}
 
 Example (incorrect style — too subjective):
 {{
     "title": "{user_name} led the weekend hiking planning",
-    "content": "{user_name} initiated the plan to hike Mount Rainier this weekend and led the gear discussion. He/she made the final call on departure time and arranged to invite friends."
+    "content": "{user_name} initiated the plan to hike Mount Rainier this weekend and led the gear discussion. He/she made the final call on departure time and arranged to invite friends.",
+    "summary": "{user_name} took charge of the weekend Mount Rainier hiking plan, drove the gear discussion and decided when everyone would leave."
 }}
 
 Example (correct style — objective recording):
 {{
     "title": "{user_name} participating in weekend Mount Rainier hike planning (2024-03-14)",
-    "content": "{user_name} proposed hiking Mount Rainier this weekend in the conversation and asked for gear suggestions. After listening to others' advice on hiking boots and warm clothing, {user_name} decided to leave early Saturday morning (2024-03-16) to catch the sunrise, and mentioned inviting friends along."
+    "content": "{user_name} proposed hiking Mount Rainier this weekend in the conversation and asked for gear suggestions. After listening to others' advice on hiking boots and warm clothing, {user_name} decided to leave early Saturday morning (2024-03-16) to catch the sunrise, and mentioned inviting friends along.",
+    "summary": "{user_name} proposed a weekend hike to Mount Rainier and asked for gear advice. After hearing suggestions on boots and warm clothing, {user_name} chose to leave early Saturday (2024-03-16) for the sunrise and mentioned inviting friends."
 }}
 
 Self-check list:
 - Is the return strictly in JSON format?
-- Do both `title` and `content` strictly revolve around `{user_name}`?
+- Do `title`, `content` and `summary` all strictly revolve around `{user_name}`?
+- Does `summary` read on its own, and say only what `content` already says?
 - Is `content` a fluent experiential narrative, not a heap of scattered facts?
 - Are all key points woven naturally into the narrative?
 

@@ -50,6 +50,7 @@ def serialize_episode(
     *,
     subject: str,
     episode_text: str,
+    summary: str,
     memcell_ids: list[str],
     timestamp: int,
     owner_id: str | None,
@@ -61,6 +62,8 @@ def serialize_episode(
         ep_idx: Zero-based index used as the string ID.
         subject: Episode subject line.
         episode_text: Narrative text; stored under the algo field name ``episode``.
+        summary: Display preview of the narrative, as the extractor or reflector wrote it. Persisted so
+            later stages can rebuild an ``Episode`` — the field is required on the model.
         memcell_ids: MemCell IDs this episode was extracted from (one for original, many for reflected).
         timestamp: Unix timestamp of the originating MemCell.
         owner_id: Speaker / owner identifier, or None.
@@ -75,6 +78,7 @@ def serialize_episode(
         "memcell_ids": memcell_ids,
         "subject": subject,
         "episode": episode_text,
+        "summary": summary,
         "timestamp": timestamp,
         "embeddings": embeddings,
     }

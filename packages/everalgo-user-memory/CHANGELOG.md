@@ -6,6 +6,20 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `EpisodeExtractor` and `EpisodeReflector` now require the model to write a `summary`.** Both episode prompt variants and both reflect prompts ask for it, and `aextract` / `areflect` raise `ValueError` when it is missing or blank rather than substituting a value — there is no honest preview to invent for one the model did not write. Note `EpisodeExtractor` has no retry and does not use Structured Output, so a model that omits the field costs the whole episode; that is the accepted price of not handing the caller a silent placeholder. `EpisodeReflector` is on Structured Output, where the schema enforces the field.
+
+  The field is spelled out as: a faithful preview of the episode, readable on its own without the body, naming the main participants and the outcome reached, introducing no fact the body does not already carry, never referring to the record itself (`this conversation`, `the above`), and under 50 words. Times, when mentioned, follow the same format the body uses — the rule constrains format, not coverage, since one dual-format timestamp can eat a seventh of the budget.
+
+  `summary` is listed after `content` in every field spec, example and schema. The model emits JSON left to right, so a `summary` placed first would be written before the narrative it summarises, making it a second independent pass over the conversation instead of a compression of the record. A test asserts the ordering in all four prompts, because it is invisible at a glance and an edit that tidies the JSON example would silently break it.
+
+- Previously `summary` was a blind `episode[:200]` slice. The prompts never asked for it, so the extractor's `data.get("summary")` branch was unreachable from the first commit — a port artefact: the consumer side came over from the opensource `episode_memory_extractor.py`, whose LLM contract had the field, and the prompt side did not. Upstream was consuming the truncation.
+
+### Fixed
+
+- The runnable examples and the quick-start docs shipped a bare-array `_FORESIGHT_JSON`, while `ForesightExtractor` requires `{"foresights": [...]}`. `examples/06_full_user_memory_pipeline.py` raised on its third stage. Unrelated to the summary change, fixed in passing because the same fixtures needed updating.
+
 ### Added
 
 - **`output_language` on every LLM-backed operator in this package** — `EpisodeExtractor`, `AtomicFactExtractor`, `ForesightExtractor`, `ProfileExtractor` and `EpisodeReflector` — with an `OutputLanguage` enum exported from `everalgo.user_memory`. Name a language and the model is told to write in it; omit it and the model infers the language from the conversation, as before. Eight prompt variants were measured over the same prompt body — 1750 calls each, five models, thirty-five conversations covering weak language signal, pasted material outweighing the participants' own words, speaker IDs contradicting the conversation, word-level mixing and five non-English languages. Naming the language drifted **0 times in 1400 samples**; the best of six variants that left the model to judge drifted **10.2%**, and rewording did not close the gap: five wordings and one structural variant all landed between 10% and 26%, each fixing some conversations while breaking others, and four of the six drifted even on undisturbed single-language conversations. The cause is not the wording — Chinese characters anywhere in the input pull the output towards Chinese, whether inside a user ID, a pasted paragraph or one term in an otherwise English sentence, while English inside a Chinese conversation does not pull back; six mirrored scenario pairs showed no exception across all eight variants. `OutputLanguage` is closed rather than free-form because the value is interpolated into prompt text, where an arbitrary string would be a directive the caller can smuggle in; an unrecognised name raises `ValueError` instead of reaching the model. Plain strings in any casing are accepted, since callers usually read this out of config.
