@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`) plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
+User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -73,7 +73,7 @@ See [`examples/06_full_user_memory_pipeline.py`](../../examples/06_full_user_mem
 
 ## Choosing the output language
 
-Every extraction method takes an `output_language`. Name one and the model writes in it; leave it out and the
+Every LLM-backed method takes an `output_language`. Name one and the model writes in it; leave it out and the
 model works the language out for itself, which is measurably less reliable:
 
 ```python
@@ -99,6 +99,14 @@ consequence compounds: a profile updated without a named language inherits whate
 says, so one wrong INIT persists through every later update. Passing the language on the update is the way
 back out. Note also that `category` and `trait` labels are model-authored, so they follow the argument along
 with the descriptions (`Location` versus `居住地`) — worth knowing if you group or filter on them.
+
+What "leave it out" means depends on the operator. The four reading a raw conversation judge the language from
+what the participants write, which is the 10.2% path above. The two reading already-extracted memory —
+`AtomicFactExtractor.aextract_from_text` and `EpisodeReflector.areflect` — instead inherit the language of
+their input, which is a much easier call for a single-language narrative but not free: `areflect` takes
+*several* episodes at once, so episodes that disagree on language leave the model to pick one, and an
+`areflect` update inherits whatever the existing narrative says. Name a language when the inputs may
+disagree, or to move a narrative that is already in the wrong one.
 
 ## Customising prompts
 
@@ -136,12 +144,16 @@ class EpisodeExtractor:
         sender_id: str | None,           # None → generic whole-memcell episode (cheaper)
         prompt: str | None = None,
         custom_instructions: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → the model infers it
     ) -> Episode: ...
 
 class ForesightExtractor:
     def __init__(self, *, llm: LLMClient) -> None: ...
     async def aextract(
-        self, memcell: MemCell, *, sender_id: str, prompt: str | None = None
+        self, memcell: MemCell, *,
+        sender_id: str,
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → the model infers it
     ) -> list[Foresight]: ...
 
 class AtomicFactExtractor:
@@ -150,6 +162,14 @@ class AtomicFactExtractor:
         self, memcell: MemCell, *,
         sender_id: str | None,           # None → generic facts not bound to any user
         prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → the model infers it
+    ) -> list[AtomicFact]: ...
+
+    async def aextract_from_text(
+        self, text: str, *,
+        timestamp: int,                  # anchors relative dates the text mentions
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → inherited from the input
     ) -> list[AtomicFact]: ...
 
 class ProfileExtractor:
@@ -159,7 +179,17 @@ class ProfileExtractor:
         sender_id: str,
         old_profile: Profile | None = None,   # None → INIT mode; present → UPDATE mode
         prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → the model infers it
     ) -> Profile: ...
+
+class EpisodeReflector:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def areflect(
+        self, episodes: Sequence[Episode], *,
+        old_episode: Episode | None = None,   # None → INIT merge; present → UPDATE
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → inherited from the input
+    ) -> Episode: ...
 ```
 
 `EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).

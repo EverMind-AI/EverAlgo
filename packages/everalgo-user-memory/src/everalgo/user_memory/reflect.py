@@ -11,6 +11,12 @@ from pydantic import BaseModel, Field
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode
+from everalgo.user_memory._language import (
+    EXISTING_NARRATIVE_LANGUAGE_RULE,
+    MERGED_EPISODES_LANGUAGE_RULE,
+    OutputLanguage,
+    build_language_rule,
+)
 from everalgo.user_memory.prompts.en.reflect import REFLECT_EPISODE_PROMPT, REFLECT_EPISODE_UPDATE_PROMPT
 
 if TYPE_CHECKING:
@@ -77,6 +83,7 @@ class EpisodeReflector:
         *,
         old_episode: Episode | None = None,
         prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,
     ) -> Episode:
         """Merge episodes into one narrative.
 
@@ -86,33 +93,63 @@ class EpisodeReflector:
                 UPDATE mode: must contain >= 1 item (new episodes only).
             old_episode: Existing merged episode. None -> INIT mode. Episode -> UPDATE mode.
             prompt: Prompt override; None uses bundled default for the selected mode.
+            output_language: Language to write the merged narrative in, as an :class:`OutputLanguage` member
+                or equivalent string in any casing. ``None`` makes each mode inherit the language of its
+                input — the episodes being merged, or the narrative being updated. That inheritance is
+                weaker than it looks: merging episodes written in different languages leaves the model to
+                pick one, and an update inherits whatever the narrative already says, so a language that
+                went wrong once stays wrong. Name a language when the episodes may disagree, or to correct a
+                narrative already in the wrong one.
 
         Returns:
             Merged Episode. owner_id=None, timestamp=episodes[-1].timestamp.
 
         Raises:
-            ValueError: Too few episodes, unsorted, or unparseable LLM output.
+            ValueError: Too few episodes, unsorted, unparseable LLM output, or ``output_language`` names no
+                supported language.
             LLMError: Network or provider failure.
         """
         if old_episode is None:
-            return await self._init_merge(episodes, prompt=prompt)
-        return await self._update_merge(old_episode, episodes, prompt=prompt)
+            return await self._init_merge(episodes, prompt=prompt, output_language=output_language)
+        return await self._update_merge(old_episode, episodes, prompt=prompt, output_language=output_language)
 
     reflect = async_to_sync(areflect)
 
-    async def _init_merge(self, episodes: Sequence[Episode], *, prompt: str | None) -> Episode:
+    async def _init_merge(
+        self,
+        episodes: Sequence[Episode],
+        *,
+        prompt: str | None,
+        output_language: OutputLanguage | str | None,
+    ) -> Episode:
         materialized = list(episodes)
         _validate_inputs(materialized, min_count=2)
         timeline = _render_timeline(materialized)
-        rendered = render_prompt(REFLECT_EPISODE_PROMPT, prompt, timeline=timeline)
+        rendered = render_prompt(
+            REFLECT_EPISODE_PROMPT,
+            prompt,
+            timeline=timeline,
+            language_rule=build_language_rule(output_language, fallback=MERGED_EPISODES_LANGUAGE_RULE),
+        )
         return await self._call_llm(rendered, materialized)
 
-    async def _update_merge(self, old_episode: Episode, episodes: Sequence[Episode], *, prompt: str | None) -> Episode:
+    async def _update_merge(
+        self,
+        old_episode: Episode,
+        episodes: Sequence[Episode],
+        *,
+        prompt: str | None,
+        output_language: OutputLanguage | str | None,
+    ) -> Episode:
         materialized = list(episodes)
         _validate_inputs(materialized, min_count=1)
         timeline = _render_timeline(materialized)
         rendered = render_prompt(
-            REFLECT_EPISODE_UPDATE_PROMPT, prompt, old_episode=old_episode.episode, new_episodes=timeline
+            REFLECT_EPISODE_UPDATE_PROMPT,
+            prompt,
+            old_episode=old_episode.episode,
+            new_episodes=timeline,
+            language_rule=build_language_rule(output_language, fallback=EXISTING_NARRATIVE_LANGUAGE_RULE),
         )
         return await self._call_llm(rendered, materialized)
 

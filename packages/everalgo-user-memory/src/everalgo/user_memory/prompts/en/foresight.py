@@ -1,7 +1,8 @@
 """English prompt for ForesightExtractor.
 
 Placeholders: ``{USER_ID}`` / ``{USER_NAME}`` / ``{CONVERSATION_TEXT}`` (uppercase). Rendered via
-:py:meth:`str.format`.
+:func:`everalgo.prompts.render_prompt`, not :py:meth:`str.format` — it mirrors ``.format``'s brace-escape
+semantics but leaves an absent placeholder verbatim instead of raising.
 Output schema: JSON object ``{"foresights": [{content, evidence, start_time, end_time, duration_days}, ...]}``.
 
 ``{language_rule}`` — appearing twice, both copies receiving the same text — is filled from

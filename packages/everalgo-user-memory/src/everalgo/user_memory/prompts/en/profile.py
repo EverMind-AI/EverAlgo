@@ -7,8 +7,10 @@ replaces the prior 2-stage ``CONVERSATION_PROFILE_PART1 + PART2`` flow with a si
 ``PROFILE_UPDATE_PROMPT`` inject a ``{target_user}`` so extraction is scoped to a single speaker in
 multi-party conversations; ``PROFILE_COMPACT_PROMPT`` only re-summarises already-stored items.
 
-Placeholders & rendering: all three templates use single-brace placeholders that survive
-:py:meth:`str.format` because their JSON examples already escape literal braces as ``{{ }}``.
+Placeholders & rendering: all three templates use single-brace placeholders and are rendered via
+:func:`everalgo.prompts.render_prompt`, which mirrors :py:meth:`str.format`'s brace-escape semantics — the
+JSON examples escape their literal braces as ``{{ }}`` — but leaves an absent placeholder verbatim rather
+than raising.
 """
 
 PROFILE_UPDATE_PROMPT = """

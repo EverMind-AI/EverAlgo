@@ -12,7 +12,9 @@ from enum import StrEnum
 from everalgo.user_memory.prompts.en._language import (
     CALLER_CHOSEN_LANGUAGE_RULE,
     COMPACTED_PROFILE_LANGUAGE_RULE,
+    EXISTING_NARRATIVE_LANGUAGE_RULE,
     EXISTING_PROFILE_LANGUAGE_RULE,
+    MERGED_EPISODES_LANGUAGE_RULE,
     PARTICIPANT_LANGUAGE_RULE,
     PROFILE_INIT_LANGUAGE_RULE,
     SOURCE_TEXT_LANGUAGE_RULE,
@@ -20,7 +22,9 @@ from everalgo.user_memory.prompts.en._language import (
 
 __all__ = [
     "COMPACTED_PROFILE_LANGUAGE_RULE",
+    "EXISTING_NARRATIVE_LANGUAGE_RULE",
     "EXISTING_PROFILE_LANGUAGE_RULE",
+    "MERGED_EPISODES_LANGUAGE_RULE",
     "PROFILE_INIT_LANGUAGE_RULE",
     "SOURCE_TEXT_LANGUAGE_RULE",
     "OutputLanguage",
@@ -74,7 +78,9 @@ def build_language_rule(
             ``SOURCE_TEXT_LANGUAGE_RULE`` for already-extracted memory text, where the judgement the
             conversation rule adjudicates does not arise; ``EXISTING_PROFILE_LANGUAGE_RULE`` and
             ``COMPACTED_PROFILE_LANGUAGE_RULE`` for the profile paths that must inherit a language rather
-            than re-decide it; ``PROFILE_INIT_LANGUAGE_RULE`` for the one call that decides it.
+            than re-decide it; ``PROFILE_INIT_LANGUAGE_RULE`` for the one call that decides it;
+            ``MERGED_EPISODES_LANGUAGE_RULE`` and ``EXISTING_NARRATIVE_LANGUAGE_RULE`` for the two reflect
+            modes, which inherit from the episodes they merge and the narrative they update respectively.
 
     Returns:
         The rule text, with the language already substituted when one was named.
