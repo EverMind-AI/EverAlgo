@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-19
+
 ### Changed
 
 - **BREAKING: `Episode.summary` is now a declared, required field.** It used to arrive through `extra="allow"`, which let a construction site omit it silently; requiring it makes the type-checkers name every site that does. External callers constructing `Episode` themselves must pass it. `assert_episode_shape` gained a matching non-empty check (whitespace-only counts as empty — a blank preview reads as a bug downstream, not as an absent field). The field's meaning is unchanged in principle and fixed in practice: a display preview of `episode`, faithful to it and readable without it. For 0.1 through 0.4 nothing produced one — the user-memory prompts never asked for it, so every caller received a blind `episode[:200]` slice: cut mid-word in English, and in Chinese a verbatim copy of most of the body, since 200 characters is most of an episode there. See `everalgo-user-memory` for the prompt side.
@@ -67,6 +69,9 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - LLM binding simplified to instance-only injection: `build_client` / constructor `llm=` parameter is the sole binding path. The prior 4-layer resolution (configure / use / current / resolve) was removed in favour of the pattern used by `openai-python`, `anthropic-sdk-python`, LangChain, and Instructor.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.2.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.0...HEAD
+[0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.4.0...everalgo-core/v0.5.0
+[0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.3.0...everalgo-core/v0.4.0
+[0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.2.1...everalgo-core/v0.3.0
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.2.0...everalgo-core/v0.2.1
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-core/v0.2.0

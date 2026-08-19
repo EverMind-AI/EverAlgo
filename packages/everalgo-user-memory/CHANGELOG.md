@@ -6,19 +6,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-
-- **BREAKING: `EpisodeExtractor` and `EpisodeReflector` now require the model to write a `summary`.** Both episode prompt variants and both reflect prompts ask for it, and `aextract` / `areflect` raise `ValueError` when it is missing or blank rather than substituting a value — there is no honest preview to invent for one the model did not write. Note `EpisodeExtractor` has no retry and does not use Structured Output, so a model that omits the field costs the whole episode; that is the accepted price of not handing the caller a silent placeholder. `EpisodeReflector` is on Structured Output, where the schema enforces the field.
-
-  The field is spelled out as: a faithful preview of the episode, readable on its own without the body, naming the main participants and the outcome reached, introducing no fact the body does not already carry, never referring to the record itself (`this conversation`, `the above`), and under 50 words. Times, when mentioned, follow the same format the body uses — the rule constrains format, not coverage, since one dual-format timestamp can eat a seventh of the budget.
-
-  `summary` is listed after `content` in every field spec, example and schema. The model emits JSON left to right, so a `summary` placed first would be written before the narrative it summarises, making it a second independent pass over the conversation instead of a compression of the record. A test asserts the ordering in all four prompts, because it is invisible at a glance and an edit that tidies the JSON example would silently break it.
-
-- Previously `summary` was a blind `episode[:200]` slice. The prompts never asked for it, so the extractor's `data.get("summary")` branch was unreachable from the first commit — a port artefact: the consumer side came over from the opensource `episode_memory_extractor.py`, whose LLM contract had the field, and the prompt side did not. Upstream was consuming the truncation.
-
-### Fixed
-
-- The runnable examples and the quick-start docs shipped a bare-array `_FORESIGHT_JSON`, while `ForesightExtractor` requires `{"foresights": [...]}`. `examples/06_full_user_memory_pipeline.py` raised on its third stage. Unrelated to the summary change, fixed in passing because the same fixtures needed updating.
+## [0.5.0] - 2026-08-19
 
 ### Added
 
@@ -30,6 +18,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **BREAKING: `EpisodeExtractor` and `EpisodeReflector` now require the model to write a `summary`.** Both episode prompt variants and both reflect prompts ask for it, and `aextract` / `areflect` raise `ValueError` when it is missing or blank rather than substituting a value — there is no honest preview to invent for one the model did not write. Note `EpisodeExtractor` has no retry and does not use Structured Output, so a model that omits the field costs the whole episode; that is the accepted price of not handing the caller a silent placeholder. `EpisodeReflector` is on Structured Output, where the schema enforces the field.
+
+  The field is spelled out as: a faithful preview of the episode, readable on its own without the body, naming the main participants and the outcome reached, introducing no fact the body does not already carry, never referring to the record itself (`this conversation`, `the above`), and under 50 words. Times, when mentioned, follow the same format the body uses — the rule constrains format, not coverage, since one dual-format timestamp can eat a seventh of the budget.
+
+  `summary` is listed after `content` in every field spec, example and schema. The model emits JSON left to right, so a `summary` placed first would be written before the narrative it summarises, making it a second independent pass over the conversation instead of a compression of the record. A test asserts the ordering in all four prompts, because it is invisible at a glance and an edit that tidies the JSON example would silently break it.
+- Previously `summary` was a blind `episode[:200]` slice. The prompts never asked for it, so the extractor's `data.get("summary")` branch was unreachable from the first commit — a port artefact: the consumer side came over from the opensource `episode_memory_extractor.py`, whose LLM contract had the field, and the prompt side did not. Upstream was consuming the truncation.
 - **The language rule the four extractors send when `output_language` is not given.** It now states the positive test — read the sentences the participants address to one another — instead of asking the model to recognise pasted material by its prose style, lists what to ignore concretely (a pasted document, a code block, an error message, a quoted passage, a link's contents) instead of defining it abstractly, says that such material usually shares a message with the speaker's own words so the split happens inside a message rather than by discarding whole ones, and keeps its worked language examples open-ended (`and so on for any language`) rather than naming Chinese and English alone. Each of those four came from a measured failure of the previous wording; the enumeration in particular cannot be dropped — removing the examples took Russian conversations from 0% to 22.5% drift — nor closed to two languages, which pulled third languages towards Chinese. This is the best-measured of six self-judging variants and the only one that never drifted on undisturbed single-language conversations, but it is still a **10.2%** wrong-language rate against 0 for naming the language, and its failures skew towards writing Chinese where English was wanted. Callers who care about output language should pass `output_language`.
 - Prompts splice their language rule through a `{language_rule}` placeholder, stated at head and tail, rather than embedding the text. A caller-supplied `prompt=` that keeps the placeholder inherits output-language control; one that drops it silently opts out, which is `render_prompt`'s existing behaviour for any absent placeholder.
 - Profile INIT gets its own fallback rule instead of the plain conversation rule. It is the participant rule verbatim — so the eight-arm measurement still describes the judgement it asks for — plus the sentence the pre-`output_language` INIT prompt carried: this is the call that fixes the profile's language, and every personality tag must be written in it too. Without that sentence INIT was the only profile path whose rule did not bind the tags, while the two paths that inherit from it both did; since tags appear in the prompts only as English examples and are model-authored free text, an unbound tag is free to stay English in a Chinese profile. What the sentence does to tag-language consistency is not itself measured — the corpus judges a profile's prose, not its labels.
@@ -39,6 +33,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 - **`prompts/zh/` (breaking).** All seven Chinese prompt modules are gone; `prompts/en/` is the only tree. The same measurements showed prompt language dictating output language almost completely — an English prompt carrying no language rule wrote English for 100% of Chinese conversations, and the Chinese prompt wrote Chinese for 100% of English ones — which made the translated tree an implicit language switch, selected by importing a different constant and maintained by hand in parallel with `en`. Routing by input language measured 0.33% drift against 0 for naming the language outright, and only for the two languages a translation existed for; the five others fell back to `en` and drifted 100%. `output_language` covers all of them from one prompt tree. Callers passing a `prompts.zh.*` constant as `prompt=` should pass `output_language="Chinese"` instead.
+
+### Fixed
+
+- The runnable examples and the quick-start docs shipped a bare-array `_FORESIGHT_JSON`, while `ForesightExtractor` requires `{"foresights": [...]}`. `examples/06_full_user_memory_pipeline.py` raised on its third stage. Unrelated to the summary change, fixed in passing because the same fixtures needed updating.
 
 ### Known issues
 
@@ -133,7 +131,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.5.0...HEAD
+[0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.1...everalgo-user-memory/v0.5.0
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.0...everalgo-user-memory/v0.4.1
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.2...everalgo-user-memory/v0.4.0
 [0.3.2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.3.1...everalgo-user-memory/v0.3.2

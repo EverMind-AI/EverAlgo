@@ -253,11 +253,15 @@ Differences from the default path:
    must cover cross-package floor raises across *all* distributions in the coordinated set.
    The root `CHANGELOG.md` gets a single shared `## [<X.Y.Z>] - <date>` section
    summarising the coordinated baseline rather than one section per package.
-2. **Step 5** typically carries many scoped commits (per-package `chore` / `fix` /
-   `refactor`). Merge with a **merge commit, not squash** — squashing collapses N scoped
-   commits into one and destroys git-cliff's per-commit grouping. In the GitLab UI,
-   override the project default for this MR; do not pass `--squash-before-merge` to
-   `glab`.
+2. **Step 5 squashes, as everywhere else in this repo.** One commit per MR is the invariant
+   `AGENTS.md` states, and every release on `main` has followed it — including the 0.2.0
+   coordinated baseline this section cites. The squash commit message therefore has to cover
+   every package in the set, which is what the MR title and description are for. This
+   paragraph used to prescribe a merge commit to protect git-cliff's per-commit grouping; that
+   was wrong twice over. The `[Unreleased]` sections a release promotes are hand-written per
+   package (step 3.b), so git-cliff is only ever a draft generator here and never needs to
+   attribute a release commit to one distribution — and no release in this repo's history was
+   ever merged that way, so the advice described nothing that existed.
 3. **Step 6** pushes N tags. **One tag per `git push` invocation.** Pushing multiple tag
    refs in a single push event makes GitLab silently drop pipeline creation for some of
    them. Push, wait for the pipeline to appear, then push the next.

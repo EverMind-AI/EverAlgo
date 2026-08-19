@@ -13,14 +13,38 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.4.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-core` | 0.5.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.2.1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.4.1 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.5.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.4.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Minor release — 2026-08-19
+
+Two distributions updated together, because the change spans both. `Episode.summary` was supposed to be a
+short preview of an episode; nothing ever wrote one. The consumer side was ported from an opensource
+extractor whose LLM contract had the field, the prompt side was not, so for every release from 0.1 through
+0.4 the field was a blind `episode[:200]` slice — cut mid-word in English, and in Chinese, where 200
+characters is most of an episode, a verbatim copy of the body. Callers were reading that as a summary.
+
+The extractor and the reflector now require the model to write one, and `Episode.summary` is a declared,
+required field rather than an `extra="allow"` passenger. Required is deliberate: it makes the type-checkers
+name every construction site that forgets it, where a default would let the field decay back into the blank
+preview being fixed. Both distributions are therefore breaking, and `everalgo-user-memory` raises its
+`everalgo-core` floor to `>=0.5.0` — the guarantee it advertises is not true against an older core.
+
+The same `everalgo-user-memory` release carries the output-language work: an `output_language` argument on
+every LLM-backed operator, backed by roughly 14000 measured extractions, and the removal of the `prompts/zh/`
+tree it makes redundant. Naming the language measured zero wrong-language output; leaving the model to infer
+it bottoms out around 10%. Per-distribution detail in each package's CHANGELOG.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.5.0 | minor (breaking) — `Episode.summary` declared and required; `assert_episode_shape` checks it |
+| `everalgo-user-memory` | 0.5.0 | minor (breaking) — model-written `summary` on episode + reflect; `output_language` on every operator; `prompts/zh/` removed |
 
 ## Patch release — 2026-08-04
 
