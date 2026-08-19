@@ -21,6 +21,7 @@ def _valid_episode_dict() -> dict[str, Any]:
     return {
         "owner_id": "u1",
         "episode": "Alice scheduled the meeting",
+        "summary": "Alice scheduled the meeting",
         "timestamp": 1700000000000,
     }
 
@@ -64,6 +65,22 @@ def test_empty_episode_string_raises_assertion_error() -> None:
     bad = _valid_episode_dict()
     bad["episode"] = ""
     with pytest.raises(AssertionError, match=r"Episode\.episode is empty"):
+        assert_episode_shape(bad)
+
+
+def test_empty_summary_raises_assertion_error() -> None:
+    """A blank preview reads as a bug downstream, so the shape helper treats it like an empty body."""
+    bad = _valid_episode_dict()
+    bad["summary"] = ""
+    with pytest.raises(AssertionError, match=r"Episode\.summary is empty"):
+        assert_episode_shape(bad)
+
+
+def test_whitespace_only_summary_raises_assertion_error() -> None:
+    """Whitespace is indistinguishable from empty once rendered."""
+    bad = _valid_episode_dict()
+    bad["summary"] = "   \n"
+    with pytest.raises(AssertionError, match=r"Episode\.summary is empty"):
         assert_episode_shape(bad)
 
 

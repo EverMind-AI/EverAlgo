@@ -5,7 +5,10 @@ Constants:
     - ``REFLECT_EPISODE_UPDATE_PROMPT`` — incremental update of an existing narrative.
       Placeholders: ``{old_episode}`` / ``{new_episodes}``.
 
-Output schema (both variants): ``{"content": str, "title": str}`` via Structured Output.
+Output schema (both variants): ``{"content": str, "summary": str, "title": str}`` via Structured
+Output. ``summary`` sits after ``content`` in :class:`~everalgo.user_memory.reflect._ReflectOutput`
+because Structured Output generates fields in schema order, and a preview written before the
+narrative it previews would be summarising nothing.
 
 ``{language_rule}`` — appearing twice in each prompt, both copies receiving the same text — is filled from
 ``user_memory._language.build_language_rule`` according to ``areflect``'s ``output_language`` argument.
@@ -34,6 +37,8 @@ Merge them into a single coherent narrative that:
 - Removes redundant information
 - Ends with a brief summary of the current state as of the latest episode
 
+Also return a `summary`: a faithful preview of the merged narrative, readable on its own without it. Name the main participants and what happened, ending on the current state as of the latest episode. Introduce no fact the narrative does not already carry, and do not refer to the record itself — no "this narrative", "the above". When you mention a time, write it in the format the narrative uses. Under 50 words; use as few as the narrative needs.
+
 {language_rule}
 
 Episodes:
@@ -57,5 +62,7 @@ Update the narrative to incorporate the new information:
 - Maintain all factual details: names, dates, locations, specific actions
 - Keep every time exactly as the narrative and the new episodes wrote it. Every absolute time that states a clock time MUST carry the UTC zone label ("2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00"); a date with no clock time needs none. Do NOT reformat, convert, or drop a time that is already there
 - End with an updated summary of the current state
+
+Also return a `summary`: a faithful preview of the merged narrative, readable on its own without it. Name the main participants and what happened, ending on the current state as of the latest episode. Introduce no fact the narrative does not already carry, and do not refer to the record itself — no "this narrative", "the above". When you mention a time, write it in the format the narrative uses. Under 50 words; use as few as the narrative needs.
 
 {language_rule}"""

@@ -97,7 +97,8 @@ _BOUNDARY_JSON = '{"reasoning": "single coherent topic", "boundaries": [], "shou
 
 _EPISODE_JSON = (
     '{"title": "Alice asks about Python async retry semantics",'
-    ' "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up."}'
+    ' "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",'
+    ' "summary": "Alice raised Python async retry patterns and the assistant offered a follow-up."}'
 )
 
 _FORESIGHT_JSON = (

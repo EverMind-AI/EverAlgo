@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -103,7 +104,7 @@ class _PromptCapturedError(Exception):
 
 async def test_aextract_returns_single_episode_from_title_content_json() -> None:
     """LLM emits {title, content} -> single Episode with subject=title, episode=content."""
-    llm_json = '{"title": "Meeting with Alice at 3pm", "content": "User scheduled a meeting with Alice at 3pm."}'
+    llm_json = '{"title": "Meeting with Alice at 3pm", "content": "User scheduled a meeting with Alice at 3pm.", "summary": "Preview of User scheduled a meeting with Alice at 3pm."}'
     fake = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
 
     ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
@@ -115,7 +116,9 @@ async def test_aextract_returns_single_episode_from_title_content_json() -> None
 
 async def test_aextract_episode_fields_filled_correctly() -> None:
     """owner_id on the returned Episode equals the supplied sender_id argument."""
-    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "c"}', model="fake")])
+    fake = FakeLLMClient(
+        responses=[ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")]
+    )
 
     ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
@@ -126,7 +129,9 @@ async def test_aextract_episode_fields_filled_correctly() -> None:
 
 async def test_aextract_owner_id_comes_from_argument_not_inferred() -> None:
     """owner_id on the returned Episode must equal the caller-supplied sender_id, not be inferred."""
-    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "c"}', model="fake")])
+    fake = FakeLLMClient(
+        responses=[ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")]
+    )
 
     ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_explicit")
 
@@ -176,7 +181,9 @@ async def test_aextract_raises_on_empty_content() -> None:
     far more from a ``ValueError`` here than from an empty-body guard firing later in
     ``assert_episode_shape`` or the benchmark extract stage, where the originating call is long gone.
     """
-    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": ""}', model="fake")])
+    fake = FakeLLMClient(
+        responses=[ChatResponse(content='{"title": "T", "content": "", "summary": "Preview"}', model="fake")]
+    )
 
     with pytest.raises(ValueError, match="empty content"):
         await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
@@ -184,7 +191,9 @@ async def test_aextract_raises_on_empty_content() -> None:
 
 async def test_aextract_raises_on_whitespace_only_content() -> None:
     """Whitespace-only ``content`` must be treated the same as empty ``content``."""
-    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "   "}', model="fake")])
+    fake = FakeLLMClient(
+        responses=[ChatResponse(content='{"title": "T", "content": "   ", "summary": "Preview"}', model="fake")]
+    )
 
     with pytest.raises(ValueError, match="empty content"):
         await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
@@ -201,7 +210,7 @@ async def test_aextract_per_call_prompt_overrides_default() -> None:
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
         captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
 
     fake = FakeLLMClient(handler=handler)
     custom = "CUSTOM EPISODE start={conversation_start_time} conv={conversation} cust={custom_instructions}"
@@ -225,7 +234,7 @@ async def test_aextract_custom_instructions_override() -> None:
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
         captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
 
     fake = FakeLLMClient(handler=handler)
     custom_prompt = "instruct={custom_instructions}"
@@ -248,7 +257,7 @@ async def test_aextract_user_name_resolved_from_messages() -> None:
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
         captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
 
     fake = FakeLLMClient(handler=handler)
     custom_prompt = "user_name={user_name}"
@@ -265,7 +274,7 @@ async def test_aextract_user_name_falls_back_to_sender_id_when_no_sender_name() 
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
         captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
 
     mc = MemCell(
         items=[
@@ -326,11 +335,19 @@ async def test_aextract_two_owner_ids_produce_independent_episodes() -> None:
 
     fake_alice = FakeLLMClient(
         responses=[
-            ChatResponse(content='{"title": "Alice offsite", "content": "Alice proposed offsite."}', model="fake")
+            ChatResponse(
+                content='{"title": "Alice offsite", "content": "Alice proposed offsite.", "summary": "Preview of Alice proposed offsite."}',
+                model="fake",
+            )
         ]
     )
     fake_bob = FakeLLMClient(
-        responses=[ChatResponse(content='{"title": "Bob offsite", "content": "Bob offered to host."}', model="fake")]
+        responses=[
+            ChatResponse(
+                content='{"title": "Bob offsite", "content": "Bob offered to host.", "summary": "Preview of Bob offered to host."}',
+                model="fake",
+            )
+        ]
     )
 
     ep_alice = await EpisodeExtractor(llm=fake_alice).aextract(mc, sender_id="u_alice")
@@ -444,7 +461,7 @@ async def test_aextract_silently_skips_non_chat_items() -> None:
         timestamp=1700000002000,
     )
 
-    llm_json = '{"title": "Demo on Friday", "content": "Alice scheduled a demo for Friday."}'
+    llm_json = '{"title": "Demo on Friday", "content": "Alice scheduled a demo for Friday.", "summary": "Preview of Alice scheduled a demo for Friday."}'
 
     fake_chat = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
     fake_mixed = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
@@ -465,7 +482,12 @@ async def test_aextract_silently_skips_non_chat_items() -> None:
 async def test_aextract_uses_instance_llm_when_per_call_omitted() -> None:
     """Instance-level llm= is used when aextract() is called without a per-call llm= argument."""
     instance_fake = FakeLLMClient(
-        responses=[ChatResponse(content='{"title": "Instance test", "content": "From instance llm"}', model="inst")]
+        responses=[
+            ChatResponse(
+                content='{"title": "Instance test", "content": "From instance llm", "summary": "Preview of From instance llm"}',
+                model="inst",
+            )
+        ]
     )
     extractor = EpisodeExtractor(llm=instance_fake)
     ep = await extractor.aextract(_memcell(), sender_id="u_alice")
@@ -477,7 +499,9 @@ async def test_aextract_uses_instance_llm_when_per_call_omitted() -> None:
 async def test_extract_generic_when_sender_id_is_none() -> None:
     """sender_id=None → generic prompt (EPISODE_GENERATION_PROMPT, no user_name), owner_id=None."""
     fake = FakeLLMClient(
-        responses=['{"title": "Bug fix discussion", "content": "Alice and Bob debugged the login flow."}']
+        responses=[
+            '{"title": "Bug fix discussion", "content": "Alice and Bob debugged the login flow.", "summary": "Preview of Alice and Bob debugged the login flow."}'
+        ]
     )
     ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=None)
     assert ep.owner_id is None
@@ -550,7 +574,7 @@ async def test_conversation_start_time_uses_24h_input_format() -> None:
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
         captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c"}', model="fake")
+        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
 
     fake = FakeLLMClient(handler=handler)
     mc = MemCell(
@@ -605,7 +629,12 @@ def _memcell_spanning_70_minutes() -> MemCell:
 async def test_episode_body_is_stored_verbatim(sender_id: str | None) -> None:
     """Both prompt variants store ``content`` exactly as the LLM returned it."""
     fake = FakeLLMClient(
-        responses=[ChatResponse(content='{"title": "T", "content": "Alice asked about hiking."}', model="fake")]
+        responses=[
+            ChatResponse(
+                content='{"title": "T", "content": "Alice asked about hiking.", "summary": "Preview of Alice asked about hiking."}',
+                model="fake",
+            )
+        ]
     )
 
     ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id=sender_id)
@@ -623,7 +652,11 @@ async def test_episode_body_gets_no_code_built_timestamp_prefix() -> None:
     conversations with no temporal content, so the prefix guarded a case that did not occur. The
     format the prefix guaranteed is now guaranteed by the prompt's UTC rule instead.
     """
-    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "body"}', model="fake")])
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(content='{"title": "T", "content": "body", "summary": "Preview of body"}', model="fake")
+        ]
+    )
 
     ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id="u_alice")
 
@@ -632,7 +665,11 @@ async def test_episode_body_gets_no_code_built_timestamp_prefix() -> None:
 
 async def test_episode_timestamp_field_still_holds_closing_time() -> None:
     """Dropping the prefix must not disturb the ``timestamp`` field: still ``memcell.timestamp``."""
-    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "body"}', model="fake")])
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(content='{"title": "T", "content": "body", "summary": "Preview of body"}', model="fake")
+        ]
+    )
     mc = _memcell_spanning_70_minutes()
 
     ep = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
@@ -640,13 +677,89 @@ async def test_episode_timestamp_field_still_holds_closing_time() -> None:
     assert ep.timestamp == mc.timestamp == _TS_FRIDAY_MS + 70 * 60 * 1000
 
 
-async def test_episode_summary_fallback_slices_verbatim_body() -> None:
-    """When the LLM omits `summary`, the fallback slices the body, which no longer carries a prefix."""
+# ==========================================================================
+# summary — a model-written display preview, not a slice of the body
+#
+# For 0.1 through 0.4 this field was `body[:200]`: the prompts never asked for it, so the extractor's
+# `data.get("summary")` branch was unreachable and every caller got a blind truncation — cut mid-word in
+# English, and a verbatim copy of the whole body in Chinese, where 200 characters is most of an episode.
+# ==========================================================================
+
+_SUMMARY = "Alice raised async retries and the assistant promised a doc."
+
+
+def _episode_response(*, title: str = "T", content: str = "A long narrative body.", summary: str = _SUMMARY) -> str:
+    return json.dumps({"title": title, "content": content, "summary": summary})
+
+
+@pytest.mark.parametrize("sender_id", [None, "u_alice"])
+async def test_summary_comes_from_the_model_verbatim(sender_id: str | None) -> None:
+    """Both prompt variants must carry the model's summary through untouched."""
+    fake = FakeLLMClient(responses=[ChatResponse(content=_episode_response(), model="fake")])
+
+    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=sender_id)
+
+    assert ep.summary == _SUMMARY
+
+
+async def test_summary_is_not_a_slice_of_the_body() -> None:
+    """The regression that prompted the change: a body long enough that a 200-char slice is visible."""
+    body = "Alice asked about async retries. " * 20
+    fake = FakeLLMClient(responses=[ChatResponse(content=_episode_response(content=body), model="fake")])
+
+    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+
+    assert ep.summary == _SUMMARY
+    assert ep.summary != body[:200]
+    assert not body.startswith(ep.summary)
+
+
+async def test_missing_summary_raises_rather_than_substituting_one() -> None:
+    """There is no honest value to invent for a preview the model did not write."""
     fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "body"}', model="fake")])
 
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id="u_alice")
+    with pytest.raises(ValueError, match=r"missing required keys \['summary'\]"):
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
 
-    assert ep.model_dump()["summary"] == "body"
+
+@pytest.mark.parametrize("summary", ["", "   ", "\n\t"])
+async def test_blank_summary_raises_like_blank_content(summary: str) -> None:
+    """A blank preview is a defect the caller cannot see, so it fails here where the call is still in hand."""
+    fake = FakeLLMClient(responses=[ChatResponse(content=_episode_response(summary=summary), model="fake")])
+
+    with pytest.raises(ValueError, match="empty summary"):
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+
+
+@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
+def test_both_variants_ask_for_summary_after_content(name: str) -> None:
+    """Field order is generation order: a summary emitted first would summarise a body that does not exist yet.
+
+    That would make it a second independent pass over the conversation, which is exactly what the field is
+    not — it is a compression of `content`. Guarded here because the ordering is invisible at a glance and
+    a well-meaning edit that alphabetises the JSON example would silently break it.
+    """
+    import everalgo.user_memory.prompts.en.episode as mod
+
+    prompt = getattr(mod, name)
+    assert prompt.count('"summary"') >= 1
+    assert prompt.count('"summary"') == prompt.count('"content"')
+    for index in range(len(prompt)):
+        if prompt.startswith('"summary"', index):
+            assert prompt.rfind('"content"', 0, index) > prompt.rfind('"summary"', 0, index), (
+                f"{name}: a summary at offset {index} is not preceded by its own content"
+            )
+
+
+@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
+def test_both_variants_bound_the_summary_length_and_self_containment(name: str) -> None:
+    """The three rigid clauses of the spec: bounded, faithful, and readable without the record."""
+    import everalgo.user_memory.prompts.en.episode as mod
+
+    prompt = getattr(mod, name)
+    assert "Under 50 words" in prompt
+    assert "Introduce no fact that is not already in content" in prompt
+    assert "Do not refer to the record itself" in prompt
 
 
 # ==========================================================================

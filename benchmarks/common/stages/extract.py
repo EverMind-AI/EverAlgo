@@ -99,6 +99,7 @@ async def _extract_memcell_data(
         raise ValueError(f"EpisodeExtractor returned empty episode body (mc_idx={mc_idx})")
 
     episode_subject: str = getattr(episode, "subject", "") or ""
+    episode_summary: str = getattr(episode, "summary", "") or ""
 
     async def _do_embed_episode() -> list[float] | None:
         vecs = await embedding_client.embed([episode_body])
@@ -121,6 +122,7 @@ async def _extract_memcell_data(
         mc_idx,
         subject=episode_subject,
         episode_text=episode_body,
+        summary=episode_summary,
         memcell_ids=[str(mc_idx)],
         timestamp=mc.timestamp,
         owner_id=None,

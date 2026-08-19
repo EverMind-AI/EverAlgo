@@ -42,6 +42,7 @@ def _make_episode(
     episode_embedding: list[float] | None = None,
     subject: str = "test",
     subject_embedding: list[float] | None = None,
+    summary: str | None = None,
 ) -> dict[str, Any]:
     """Return a minimal episode dict matching the Extract Base output schema."""
     return {
@@ -50,6 +51,7 @@ def _make_episode(
         "memcell_ids": [ep_id],
         "subject": subject,
         "episode": episode_text,
+        "summary": summary if summary is not None else f"Preview of {episode_text}",
         "timestamp": timestamp,
         "embeddings": {
             "episode": episode_embedding,
@@ -308,13 +310,14 @@ async def test_process_conversation_writes_three_files(tmp_path: Path) -> None:
         assert "id" in mc
         assert "items" in mc
 
-    # Episodes — uses algo field name, has embeddings, no summary
+    # Episodes — uses algo field names, has embeddings, and persists the model-written summary so the
+    # reflect stage can rebuild an Episode (the field is required on the model).
     episodes = json.loads((tmp_path / "episodes_conv_0.json").read_text())
     assert len(episodes) == 2
     for ep in episodes:
         assert "episode" in ep
         assert "content" not in ep
-        assert "summary" not in ep
+        assert ep["summary"], "summary must round-trip through the serialised episode"
         assert "memcell_ids" in ep
         assert "embeddings" in ep
 

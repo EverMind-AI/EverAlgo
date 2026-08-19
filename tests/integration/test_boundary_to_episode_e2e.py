@@ -60,7 +60,8 @@ async def test_boundary_to_episode_pipeline_e2e() -> None:
         else:
             content = (
                 '{"title": "Meeting with Alice at 3pm",'
-                ' "content": "User scheduled a meeting with Alice at 3pm and plans to follow up next week."}'
+                ' "content": "User scheduled a meeting with Alice at 3pm and plans to follow up next week.",'
+                ' "summary": "The user set up a 3pm meeting with Alice and intends to follow up next week."}'
             )
         return ChatResponse(content=content, model="fake")
 

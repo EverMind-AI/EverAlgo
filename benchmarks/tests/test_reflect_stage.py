@@ -47,6 +47,7 @@ def _make_episode(
     owner_id: str | None = None,
     memcell_ids: list[str] | None = None,
     embedding: list[float] | None = None,
+    summary: str | None = None,
 ) -> dict[str, Any]:
     """Return a minimal episode dict matching the Extract Base output schema."""
     return {
@@ -55,6 +56,7 @@ def _make_episode(
         "memcell_ids": memcell_ids or [ep_id],
         "subject": subject,
         "episode": episode_text,
+        "summary": summary if summary is not None else f"Preview of {episode_text}",
         "timestamp": timestamp,
         "embeddings": {"episode": embedding or [0.1, 0.2, 0.3], "subject": None},
     }
@@ -123,6 +125,7 @@ def _make_reflector_mock(
             owner_id=None,
             episode=merged_text,
             subject=merged_subject,
+            summary=f"Preview of {merged_subject}",
             timestamp=max(ep.timestamp for ep in episodes),
         )
 

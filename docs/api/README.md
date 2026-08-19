@@ -30,7 +30,7 @@ from everalgo.types import (
     ToolCallResult,     # tool execution result — kind="tool_result"
     ConversationItem,   # ChatMessage | ToolCallRequest | ToolCallResult (discriminated union)
     MemCell,            # boundary-segmented conversation slice; items: list[ConversationItem]
-    Episode,            # narrative memory — owner_id, episode, subject, timestamp
+    Episode,            # narrative memory — owner_id, episode, subject, summary, timestamp
     Foresight,          # anticipated future event — owner_id, foresight, evidence, start_time, end_time, duration_days
     AtomicFact,         # single verifiable assertion — owner_id (str | None), fact, timestamp
     Profile,            # structured user profile — owner_id, summary, timestamp; extra fields via extra="allow"

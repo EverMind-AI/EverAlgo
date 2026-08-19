@@ -7,13 +7,20 @@ class Episode(BaseModel):
     """User-side episodic memory — a structured 'what happened' trace.
 
     ``owner_id`` is the user this episode belongs to, or ``None`` for whole-memcell (generic) episodes
-    that do not bind to any user. LLM output maps ``title`` → ``subject`` and ``content`` → ``episode``.
-    ``extra="allow"`` surfaces any LLM-emitted secondary fields without a schema bump.
+    that do not bind to any user. LLM output maps ``title`` → ``subject``, ``content`` → ``episode`` and
+    ``summary`` → ``summary``. ``extra="allow"`` surfaces any LLM-emitted secondary fields without a
+    schema bump.
+
+    ``summary`` is a display preview of ``episode``: faithful to it, readable without it, introducing
+    nothing it does not already say. Required rather than defaulted so that a construction site which
+    forgets it fails the type-checkers instead of silently producing an empty preview — it was a blind
+    ``episode[:200]`` slice for the whole of 0.1 through 0.4, which is what a silent default degrades back into.
     """
 
     owner_id: str | None
     episode: str
     subject: str = ""
+    summary: str
     timestamp: int  # Unix epoch milliseconds
 
     model_config = ConfigDict(extra="allow")

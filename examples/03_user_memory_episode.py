@@ -31,6 +31,10 @@ _EPISODE_JSON = json.dumps(
             "Alice initiated a discussion on Python async retry patterns. "
             "The assistant offered to send a follow-up document the next week."
         ),
+        "summary": (
+            "Alice asked about Python async retry patterns and the assistant "
+            "promised a follow-up document the next week."
+        ),
     }
 )
 
@@ -69,6 +73,7 @@ async def main() -> None:
     print(f"owner_id  : {episode.owner_id!r}")
     print(f"subject   : {episode.subject!r}")
     print(f"episode   : {episode.episode!r}")
+    print(f"summary   : {episode.summary!r}")
     print(f"timestamp : {episode.timestamp}")
 
 

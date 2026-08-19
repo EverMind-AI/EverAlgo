@@ -98,24 +98,29 @@ class EpisodeExtractor:
 
 
 # ---------------------------------------------------------------------------
-# LLM callsite — regex JSON extraction + 5-retry (mirror b150b32 boundary pattern).
+# LLM callsite — regex JSON extraction, no retry (the client documents none either; retry is a
+# caller concern per everalgo.llm.providers.openai_compat).
 # ---------------------------------------------------------------------------
 
 
 async def _call_llm_for_episode(llm: LLMClient, rendered: str) -> dict[str, Any]:
     """Call LLM and return validated episode dict.
 
-    Uses brace-balanced extraction because the ``summary`` field may contain nested strings with
-    punctuation. Raises ``ValueError`` on missing JSON or missing required keys.
+    Uses brace-balanced extraction because the free-text fields may contain nested strings with
+    punctuation. Raises ``ValueError`` on missing JSON, a missing required key, or an empty
+    ``content`` / ``summary``. All three keys are required: ``summary`` reaches the caller as a
+    display preview, and there is no honest value to substitute for one the model did not write.
     """
     response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
     text = response.content
     json_str = _extract_json_object(text)
     data: dict[str, Any] = json.loads(json_str)
-    if "title" not in data or "content" not in data:
-        raise ValueError(f"Episode LLM response missing required keys: {data!r}")
-    if not str(data["content"]).strip():
-        raise ValueError(f"Episode LLM response has empty content: {data!r}")
+    missing = [key for key in ("title", "content", "summary") if key not in data]
+    if missing:
+        raise ValueError(f"Episode LLM response missing required keys {missing}: {data!r}")
+    for key in ("content", "summary"):
+        if not str(data[key]).strip():
+            raise ValueError(f"Episode LLM response has empty {key}: {data!r}")
     return data
 
 
@@ -154,17 +159,13 @@ def _build_episode(data: dict[str, Any], *, sender_id: str | None, memcell: MemC
     a prefix on top of that restated the opening message's time a second time, since the prefix's value
     was ``items[0].timestamp`` and the narrative's own timeline starts at the same moment.
     """
-    title = str(data["title"])
-    body = str(data["content"])
-    summary_raw = data.get("summary")
-    summary = summary_raw if isinstance(summary_raw, str) and summary_raw.strip() else body[:200]
     return Episode.model_validate(
         {
             "owner_id": sender_id,
-            "episode": body,
-            "subject": title,
+            "episode": str(data["content"]),
+            "subject": str(data["title"]),
+            "summary": str(data["summary"]),
             "timestamp": memcell.timestamp,
-            "summary": summary,  # preserved via extra='allow' without a schema bump
         }
     )
 

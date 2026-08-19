@@ -21,7 +21,7 @@ from everalgo.types import ChatMessage, Episode, MemCell
             items=[ChatMessage(id="m3", role="user", content="hi", timestamp=1, sender_id="user")],
             timestamp=10,
         ),
-        Episode(owner_id="u1", episode="Alice asked about Q3.", timestamp=1),
+        Episode(owner_id="u1", episode="Alice asked about Q3.", summary="Alice asked about Q3.", timestamp=1),
         Episode.model_validate(
             {
                 "owner_id": "u2",

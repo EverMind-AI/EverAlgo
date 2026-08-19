@@ -31,8 +31,8 @@ from everalgo.user_memory import (
 )
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "should_wait": False})
-_EPISODE_JSON  = json.dumps({"title": "Alice asks about async retries", "content": "Alice explored async retry patterns."})
-_FORE_JSON     = json.dumps([{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}])
+_EPISODE_JSON  = json.dumps({"title": "Alice asks about async retries", "content": "Alice explored async retry patterns.", "summary": "Alice explored async retry patterns."})
+_FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _FACT_JSON     = json.dumps({"atomic_facts": {"time": "Nov 14 2023", "atomic_fact": ["Alice is learning Python async."]}})
 _PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"category": "Technical", "description": "Python developer."}]})
 
@@ -191,6 +191,14 @@ class EpisodeReflector:
         output_language: OutputLanguage | str | None = None,   # None → inherited from the input
     ) -> Episode: ...
 ```
+
+Every episode carries three model-written fields: `subject` (the title), `episode` (the full narrative) and
+`summary` (a display preview of the narrative — faithful to it, readable without it, under 50 words). All
+three are required; if the model omits `summary` or returns it blank, `aextract` raises rather than
+substituting a value. Up to 0.4 the field was a blind `episode[:200]` slice, because the prompts never asked
+for it — a truncation cut mid-word in English, and in Chinese a verbatim copy of most of the body.
+
+`EpisodeReflector` produces the same three fields, so a merged episode has a preview of the merged narrative.
 
 `EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).
 

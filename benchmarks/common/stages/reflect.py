@@ -37,11 +37,22 @@ logger = logging.getLogger(__name__)
 
 
 def _episode_dict_to_model(ep: dict[str, Any]) -> Episode:
-    """Convert a serialised episode dict to an ``Episode`` domain object."""
+    """Convert a serialised episode dict to an ``Episode`` domain object.
+
+    Raises:
+        ValueError: If ``summary`` is absent. Episodes serialised before it became a required field lack
+            it, and a bare ``KeyError`` here would not say which stage has to be re-run.
+    """
+    if "summary" not in ep:
+        raise ValueError(
+            f"episode id={ep.get('id', 'unknown')} has no 'summary'; it predates the field becoming "
+            f"required on Episode. Re-run the extract stage to regenerate episodes_*.json."
+        )
     return Episode(
         owner_id=ep.get("owner_id"),
         episode=ep["episode"],
         subject=ep.get("subject", ""),
+        summary=ep["summary"],
         timestamp=int(ep["timestamp"]),
     )
 
@@ -73,6 +84,7 @@ async def _reflect_cluster(
 
     merged_body = merged.episode
     merged_subject = merged.subject
+    merged_summary = merged.summary
 
     body_vec, subject_vec = await _embed_pair(merged_body, merged_subject, embedding_client)
 
@@ -88,6 +100,7 @@ async def _reflect_cluster(
         0,  # placeholder; re-numbered by caller
         subject=merged_subject,
         episode_text=merged_body,
+        summary=merged_summary,
         memcell_ids=union_memcell_ids,
         timestamp=merged.timestamp,
         owner_id=None,

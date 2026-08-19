@@ -46,7 +46,7 @@ from everalgo.testing import FakeLLMClient
 
 # Scripted mode — responses are returned in order
 fake = FakeLLMClient(responses=[
-    ChatResponse(content=json.dumps({"title": "T", "content": "C"}), model="fake"),
+    ChatResponse(content=json.dumps({"title": "T", "content": "C", "summary": "S"}), model="fake"),
 ])
 
 # Handler mode — full control over each call
