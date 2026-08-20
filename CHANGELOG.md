@@ -17,10 +17,37 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.6.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.7.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Minor release — 2026-08-20 (user-memory)
+
+`ProfileExtractor`'s three prompts are rewritten around one definition of what a profile is: a portrait of a
+person, not a log of what happened. The reported symptom was a real profile holding 22 `explicit_info` items
+with 20 of them under two category names; the cause was not label choice but that every operation in a
+conversation was being restated as a standing capability — 8.0 items per run on a purely operational corpus,
+86% of them claims like `负责测试执行` that the person never made. Category collision followed from those items
+all being the same kind of thing.
+
+No public API changes. What changes is what the extractor writes: an operational conversation can now
+correctly yield nothing; a stated fact lands in `explicit_info` rather than being rephrased as a disposition;
+no item names the subject; facts about one dimension merge into one item; transient statements are dropped.
+The bump is minor rather than patch because compaction now runs at the item limit instead of 50% beyond it, so
+a profile between 31 and 45 items makes one more LLM call than it used to.
+
+Verified across five models from four vendors and three corpora (the tuned Chinese software-engineering one, a
+non-technical Chinese one, and an English one): 45 must-keep checks all at 20/20, capability phrasing and
+subject naming at 0.00 per run everywhere. One limitation stands and is documented in the module docstring — a
+record of the work still reaches `explicit_info` at 1.4-1.8 items per run on a purely operational corpus, and
+four rules written against it each regressed something else.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-user-memory` | 0.7.0 | minor — profile prompt rewrite; compaction threshold now the item limit |
+
+Detail in [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md).
 
 ## Minor release — 2026-08-19 (boundary)
 
