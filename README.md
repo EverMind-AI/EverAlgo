@@ -71,7 +71,7 @@ _BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "sho
 _EPISODE_JSON  = json.dumps({"title": "Alice asks about async", "content": "Alice explored async patterns."})
 _FORE_JSON     = json.dumps([{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}])
 _FACT_JSON     = json.dumps({"atomic_facts": {"time": "Nov 14 2023", "atomic_fact": ["Alice is learning Python async."]}})
-_PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"category": "Technical", "description": "Python developer."}]})
+_PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"trait": "Pragmatic", "description": "Prefers minimal-ceremony tooling."}]})
 
 
 async def main() -> None:

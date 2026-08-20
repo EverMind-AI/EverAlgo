@@ -132,7 +132,10 @@ explicit_package_bases = true
 warn_unused_ignores = false
 # Vendored opensource reference code (locomo-benchmark / the upstream system) is checked into the repo for algorithm
 # porting; it is not part of the published distributions and must not block the workspace's strict gate.
-exclude = "^opensource/"
+# `local/` is gitignored scratch space for design notes and one-off probe scripts (see `.gitignore`), so nothing
+# in it is repository content. pyright already skips it by virtue of `include = ["packages/*/src"]`; mypy scanned
+# it, which meant dropping a throwaway script there broke the gate for everyone.
+exclude = "^(opensource|local)/"
 # Required for PEP 420 namespace resolution; also disambiguates `everalgo.types` from stdlib `types`.
 mypy_path = "packages/everalgo-core/src:packages/everalgo-boundary/src:packages/everalgo-clustering/src:packages/everalgo-rank/src:packages/everalgo-parser/src:packages/everalgo-user-memory/src:packages/everalgo-agent-memory/src:packages/everalgo-knowledge/src"
 

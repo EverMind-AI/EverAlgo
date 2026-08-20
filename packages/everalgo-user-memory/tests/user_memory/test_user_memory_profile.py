@@ -503,7 +503,7 @@ async def test_update_merge_correctness_add_update_delete() -> None:
 
 
 async def test_init_injects_target_user_and_preserves_other_speakers() -> None:
-    """INIT prompt names sender_id as target user; other speakers stay rendered as context."""
+    """INIT prompt labels the target by name and locates them by id; other speakers stay as context."""
     captured: dict[str, str] = {}
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
@@ -521,12 +521,14 @@ async def test_init_injects_target_user_and_preserves_other_speakers() -> None:
     )
     await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_alice")
 
-    assert "TARGET USER: u_alice" in captured["prompt"]  # target injected
+    assert "TARGET USER: Alice" in captured["prompt"]  # name preferred over the raw id
+    assert "equals ``u_alice``" in captured["prompt"]  # id stays the locator
+    assert "{target_user_id}" not in captured["prompt"]  # placeholder actually substituted
     assert "u_bob" in captured["prompt"]  # other speaker kept as context (no render filtering)
 
 
 async def test_update_injects_target_user() -> None:
-    """UPDATE prompt names sender_id as target user."""
+    """UPDATE prompt labels the target by name and locates them by id."""
     captured: dict[str, str] = {}
 
     def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
@@ -553,8 +555,52 @@ async def test_update_injects_target_user() -> None:
     )
     await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_alice", old_profile=old)
 
-    assert "TARGET USER: u_alice" in captured["prompt"]
+    assert "TARGET USER: Alice" in captured["prompt"]
+    assert "equals ``u_alice``" in captured["prompt"]
+    assert "{target_user_id}" not in captured["prompt"]
     assert "u_bob" in captured["prompt"]  # other speaker kept as context (no render filtering)
+
+
+async def test_init_falls_back_to_sender_id_when_no_name_is_carried() -> None:
+    """``sender_name`` is optional, so the id doubles as the label when the conversation carries none."""
+    captured: dict[str, str] = {}
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=_payload([], []), model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+    cell = MemCell(items=[_msg("I write Python.", sender="u_alice", sender_name=None)], timestamp=_TS)
+
+    await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_alice")
+
+    assert "TARGET USER: u_alice" in captured["prompt"]
+    assert "equals ``u_alice``" in captured["prompt"]
+
+
+async def test_display_name_ignores_a_blank_name_and_other_speakers_names() -> None:
+    """A whitespace-only name is no name, and another speaker's name is never the target's label."""
+    captured: dict[str, str] = {}
+
+    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+        assert isinstance(messages[0].content, str)  # narrow for test
+        captured["prompt"] = messages[0].content
+        return ChatResponse(content=_payload([], []), model="fake")
+
+    fake = FakeLLMClient(handler=handler)
+    cell = MemCell(
+        items=[
+            _msg("I write Python.", sender="u_alice", sender_name="   "),
+            _msg("I prefer Go.", sender="u_bob", sender_name="Bob"),
+        ],
+        timestamp=_TS,
+    )
+
+    await ProfileExtractor(llm=fake).aextract([cell], sender_id="u_alice")
+
+    assert "TARGET USER: u_alice" in captured["prompt"]
+    assert "TARGET USER: Bob" not in captured["prompt"]
 
 
 # ==========================================================================
@@ -750,27 +796,330 @@ def test_en_profile_prompts_never_frame_language_as_a_choice(phrase: str) -> Non
         assert phrase not in getattr(en_mod, name), name
 
 
-# The UPDATE prompt used to say nothing at all about how an index is resolved, while its own example
-# output puts update and delete in one array — the shape that silently corrupted a profile.
-_INDEX_SEMANTICS_CLAUSES_EN = (
-    "resolved against the profile snapshot shown above",
-    "never shift each other's indices",
-    '"add" takes no index',
+# ==========================================================================
+# Prompt shape
+#
+# Every rule below answers a measured failure, and the rewrite put the shared ones in two constants that
+# all three prompts splice in — which is what stops compaction from drifting behind the other two paths, as
+# it had (brackets on 40/40 traits where the others had 0/44; capability items merged rather than deleted).
+# Guards therefore assert against `_PORTRAIT` / `_ITEM_RULES` once, plus the per-prompt parts separately.
+#
+# Numbers, all from 20-run measurements on a corpus of eight purely operational conversations (nothing the
+# person said about themselves, so the correct answer is nothing at all):
+#   before: 8.00 explicit items per run, 86% of them an action restated as a standing capability
+#   after:  0.00
+# ==========================================================================
+
+_PORTRAIT_CLAUSES = (
+    "A profile is a **portrait of a person**, not a log of what happened.",
+    "only because it is still true the next time you meet this person",
+    "can correctly yield nothing at all",
+    # explicit_info: stated, and still true next time.
+    "what this person **stated** about themselves",
+    "I'm on leave next week",
+    "there is nowhere to record when they expire",
+    # implicit_traits: the unstated half, with a threshold on what counts as evidence.
+    "the half of the portrait they did not state outright",
+    "should not leave this empty",
+    "**two or more signals**",
+    "**chose or asserted** — never an operation they carried out",
+    "two actions are not two signals about who someone is",
+    # Which bucket: decided by whether the person said it, not by what the fact is about.
+    "decided by whether this person said it, never by what the fact is about",
+    "including how their team requires work to be done, what they refuse to touch",
+    "implicit_traits holds only what no sentence of theirs states",
+    "does not move it across",
+    # The capability ban, and why an evidence line does not rescue one already stored.
+    "**Never restate an action as a capability, duty, skill, familiarity, interest or attitude.**",
+    "not caring about test results or an interest in testing either",
+    "asking what a skipped test was is a question, not an attitude towards testing",
+    "interested in, attentive to or concerned with anything unless they said so themselves",
+    # The mechanism behind the leftover noise: what the assistant explained came back as the person's own
+    # knowledge, so the ban on capabilities never reached it.
+    "**A question records nothing but the question, and being told something is not knowing it.**",
+    "it never becomes this person's knowledge, familiarity or concern",
+    "leaves the portrait exactly as it was",
+    "an occasion cannot establish one",
+    "to be removed, not rewritten and not merged",
 )
 
-_INDEX_SEMANTICS_CLAUSES_ZH = (
-    "以上方展示的画像快照为准",
-    "绝不会互相移动索引",
-    '"add" 不接受 index',
+_ITEM_CLAUSES = (
+    # One dimension, one item — with the name-reuse and granularity tests that make it bind.
+    "**One item per dimension.**",
+    "is ONE item, not three",
+    "Reuse a category or trait name already in use rather than coining a near-synonym",
+    "Dimensions are coarse",
+    "When unsure whether a dimension is new, it is not.",
+    # No cross-dimension chaining. The connective list is load-bearing; see the note below.
+    "**One item, one dimension.**",
+    '"also", "as well as" or a comma-list',
+    "Where neither belongs in a portrait, write nothing.",
+    # No stand-in for the subject, in either field.
+    "**Never name the subject.**",
+    'never "{target_user} works mainly in Python"',
+    # Interpolated, not a literal name. No real name may ship in a PyPI prompt, and a fixed stand-in does not
+    # work either: a literal "Alice" — absent from the conversation — took implicit_traits from 0.95 to
+    # 0.00/0.05/0.00 per run over three repeats (same-version spread 0.05). The example has to name whoever is
+    # actually speaking; a stranger's name reads as another participant and unanchors the subject.
+    "give what was said and when, not who said it",
 )
 
 
-@pytest.mark.parametrize("clause", _INDEX_SEMANTICS_CLAUSES_EN)
-def test_en_update_prompt_states_the_index_semantics(clause: str) -> None:
-    """Index semantics must be explicit, so a model cannot read sequential-mutation into them."""
+@pytest.mark.parametrize("clause", _PORTRAIT_CLAUSES)
+def test_portrait_block_carries_its_clauses(clause: str) -> None:
+    """The definition of a profile and of the two buckets, shared by all three prompts."""
+    from everalgo.user_memory.prompts.en.profile import _PORTRAIT
+
+    assert clause in _PORTRAIT
+
+
+@pytest.mark.parametrize("clause", _ITEM_CLAUSES)
+def test_item_rules_block_carries_its_clauses(clause: str) -> None:
+    """How items are shaped: one per dimension, one dimension each, subject never named."""
+    from everalgo.user_memory.prompts.en.profile import _ITEM_RULES
+
+    assert clause in _ITEM_RULES
+
+
+@pytest.mark.parametrize(
+    "name", ["PROFILE_INITIAL_EXTRACTION_PROMPT", "PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT"]
+)
+def test_all_three_prompts_splice_in_the_shared_blocks(name: str) -> None:
+    """Compaction fell behind precisely because it carried its own wording; a shared block cannot drift."""
+    import everalgo.user_memory.prompts.en.profile as mod
+
+    prompt = getattr(mod, name)
+    assert mod._PORTRAIT in prompt, name
+    assert mod._ITEM_RULES in prompt, name
+    assert mod._ITEM_SHAPE in prompt, name
+
+
+def test_item_shape_says_what_basis_holds() -> None:
+    """Left undefined, "basis" came back as the rule that asks for it rather than the signals it asks for.
+
+    The nearest instruction was the trait threshold, so the model filled the field with a translation of
+    "two or more signals" — a claim of having found evidence, in the slot meant to hold it. Naming the
+    signals is now the requirement, and restating the threshold is named as the failure.
+    """
+    from everalgo.user_memory.prompts.en.profile import _ITEM_SHAPE
+
+    assert '"basis" names the signals themselves' in _ITEM_SHAPE
+    assert "each one findable in the conversation" in _ITEM_SHAPE
+    assert 'Restating the requirement ("two or more signals", "multiple instances", "repeated choices")' in _ITEM_SHAPE
+    assert "if you cannot name the signals, the trait does not belong here at all" in _ITEM_SHAPE
+
+
+def test_init_prompt_permits_producing_nothing() -> None:
+    """Without an explicit way out, a conversation with nothing to record still has to yield something.
+
+    INIT's instruction is "build a user profile", so on purely operational input the model filled the gap by
+    restating operations as capabilities. Granting permission moved capability phrasing 0.80 -> 0.20 per run
+    after four rounds of prohibitions had stalled.
+    """
+    from everalgo.user_memory.prompts.en.profile import PROFILE_INITIAL_EXTRACTION_PROMPT
+
+    assert "Either list may be empty, and often should be." in PROFILE_INITIAL_EXTRACTION_PROMPT
+    assert "That IS the correct answer there" in PROFILE_INITIAL_EXTRACTION_PROMPT
+    assert "Do not treat producing items as the goal." in PROFILE_INITIAL_EXTRACTION_PROMPT
+
+
+def test_update_prompt_reserves_add_for_dimensions_not_yet_on_file() -> None:
+    """`add` used to read "completely new user information", which a new fact about a stored dimension is."""
     from everalgo.user_memory.prompts.en.profile import PROFILE_UPDATE_PROMPT
 
-    assert clause in PROFILE_UPDATE_PROMPT
+    assert "a dimension not yet on file at all" in PROFILE_UPDATE_PROMPT
+    assert "a second item under an existing category or trait name is always wrong" in PROFILE_UPDATE_PROMPT
+    assert "This is the operation for a fresh occurrence of something already recorded" in PROFILE_UPDATE_PROMPT
+
+
+def test_update_prompt_can_delete_a_stored_capability_item() -> None:
+    """Deleting these is compaction's job, but UPDATE must be able to when the conversation raises one."""
+    from everalgo.user_memory.prompts.en.profile import PROFILE_UPDATE_PROMPT
+
+    assert (
+        "asserts a duty, capability, skill, familiarity, interest or attitude this person never claimed"
+        in PROFILE_UPDATE_PROMPT
+    )
+
+
+def test_update_prompt_keeps_index_semantics_and_field_consistency() -> None:
+    """Index rules predate this work and still carry it; omitted fields keeping stored values does too."""
+    from everalgo.user_memory.prompts.en.profile import PROFILE_UPDATE_PROMPT
+
+    assert "every index resolves against the profile snapshot shown above" in PROFILE_UPDATE_PROMPT
+    assert "never shift each other's indices" in PROFILE_UPDATE_PROMPT
+    assert '"add" takes no index' in PROFILE_UPDATE_PROMPT
+    assert 'fields you omit from an "update" keep their stored values' in PROFILE_UPDATE_PROMPT
+
+
+def test_update_prompt_output_examples_share_one_shape() -> None:
+    """Two examples in different shapes produced unparseable JSON in 6/20 runs.
+
+    A flat single-line "none" example beside a three-level indented one had the model writing a single line
+    and closing it with the nested example's brace count. Both are indented now, and a sentence states the
+    brace count outright.
+    """
+    from everalgo.user_memory.prompts.en.profile import PROFILE_UPDATE_PROMPT
+
+    assert "Every operation object closes with exactly two braces before the comma" in PROFILE_UPDATE_PROMPT
+    # Neither example may be the flat form that got mixed with the nested one.
+    assert '{{"operations": [{{"action": "none"}}]' not in PROFILE_UPDATE_PROMPT
+
+
+def test_compact_threshold_equals_the_item_limit() -> None:
+    """Compaction runs at the limit, not 50% past it — it is the only path that removes non-portrait items.
+
+    UPDATE cannot do that job: it sees a snapshot plus one conversation and acts on what the conversation
+    raises. Told to audit the whole profile it emitted the deletes in 1 run out of 10 and otherwise answered
+    "none, nothing needs cleaning" — it had read the instruction and judged the items acceptable. Measured at
+    this threshold, a 32-item profile carrying 29 capability items comes back with 1.9 of them and all 3
+    legitimate items intact; at the old threshold it would have had to reach 46 items first.
+    """
+    from everalgo.user_memory.profile import _PROFILE_COMPACT_THRESHOLD, _PROFILE_MAX_ITEMS
+
+    assert _PROFILE_COMPACT_THRESHOLD == _PROFILE_MAX_ITEMS
+
+
+def test_compact_prompt_deletes_before_merging() -> None:
+    """Ordering matters: the two steps collide on exactly the items that must go.
+
+    Merge-first turned 22 capability items sharing one category into a single surviving false claim. Stating
+    delete-first, and that an evidence line does not rescue such an item, takes 29 of them down to 1.9 with
+    every legitimate item kept (30/30 across three thresholds).
+    """
+    from everalgo.user_memory.prompts.en.profile import PROFILE_COMPACT_PROMPT
+
+    assert "Work in this order." in PROFILE_COMPACT_PROMPT
+    assert "Delete everything that was never a portrait item, before merging anything." in PROFILE_COMPACT_PROMPT
+    assert "Twelve such items become **zero** items, not one." in PROFILE_COMPACT_PROMPT
+    assert "Being numerous is not evidence" in PROFILE_COMPACT_PROMPT
+    # The delete step must come before the merge step in the text, not merely be present.
+    assert PROFILE_COMPACT_PROMPT.index("Delete everything that was never") < PROFILE_COMPACT_PROMPT.index(
+        "Then collapse each remaining dimension"
+    )
+
+
+def test_compact_prompt_rehomes_a_trait_that_merely_restates_a_statement() -> None:
+    """Compaction is the only path that rewrites both lists, so it is the only one that can move an item.
+
+    A stated fact filed as a disposition ("insists on the team's merge process" for "we must go through MRs")
+    is the same fact in the wrong bucket; leaving it there splits one dimension across two lists.
+    """
+    from everalgo.user_memory.prompts.en.profile import PROFILE_COMPACT_PROMPT
+
+    assert "**Move anything misfiled.**" in PROFILE_COMPACT_PROMPT
+    assert "A trait that merely restates something this person said is an explicit_info fact" in PROFILE_COMPACT_PROMPT
+    assert "do not leave a copy behind in implicit_traits" in PROFILE_COMPACT_PROMPT
+    # Deleting non-portrait items first keeps this step from rehoming an item that should simply go.
+    assert PROFILE_COMPACT_PROMPT.index("Delete everything that was never") < PROFILE_COMPACT_PROMPT.index(
+        "Move anything misfiled"
+    )
+
+
+def test_no_prompt_demonstrates_a_forbidden_form() -> None:
+    """An example beats the rule it contradicts — measured four times over.
+
+    `evidence` named the speaker in 71/71 items while a rule forbade it, because one example showed
+    "In Oct 2024 user mentioned...". Compaction bracketed 40/40 traits where the other paths bracketed 0/44,
+    the only difference being an "(e.g., [Risk-Averse])". Both examples are gone; this pins them out.
+    """
+    import everalgo.user_memory.prompts.en.profile as mod
+
+    for name in ("PROFILE_INITIAL_EXTRACTION_PROMPT", "PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT"):
+        prompt = getattr(mod, name)
+        assert "user mentioned" not in prompt, name
+        assert "[Risk-Averse]" not in prompt, name
+        assert "current status" not in prompt, name  # the phrase that used to request a passing state
+
+
+# Each rule was added in its own measurement round, so nothing stopped a later round from restating an
+# earlier one. One did: the durability clause landed twice when an interrupted command had already written
+# the first wording — invisible to lint, to the tests, and to a diff that reads as two ordinary additions.
+#
+# NOT listed here: the "also / as well as / comma-list" prohibition, which appears in both the generic item
+# rule and the trait rule. That reads as a duplicate and was removed as one; measured, it is load-bearing.
+# Explicit items went 0.63-0.75 per run (two repeats) to 1.30-1.40 (three), two non-overlapping ranges
+# against a repeat-run spread of 0.05-0.12 — and the regression showed up in `explicit_info`, which the trait
+# rule does not govern. The prompt's signals are not partitioned by section. Do not "tidy" that one away.
+_SINGLE_OCCURRENCE_PHRASES = (
+    "portrait of a person",
+    "**One item per dimension.**",
+    "**One item, one dimension.**",
+    "**Never name the subject.**",
+    "**two or more signals**",
+)
+
+
+@pytest.mark.parametrize("phrase", _SINGLE_OCCURRENCE_PHRASES)
+def test_no_rule_is_stated_twice_within_one_prompt(phrase: str) -> None:
+    """One paragraph per rule, per prompt — a rule stated twice is a rule that got edited twice."""
+    import everalgo.user_memory.prompts.en.profile as mod
+
+    for name in ("PROFILE_INITIAL_EXTRACTION_PROMPT", "PROFILE_UPDATE_PROMPT", "PROFILE_COMPACT_PROMPT"):
+        prompt = getattr(mod, name)
+        assert prompt.count(phrase) == 1, f"{name}: {phrase!r} appears {prompt.count(phrase)}x"
+
+
+# ==========================================================================
+# Label inventory — what the UPDATE prompt is shown before the JSON dump
+# ==========================================================================
+
+
+def test_label_inventory_lists_distinct_labels_in_first_seen_order() -> None:
+    """Duplicates collapse and order is preserved, so the inventory reads as a checklist."""
+    from everalgo.user_memory.profile import _render_label_inventory
+
+    rendered = _render_label_inventory(
+        [
+            {"category": "工作内容", "description": "a"},
+            {"category": "技术知识", "description": "b"},
+            {"category": "工作内容", "description": "c"},
+        ],
+        [{"trait": "高效务实", "description": "d"}],
+    )
+
+    assert "工作内容, 技术知识" in rendered
+    assert "高效务实" in rendered
+    assert rendered.count("工作内容") == 1
+
+
+def test_label_inventory_marks_an_empty_bucket_rather_than_leaving_a_blank() -> None:
+    """A blank line reads as "nothing to check against"; the sentinel says it outright."""
+    from everalgo.user_memory.profile import _render_label_inventory
+
+    rendered = _render_label_inventory([], [])
+
+    assert rendered.count("(none yet)") == 2
+
+
+def test_label_inventory_skips_non_dict_and_blank_labels() -> None:
+    """extra="allow" means a bucket can hold anything; a blank label is no label."""
+    from everalgo.user_memory.profile import _render_label_inventory
+
+    rendered = _render_label_inventory(["not a dict", {"category": "   "}, {"description": "no category"}], [])
+
+    assert "(none yet)" in rendered
+
+
+def test_update_render_puts_the_inventory_before_the_indexed_items() -> None:
+    """The inventory is a checklist to read first; after the JSON dump it would be read last or not at all."""
+    from everalgo.user_memory.profile import _render_profile_for_update
+
+    profile = Profile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "s",
+            "timestamp": _TS,
+            "explicit_info": [{"category": "Skills", "description": "Python.", "evidence": "x"}],
+            "implicit_traits": [{"trait": "[Pragmatic]", "description": "d", "basis": "b", "evidence": "e"}],
+        }
+    )
+
+    rendered = _render_profile_for_update(profile)
+
+    assert rendered.index("categories already in use") < rendered.index("=== explicit_info ===")
+    assert rendered.index("trait labels already in use") < rendered.index("=== explicit_info ===")
+    assert "[0] " in rendered  # indexed items still there, numbering untouched
 
 
 # ==========================================================================
@@ -830,7 +1179,8 @@ def test_two_deletes_both_resolve_against_the_original_snapshot() -> None:
 def test_add_does_not_widen_the_index_bound(caplog: pytest.LogCaptureFixture) -> None:
     """An index past the snapshot's end stays out of range however many items this batch adds."""
     ops: list[dict[str, Any]] = [
-        {"action": "add", "type": "explicit_info", "data": {"category": "c", "description": "F-new"}},
+        # A category no stored item owns, so the add lands as an add rather than being folded in.
+        {"action": "add", "type": "explicit_info", "data": {"category": "fresh", "description": "F-new"}},
         {"action": "update", "type": "explicit_info", "index": 5, "data": {"description": "CLOBBERED"}},
     ]
     with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
@@ -838,6 +1188,61 @@ def test_add_does_not_widen_the_index_bound(caplog: pytest.LogCaptureFixture) ->
 
     assert _descriptions(result) == [*_BASE, "F-new"]
     assert "index out of range" in caplog.text
+
+
+def test_add_under_an_existing_category_is_folded_into_that_item() -> None:
+    """One dimension, one item — enforced here, not only asked for in the prompt.
+
+    The prompt states that a second item under an existing category is always wrong, and the model mostly
+    complies. Mostly is not enough: an end-to-end walkthrough produced three items under one `职业角色`
+    category, which is the duplication this whole area exists to prevent. The incoming fact is real, so it
+    is folded into the item that owns the label rather than dropped.
+    """
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "explicit_info", "data": {"category": "c", "description": "refuses front-end"}},
+    ]
+    result = _apply_ops(_profile_of(["works in Python"]), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["works in Python; refuses front-end"]
+
+
+def test_folding_extends_evidence_and_skips_a_restated_fact() -> None:
+    """Evidence accumulates with the description; a fact already stated verbatim does not lengthen it."""
+    stored = _profile_of(["works in Python"])
+    ops: list[dict[str, Any]] = [
+        {
+            "action": "add",
+            "type": "explicit_info",
+            "data": {"category": "c", "description": "refuses front-end", "evidence": "e2"},
+        },
+        # Same description again: nothing to append.
+        {"action": "add", "type": "explicit_info", "data": {"category": "c", "description": "works in Python"}},
+    ]
+    result = _apply_ops(stored, ops, timestamp=_TS)
+    item = cast("list[dict[str, Any]]", result.explicit_info)[0]  # type: ignore[attr-defined]
+
+    assert item["description"] == "works in Python; refuses front-end"
+    assert item["evidence"] == "e; e2"
+
+
+def test_folding_applies_to_traits_by_their_own_label_field() -> None:
+    """`implicit_traits` is keyed by `trait`, not `category`, so the bucket's own field decides."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "implicit_traits", "data": {"trait": "c", "description": "second observation"}},
+    ]
+    result = _apply_ops(_profile_of(["first observation"], bucket="implicit_traits"), ops, timestamp=_TS)
+
+    assert _descriptions(result, "implicit_traits") == ["first observation; second observation"]
+
+
+def test_add_under_a_free_category_still_adds() -> None:
+    """Folding must not swallow a genuinely new dimension."""
+    ops: list[dict[str, Any]] = [
+        {"action": "add", "type": "explicit_info", "data": {"category": "elsewhere", "description": "lives in Berlin"}},
+    ]
+    result = _apply_ops(_profile_of(["works in Python"]), ops, timestamp=_TS)
+
+    assert _descriptions(result) == ["works in Python", "lives in Berlin"]
 
 
 def test_unknown_type_is_rejected_rather_than_routed_to_implicit_traits(caplog: pytest.LogCaptureFixture) -> None:
