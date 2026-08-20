@@ -89,16 +89,6 @@ class _PromptCapturedError(Exception):
 
 
 # zh must not rot relative to en — it is a public prompt selectable via `prompt=` (see README.md).
-_MIXED_INPUT_CLAUSES_ZH = (
-    "本人撰写的内容",  # judgement source restricted to participants' own writing
-    "在篇幅上占据对话主体",  # long quoted material must not flip the judgement
-    "判断何为粘贴材料时适用以下检验",  # operational test, mirrors the en clause above
-    "也无论是否被引号或代码块包裹",
-    "句子结构",  # embedded foreign terms do not flip the judgement
-    "保留原文形式",  # proper nouns / technical terms stay untranslated
-)
-
-
 async def test_aextract_parses_wrapped_foresight_payload() -> None:
     """Wrapped JSON object with foresights array → list[Foresight]."""
     llm_json = (

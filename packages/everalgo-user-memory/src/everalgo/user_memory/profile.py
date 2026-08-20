@@ -35,8 +35,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Which field names a bucket's dimension. Used to enforce one-item-per-dimension when the model does not.
+_LABEL_FIELDS = {"explicit_info": "category", "implicit_traits": "trait"}
+
+# Separator for folding one item's prose into another. ASCII rather than a full-width semicolon because a
+# profile is written in whatever `output_language` names, and this has to read acceptably in all of them.
+_FOLD_JOIN = "; "
+_FOLD_STRIP = "\uff1b;\u3002. "  # trailing punctuation dropped before joining: both semicolons, both full stops, space
+
 _PROFILE_MAX_ITEMS = 30
-_PROFILE_COMPACT_THRESHOLD = int(_PROFILE_MAX_ITEMS * 1.5)
+# Compaction is the path that removes items which were never portrait facts — an action restated as a
+# capability, a passing state, anything expired. UPDATE cannot do that job: it sees a snapshot plus one
+# conversation and acts on what the conversation raises, so told to audit the whole profile it emitted the
+# deletes in 1 run out of 10 and otherwise answered "none, nothing needs cleaning". Compaction therefore
+# runs as soon as the limit is reached rather than 50% beyond it, which is also how quickly a polluted
+# profile gets a chance to be cleaned.
+_PROFILE_COMPACT_THRESHOLD = _PROFILE_MAX_ITEMS
 
 
 class ProfileExtractor:
@@ -135,7 +149,8 @@ class ProfileExtractor:
             PROFILE_INITIAL_EXTRACTION_PROMPT,
             prompt,
             conversation_text=conversation_text,
-            target_user=sender_id,
+            target_user=_sender_display_name(memcells, sender_id),
+            target_user_id=sender_id,
             language_rule=build_language_rule(output_language, fallback=PROFILE_INIT_LANGUAGE_RULE),
         )
 
@@ -173,7 +188,8 @@ class ProfileExtractor:
             prompt,
             current_profile=current_profile_text,
             conversations=conversation_text,
-            target_user=sender_id,
+            target_user=_sender_display_name(memcells, sender_id),
+            target_user_id=sender_id,
             language_rule=build_language_rule(output_language, fallback=EXISTING_PROFILE_LANGUAGE_RULE),
         )
 
@@ -185,10 +201,22 @@ class ProfileExtractor:
         implicit_traits: list[Any] = list(getattr(merged_profile, "implicit_traits", []) or [])
         total_items = len(explicit_info) + len(implicit_traits)
         if total_items > _PROFILE_COMPACT_THRESHOLD:
-            return await self._compact(merged_profile, output_language=output_language)
+            return await self._compact(
+                merged_profile,
+                display_name=_sender_display_name(memcells, sender_id),
+                sender_id=sender_id,
+                output_language=output_language,
+            )
         return merged_profile
 
-    async def _compact(self, profile: Profile, *, output_language: OutputLanguage | str | None = None) -> Profile:
+    async def _compact(
+        self,
+        profile: Profile,
+        *,
+        display_name: str,
+        sender_id: str,
+        output_language: OutputLanguage | str | None = None,
+    ) -> Profile:
         explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
         implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
         total_items = len(explicit_info) + len(implicit_traits)
@@ -203,6 +231,8 @@ class ProfileExtractor:
             total_items=total_items,
             max_items=_PROFILE_MAX_ITEMS,
             profile_text=profile_text,
+            target_user=display_name,
+            target_user_id=sender_id,
             language_rule=build_language_rule(output_language, fallback=COMPACTED_PROFILE_LANGUAGE_RULE),
         )
 
@@ -222,7 +252,7 @@ class ProfileExtractor:
 
 
 # ---------------------------------------------------------------------------
-# LLM callsites — brace-balanced JSON extraction + 5-retry (mirror b150b32).
+# LLM callsites — brace-balanced JSON extraction, one attempt each (no retry; see OpenAICompatClient).
 # ---------------------------------------------------------------------------
 
 
@@ -294,6 +324,20 @@ def _user_senders(memcells: Sequence[MemCell]) -> set[str]:
     return {m.sender_id for cell in memcells for m in chat_messages(cell) if m.role == "user"}
 
 
+def _sender_display_name(memcells: Sequence[MemCell], sender_id: str) -> str:
+    """Human-readable label for ``sender_id``; the id itself when the conversation carries no name.
+
+    Only the label is affected — ``sender_id`` stays the locator the prompt matches speakers by, because
+    ``ChatMessage.sender_name`` is optional and not guaranteed unique, and single-subject attribution is
+    the strongest requirement these prompts carry.
+    """
+    for cell in memcells:
+        for m in chat_messages(cell):
+            if m.sender_id == sender_id and m.sender_name and m.sender_name.strip():
+                return m.sender_name.strip()
+    return sender_id
+
+
 def _render_conversation(memcells: Sequence[MemCell]) -> str:
     """Render ChatMessage items as ``[ISO-ts] speaker(user_id:xxx): content`` lines; tool items are skipped."""
     lines: list[str] = []
@@ -312,9 +356,46 @@ def _render_conversation(memcells: Sequence[MemCell]) -> str:
 
 
 def _render_profile_for_update(profile: Profile) -> str:
-    """Render existing profile fields as indexed JSON for the UPDATE prompt."""
+    """Render the existing profile for the UPDATE prompt: label inventory first, then indexed JSON."""
     explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
     implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
+    return "\n".join(
+        (_render_label_inventory(explicit_info, implicit_traits), _render_indexed_items(explicit_info, implicit_traits))
+    )
+
+
+def _render_label_inventory(explicit_info: list[Any], implicit_traits: list[Any]) -> str:
+    """List the category / trait labels already in use, deduplicated, in first-seen order.
+
+    Listed on their own rather than left implicit in the JSON dump below: deciding add-versus-update is a
+    comparison against the labels, and asking for it inside a wall of JSON is what let near-synonyms
+    accumulate — measured at 8 explicit items from 8 conversations, 86% of them one-off actions restated as
+    standing capabilities, with one category repeated 7 times.
+    """
+    return "\n".join(
+        (
+            "=== categories already in use (reuse one when the new fact belongs to that dimension) ===",
+            _render_labels(explicit_info, key="category"),
+            "=== trait labels already in use (one disposition = one trait; add evidence to one of these rather than naming a synonym) ===",
+            _render_labels(implicit_traits, key="trait"),
+        )
+    )
+
+
+def _render_labels(items: list[Any], *, key: str) -> str:
+    """Comma-joined distinct non-empty ``key`` values, or a sentinel when the bucket carries none."""
+    seen: dict[str, None] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        label = item.get(key)
+        if isinstance(label, str) and label.strip():
+            seen.setdefault(label.strip(), None)
+    return ", ".join(seen) if seen else "(none yet)"
+
+
+def _render_indexed_items(explicit_info: list[Any], implicit_traits: list[Any]) -> str:
+    """Render both buckets as ``[i] {json}`` lines — the numbering every op index resolves against."""
     parts: list[str] = ["=== explicit_info ==="]
     for i, item in enumerate(explicit_info):
         parts.append(f"[{i}] {json.dumps(item, ensure_ascii=False)}")
@@ -384,7 +465,7 @@ def _collect_ops(ops: list[dict[str, Any]], buckets: dict[str, list[Any]]) -> di
         if op_type not in collected:
             _log_rejected_op(op, "unknown type")
         elif action == "add":
-            _collect_add(op, collected[op_type])
+            _collect_add(op, collected[op_type], items=buckets[op_type], label_field=_LABEL_FIELDS[op_type])
         elif action in ("update", "delete"):
             _collect_indexed(op, collected[op_type], items=buckets[op_type])
         else:
@@ -395,8 +476,14 @@ def _collect_ops(ops: list[dict[str, Any]], buckets: dict[str, list[Any]]) -> di
     return collected
 
 
-def _collect_add(op: dict[str, Any], slot: _BucketOps) -> None:
-    """Queue an add, rejecting a payload that is unusable or has no identity to deduplicate on."""
+def _collect_add(op: dict[str, Any], slot: _BucketOps, *, items: list[Any], label_field: str) -> None:
+    """Queue an add — or fold it into the item that already owns its label.
+
+    One dimension gets one item, and a category or trait name is that dimension's handle. The prompt says a
+    second item under an existing name is always wrong, and the model mostly complies; mostly is not enough
+    when the result is the duplication this whole area exists to prevent, so the rule is enforced here too.
+    Folding rather than rejecting: the incoming fact is real, it simply belongs in the item already on file.
+    """
     data = op.get("data")
     if not isinstance(data, dict):
         _log_rejected_op(op, "data is not an object")
@@ -405,7 +492,46 @@ def _collect_add(op: dict[str, Any], slot: _BucketOps) -> None:
     if _identity_key(item) is None:
         _log_rejected_op(op, "missing description")
         return
-    slot.adds.append(item)
+
+    owner = _index_owning_label(items, item.get(label_field), label_field=label_field)
+    if owner is None:
+        slot.adds.append(item)
+        return
+    logger.warning("profile add folded into existing item: bucket_label_taken index=%d", owner)
+    slot.updates[owner] = {**slot.updates.get(owner, {}), **_fold(cast("dict[str, Any]", items[owner]), item)}
+
+
+def _index_owning_label(items: list[Any], label: object, *, label_field: str) -> int | None:
+    """Index of the item already using ``label``, comparing the way ``_normalize`` does; None if free."""
+    if not isinstance(label, str) or not label.strip():
+        return None
+    wanted = _normalize(label)
+    for idx, existing in enumerate(items):
+        if not isinstance(existing, dict):
+            continue
+        current = existing.get(label_field)
+        if isinstance(current, str) and _normalize(current) == wanted:
+            return idx
+    return None
+
+
+def _fold(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Patch extending ``existing`` with ``incoming``'s prose, joining text fields rather than replacing.
+
+    Only the fields carrying prose are joined; a field the incoming item does not restate is left alone.
+    Nothing is appended twice, so a model repeating a fact verbatim does not lengthen the item.
+    """
+    patch: dict[str, Any] = {}
+    for field_name in ("description", "evidence", "basis"):
+        addition = incoming.get(field_name)
+        if not isinstance(addition, str) or not addition.strip():
+            continue
+        current = existing.get(field_name)
+        if not isinstance(current, str) or not current.strip():
+            patch[field_name] = addition.strip()
+        elif _normalize(addition) not in _normalize(current):
+            patch[field_name] = f"{current.rstrip(_FOLD_STRIP)}{_FOLD_JOIN}{addition.strip()}"
+    return patch
 
 
 def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: list[Any]) -> None:
