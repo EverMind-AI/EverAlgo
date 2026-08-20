@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-20
+
 ### Changed
 
 - **`ProfileExtractor`'s three prompts are rewritten around one definition of what a profile is.** Measured against 20 runs of an eight-round transcript containing nothing but operations — commands, tool output, the assistant's replies, no self-description — the previous prompts produced **8.0 `explicit_info` items per run, one per conversation, 86% of them a single action restated as a standing capability** (`负责测试执行`, `具备调试能力`), with one category repeated 7 times at the median. That corpus carries exactly one thing a portrait should hold — one voiced preference — and it now yields **2.5 items per run with that preference kept in 19/20 runs**, capability phrasing among them down to **0.2-0.55 per run**. Every number in this entry is measured on the prompts as they ship here; an earlier draft of this entry quoted **0.00** for this corpus, taken before a round of prompt compression that was never re-measured and cost roughly 4x on it. See "Known limitations" for what still gets through.
@@ -183,7 +185,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.6.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.7.0...HEAD
+[0.7.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.6.0...everalgo-user-memory/v0.7.0
 [0.6.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.5.0...everalgo-user-memory/v0.6.0
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.1...everalgo-user-memory/v0.5.0
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.0...everalgo-user-memory/v0.4.1
