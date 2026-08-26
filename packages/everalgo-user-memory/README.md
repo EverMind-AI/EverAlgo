@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — five LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `DecisionExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, a `DecisionReflector` that merges decisions into one current `Decision`, plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
+User-side memory products for EverAlgo — six LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `DecisionExtractor`, `PrincipleExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, a `DecisionReflector` that merges decisions into one current `Decision`, plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -106,7 +106,7 @@ with the descriptions (`Location` versus `居住地`) — worth knowing if you g
 
 What "leave it out" means depends on the operator. The five reading a raw conversation judge the language from
 what the participants write, which is the 10.2% path above. The operators reading already-extracted memory —
-`AtomicFactExtractor.aextract_from_text`, `EpisodeReflector.areflect`, and `DecisionReflector.areflect` — instead inherit the language of
+`AtomicFactExtractor.aextract_from_text`, `EpisodeReflector.areflect`, `DecisionReflector.areflect`, and `PrincipleExtractor.aextract` — instead inherit the language of
 their input, which is a much easier call for a single-language narrative but not free: `areflect` takes
 *several* records at once, so sources that disagree on language leave the model to pick one, and an
 `areflect` update inherits whatever the existing record says. Name a language when the inputs may
@@ -211,6 +211,15 @@ class DecisionReflector:
         prompt: str | None = None,
         output_language: OutputLanguage | str | None = None,   # None → inherited from the input
     ) -> Decision: ...   # still a Decision, not a Principle; owner_id is always None
+
+class PrincipleExtractor:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def aextract(
+        self, decisions: Sequence[tuple[str, Decision]], *,  # (entry_id, Decision); ids are caller-supplied
+        owner_id: str,
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → inherited from the decisions
+    ) -> list[Principle]: ...   # algorithm DTO, not a Memory Kind; empty cluster → []
 ```
 
 Every episode carries three model-written fields: `subject` (the title), `episode` (the full narrative) and
@@ -222,6 +231,8 @@ for it — a truncation cut mid-word in English, and in Chinese a verbatim copy 
 `EpisodeReflector` produces the same three fields, so a merged episode has a preview of the merged narrative.
 
 `DecisionReflector` has the same INIT / UPDATE split as `EpisodeReflector`, but the merged record is still a `Decision` (title / decision / reason / impact / tags) — not a Principle.
+
+`PrincipleExtractor` synthesises zero or more `Principle` DTOs from a cluster of `(entry_id, Decision)` pairs. `source_entry_ids` can only cite ids the caller passed; this is meta memory, not a product Kind.
 
 `EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).
 

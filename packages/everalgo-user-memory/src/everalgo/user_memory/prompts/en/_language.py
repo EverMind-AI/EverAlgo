@@ -113,6 +113,16 @@ in another language must not split the record; a language that went wrong on INI
 caller names one.
 """
 
+PRINCIPLES_FROM_DECISIONS_LANGUAGE_RULE = (
+    "**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the decisions you are "
+    "synthesising from. Synthesis never changes the language — do not translate. This is mandatory."
+)
+"""Fallback for synthesising Principles from an already-extracted Decision cluster.
+
+Same inherit-don't-translate shape as ``MERGED_DECISIONS_LANGUAGE_RULE``. The decisions were extracted
+upstream; re-judging here would translate a principle out of the language its sources were written in.
+"""
+
 SOURCE_TEXT_LANGUAGE_RULE = (
     "**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language EPISODE_TEXT itself is written in. "
     "ALL output MUST match that language. This is mandatory."

@@ -1,4 +1,4 @@
-"""User-side memory extractors — 5 Extractors + EpisodeReflector + DecisionReflector + boundary facade + DetectionResult re-export.
+"""User-side memory extractors — 6 Extractors + EpisodeReflector + DecisionReflector + boundary facade + DetectionResult re-export.
 
 The user-scenario boundary facade (:class:`BoundaryDetector`) lives here; agent-trajectory
 boundary detection will be added to ``everalgo.agent_memory`` in Stage 4.
@@ -13,6 +13,7 @@ from everalgo.user_memory.boundary import BoundaryDetector
 from everalgo.user_memory.decision import DecisionExtractor
 from everalgo.user_memory.episode import EpisodeExtractor
 from everalgo.user_memory.foresight import ForesightExtractor
+from everalgo.user_memory.principle import PrincipleExtractor
 from everalgo.user_memory.profile import ProfileExtractor
 from everalgo.user_memory.reflect import EpisodeReflector
 from everalgo.user_memory.reflect_decision import DecisionReflector
@@ -27,6 +28,7 @@ __all__ = [
     "EpisodeReflector",
     "ForesightExtractor",
     "OutputLanguage",
+    "PrincipleExtractor",
     "ProfileExtractor",
 ]
 

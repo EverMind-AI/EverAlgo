@@ -5,7 +5,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_public_symbols_exported() -> None:
-    """5 Extractors + two Reflectors + BoundaryDetector + OutputLanguage + DetectionResult re-export."""
+    """6 Extractors + two Reflectors + BoundaryDetector + OutputLanguage + DetectionResult re-export."""
     for name in (
         "AtomicFactExtractor",
         "BoundaryDetector",
@@ -16,13 +16,14 @@ def test_public_symbols_exported() -> None:
         "EpisodeReflector",
         "ForesightExtractor",
         "OutputLanguage",
+        "PrincipleExtractor",
         "ProfileExtractor",
     ):
         assert hasattr(everalgo.user_memory, name)
 
 
 def test_dunder_all_lists_exactly_the_public_symbols() -> None:
-    """__all__ exposes 5 Extractors + two Reflectors + BoundaryDetector + OutputLanguage + DetectionResult."""
+    """__all__ exposes 6 Extractors + two Reflectors + BoundaryDetector + OutputLanguage + DetectionResult."""
     assert sorted(everalgo.user_memory.__all__) == sorted(
         [
             "AtomicFactExtractor",
@@ -34,6 +35,7 @@ def test_dunder_all_lists_exactly_the_public_symbols() -> None:
             "EpisodeReflector",
             "ForesightExtractor",
             "OutputLanguage",
+            "PrincipleExtractor",
             "ProfileExtractor",
         ]
     )
@@ -46,7 +48,7 @@ def test_workspace_extractor_is_not_re_exported() -> None:
 
 
 def test_user_memory_extractors_instantiable_with_llm() -> None:
-    """All 5 Extractors + both Reflectors accept a required llm= keyword argument at construction."""
+    """All 6 Extractors + both Reflectors accept a required llm= keyword argument at construction."""
     from everalgo.user_memory import (
         AtomicFactExtractor,
         DecisionExtractor,
@@ -54,6 +56,7 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
         EpisodeExtractor,
         EpisodeReflector,
         ForesightExtractor,
+        PrincipleExtractor,
         ProfileExtractor,
     )
 
@@ -64,4 +67,5 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
     assert EpisodeExtractor(llm=fake).__class__.__name__ == "EpisodeExtractor"
     assert EpisodeReflector(llm=fake).__class__.__name__ == "EpisodeReflector"
     assert ForesightExtractor(llm=fake).__class__.__name__ == "ForesightExtractor"
+    assert PrincipleExtractor(llm=fake).__class__.__name__ == "PrincipleExtractor"
     assert ProfileExtractor(llm=fake).__class__.__name__ == "ProfileExtractor"

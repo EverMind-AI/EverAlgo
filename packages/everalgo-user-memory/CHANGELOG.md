@@ -10,6 +10,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - **`DecisionExtractor`** — one LLM call over a `MemCell` returns `list[Decision]`. There is no `sender_id`; every `owner_id` is `None` (whole-slice generic path). No committed trade-off is a successful empty list (`{"decisions": []}`), not a retry.
 - **`DecisionReflector`** — INIT (`old_decision=None`, ≥2 decisions) or UPDATE (existing Decision + ≥1 newer) merges into **one** `Decision`. Not a Principle. `owner_id` is `None`; `timestamp` is the last input item's.
+- **`PrincipleExtractor`** — a Decision cluster as `(entry_id, Decision)` pairs returns `list[Principle]`. `source_entry_ids` are a subset of the caller-supplied ids. An empty cluster is `[]` with no LLM call.
 
 ## [0.7.0] - 2026-08-20
 

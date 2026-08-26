@@ -18,6 +18,7 @@ from everalgo.user_memory.prompts.en._language import (
     MERGED_DECISIONS_LANGUAGE_RULE,
     MERGED_EPISODES_LANGUAGE_RULE,
     PARTICIPANT_LANGUAGE_RULE,
+    PRINCIPLES_FROM_DECISIONS_LANGUAGE_RULE,
     PROFILE_INIT_LANGUAGE_RULE,
     SOURCE_TEXT_LANGUAGE_RULE,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "EXISTING_PROFILE_LANGUAGE_RULE",
     "MERGED_DECISIONS_LANGUAGE_RULE",
     "MERGED_EPISODES_LANGUAGE_RULE",
+    "PRINCIPLES_FROM_DECISIONS_LANGUAGE_RULE",
     "PROFILE_INIT_LANGUAGE_RULE",
     "SOURCE_TEXT_LANGUAGE_RULE",
     "OutputLanguage",
@@ -85,7 +87,8 @@ def build_language_rule(
             than re-decide it; ``PROFILE_INIT_LANGUAGE_RULE`` for the one call that decides it;
             ``MERGED_EPISODES_LANGUAGE_RULE`` and ``EXISTING_NARRATIVE_LANGUAGE_RULE`` for the two episode
             reflect modes; ``MERGED_DECISIONS_LANGUAGE_RULE`` and ``EXISTING_DECISION_LANGUAGE_RULE`` for
-            the two decision reflect modes.
+            the two decision reflect modes; ``PRINCIPLES_FROM_DECISIONS_LANGUAGE_RULE`` for synthesising
+            Principles from a Decision cluster.
 
     Returns:
         The rule text, with the language already substituted when one was named.
