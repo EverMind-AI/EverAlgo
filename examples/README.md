@@ -15,5 +15,7 @@ uv run python examples/01_boundary_chat.py
 | 04 | [`04_agent_memory_case.py`](04_agent_memory_case.py) | Agent trajectory → `AgentCase` via `AgentCaseExtractor` |
 | 05 | [`05_rank_rerank.py`](05_rank_rerank.py) | LLM-based reranking with `arerank` |
 | 06 | [`06_full_user_memory_pipeline.py`](06_full_user_memory_pipeline.py) | Full pipeline: chat → boundary → 4 user-memory extractors |
+| 07 | [`07_parser_dispatch.py`](07_parser_dispatch.py) | Multimodal `RawFile` → `ParsedContent` dispatch |
+| 08 | [`08_decision_memory_pipeline.py`](08_decision_memory_pipeline.py) | Decision Extract → Reflect → Principle |
 
 For deeper architecture see [`docs/concepts/architecture.md`](../docs/concepts/architecture.md).

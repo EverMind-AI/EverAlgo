@@ -45,6 +45,7 @@ uv run python examples/01_boundary_chat.py          # Chat → MemCell
 uv run python examples/03_user_memory_episode.py    # MemCell → Episode
 uv run python examples/04_agent_memory_case.py      # Agent trajectory → AgentCase
 uv run python examples/06_full_user_memory_pipeline.py   # Full pipeline
+uv run python examples/08_decision_memory_pipeline.py    # Decision Extract → Reflect → Principle
 uv run pytest                                        # workspace-wide test suite
 ```
 
@@ -204,7 +205,7 @@ Read [`AGENTS.md`](AGENTS.md) — the single source of truth for assistant conte
 - [`docs/api/`](docs/api/) — per-package API reference
 - [`docs/version-policy.md`](docs/version-policy.md) — SemVer + supported Python versions
 - [`docs/contributing.md`](docs/contributing.md) — how to contribute
-- [`examples/`](examples/) — runnable quickstart scripts (01 through 07)
+- [`examples/`](examples/) — runnable quickstart scripts (01 through 08)
 - [`AGENTS.md`](AGENTS.md) — onboarding for AI assistants + contributors
 
 ## License

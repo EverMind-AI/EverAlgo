@@ -75,6 +75,8 @@ asyncio.run(main())
 
 See [`examples/06_full_user_memory_pipeline.py`](../../examples/06_full_user_memory_pipeline.py) for the complete end-to-end example including geometry clustering.
 
+See [`examples/08_decision_memory_pipeline.py`](../../examples/08_decision_memory_pipeline.py) for Decision Extract → Reflect → Principle.
+
 ## Choosing the output language
 
 Every LLM-backed method takes an `output_language`. Name one and the model writes in it; leave it out and the
