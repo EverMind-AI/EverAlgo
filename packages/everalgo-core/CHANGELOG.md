@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Decision` and `Principle` types in `everalgo.types`.
+
 ## [0.5.0] - 2026-08-19
 
 ### Changed

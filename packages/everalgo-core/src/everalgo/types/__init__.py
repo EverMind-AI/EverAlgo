@@ -21,7 +21,7 @@ from everalgo.types.chat import ChatMessage
 from everalgo.types.content import ContentBlock, TextContent
 from everalgo.types.conversation import ConversationItem, MemCell
 from everalgo.types.knowledge import CategorySpec, KnowledgeMemory
-from everalgo.types.memories import AtomicFact, Episode, Foresight, Profile
+from everalgo.types.memories import AtomicFact, Decision, Episode, Foresight, Principle, Profile
 from everalgo.types.modality import (
     EXTENSION_TO_MODALITY,
     MIME_TO_EXTENSION,
@@ -60,6 +60,7 @@ __all__ = [
     "ChatMessage",
     "ContentBlock",
     "ConversationItem",
+    "Decision",
     "Episode",
     "FactCandidate",
     "Foresight",
@@ -67,6 +68,7 @@ __all__ = [
     "MemCell",
     "Modality",
     "ParsedContent",
+    "Principle",
     "Profile",
     "RankInput",
     "RankOutput",

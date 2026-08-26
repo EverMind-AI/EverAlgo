@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from everalgo.types import ChatMessage, Episode, MemCell
+from everalgo.types import ChatMessage, Decision, Episode, MemCell, Principle
 
 
 @pytest.mark.parametrize(
@@ -31,6 +31,30 @@ from everalgo.types import ChatMessage, Episode, MemCell
                 "keywords": ["plan"],
             }
         ),
+        Decision(
+            owner_id="u1",
+            title="Runtime",
+            decision="Use Python for the agent core.",
+            reason="Faster iteration.",
+            timestamp=1,
+        ),
+        Decision.model_validate(
+            {
+                "owner_id": None,
+                "title": "Runtime",
+                "decision": "Use Python for the agent core.",
+                "reason": "Faster iteration.",
+                "timestamp": 2,
+                "tags": ["architecture"],
+                "keywords": ["python"],
+            }
+        ),
+        Principle(
+            owner_id="u1",
+            title="Iteration speed",
+            statement="Agent architecture prioritises iteration speed.",
+            timestamp=1,
+        ),
     ],
     ids=[
         "chatmessage-user",
@@ -39,6 +63,9 @@ from everalgo.types import ChatMessage, Episode, MemCell
         "memcell-one-message",
         "episode-minimal",
         "episode-with-extras",
+        "decision-minimal",
+        "decision-with-extras",
+        "principle-minimal",
     ],
 )
 def test_model_dump_json_then_validate_json_round_trips(obj: Any) -> None:

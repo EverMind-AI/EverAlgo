@@ -1,6 +1,6 @@
-"""User-side memory types — minimal set for the EPISODE path."""
+"""User-side memory types — Episode / Foresight / AtomicFact / Profile / Decision / Principle."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Episode(BaseModel):
@@ -67,6 +67,43 @@ class Profile(BaseModel):
 
     owner_id: str
     summary: str
+    timestamp: int  # Unix epoch milliseconds
+
+    model_config = ConfigDict(extra="allow")
+
+
+class Decision(BaseModel):
+    """User-side decision memory — one concrete trade-off.
+
+    ``owner_id`` is the user this decision belongs to, or ``None`` for a whole-memcell (generic)
+    decision that does not bind to any user. EverOS injects ``session_id`` / ``parent_id`` at the
+    domain boundary; they are not part of this DTO. ``extra="allow"`` keeps secondary LLM fields
+    without a schema bump.
+    """
+
+    owner_id: str | None
+    title: str
+    decision: str
+    reason: str
+    impact: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    timestamp: int  # Unix epoch milliseconds
+
+    model_config = ConfigDict(extra="allow")
+
+
+class Principle(BaseModel):
+    """Engineering principle synthesised from a cluster of Decisions.
+
+    Algorithm output DTO only — not a product Memory Kind. ``source_entry_ids`` point at source
+    Decision markdown entry ids supplied by the caller. ``extra="allow"`` keeps secondary LLM
+    fields without a schema bump.
+    """
+
+    owner_id: str
+    title: str
+    statement: str
+    source_entry_ids: list[str] = Field(default_factory=list)
     timestamp: int  # Unix epoch milliseconds
 
     model_config = ConfigDict(extra="allow")
