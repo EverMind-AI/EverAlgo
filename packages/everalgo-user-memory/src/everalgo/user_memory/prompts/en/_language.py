@@ -89,6 +89,30 @@ narrative's own — which is what stops an update in a second language from spli
 equally unrecoverable when the language it pins is already wrong. Naming a language is the way out.
 """
 
+MERGED_DECISIONS_LANGUAGE_RULE = (
+    "**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the decisions you are "
+    "merging. Merging never changes the language — do not translate. This is mandatory."
+)
+"""Fallback for merging already-extracted Decisions into one current Decision.
+
+Same inherit-don't-translate shape as ``MERGED_EPISODES_LANGUAGE_RULE``. The decisions were extracted
+upstream, so their language is already settled; re-judging here would translate a merge out of the
+language its sources were written in. Disagreeing sources still leave the model to pick one — name a
+language when the caller cannot guarantee they agree.
+"""
+
+EXISTING_DECISION_LANGUAGE_RULE = (
+    "**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing decision "
+    "you are updating. Updating never changes the language — do not translate, even if the new decisions "
+    "are written in a different language. This is mandatory."
+)
+"""Fallback for updating an already-merged Decision.
+
+Pins the existing Decision's language, matching ``EXISTING_NARRATIVE_LANGUAGE_RULE``. A later decision
+in another language must not split the record; a language that went wrong on INIT stays wrong until a
+caller names one.
+"""
+
 SOURCE_TEXT_LANGUAGE_RULE = (
     "**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language EPISODE_TEXT itself is written in. "
     "ALL output MUST match that language. This is mandatory."

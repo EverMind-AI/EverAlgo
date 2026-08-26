@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — five LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `DecisionExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
+User-side memory products for EverAlgo — five LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `DecisionExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, a `DecisionReflector` that merges decisions into one current `Decision`, plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -105,12 +105,12 @@ back out. Note also that `category` and `trait` labels are model-authored, so th
 with the descriptions (`Location` versus `居住地`) — worth knowing if you group or filter on them.
 
 What "leave it out" means depends on the operator. The five reading a raw conversation judge the language from
-what the participants write, which is the 10.2% path above. The two reading already-extracted memory —
-`AtomicFactExtractor.aextract_from_text` and `EpisodeReflector.areflect` — instead inherit the language of
+what the participants write, which is the 10.2% path above. The operators reading already-extracted memory —
+`AtomicFactExtractor.aextract_from_text`, `EpisodeReflector.areflect`, and `DecisionReflector.areflect` — instead inherit the language of
 their input, which is a much easier call for a single-language narrative but not free: `areflect` takes
-*several* episodes at once, so episodes that disagree on language leave the model to pick one, and an
-`areflect` update inherits whatever the existing narrative says. Name a language when the inputs may
-disagree, or to move a narrative that is already in the wrong one.
+*several* records at once, so sources that disagree on language leave the model to pick one, and an
+`areflect` update inherits whatever the existing record says. Name a language when the inputs may
+disagree, or to move a record that is already in the wrong one.
 
 ## Customising prompts
 
@@ -202,6 +202,15 @@ class EpisodeReflector:
         prompt: str | None = None,
         output_language: OutputLanguage | str | None = None,   # None → inherited from the input
     ) -> Episode: ...
+
+class DecisionReflector:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def areflect(
+        self, decisions: Sequence[Decision], *,
+        old_decision: Decision | None = None,  # None → INIT merge; present → UPDATE
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → inherited from the input
+    ) -> Decision: ...   # still a Decision, not a Principle; owner_id is always None
 ```
 
 Every episode carries three model-written fields: `subject` (the title), `episode` (the full narrative) and
@@ -211,6 +220,8 @@ substituting a value. Up to 0.4 the field was a blind `episode[:200]` slice, bec
 for it — a truncation cut mid-word in English, and in Chinese a verbatim copy of most of the body.
 
 `EpisodeReflector` produces the same three fields, so a merged episode has a preview of the merged narrative.
+
+`DecisionReflector` has the same INIT / UPDATE split as `EpisodeReflector`, but the merged record is still a `Decision` (title / decision / reason / impact / tags) — not a Principle.
 
 `EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).
 
