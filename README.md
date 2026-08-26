@@ -25,7 +25,7 @@ This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespac
 | [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
 | [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank toolkit |
 | [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (image, audio, PDF, HTML, email, office, URL; video deferred) |
-| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
+| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` / `Decision` extractors |
 | [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCase` / `AgentSkill` extractors |
 | [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeExtractor` pipeline + `aclassify_category` (file-based knowledge extraction) |
 
@@ -45,6 +45,7 @@ uv run python examples/01_boundary_chat.py          # Chat → MemCell
 uv run python examples/03_user_memory_episode.py    # MemCell → Episode
 uv run python examples/04_agent_memory_case.py      # Agent trajectory → AgentCase
 uv run python examples/06_full_user_memory_pipeline.py   # Full pipeline
+uv run python examples/08_decision_memory_pipeline.py    # Decision Extract → Reflect → Principle
 uv run pytest                                        # workspace-wide test suite
 ```
 
@@ -135,7 +136,7 @@ All eight distributions are published on PyPI. Two operators are **unimplemented
 | `WorkspaceMemCellExtractor` | `everalgo.boundary.workspace` | Jira / Email / Confluence slicing — not implemented |
 | video parsing | `everalgo.parser.video` | deferred pending an ADR (Gemini Video vs Whisper + frame sampling) |
 
-Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile), the agent-memory extractors (Case / Skill), and the knowledge extractor (KnowledgeExtractor + document classification).
+Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile / Decision), the agent-memory extractors (Case / Skill), and the knowledge extractor (KnowledgeExtractor + document classification).
 
 ## Releasing
 
@@ -204,7 +205,7 @@ Read [`AGENTS.md`](AGENTS.md) — the single source of truth for assistant conte
 - [`docs/api/`](docs/api/) — per-package API reference
 - [`docs/version-policy.md`](docs/version-policy.md) — SemVer + supported Python versions
 - [`docs/contributing.md`](docs/contributing.md) — how to contribute
-- [`examples/`](examples/) — runnable quickstart scripts (01 through 07)
+- [`examples/`](examples/) — runnable quickstart scripts (01 through 08)
 - [`AGENTS.md`](AGENTS.md) — onboarding for AI assistants + contributors
 
 ## License

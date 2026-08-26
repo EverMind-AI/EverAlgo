@@ -13,7 +13,7 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 | `everalgo-clustering` | [`packages/everalgo-clustering/README.md`](../../packages/everalgo-clustering/README.md) | `Cluster`, `cluster_by_geometry`, `cluster_by_llm` |
 | `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `rank.episodic`, `rank.profile`, `rank.case`, `rank.skill`, `rank.fusion`, `rank.weight`, `rank.rerank` |
 | `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `ParsedContent`, image / audio / document / URL parsers (video deferred) |
-| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor` |
+| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `DecisionExtractor`, `PrincipleExtractor` |
 | `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `AgentBoundaryDetector`, `AgentCaseExtractor`, `AgentSkillExtractor`, `AgentProfileExtractor`, `CaseSkipReason`, `SkillSkipReason` |
 | `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `aclassify_category`, `KnowledgeMemory`, `CategorySpec` |
 
@@ -31,6 +31,8 @@ from everalgo.types import (
     ConversationItem,   # ChatMessage | ToolCallRequest | ToolCallResult (discriminated union)
     MemCell,            # boundary-segmented conversation slice; items: list[ConversationItem]
     Episode,            # narrative memory — owner_id, episode, subject, summary, timestamp
+    Decision,           # committed trade-off — owner_id, title, decision, reason, impact, tags, timestamp
+    Principle,          # synthesised from a Decision cluster — owner_id, title, statement, source_entry_ids, timestamp
     Foresight,          # anticipated future event — owner_id, foresight, evidence, start_time, end_time, duration_days
     AtomicFact,         # single verifiable assertion — owner_id (str | None), fact, timestamp
     Profile,            # structured user profile — owner_id, summary, timestamp; extra fields via extra="allow"

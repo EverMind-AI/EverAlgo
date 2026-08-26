@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
+User-side memory products for EverAlgo — six LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `DecisionExtractor`, `PrincipleExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, a `DecisionReflector` that merges decisions into one current `Decision`, plus a `BoundaryDetector` class facade that wraps `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -13,7 +13,7 @@ pip install everalgo-user-memory
 
 ## Quick start
 
-All extractors are stateless classes; pass `llm=` at construction time. The `sender_id` argument is always required and is not inferred from the conversation.
+All extractors are stateless classes; pass `llm=` at construction time. Extractors that bind a person take `sender_id` and do not infer it from the conversation. `DecisionExtractor` does not take `sender_id`: it runs once for the whole `MemCell` and leaves `owner_id` unbound.
 
 ```python
 import asyncio
@@ -28,6 +28,7 @@ from everalgo.user_memory import (
     ForesightExtractor,
     AtomicFactExtractor,
     ProfileExtractor,
+    DecisionExtractor,
 )
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "should_wait": False})
@@ -35,6 +36,7 @@ _EPISODE_JSON  = json.dumps({"title": "Alice asks about async retries", "content
 _FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _FACT_JSON     = json.dumps({"atomic_facts": {"time": "Nov 14 2023", "atomic_fact": ["Alice is learning Python async."]}})
 _PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"trait": "Pragmatic", "description": "Prefers minimal-ceremony tooling."}]})
+_DECISION_JSON = json.dumps({"decisions": []})
 
 
 async def main() -> None:
@@ -48,6 +50,7 @@ async def main() -> None:
         ChatResponse(content=_EPISODE_JSON,  model="fake"),
         ChatResponse(content=_FORE_JSON,     model="fake"),
         ChatResponse(content=_FACT_JSON,     model="fake"),
+        ChatResponse(content=_DECISION_JSON, model="fake"),
         ChatResponse(content=_PROFILE_JSON,  model="fake"),
     ])
 
@@ -59,17 +62,20 @@ async def main() -> None:
     episode   = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
     foresights = await ForesightExtractor(llm=fake).aextract(mc, sender_id="u_alice")
     facts      = await AtomicFactExtractor(llm=fake).aextract(mc, sender_id="u_alice")
+    decisions  = await DecisionExtractor(llm=fake).aextract(mc)
 
     # Step 5: Profile takes a chronological Sequence[MemCell]; last is most recent
     profile = await ProfileExtractor(llm=fake).aextract([mc], sender_id="u_alice")
 
-    print(episode.subject, profile.summary)
+    print(episode.subject, profile.summary, len(decisions))
 
 
 asyncio.run(main())
 ```
 
 See [`examples/06_full_user_memory_pipeline.py`](../../examples/06_full_user_memory_pipeline.py) for the complete end-to-end example including geometry clustering.
+
+See [`examples/08_decision_memory_pipeline.py`](../../examples/08_decision_memory_pipeline.py) for Decision Extract → Reflect → Principle.
 
 ## Choosing the output language
 
@@ -100,13 +106,13 @@ says, so one wrong INIT persists through every later update. Passing the languag
 back out. Note also that `category` and `trait` labels are model-authored, so they follow the argument along
 with the descriptions (`Location` versus `居住地`) — worth knowing if you group or filter on them.
 
-What "leave it out" means depends on the operator. The four reading a raw conversation judge the language from
-what the participants write, which is the 10.2% path above. The two reading already-extracted memory —
-`AtomicFactExtractor.aextract_from_text` and `EpisodeReflector.areflect` — instead inherit the language of
+What "leave it out" means depends on the operator. The five reading a raw conversation judge the language from
+what the participants write, which is the 10.2% path above. The operators reading already-extracted memory —
+`AtomicFactExtractor.aextract_from_text`, `EpisodeReflector.areflect`, `DecisionReflector.areflect`, and `PrincipleExtractor.aextract` — instead inherit the language of
 their input, which is a much easier call for a single-language narrative but not free: `areflect` takes
-*several* episodes at once, so episodes that disagree on language leave the model to pick one, and an
-`areflect` update inherits whatever the existing narrative says. Name a language when the inputs may
-disagree, or to move a narrative that is already in the wrong one.
+*several* records at once, so sources that disagree on language leave the model to pick one, and an
+`areflect` update inherits whatever the existing record says. Name a language when the inputs may
+disagree, or to move a record that is already in the wrong one.
 
 ## Customising prompts
 
@@ -156,6 +162,14 @@ class ForesightExtractor:
         output_language: OutputLanguage | str | None = None,   # None → the model infers it
     ) -> list[Foresight]: ...
 
+class DecisionExtractor:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def aextract(
+        self, memcell: MemCell, *,
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → the model infers it
+    ) -> list[Decision]: ...   # owner_id is always None; empty list is success
+
 class AtomicFactExtractor:
     def __init__(self, *, llm: LLMClient) -> None: ...
     async def aextract(
@@ -190,6 +204,24 @@ class EpisodeReflector:
         prompt: str | None = None,
         output_language: OutputLanguage | str | None = None,   # None → inherited from the input
     ) -> Episode: ...
+
+class DecisionReflector:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def areflect(
+        self, decisions: Sequence[Decision], *,
+        old_decision: Decision | None = None,  # None → INIT merge; present → UPDATE
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → inherited from the input
+    ) -> Decision: ...   # still a Decision, not a Principle; owner_id is always None
+
+class PrincipleExtractor:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def aextract(
+        self, decisions: Sequence[tuple[str, Decision]], *,  # (entry_id, Decision); ids are caller-supplied
+        owner_id: str,
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → inherited from the decisions
+    ) -> list[Principle]: ...   # algorithm DTO, not a Memory Kind; empty cluster → []
 ```
 
 Every episode carries three model-written fields: `subject` (the title), `episode` (the full narrative) and
@@ -199,6 +231,10 @@ substituting a value. Up to 0.4 the field was a blind `episode[:200]` slice, bec
 for it — a truncation cut mid-word in English, and in Chinese a verbatim copy of most of the body.
 
 `EpisodeReflector` produces the same three fields, so a merged episode has a preview of the merged narrative.
+
+`DecisionReflector` has the same INIT / UPDATE split as `EpisodeReflector`, but the merged record is still a `Decision` (title / decision / reason / impact / tags) — not a Principle.
+
+`PrincipleExtractor` synthesises zero or more `Principle` DTOs from a cluster of `(entry_id, Decision)` pairs. `source_entry_ids` can only cite ids the caller passed; this is meta memory, not a product Kind.
 
 `EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).
 

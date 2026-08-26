@@ -202,5 +202,5 @@ Both import the same class.
 
 - **Architecture deep-dive** → [concepts/architecture.md](concepts/architecture.md)
 - **Stateless design rationale** → [concepts/stateless-design.md](concepts/stateless-design.md)
-- **Full example scripts** → [`examples/`](../examples/) (01 through 07)
+- **Full example scripts** → [`examples/`](../examples/) (01 through 08)
 - **API index per package** → [api/README.md](api/README.md)

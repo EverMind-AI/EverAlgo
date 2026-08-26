@@ -12,19 +12,25 @@ from enum import StrEnum
 from everalgo.user_memory.prompts.en._language import (
     CALLER_CHOSEN_LANGUAGE_RULE,
     COMPACTED_PROFILE_LANGUAGE_RULE,
+    EXISTING_DECISION_LANGUAGE_RULE,
     EXISTING_NARRATIVE_LANGUAGE_RULE,
     EXISTING_PROFILE_LANGUAGE_RULE,
+    MERGED_DECISIONS_LANGUAGE_RULE,
     MERGED_EPISODES_LANGUAGE_RULE,
     PARTICIPANT_LANGUAGE_RULE,
+    PRINCIPLES_FROM_DECISIONS_LANGUAGE_RULE,
     PROFILE_INIT_LANGUAGE_RULE,
     SOURCE_TEXT_LANGUAGE_RULE,
 )
 
 __all__ = [
     "COMPACTED_PROFILE_LANGUAGE_RULE",
+    "EXISTING_DECISION_LANGUAGE_RULE",
     "EXISTING_NARRATIVE_LANGUAGE_RULE",
     "EXISTING_PROFILE_LANGUAGE_RULE",
+    "MERGED_DECISIONS_LANGUAGE_RULE",
     "MERGED_EPISODES_LANGUAGE_RULE",
+    "PRINCIPLES_FROM_DECISIONS_LANGUAGE_RULE",
     "PROFILE_INIT_LANGUAGE_RULE",
     "SOURCE_TEXT_LANGUAGE_RULE",
     "OutputLanguage",
@@ -79,8 +85,10 @@ def build_language_rule(
             conversation rule adjudicates does not arise; ``EXISTING_PROFILE_LANGUAGE_RULE`` and
             ``COMPACTED_PROFILE_LANGUAGE_RULE`` for the profile paths that must inherit a language rather
             than re-decide it; ``PROFILE_INIT_LANGUAGE_RULE`` for the one call that decides it;
-            ``MERGED_EPISODES_LANGUAGE_RULE`` and ``EXISTING_NARRATIVE_LANGUAGE_RULE`` for the two reflect
-            modes, which inherit from the episodes they merge and the narrative they update respectively.
+            ``MERGED_EPISODES_LANGUAGE_RULE`` and ``EXISTING_NARRATIVE_LANGUAGE_RULE`` for the two episode
+            reflect modes; ``MERGED_DECISIONS_LANGUAGE_RULE`` and ``EXISTING_DECISION_LANGUAGE_RULE`` for
+            the two decision reflect modes; ``PRINCIPLES_FROM_DECISIONS_LANGUAGE_RULE`` for synthesising
+            Principles from a Decision cluster.
 
     Returns:
         The rule text, with the language already substituted when one was named.

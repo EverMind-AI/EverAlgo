@@ -54,7 +54,7 @@ Install only what your use case needs:
 | `everalgo-clustering` | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
 | `everalgo-rank` | 4 retrieval strategies (hybrid / agentic / cluster / maxsim) + 4 business rankers (episodic / profile / case / skill) + fusion / weight / rerank tools |
 | `everalgo-parser` | Multimodal raw-file → `ParsedContent` |
-| `everalgo-user-memory` | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
+| `everalgo-user-memory` | `Episode` / `Foresight` / `AtomicFact` / `Profile` / `Decision` extractors |
 | `everalgo-agent-memory` | `AgentCase` / `AgentSkill` extractors |
 | `everalgo-knowledge` | `KnowledgeMemory` extractor |
 

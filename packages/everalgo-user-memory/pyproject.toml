@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-user-memory"
-version = "0.7.0"
-description = "EverAlgo user memory: Episode / Foresight / AtomicFact / Profile extractors (re-exports boundary as Chat/WorkspaceMemCellExtractor)."
+version = "0.8.0"
+description = "EverAlgo user memory: Episode / Foresight / AtomicFact / Profile / Decision / Principle extractors (re-exports boundary as Chat/WorkspaceMemCellExtractor)."
 requires-python = ">=3.12"
 license = "Apache-2.0"
 readme = "README.md"
@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
   "asgiref>=3.0",
   "everalgo-boundary>=0.3.0,<2.0.0",
-  "everalgo-core>=0.5.0,<2.0.0",
+  "everalgo-core>=0.6.0,<2.0.0",
   # ``reflect`` declares its Structured Output schema with pydantic directly; declare it explicitly
   # rather than relying on the transitive pull-in via everalgo-core.
   "pydantic>=2.7",

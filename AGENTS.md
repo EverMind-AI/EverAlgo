@@ -33,14 +33,14 @@ everalgo/                              # monorepo, uv virtual workspace
 ├── docs/
 │   ├── concepts/                      # high-level architecture notes
 │   └── api/                            # API reference (per-distribution)
-├── examples/                          # runnable quickstart scripts (01–07, use FakeLLMClient)
+├── examples/                          # runnable quickstart scripts (01–08, use FakeLLMClient)
 ├── packages/
 │   ├── everalgo-core/                 # types, llm (+ providers), prompts, testing
 │   ├── everalgo-boundary/             # detect_boundaries + DetectionResult + workspace stub
 │   ├── everalgo-clustering/           # cluster_by_geometry / cluster_by_llm over list[Cluster]
 │   ├── everalgo-rank/                 # 4 rankers + fusion / weight / rerank toolkit
 │   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (EXPERIMENTAL stub)
-│   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile
+│   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile / Decision
 │   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill / AgentProfile
 │   └── everalgo-knowledge/            # KnowledgeExtractor + aclassify_category (file-based knowledge extraction)
 ├── benchmarks/                        # internal LoCoMo benchmark suite ([tool.uv] package = false, not published)
@@ -107,6 +107,7 @@ uv run python examples/01_boundary_chat.py          # Chat → MemCell
 uv run python examples/03_user_memory_episode.py    # MemCell → Episode
 uv run python examples/04_agent_memory_case.py      # Agent trajectory → AgentCase
 uv run python examples/06_full_user_memory_pipeline.py   # Full pipeline
+uv run python examples/08_decision_memory_pipeline.py    # Decision Extract → Reflect → Principle
 ```
 
 ### Pre-commit hook (required)

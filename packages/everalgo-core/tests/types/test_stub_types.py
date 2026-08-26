@@ -41,6 +41,39 @@ def test_profile_importable_with_required_fields() -> None:
     assert not hasattr(pf, "parent_type")
 
 
+def test_decision_importable_with_required_fields() -> None:
+    from everalgo.types import Decision
+
+    dc = Decision(
+        owner_id="u1",
+        title="t",
+        decision="d",
+        reason="r",
+        timestamp=1,
+    )
+    assert dc.owner_id == "u1"
+    assert dc.tags == []
+    assert not hasattr(dc, "parent_type")
+    assert not hasattr(dc, "parent_id")
+    assert not hasattr(dc, "session_id")
+
+
+def test_principle_importable_with_required_fields() -> None:
+    from everalgo.types import Principle
+
+    pr = Principle(
+        owner_id="u1",
+        title="t",
+        statement="s",
+        timestamp=1,
+    )
+    assert pr.owner_id == "u1"
+    assert pr.source_entry_ids == []
+    assert not hasattr(pr, "parent_type")
+    assert not hasattr(pr, "parent_id")
+    assert not hasattr(pr, "session_id")
+
+
 def test_agent_types_importable() -> None:
     """AgentCase / AgentSkill are no longer stubs (sub-project 4); fields are required."""
     from everalgo.types import AgentCase, AgentSkill

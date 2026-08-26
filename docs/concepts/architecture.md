@@ -63,7 +63,7 @@ everalgo/                              # PEP 420 namespace package — no __init
 ├── everalgo-clustering/               # cluster_by_geometry / cluster_by_llm over list[Cluster]
 ├── everalgo-rank/                     # 4 rankers + fusion / weight / rerank tools
 ├── everalgo-parser/                   # multimodal raw-file → ParsedContent
-├── everalgo-user-memory/              # Episode / Foresight / AtomicFact / Profile
+├── everalgo-user-memory/              # Episode / Foresight / AtomicFact / Profile / Decision
 ├── everalgo-agent-memory/             # AgentCase / AgentSkill
 └── everalgo-knowledge/                # KnowledgeMemory
 ```
