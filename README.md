@@ -25,7 +25,7 @@ This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespac
 | [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
 | [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank toolkit |
 | [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (image, audio, PDF, HTML, email, office, URL; video deferred) |
-| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
+| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` / `Decision` extractors |
 | [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCase` / `AgentSkill` extractors |
 | [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeExtractor` pipeline + `aclassify_category` (file-based knowledge extraction) |
 
@@ -136,7 +136,7 @@ All eight distributions are published on PyPI. Two operators are **unimplemented
 | `WorkspaceMemCellExtractor` | `everalgo.boundary.workspace` | Jira / Email / Confluence slicing — not implemented |
 | video parsing | `everalgo.parser.video` | deferred pending an ADR (Gemini Video vs Whisper + frame sampling) |
 
-Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile), the agent-memory extractors (Case / Skill), and the knowledge extractor (KnowledgeExtractor + document classification).
+Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile / Decision), the agent-memory extractors (Case / Skill), and the knowledge extractor (KnowledgeExtractor + document classification).
 
 ## Releasing
 

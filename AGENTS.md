@@ -40,7 +40,7 @@ everalgo/                              # monorepo, uv virtual workspace
 │   ├── everalgo-clustering/           # cluster_by_geometry / cluster_by_llm over list[Cluster]
 │   ├── everalgo-rank/                 # 4 rankers + fusion / weight / rerank toolkit
 │   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (EXPERIMENTAL stub)
-│   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile
+│   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile / Decision
 │   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill / AgentProfile
 │   └── everalgo-knowledge/            # KnowledgeExtractor + aclassify_category (file-based knowledge extraction)
 ├── benchmarks/                        # internal LoCoMo benchmark suite ([tool.uv] package = false, not published)

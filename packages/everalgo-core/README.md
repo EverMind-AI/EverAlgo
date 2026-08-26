@@ -14,7 +14,7 @@ pip install everalgo-core
 
 | Subpackage | What it contains |
 |---|---|
-| `everalgo.types` | All shared data types: `MemCell`, `ChatMessage`, `ConversationItem`, `Episode`, `Foresight`, `AtomicFact`, `Profile`, `AgentCase`, `AgentSkill`, `RankInput`, `RankOutput`, `Candidate`, `ScoredItem`, `ParsedContent`, `RawFile`, tool-call types |
+| `everalgo.types` | All shared data types: `MemCell`, `ChatMessage`, `ConversationItem`, `Episode`, `Foresight`, `AtomicFact`, `Profile`, `Decision`, `Principle`, `AgentCase`, `AgentSkill`, `RankInput`, `RankOutput`, `Candidate`, `ScoredItem`, `ParsedContent`, `RawFile`, tool-call types |
 | `everalgo.llm` | `LLMClient` Protocol, `LLMConfig`, `ChatMessage` / `ChatResponse` / `Usage`, `LLMError`, `build_client` factory |
 | `everalgo.llm.format` | `format_atomic_fact_time`, `format_message_timestamp`, `format_natural_language_time` — timestamp rendering for LLM prompts |
 | `everalgo.llm.parse` | `parse_llm_json_object` — three-tier robust JSON-object extraction |

@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-26
+
 ### Added
 
 - `Decision` and `Principle` types in `everalgo.types`.
@@ -73,7 +75,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - LLM binding simplified to instance-only injection: `build_client` / constructor `llm=` parameter is the sole binding path. The prior 4-layer resolution (configure / use / current / resolve) was removed in favour of the pattern used by `openai-python`, `anthropic-sdk-python`, LangChain, and Instructor.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0...HEAD
+[0.6.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.0...everalgo-core/v0.6.0
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.4.0...everalgo-core/v0.5.0
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.3.0...everalgo-core/v0.4.0
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.2.1...everalgo-core/v0.3.0

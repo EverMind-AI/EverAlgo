@@ -13,14 +13,33 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.5.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-core` | 0.6.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.7.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.8.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Minor release — 2026-08-26 (decision memory)
+
+Two distributions, one product line. `everalgo-core` adds the `Decision` and `Principle` DTOs.
+`everalgo-user-memory` adds `DecisionExtractor`, `DecisionReflector`, and `PrincipleExtractor`, and
+raises its core floor to `>=0.6.0`. Decision is the new instance memory type; Principle is algorithm
+output synthesised from a Decision cluster — not a product Memory Kind.
+
+The extractors stay storage-free: one LLM call per MemCell with no `sender_id`, reflection still
+returns a `Decision`, and `source_entry_ids` are a subset of caller-supplied ids. An offline example
+(`examples/08_decision_memory_pipeline.py`) chains Extract → Reflect INIT → Principle on FakeLLM.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.6.0 | minor — `Decision` and `Principle` types |
+| `everalgo-user-memory` | 0.8.0 | minor — Decision extract / reflect / Principle extract; core floor `>=0.6.0` |
+
+Detail in [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) and
+[packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md).
 
 ## Minor release — 2026-08-20 (user-memory)
 

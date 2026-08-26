@@ -6,12 +6,18 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-26
+
 ### Added
 
 - **`DecisionExtractor`** — one LLM call over a `MemCell` returns `list[Decision]`. There is no `sender_id`; every `owner_id` is `None` (whole-slice generic path). No committed trade-off is a successful empty list (`{"decisions": []}`), not a retry.
 - **`DecisionReflector`** — INIT (`old_decision=None`, ≥2 decisions) or UPDATE (existing Decision + ≥1 newer) merges into **one** `Decision`. Not a Principle. `owner_id` is `None`; `timestamp` is the last input item's.
 - **`PrincipleExtractor`** — a Decision cluster as `(entry_id, Decision)` pairs returns `list[Principle]`. `source_entry_ids` are a subset of the caller-supplied ids. An empty cluster is `[]` with no LLM call.
 - [`examples/08_decision_memory_pipeline.py`](../../examples/08_decision_memory_pipeline.py) — FakeLLM Extract → Reflect INIT → Principle, offline.
+
+### Changed
+
+- Raise the `everalgo-core` floor from `>=0.5.0` to `>=0.6.0`. `Decision` and `Principle` land in core 0.6.0; the previous floor would resolve a core that does not export them.
 
 ## [0.7.0] - 2026-08-20
 
@@ -192,7 +198,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.7.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0...HEAD
+[0.8.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.7.0...everalgo-user-memory/v0.8.0
 [0.7.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.6.0...everalgo-user-memory/v0.7.0
 [0.6.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.5.0...everalgo-user-memory/v0.6.0
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.1...everalgo-user-memory/v0.5.0
