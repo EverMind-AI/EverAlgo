@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,6 +25,7 @@ from everalgo.user_memory._render import chat_messages, render_content
 from everalgo.user_memory.prompts.en.profile import (
     PROFILE_COMPACT_PROMPT,
     PROFILE_INITIAL_EXTRACTION_PROMPT,
+    PROFILE_REGROUP_PROMPT,
     PROFILE_UPDATE_PROMPT,
 )
 
@@ -35,22 +37,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Which field names a bucket's dimension. Used to enforce one-item-per-dimension when the model does not.
+# Which field names a bucket's grouping dimension. v2: the label is a GROUP key shared by many
+# atomic items, not a unique key — used to canonicalise spelling, never to merge content.
 _LABEL_FIELDS = {"explicit_info": "category", "implicit_traits": "trait"}
-
-# Separator for folding one item's prose into another. ASCII rather than a full-width semicolon because a
-# profile is written in whatever `output_language` names, and this has to read acceptably in all of them.
-_FOLD_JOIN = "; "
-_FOLD_STRIP = "\uff1b;\u3002. "  # trailing punctuation dropped before joining: both semicolons, both full stops, space
-
-_PROFILE_MAX_ITEMS = 30
-# Compaction is the path that removes items which were never portrait facts — an action restated as a
-# capability, a passing state, anything expired. UPDATE cannot do that job: it sees a snapshot plus one
-# conversation and acts on what the conversation raises, so told to audit the whole profile it emitted the
-# deletes in 1 run out of 10 and otherwise answered "none, nothing needs cleaning". Compaction therefore
-# runs as soon as the limit is reached rather than 50% beyond it, which is also how quickly a polluted
-# profile gets a chance to be cleaned.
-_PROFILE_COMPACT_THRESHOLD = _PROFILE_MAX_ITEMS
+# v2 caps. Items are atomic (one fact each), so the same portrait spans more items than v1's
+# one-blob-per-dimension packing; 60 total covers v1's 30 dimensions at two facts each. The
+# per-category cap bounds a single dimension flooding the portrait.
+#
+# Length is measured in ASCII-EQUIVALENT WIDTH UNITS (East Asian Wide/Fullwidth chars count 2,
+# everything else 1), so ONE threshold holds across languages with no per-language enumeration:
+# 200 units = ~200 English chars = ~100 CJK chars, and Japanese/Korean inherit it for free.
+# The backstop is an ENGINEERING guard against runaway concatenation only -- the style rule
+# ("one or two short sentences") lives in the prompt. 250 units: measured compliant-item p95 is
+# 183-198 units (en corpus), so 250 catches the runaway tail without policing compliant items;
+# 200 would sit ON the style budget and thrash regroup on legitimate English items.
+_PROFILE_MAX_ITEMS = 60
+_PROFILE_MAX_PER_CATEGORY = 8
+_ITEM_WIDTH_BACKSTOP = 250
+# Full-profile compaction fires ONLY on the total cap; per-label breaches (count or width) get a
+# group-scoped regroup instead — see _overcrowded_labels and _regroup. Compaction remains the only
+# path that removes never-was-a-portrait items (UPDATE emits such deletes in ~1 run out of 10).
 
 
 class ProfileExtractor:
@@ -199,15 +205,94 @@ class ProfileExtractor:
 
         explicit_info: list[Any] = list(getattr(merged_profile, "explicit_info", []) or [])
         implicit_traits: list[Any] = list(getattr(merged_profile, "implicit_traits", []) or [])
-        total_items = len(explicit_info) + len(implicit_traits)
-        if total_items > _PROFILE_COMPACT_THRESHOLD:
+        # Full-profile compaction ONLY on the total cap: rewriting everything to fix one
+        # overcrowded group deletes valid items in groups that were fine (measured: a
+        # noise round dropped 6 of 13 gold facts). Group-level breaches — too many items
+        # under one label, or a runaway-length item — get a REGROUP pass scoped to that
+        # one group, whose legal moves are split/rename/merge-restatements, not deletion.
+        if len(explicit_info) + len(implicit_traits) > _PROFILE_MAX_ITEMS:
             return await self._compact(
                 merged_profile,
                 display_name=_sender_display_name(memcells, sender_id),
                 sender_id=sender_id,
                 output_language=output_language,
             )
-        return merged_profile
+        result = merged_profile
+        for bucket, label in _overcrowded_labels(explicit_info, implicit_traits):
+            result = await self._regroup(
+                result,
+                bucket=bucket,
+                label=label,
+                display_name=_sender_display_name(memcells, sender_id),
+                sender_id=sender_id,
+                output_language=output_language,
+            )
+        return result
+
+    async def _regroup(
+        self,
+        profile: Profile,
+        *,
+        bucket: str,
+        label: str,
+        display_name: str,
+        sender_id: str,
+        output_language: OutputLanguage | str | None = None,
+    ) -> Profile:
+        """Reorganise ONE overcrowded group in place; every other item passes through untouched.
+
+        The group's items are re-filed under dimension-true labels (split/rename), restatements
+        of one fact merge, and only never-was-a-portrait items may drop. A model response that
+        still breaches the cap is accepted with a warning — regroup never loops.
+        """
+        wanted = _normalize(label)
+        label_field = _LABEL_FIELDS[bucket]
+        buckets: dict[str, list[Any]] = {
+            "explicit_info": list(getattr(profile, "explicit_info", []) or []),
+            "implicit_traits": list(getattr(profile, "implicit_traits", []) or []),
+        }
+        group: list[Any] = [
+            it
+            for it in buckets[bucket]
+            if (lbl := _item_label(it, label_field)) is not None and _normalize(lbl) == wanted
+        ]
+        rest: list[Any] = [it for it in buckets[bucket] if it not in group]
+        other_labels = sorted({lbl for it in rest if (lbl := _item_label(it, label_field)) is not None})
+        rendered = render_prompt(
+            PROFILE_REGROUP_PROMPT,
+            None,
+            label=label,
+            label_field=label_field,
+            count=len(group),
+            max_per_category=_PROFILE_MAX_PER_CATEGORY,
+            other_labels=", ".join(other_labels) if other_labels else "(none)",
+            items_text=json.dumps(group, ensure_ascii=False, indent=2),
+            target_user=display_name,
+            target_user_id=sender_id,
+            language_rule=build_language_rule(output_language, fallback=COMPACTED_PROFILE_LANGUAGE_RULE),
+        )
+        data = await _call_llm_for_profile_regroup(self._llm, rendered)
+        returned: list[Any] = list(data["items"])
+        kept: list[Any] = [it for it in returned if isinstance(it, dict) and _identity_key(cast("dict[str, Any]", it))]
+        dropped_malformed = len(returned) - len(kept)
+        if dropped_malformed:
+            logger.warning("profile regroup dropped %d malformed item(s) label=%s", dropped_malformed, label)
+        new_bucket = _dedupe([*rest, *kept], source="regroup")
+        still = sum(
+            1 for it in new_bucket if (lbl := _item_label(it, label_field)) is not None and _normalize(lbl) == wanted
+        )
+        if still > _PROFILE_MAX_PER_CATEGORY:
+            logger.warning("profile regroup left label over cap: label=%s count=%d", label, still)
+        buckets[bucket] = new_bucket
+        return Profile.model_validate(
+            {
+                "owner_id": profile.owner_id,
+                "summary": _build_summary(buckets["explicit_info"], buckets["implicit_traits"]),
+                "timestamp": profile.timestamp,
+                "explicit_info": buckets["explicit_info"],
+                "implicit_traits": buckets["implicit_traits"],
+            }
+        )
 
     async def _compact(
         self,
@@ -230,6 +315,7 @@ class ProfileExtractor:
             None,
             total_items=total_items,
             max_items=_PROFILE_MAX_ITEMS,
+            max_per_category=_PROFILE_MAX_PER_CATEGORY,
             profile_text=profile_text,
             target_user=display_name,
             target_user_id=sender_id,
@@ -292,6 +378,18 @@ async def _call_llm_for_profile_compact(llm: LLMClient, rendered: str) -> dict[s
         raise ValueError(f"Profile compact response missing required keys: {list(data.keys())!r}")
     if not isinstance(data["explicit_info"], list) or not isinstance(data["implicit_traits"], list):
         raise ValueError(f"explicit_info and implicit_traits must be lists: {data!r}")  # noqa: TRY004
+    return data
+
+
+async def _call_llm_for_profile_regroup(llm: LLMClient, rendered: str) -> dict[str, Any]:
+    """Call LLM for a single-group regroup; return validated dict with an items list."""
+    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
+    json_str = _extract_json_object(response.content)
+    data: dict[str, Any] = json.loads(json_str)
+    if "items" not in data:
+        raise ValueError(f"Profile regroup response missing 'items' key: {list(data.keys())!r}")
+    if not isinstance(data["items"], list):
+        raise ValueError(f"items must be a list: {data!r}")  # noqa: TRY004
     return data
 
 
@@ -477,12 +575,14 @@ def _collect_ops(ops: list[dict[str, Any]], buckets: dict[str, list[Any]]) -> di
 
 
 def _collect_add(op: dict[str, Any], slot: _BucketOps, *, items: list[Any], label_field: str) -> None:
-    """Queue an add — or fold it into the item that already owns its label.
+    """Queue an add, canonicalising its label to the spelling already on file.
 
-    One dimension gets one item, and a category or trait name is that dimension's handle. The prompt says a
-    second item under an existing name is always wrong, and the model mostly complies; mostly is not enough
-    when the result is the duplication this whole area exists to prevent, so the rule is enforced here too.
-    Folding rather than rejecting: the incoming fact is real, it simply belongs in the item already on file.
+    v2: a label is a GROUP key — several atomic items under one category is the intended shape, so an
+    add whose label is already in use is appended as a sibling, never folded into the owner's prose
+    (v1's fold is what let items concatenate without bound). Only the label's spelling is normalised,
+    so one dimension cannot split into casing/whitespace variants of its own name. Near-synonym labels
+    are the prompt's job (label inventory) with compaction as the backstop. Fact-level duplicates are
+    still caught by ``_dedupe`` (description identity).
     """
     data = op.get("data")
     if not isinstance(data, dict):
@@ -494,11 +594,9 @@ def _collect_add(op: dict[str, Any], slot: _BucketOps, *, items: list[Any], labe
         return
 
     owner = _index_owning_label(items, item.get(label_field), label_field=label_field)
-    if owner is None:
-        slot.adds.append(item)
-        return
-    logger.warning("profile add folded into existing item: bucket_label_taken index=%d", owner)
-    slot.updates[owner] = {**slot.updates.get(owner, {}), **_fold(cast("dict[str, Any]", items[owner]), item)}
+    if owner is not None:
+        item[label_field] = cast("dict[str, Any]", items[owner])[label_field]
+    slot.adds.append(item)
 
 
 def _index_owning_label(items: list[Any], label: object, *, label_field: str) -> int | None:
@@ -515,23 +613,36 @@ def _index_owning_label(items: list[Any], label: object, *, label_field: str) ->
     return None
 
 
-def _fold(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
-    """Patch extending ``existing`` with ``incoming``'s prose, joining text fields rather than replacing.
+def _overcrowded_labels(explicit_info: list[Any], implicit_traits: list[Any]) -> list[tuple[str, str]]:
+    """``(bucket, label)`` pairs needing a regroup pass.
 
-    Only the fields carrying prose are joined; a field the incoming item does not restate is left alone.
-    Nothing is appended twice, so a model repeating a fact verbatim does not lengthen the item.
+    Flagged when a label holds too many items, or one of its items is past the width backstop
+    (runaway concatenation — a split candidate, not a style gate). The label returned is the first-seen original spelling, for prompt display; matching is by
+    ``_normalize``. Order is deterministic: explicit_info first, then first-seen label order.
     """
-    patch: dict[str, Any] = {}
-    for field_name in ("description", "evidence", "basis"):
-        addition = incoming.get(field_name)
-        if not isinstance(addition, str) or not addition.strip():
-            continue
-        current = existing.get(field_name)
-        if not isinstance(current, str) or not current.strip():
-            patch[field_name] = addition.strip()
-        elif _normalize(addition) not in _normalize(current):
-            patch[field_name] = f"{current.rstrip(_FOLD_STRIP)}{_FOLD_JOIN}{addition.strip()}"
-    return patch
+    flagged: list[tuple[str, str]] = []
+    for bucket, items in (("explicit_info", explicit_info), ("implicit_traits", implicit_traits)):
+        label_field = _LABEL_FIELDS[bucket]
+        counts: dict[str, int] = {}
+        first_spelling: dict[str, str] = {}
+        oversized: dict[str, bool] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item = cast("dict[str, Any]", item)
+            label = item.get(label_field)
+            if not isinstance(label, str) or not label.strip():
+                continue
+            key = _normalize(label)
+            first_spelling.setdefault(key, label.strip())
+            counts[key] = counts.get(key, 0) + 1
+            description = item.get("description")
+            if isinstance(description, str) and _ascii_width(description) > _ITEM_WIDTH_BACKSTOP:
+                oversized[key] = True
+        for key, spelling in first_spelling.items():
+            if counts[key] > _PROFILE_MAX_PER_CATEGORY or oversized.get(key):
+                flagged.append((bucket, spelling))
+    return flagged
 
 
 def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: list[Any]) -> None:
@@ -628,6 +739,25 @@ def _identity_key(item: dict[str, Any]) -> str | None:
         return None
     # An empty description is no identity: it would match every other item that is missing one.
     return _normalize(description) or None
+
+
+def _item_label(item: Any, label_field: str) -> str | None:
+    """The item's stripped label string, or None when it is not a dict or carries no usable label."""
+    if not isinstance(item, dict):
+        return None
+    label = cast("dict[str, Any]", item).get(label_field)
+    if isinstance(label, str) and label.strip():
+        return label.strip()
+    return None
+
+
+def _ascii_width(text: str) -> int:
+    """Length in ASCII-equivalent units: East Asian Wide/Fullwidth characters count 2, the rest 1.
+
+    One cross-language yardstick for item length — 200 units reads as one to two short sentences
+    in English and in CJK alike, with no per-language threshold table to maintain.
+    """
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
 
 
 def _normalize(text: str) -> str:

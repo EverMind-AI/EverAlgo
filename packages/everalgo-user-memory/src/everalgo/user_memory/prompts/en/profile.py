@@ -1,53 +1,50 @@
-"""English prompts for ProfileExtractor.
+"""English prompts for ProfileExtractor — v2 (atomic items grouped by category).
 
-Three prompts cover the three calls: ``PROFILE_INITIAL_EXTRACTION_PROMPT`` builds a profile from a
-conversation, ``PROFILE_UPDATE_PROMPT`` emits operations against a stored one, ``PROFILE_COMPACT_PROMPT``
-rewrites a profile that has outgrown its item limit. The first two inject a ``{target_user}`` so extraction
-is scoped to a single speaker in multi-party conversations; compaction only rewrites stored items.
+EXPERIMENTAL PROTOTYPE (exp/profile-atomic-restructure). Structural change from v1:
+an item is one atomic fact stated in one or two short sentences, and a category is a
+GROUP KEY that many items share — not a unique key whose single item absorbs every
+fact of the dimension. Growth therefore lands on the item COUNT axis (where dedupe,
+caps and compaction govern) instead of the item LENGTH axis (which v1 left ungoverned
+and which produced unreadable multi-hundred-character blobs in production).
 
-What a profile IS, and how the two buckets divide, is defined once in ``_PORTRAIT`` and spliced into all
-three. Each prompt previously carried its own wording, which is how compaction fell behind: it went on
-merging items and refining tags under rules the other two had left behind, undoing their work on the one
-path that rewrites everything. A shared definition cannot drift that way.
+Four prompts cover the four calls: ``PROFILE_INITIAL_EXTRACTION_PROMPT`` builds a
+profile from a conversation, ``PROFILE_UPDATE_PROMPT`` emits operations against a
+stored one, ``PROFILE_COMPACT_PROMPT`` rewrites a profile over its total cap, and
+``PROFILE_REGROUP_PROMPT`` reorganises one overcrowded group. The first two inject a
+``{target_user}`` so extraction is scoped to a single speaker in multi-party
+conversations; the last two only rewrite stored items.
 
-Placeholders & rendering: all three templates use single-brace placeholders and are rendered via
-:func:`everalgo.prompts.render_prompt`, which mirrors :py:meth:`str.format`'s brace-escape semantics — the
-JSON examples escape their literal braces as ``{{ }}`` — but leaves an absent placeholder verbatim rather
-than raising.
+Assembled layout is uniform and instructions-first: task line → what a portrait is
+(``_PORTRAIT``) → how items are written (``_ITEM_RULES``) → call-specific semantics →
+output shape (``_ITEM_SHAPE``) → language anchor → DATA LAST. The task line must not
+say "below/above" about anything that is not actually there; every data reference
+names its section. Review any edit by reading the RENDERED prompt end to end from the
+receiver's seat — flow, redundancy, dangling references — not the template source.
 
-Every rule here answers a measured failure; the numbers are in this package's CHANGELOG. Two properties
-are easy to break while tidying:
+What a profile IS, and how the two buckets divide, is defined once in ``_PORTRAIT`` and
+spliced into all four (shared so a rule cannot drift between paths — see v1 history).
 
-* **A rule repeated in two places may be load-bearing.** Removing one copy of the "also / as well as /
-  comma-list" prohibition as a duplicate raised explicit items from 0.63-0.75 per run to 1.30-1.40, and the
-  regression appeared in ``explicit_info``, which the trait rule does not govern. Signals here are not
-  partitioned by section.
-* **An example beats the rule it contradicts.** ``evidence`` kept naming the speaker in 71/71 items while a
-  rule forbade it, because one example demonstrated ``"In Oct 2024 user mentioned..."``. Compaction put
-  brackets on 40/40 traits where the other paths put them on 0/44, the only difference being an
-  ``(e.g., [Risk-Averse])``. Keep every example consistent with every rule.
-* **The naming example has to name the actual subject.** ``_ITEM_RULES`` interpolates ``{target_user}`` rather
-  than carrying a name, and a fixed placeholder is not a substitute: replacing the interpolation with a literal
-  ``"Alice"`` — a name absent from the conversation — dropped ``implicit_traits`` from 0.95 to 0.00/0.05/0.00 per
-  run over three repeats, against a same-version spread of 0.05. Naming the person who is actually speaking is
-  what anchors who the portrait is about; a stranger's name reads as another participant.
-* **Four rules written against a record of the work all regressed something else.** What the assistant explained,
-  what a tool turned out to support, a setting that was changed — these are durable, assert nothing about the
-  person, and still reach ``explicit_info`` at roughly 1.4-1.8 items per run on a purely operational corpus. Naming
-  the subject matter ("facts about the code, the tooling, the tests") tripled the count on that corpus; stating it
-  by form ("a record of the work is not a portrait") dropped the operational-turn check from 20/20 to 8/20; adding
-  it to the bucket definition dropped it to 6/20; widening the assistant clause to name what it reported, to 11/20.
-  Every attempt raised the total item count, which is the pattern: at this length an added prohibition dilutes the
-  ones already here. Do not add a fifth without measuring both directions.
-* **Do not hand the model a list of label names.** A six-name vocabulary of dimensions (role / languages &
-  tools / process / …) was added to stop one fact drawing a fresh category name each run, qualified with
-  "written in the output language". All 20 runs came back with the English labels verbatim under
-  ``output_language=CHINESE`` — ``[role]``, ``[process]`` — and 10/20 chained two dimensions into one
-  description under the borrowed label. Bold literals get copied, not translated. Reverted.
+Placeholders & rendering: all templates use single-brace placeholders and are rendered
+via :func:`everalgo.prompts.render_prompt`, which mirrors :py:meth:`str.format`'s
+brace-escape semantics — the JSON examples escape their literal braces as ``{{ }}`` —
+but leaves an absent placeholder verbatim rather than raising.
+
+Inherited measured lessons from v1 that still bind here:
+
+* **A rule repeated in two places may be load-bearing.** Signals are not partitioned by
+  section; do not remove a "duplicate" copy without measuring.
+* **An example beats the rule it contradicts.** Keep every example consistent with every
+  rule, including in evidence formatting.
+* **The naming example has to name the actual subject.** ``_ITEM_RULES`` interpolates
+  ``{target_user}``; a fixed placeholder name regresses trait extraction to ~zero.
+* **Added prohibitions dilute the ones already here.** Measure both directions before
+  adding rules.
+* **Do not hand the model a list of label names.** Bold literals get copied verbatim,
+  not translated into the output language.
 """
 
 # --------------------------------------------------------------------------------------------------
-# Shared blocks. Spliced into all three prompts so a rule cannot hold on one path and not another.
+# Shared blocks. Spliced into all four prompts so a rule cannot hold on one path and not another.
 # --------------------------------------------------------------------------------------------------
 
 _PORTRAIT = """\
@@ -55,9 +52,9 @@ A profile is a **portrait of a person**, not a log of what happened. Nothing ent
 
 **explicit_info** — what this person **stated** about themselves: their role, the constraints they work under, their environment, the preferences they voiced. One clear statement is enough. It must also still hold next time: "I'm tired today", "I'm in a hurry right now", "I'm annoyed at this bug", "I'm on leave next week" were genuinely said and do not belong in a portrait, and there is nowhere to record when they expire. Anything you would have to infer from what they did does not belong here at all: watching an action tells you the action happened, not that this person holds a standing property. A single operation is an event, not a portrait fact.
 
-**implicit_traits** — the half of the portrait they did not state outright: how they decide, what they insist on, what they avoid. A conversation with any substance should not leave this empty. Each trait needs **two or more signals**, and a signal is something this person **chose or asserted** — never an operation they carried out. Switching a branch, running a test, fixing an import are actions; two actions are not two signals about who someone is. The two need not share a topic — one disposition can show through on unrelated subjects — but the same statement twice is one signal, not two.
+**implicit_traits** — latent traits of this person, **inferred** from the conversation: how they decide, what they insist on, what they avoid. A trait is a grounded inference — you read a disposition out of signals and name those signals in its basis. A signal is something this person **chose or asserted**, not an operation they carried out (running a test is an action, not a signal); **one clear signal is enough**, and signals need not share a topic — one disposition can show through on unrelated subjects — but the same statement twice is one signal, not two. Actively look for these: a conversation with any substance should not leave this list empty — leave it empty only for purely operational exchanges.
 
-**Which bucket an item goes in is decided by whether this person said it, never by what the fact is about.** Anything traceable to a sentence they uttered is explicit_info — including how their team requires work to be done, what they refuse to touch, what they insist you do — however much it also reveals about them. implicit_traits holds only what no sentence of theirs states. Rephrasing a statement as a disposition ("insists on the team's merge process") does not move it across: it is still the thing they said, and it belongs in explicit_info once, not in both buckets.
+**Two gates admit an item: it must be a fact about THIS PERSON, and only then does the bucket question arise.** A rule that would hold for whoever sat in their seat — a team process, an SOP, how a system or pipeline works — is nobody's portrait fact, however clearly this person stated it; what may enter is its personal side, when there is one (they set this rule for you to follow; they refuse to work any other way). For what passes that gate, the bucket is decided by whether this person said it, never by what the fact is about: anything traceable to a sentence they uttered is explicit_info — what they refuse to touch, what they insist you do — however much it also reveals about them. implicit_traits holds inferences — a disposition they never stated, read out of what they did say and choose; what someone stated needs no inference. Rephrasing a statement as a disposition ("insists on the team's merge process") is not an inference: it is still the thing they said, and it belongs in explicit_info once, not in both buckets.
 
 **Never restate an action as a capability, duty, skill, familiarity, interest or attitude.** Having run the tests once is not being responsible for testing, and it is not caring about test results or an interest in testing either; asking what a skipped test was is a question, not an attitude towards testing; reading a log is not attentiveness. Do not call this person responsible for, involved in, capable of, familiar with, interested in, attentive to or concerned with anything unless they said so themselves. This is about the claim, not the wording, and holds in every language. A pattern you inferred from behaviour goes to implicit_traits, not to explicit_info reworded.
 
@@ -66,18 +63,18 @@ A profile is a **portrait of a person**, not a log of what happened. Nothing ent
 An item already on file making such a claim is **not** rescued by the evidence attached to it. That evidence records an occasion; the claim asserts a standing property; an occasion cannot establish one. Such an item was never a portrait item and is to be removed, not rewritten and not merged."""
 
 _ITEM_RULES = """\
-**One item per dimension.** A category names a durable dimension of the person, not a kind of activity, and that dimension gets exactly one item whose description covers the whole of it. "works mainly in Python, some Rust, refuses front-end JavaScript" is ONE item, not three. A fact about a dimension already on file extends that item; a dimension not yet on file gets its own. Reuse a category or trait name already in use rather than coining a near-synonym — two names for one dimension is how a duplicate gets in. Dimensions are coarse: which languages someone uses, what their team's process requires, which tools they work on are each one dimension, not one per language, rule or tool. When unsure whether a dimension is new, it is not.
+**One fact, one item.** An item states a single atomic fact about this person, in one or two short sentences — plain, direct and easy to read. Never chain separate facts together with "also", "as well as" or a comma-list: "prefers small pull requests, insists on rebase-before-merge, and reviews are done in the morning" is THREE items, not one. A statement that genuinely forms one fact stays one item — "works mainly in Python with some Rust" is one fact about their language stack — but the moment a second independent fact appears, it gets its own item.
 
-**One item, one dimension.** A description states that one dimension and nothing else. Never chain unrelated dimensions together with "also", "as well as" or a comma-list under a catch-all label — that is a pile of events wearing one label, no better than adding them separately. Where neither belongs in a portrait, write nothing.
+**A category groups items; it never merges them.** A category names a durable dimension of the person — their role, their daily habits, the tools they work with — and several items sharing one category is the normal, expected shape. A category names the dimension of the FACT itself, never the topic of the conversation it surfaced in: a fact about someone's dev environment stated while laying down collaboration rules still files under their environment. Before naming a category, look at the names already in use: when the fact belongs to a dimension already on file, reuse that exact name. Two names for one dimension scatters the portrait; two facts under one name is what categories are for; one name holding facts of several dimensions has stopped being a category. Category names are coarse and few; the items under them are atomic and many.
 
 **Never name the subject.** A profile is read as being about this one person, so state each item directly: "Works mainly in Python", never "{target_user} works mainly in Python", "the user works mainly in Python" or "{target_user_id} works mainly in Python". This holds in "evidence" too — give what was said and when, not who said it."""
 
 _TARGET_USER = """\
 **TARGET USER: {target_user}**
-This may be a multi-speaker conversation; each line is tagged with the speaker's ``user_id``. {verb} only for the speaker whose ``user_id`` equals ``{target_user_id}``; anything stated by or about another participant belongs to THAT participant. Do not treat assistant suggestions as this person's traits. The label and id above only locate their lines — neither appears in your output."""
+The conversation may have multiple speakers; each line is tagged with the speaker's ``user_id``. {verb} only for the speaker whose ``user_id`` equals ``{target_user_id}``; anything stated by or about another participant belongs to THAT participant. Do not treat assistant suggestions as this person's traits. The label and id above only locate their lines — neither appears in your output."""
 
 _ITEM_SHAPE = """\
-An explicit_info item is {{"category", "description", "evidence"}}; an implicit_traits item is {{"trait", "description", "basis", "evidence"}}. Keep each description to one natural sentence. "evidence" gives when something was said and quotes it, naming no one — e.g. "2024-10-03: '...'". "basis" names the signals themselves — the choices or assertions you are reading the disposition from, each one findable in the conversation. Restating the requirement ("two or more signals", "multiple instances", "repeated choices") is not a basis; if you cannot name the signals, the trait does not belong here at all."""
+An explicit_info item is {{"category", "description", "evidence"}}; an implicit_traits item is {{"trait", "description", "basis"}} — no evidence field, its grounding is the basis. Keep each description to one or two short sentences — concise and plain; if a description needs "also" or a semicolon to hold together, it is more than one item. "evidence" gives when something was said and quotes it, naming no one — e.g. "2024-10-03: '...'" — and carries **at most two dated quotes**; when a third arrives, keep the two most recent. "basis" names the signals themselves — the choices or assertions you are reading the disposition from, each one findable in the conversation. Restating the requirement ("one clear signal", "multiple instances", "repeated choices") is not a basis; if you cannot name the signals, the trait does not belong here at all."""
 
 
 # --------------------------------------------------------------------------------------------------
@@ -88,7 +85,7 @@ PROFILE_INITIAL_EXTRACTION_PROMPT = (
     """
 {language_rule}
 
-You are a "User Profile Analyst". Read the conversation below and build a user profile.
+You are a user-profile analyst. From the conversation given in the 【Conversation】 section at the end, build a profile of the target user, following the rules below.
 
 """
     + _PORTRAIT
@@ -99,8 +96,6 @@ You are a "User Profile Analyst". Read the conversation below and build a user p
     + """
 
 【Output】
-Either list may be empty, and often should be. A conversation made only of operations — requests, commands, tool output, the assistant's answers — with nothing this person said about themselves yields `"explicit_info": []`. That IS the correct answer there; inventing a fact to fill it is the error. Do not treat producing items as the goal.
-
 """
     + _ITEM_SHAPE
     + """
@@ -108,7 +103,7 @@ Either list may be empty, and often should be. A conversation made only of opera
 Output JSON directly, nothing else:
 ```json
 {{"explicit_info": [{{"category": "...", "description": "...", "evidence": "..."}}],
-  "implicit_traits": [{{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}]}}
+  "implicit_traits": [{{"trait": "...", "description": "...", "basis": "..."}}]}}
 ```
 
 {language_rule}
@@ -126,7 +121,7 @@ PROFILE_UPDATE_PROMPT = (
     """
 {language_rule}
 
-You are a user profile updater. Decide which operations to perform on the stored profile.
+You are a user-profile updater. A stored profile and new conversation records are given in the 【Stored Profile】 and 【Conversation Records】 sections at the end; decide which operations to apply to the stored profile, following the rules below.
 
 """
     + _PORTRAIT
@@ -136,28 +131,22 @@ You are a user profile updater. Decide which operations to perform on the stored
     + _TARGET_USER.replace("{verb}", "Update the profile")
     + """
 
-【Stored Profile】(each item carries an index)
-{current_profile}
-
-【Conversation Records】
-{conversations}
-
 【Operations】
-- **update**: an existing item gains a correction, a supplement or fresh evidence. **This is the operation for a fresh occurrence of something already recorded** — more evidence for a trait you have, a fact that sharpens an existing one, or a statement that contradicts it. Reaching for "add" here is the most common error on this task.
-- **add**: a dimension not yet on file at all. If a stored item already covers the dimension, use "update" — a second item under an existing category or trait name is always wrong.
+- **update**: an existing item's own fact gains a correction, a contradiction, a sharper wording or fresh evidence. Update acts on the SAME fact only — it never widens an item to absorb a different fact, however close the topic. An updated description still states one fact in one or two short sentences.
+- **add**: a fact not yet on file. A new fact belonging to a dimension already on file is still an **add** — reuse that category or trait name and the fact becomes a sibling item under it. Adding a second copy of a fact already on file is always wrong; that is an "update" carrying the fresh evidence.
 - **delete**: this person explicitly negates it; it has expired ("traveling next week", already past); it is too trivial to be a portrait ("wants pizza today"); a new statement contradicts it outright; **or the stored item asserts a duty, capability, skill, familiarity, interest or attitude this person never claimed** — delete those on sight, whatever evidence they carry, and do not settle for rewriting them.
 - **none**: no operation needed — often the right answer. A conversation made only of operations contains nothing about who this person is, however much of it there is. "none" is complete and correct; manufacturing an operation is not.
 
 【Rules】
-1. **Index semantics**: every index resolves against the profile snapshot shown above, numbered exactly as it appears there. Operations within one response never shift each other's indices — do not adjust an index to compensate for another operation in the same list. "add" takes no index. Indices for explicit_info and implicit_traits are independent.
+1. **Index semantics**: every index resolves against the profile snapshot exactly as numbered in the 【Stored Profile】 section. Operations within one response never shift each other's indices — do not adjust an index to compensate for another operation in the same list. "add" takes no index. Indices for explicit_info and implicit_traits are independent.
 2. **Keep an item internally consistent**: fields you omit from an "update" keep their stored values, so when you rewrite a "description" carry its matching "evidence" in the same operation — otherwise the item asserts one thing while quoting the opposite.
-3. Before "add", read the names already in use above. If a similar item exists under any wording, "update" it instead.
+3. **Add versus update is decided by the FACT, the category inventory only names the group.** Before "add", scan the stored items for the same fact under any wording — found means "update" that item. Not found means "add", filed under the existing category name that covers its dimension (coin a new name only for a genuinely new dimension).
 
+【Output】
 """
     + _ITEM_SHAPE
     + """
 
-【Output】
 Nothing to do:
 ```json
 {{
@@ -172,7 +161,7 @@ One or more operations:
 {{
   "operations": [
     {{"action": "add", "type": "explicit_info", "data": {{"category": "...", "description": "...", "evidence": "..."}}}},
-    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}}},
+    {{"action": "add", "type": "implicit_traits", "data": {{"trait": "...", "description": "...", "basis": "..."}}}},
     {{"action": "update", "type": "explicit_info", "index": 0, "data": {{"description": "...", "evidence": "..."}}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}}
   ],
@@ -181,19 +170,25 @@ One or more operations:
 ```
 Every operation object closes with exactly two braces before the comma: one for "data", one for the operation itself.
 
-{language_rule}"""
+{language_rule}
+
+【Stored Profile】(each item carries an index)
+{current_profile}
+
+【Conversation Records】
+{conversations}"""
 )
 
 
 # --------------------------------------------------------------------------------------------------
-# COMPACT — rewrite a profile that has outgrown its limit.
+# COMPACT — rewrite a profile that has outgrown its caps.
 # --------------------------------------------------------------------------------------------------
 
 PROFILE_COMPACT_PROMPT = (
     """
 {language_rule}
 
-The stored profile holds {total_items} items (explicit_info + implicit_traits combined), over the limit of {max_items}. Rewrite it down to **{max_items} items TOTAL** across both lists — not {max_items} each.
+The stored profile given in the 【Stored Profile】 section at the end is over its caps: it holds {total_items} items (explicit_info + implicit_traits combined) against a limit of {max_items} TOTAL, no more than {max_per_category} items under any one category or trait name, and every description within one or two short sentences. Rewrite it back inside all three, following the rules below.
 
 """
     + _PORTRAIT
@@ -202,26 +197,71 @@ The stored profile holds {total_items} items (explicit_info + implicit_traits co
     + """
 
 【How to compact】Work in this order.
-1. **Delete everything that was never a portrait item, before merging anything.** An action restated as a capability, duty, skill, familiarity, interest or attitude ("responsible for testing", "capable of debugging", "involved in version control", "cares about test results", "attentive to CI"); a passing state; anything trivial or already expired. Delete these outright — do NOT merge them: folding twelve "responsible for testing" entries into one still leaves a claim this person never made, and it now looks well-founded. Being numerous is not evidence, and neither is the evidence line attached to each one: it records an occasion, the claim asserts a standing property. Twelve such items become **zero** items, not one.
-2. **Move anything misfiled.** A trait that merely restates something this person said is an explicit_info fact — move it into the dimension covering it, and do not leave a copy behind in implicit_traits.
-3. **Then collapse each remaining dimension into its one item.** Several items under one category, or under near-synonymous categories, are one dimension that was allowed to split — merge those under the name already in use.
-4. **Keep the evidence** of every item you keep, and keep it naming no one.
-5. Prefer deleting a weak item over shortening a strong one. Reaching {max_items} by trimming good descriptions is the wrong trade. Ending well under {max_items} is fine — the limit is a ceiling, not a target.
+1. **Delete everything that was never a portrait item, before touching anything else.** An action restated as a capability, duty, skill, familiarity, interest or attitude ("responsible for testing", "capable of debugging", "involved in version control", "cares about test results", "attentive to CI"); a passing state; anything trivial or already expired. Delete these outright — do NOT merge them: folding twelve "responsible for testing" entries into one still leaves a claim this person never made, and it now looks well-founded. Being numerous is not evidence, and neither is the evidence line attached to each one: it records an occasion, the claim asserts a standing property. Twelve such items become **zero** items, not one.
+2. **Move anything misfiled.** A trait that merely restates something this person said is an explicit_info fact — move it to explicit_info under the category covering its dimension, and do not leave a copy behind in implicit_traits.
+3. **Split every item that chains several facts.** A description held together by "also", semicolons or a comma-list of independent facts becomes several items — one fact each, one or two short sentences each, all under the same category, each keeping the evidence that belongs to its own fact. Splitting is not a way around the caps: a fact that would then be deleted as trivial should simply be deleted.
+4. **Merge only restatements of the SAME fact.** Two items saying one thing in different words become one item keeping the better wording. Distinct facts stay distinct items — never collapse a dimension's items into one summary item; that recreates the blob this rewrite exists to remove.
+5. **Regroup the categories.** Near-synonymous names for one dimension all take the name already covering most of its items; a name that has swallowed facts of several dimensions is split into dimension-true categories. Items keep their own content either way — regrouping renames, it never rewrites.
+6. **Keep the evidence** of every item you keep — at most the two most recent dated quotes each, naming no one.
+7. Prefer deleting a weak item over merging or shortening a strong one. The caps are met by deleting, merging restatements and regrouping — NEVER by rephrasing a stated fact as an implicit trait; what this person said stays in explicit_info whatever the caps say. Ending well under the caps is fine — they are ceilings, not targets.
 
-【Stored Profile】
-{profile_text}
-
+【Output】
 """
     + _ITEM_SHAPE
     + """
 
-【Output】
-explicit_info + implicit_traits must total no more than {max_items} items.
+explicit_info + implicit_traits must total no more than {max_items} items, with no more than {max_per_category} under any one category or trait name. Output JSON directly, nothing else:
 ```json
 {{"explicit_info": [{{"category": "...", "description": "...", "evidence": "..."}}],
-  "implicit_traits": [{{"trait": "...", "description": "...", "basis": "...", "evidence": "..."}}],
-  "compact_note": "what was merged and what was dropped"}}
+  "implicit_traits": [{{"trait": "...", "description": "...", "basis": "..."}}],
+  "compact_note": "what was split, merged and dropped"}}
 ```
 
-{language_rule}"""
+{language_rule}
+
+【Stored Profile】
+{profile_text}"""
+)
+
+
+# --------------------------------------------------------------------------------------------------
+# REGROUP — reorganise ONE overcrowded group without touching the rest of the profile.
+# --------------------------------------------------------------------------------------------------
+
+PROFILE_REGROUP_PROMPT = (
+    """
+{language_rule}
+
+One group of a stored user profile has grown past its cap: {count} items share the {label_field} name "{label}", against a limit of {max_per_category} per name. The group's items are given in the 【Items】 section at the end; reorganise THIS GROUP ONLY, following the rules below — the rest of the profile is not shown and must not be assumed.
+
+"""
+    + _PORTRAIT
+    + "\n\n"
+    + _ITEM_RULES
+    + """
+
+【How to regroup】Work in this order.
+1. **Merge restatements of the SAME fact** into one item, keeping the better wording and at most the two most recent dated quotes of evidence. Distinct facts stay distinct items.
+2. **Split the name if it has swallowed several dimensions.** File each item under the {label_field} name of ITS OWN dimension — reuse a name from the 【Other names in use】 section when one fits, otherwise coin a coarse new one. Renaming never rewrites a description.
+3. **Delete only what was never a portrait item**: an action restated as a capability, duty, skill, familiarity, interest or attitude; a passing state; anything trivial or expired. Deleting is NOT a way to meet the cap — a real fact stays, filed under a better name.
+4. **Never change an item's bucket.** These items stay in the bucket they came from, whatever their wording suggests.
+
+【Output】
+"""
+    + _ITEM_SHAPE
+    + """
+
+Return every kept item (renamed or not), nothing else:
+```json
+{{"items": [{{...}}],
+  "regroup_note": "what was merged, renamed and dropped"}}
+```
+
+{language_rule}
+
+【Other names in use】(elsewhere in the profile)
+{other_labels}
+
+【Items】(currently under "{label}")
+{items_text}"""
 )
