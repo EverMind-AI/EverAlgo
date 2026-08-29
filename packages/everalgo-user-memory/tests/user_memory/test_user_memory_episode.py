@@ -14,11 +14,14 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 from everalgo.user_memory import OutputLanguage
 from everalgo.user_memory.episode import (
+    _SUMMARY_WIDTH_CAP,
     EpisodeExtractor,
     _format_prompt_time,
     _render_conversation,
     _resolve_user_name,
+    _truncate_at_sentence_boundary,
 )
+from everalgo.user_memory.prompts.en.episode import SUMMARY_COMPRESS_PROMPT
 
 
 def _memcell() -> MemCell:
@@ -757,7 +760,8 @@ def test_both_variants_bound_the_summary_length_and_self_containment(name: str) 
     import everalgo.user_memory.prompts.en.episode as mod
 
     prompt = getattr(mod, name)
-    assert "Under 50 words" in prompt
+    assert "1-3 short sentences" in prompt
+    assert "COMPRESS, never restate" in prompt
     assert "Introduce no fact that is not already in content" in prompt
     assert "Do not refer to the record itself" in prompt
 
@@ -835,3 +839,124 @@ def test_all_variants_require_utc_label_on_absolute_clock_times() -> None:
     for name in ("EPISODE_GENERATION_PROMPT", "USER_EPISODE_GENERATION_PROMPT"):
         assert "MUST carry the UTC zone label" in getattr(en_mod, name)
         assert "must NOT begin with a timestamp" not in getattr(en_mod, name)
+
+
+# ==========================================================================
+# Summary width guard (three tiers)
+# ==========================================================================
+
+_LONG_BODY = "The team met and decided many things. " * 30  # ~1170 units, over the cap
+
+
+def _episode_json(summary: str) -> str:
+    return json.dumps({"title": "T", "content": _LONG_BODY, "summary": summary})
+
+
+async def test_compliant_summary_passes_untouched_with_one_llm_call() -> None:
+    """Tier 1: a within-cap summary is stored verbatim; no repair call is spent."""
+    calls: list[str] = []
+
+    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+        assert isinstance(messages[0].content, str)
+        calls.append(messages[0].content)
+        return ChatResponse(content=_episode_json("Alice and Bob met and agreed."), model="fake")
+
+    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
+
+    assert ep.summary == "Alice and Bob met and agreed."  # type: ignore[attr-defined]
+    assert len(calls) == 1
+
+
+async def test_overwide_summary_is_replaced_by_the_compress_call() -> None:
+    """Tier 2: an over-cap summary triggers one repair call over content alone."""
+    calls: list[str] = []
+
+    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+        assert isinstance(messages[0].content, str)
+        calls.append(messages[0].content)
+        if len(calls) == 1:
+            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+        return ChatResponse(content="A short faithful preview.", model="fake")
+
+    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
+
+    assert ep.summary == "A short faithful preview."  # type: ignore[attr-defined]
+    assert len(calls) == 2
+    # the repair call sees the extracted content, not the raw conversation
+    assert _LONG_BODY[:80] in calls[1]
+    assert "speaker" not in calls[1]
+
+
+async def test_failed_compress_degrades_to_sentence_truncation_not_an_error() -> None:
+    """Tier 3: repair call dies -> truncated prefix stored; extraction itself never fails."""
+    calls: list[int] = []
+
+    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+        calls.append(1)
+        if len(calls) == 1:
+            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+        raise RuntimeError("compress model down")
+
+    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
+
+    summary = ep.summary  # type: ignore[attr-defined]
+    assert summary.endswith("\u2026")
+    assert len(summary) <= _SUMMARY_WIDTH_CAP
+    # whole sentences kept, with the ellipsis REPLACING the final terminator
+    body = summary.removesuffix("\u2026")
+    assert not body.endswith((".", "!", "?"))
+    assert (body + ". ") in _LONG_BODY  # the kept prefix ends exactly where a sentence did
+
+
+async def test_compress_output_still_over_cap_falls_through_to_truncation() -> None:
+    """Tier 2 output that itself violates the cap is not stored; tier 3 truncates it."""
+    calls: list[int] = []
+
+    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+        calls.append(1)
+        if len(calls) == 1:
+            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+        return ChatResponse(content="Still very wordy. " * 40, model="fake")
+
+    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
+
+    summary = ep.summary  # type: ignore[attr-defined]
+    assert summary.endswith("\u2026")
+    assert len(summary) <= _SUMMARY_WIDTH_CAP
+
+
+def test_truncation_cuts_at_a_sentence_boundary_and_replaces_the_terminator() -> None:
+    text = "First sentence here. Second one follows! Third asks a question? " * 20
+    out = _truncate_at_sentence_boundary(text, 100)
+    assert out.endswith("\u2026")
+    body = out.removesuffix("\u2026")
+    assert not body.endswith((".", "!", "?"))  # ellipsis replaced the terminator
+    assert text.startswith(body) and text[len(body)] in ".!?"  # cut sat ON a boundary
+    assert len(out) <= 100
+
+
+def test_truncation_handles_cjk_width_and_terminators() -> None:
+    text = "\u4ed6\u5468\u516d\u65e9\u4e0a\u51fa\u53d1\u53bb\u770b\u65e5\u51fa\u3002" * 30
+    out = _truncate_at_sentence_boundary(text, 100)
+    assert out.endswith("\u2026")
+    body = out.removesuffix("\u2026")
+    assert not body.endswith("\u3002")  # ellipsis replaced the CJK full stop
+    assert text.startswith(body) and text[len(body)] == "\u3002"
+    from everalgo.user_memory._width import ascii_width
+
+    assert ascii_width(out) <= 100
+
+
+def test_truncation_without_any_sentence_end_hard_cuts_with_ellipsis() -> None:
+    text = "word " * 200  # no terminator at all
+    out = _truncate_at_sentence_boundary(text, 60)
+    assert out.endswith("\u2026")
+    assert len(out) <= 60
+
+
+def test_compress_prompt_carries_its_contract() -> None:
+    """Placeholders present; data slot last, matching the assembly arc convention."""
+    assert "{language_rule}" in SUMMARY_COMPRESS_PROMPT
+    assert "{episode_text}" in SUMMARY_COMPRESS_PROMPT
+    assert SUMMARY_COMPRESS_PROMPT.rstrip().endswith("{episode_text}")
+    assert "1-3 short sentences" in SUMMARY_COMPRESS_PROMPT

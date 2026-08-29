@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import unicodedata
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,6 +21,7 @@ from everalgo.user_memory._language import (
     build_language_rule,
 )
 from everalgo.user_memory._render import chat_messages, render_content
+from everalgo.user_memory._width import ascii_width as _ascii_width
 from everalgo.user_memory.prompts.en.profile import (
     PROFILE_COMPACT_PROMPT,
     PROFILE_INITIAL_EXTRACTION_PROMPT,
@@ -749,15 +749,6 @@ def _item_label(item: Any, label_field: str) -> str | None:
     if isinstance(label, str) and label.strip():
         return label.strip()
     return None
-
-
-def _ascii_width(text: str) -> int:
-    """Length in ASCII-equivalent units: East Asian Wide/Fullwidth characters count 2, the rest 1.
-
-    One cross-language yardstick for item length — 200 units reads as one to two short sentences
-    in English and in CJK alike, with no per-language threshold table to maintain.
-    """
-    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
 
 
 def _normalize(text: str) -> str:

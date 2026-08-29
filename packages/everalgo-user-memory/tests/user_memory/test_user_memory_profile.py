@@ -23,13 +23,13 @@ from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, Profile, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 from everalgo.user_memory import OutputLanguage
+from everalgo.user_memory._width import ascii_width as _ascii_width
 from everalgo.user_memory.profile import (
     _ITEM_WIDTH_BACKSTOP,
     _PROFILE_MAX_ITEMS,
     _PROFILE_MAX_PER_CATEGORY,
     ProfileExtractor,
     _apply_ops,
-    _ascii_width,
     _build_summary,
     _overcrowded_labels,
     _render_conversation,
