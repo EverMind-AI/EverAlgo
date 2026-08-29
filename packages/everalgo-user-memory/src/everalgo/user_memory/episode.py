@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -11,16 +12,37 @@ from asgiref.sync import async_to_sync
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
 from everalgo.types import Episode, MemCell
-from everalgo.user_memory._language import OutputLanguage, build_language_rule
+from everalgo.user_memory._language import (
+    SOURCE_TEXT_LANGUAGE_RULE,
+    OutputLanguage,
+    build_language_rule,
+)
 from everalgo.user_memory._render import chat_messages, render_content
+from everalgo.user_memory._width import ascii_width
 from everalgo.user_memory.prompts.en.episode import (
     DEFAULT_CUSTOM_INSTRUCTIONS,
     EPISODE_GENERATION_PROMPT,
+    SUMMARY_COMPRESS_PROMPT,
     USER_EPISODE_GENERATION_PROMPT,
 )
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+
+logger = logging.getLogger(__name__)
+
+# Hard cap on the stored ``summary``, in ASCII-equivalent units (~65 English words /
+# ~200 Chinese characters — one notch looser than the prompt's 1-3-sentence target, so the
+# guard only catches real violations, not compliant output on the margin). Production
+# 2026-08: a qwen3-4b finetune restated the whole ``content`` as ``summary`` on ~22% of
+# episodes (max 9038 chars) — the prompt alone does not hold the line, so the extractor does.
+_SUMMARY_WIDTH_CAP = 400
+
+# Input guard for the compress call, mirroring the caller-side cap on stored narratives:
+# well above any sane ``content``, it only trims pathological ones.
+_SUMMARY_SOURCE_MAX_CHARS = 8000
+
+_ELLIPSIS = "\u2026"
 
 
 class EpisodeExtractor:
@@ -64,6 +86,11 @@ class EpisodeExtractor:
             LLMError: From the LLM call.
             ValueError: If the LLM returns no parsed structured output, or ``output_language``
                 names no supported language.
+
+        The returned ``summary`` is guaranteed no wider than ``_SUMMARY_WIDTH_CAP`` ASCII-equivalent
+        units: an over-cap one is repaired by one compress call over ``content``, then by
+        sentence-boundary truncation — never by failing the extraction (see
+        ``_ensure_summary_within_cap``).
         """
         custom_instr = custom_instructions or DEFAULT_CUSTOM_INSTRUCTIONS
         conv_start = _format_prompt_time(memcell.items[0].timestamp)
@@ -92,6 +119,13 @@ class EpisodeExtractor:
             )
 
         data = await _call_llm_for_episode(self._llm, rendered)
+        compress_rule = language_rule if output_language is not None else SOURCE_TEXT_LANGUAGE_RULE
+        data["summary"] = await _ensure_summary_within_cap(
+            self._llm,
+            summary=str(data["summary"]),
+            content=str(data["content"]),
+            language_rule=compress_rule,
+        )
         return _build_episode(data, sender_id=sender_id, memcell=memcell)
 
     extract = async_to_sync(aextract)
@@ -122,6 +156,84 @@ async def _call_llm_for_episode(llm: LLMClient, rendered: str) -> dict[str, Any]
         if not str(data[key]).strip():
             raise ValueError(f"Episode LLM response has empty {key}: {data!r}")
     return data
+
+
+# ---------------------------------------------------------------------------
+# Summary width guard — three tiers, never raising: the summary is a display preview,
+# and the caller's failure model retries the WHOLE extraction on an exception and drops
+# the episode after the last attempt. Failing the main product over a cosmetic field is
+# the one outcome this guard exists to prevent, so every tier degrades instead of raising.
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_summary_within_cap(llm: LLMClient, *, summary: str, content: str, language_rule: str) -> str:
+    """Return a summary no wider than ``_SUMMARY_WIDTH_CAP``.
+
+    Tier 1: the extractor's own summary, when compliant (the normal path, free).
+    Tier 2: one cheap compress call over ``content`` alone — not the full conversation —
+    when the extractor restated instead of compressing.
+    Tier 3: sentence-boundary truncation, so an increment is compliant by construction
+    even when the model refuses to be. The truncated preview ends with an ellipsis and
+    loses coverage, never correctness: every kept sentence is one the model wrote.
+    """
+    if ascii_width(summary) <= _SUMMARY_WIDTH_CAP:
+        return summary
+    rewritten = await _compress_summary(llm, content=content, language_rule=language_rule)
+    if rewritten is not None and ascii_width(rewritten) <= _SUMMARY_WIDTH_CAP:
+        return rewritten
+    if rewritten is not None and ascii_width(rewritten) < ascii_width(summary):
+        summary = rewritten
+    logger.warning(
+        "episode summary still %d units wide after compression, truncating to %d",
+        ascii_width(summary),
+        _SUMMARY_WIDTH_CAP,
+    )
+    return _truncate_at_sentence_boundary(summary, _SUMMARY_WIDTH_CAP)
+
+
+async def _compress_summary(llm: LLMClient, *, content: str, language_rule: str) -> str | None:
+    """One repair call: rewrite the preview from ``content``. ``None`` on any failure.
+
+    Plain-text output (no JSON) keeps the failure surface small; the broad except is the
+    point — no repair failure may ever cost the episode itself.
+    """
+    prompt = SUMMARY_COMPRESS_PROMPT.format(
+        language_rule=language_rule, episode_text=content[:_SUMMARY_SOURCE_MAX_CHARS]
+    )
+    try:
+        response = await llm.chat(messages=[LLMChatMessage(role="user", content=prompt)])
+        return response.content.strip().strip('"') or None
+    except Exception as exc:
+        logger.warning("summary compress call failed: %s", exc)
+        return None
+
+
+_SENTENCE_TERMINATORS = ".\u3002\uff0e\uff01\uff1f!?"
+
+
+def _truncate_at_sentence_boundary(text: str, cap: int) -> str:
+    """Longest prefix of whole sentences within ``cap`` width, ellipsis-terminated.
+
+    The ellipsis REPLACES the final sentence terminator (never sits after it), so the
+    cut reads as one mark, not two. Falls back to a bare width cut only when even the first sentence exceeds the budget
+    (a sentence-less run); mid-word is still better than over-cap there, and the ellipsis
+    marks the cut either way.
+    """
+    budget = max(cap - ascii_width(_ELLIPSIS), 1)
+    width = 0
+    last_sentence_end = 0
+    hard_cut = len(text)
+    for i, ch in enumerate(text):
+        width += ascii_width(ch)
+        if width > budget:
+            hard_cut = i
+            break
+        if ch in _SENTENCE_TERMINATORS:
+            last_sentence_end = i + 1
+    if width <= budget:
+        return text
+    cut = last_sentence_end or hard_cut
+    return text[:cut].rstrip().rstrip(_SENTENCE_TERMINATORS) + _ELLIPSIS
 
 
 def _extract_json_object(text: str) -> str:

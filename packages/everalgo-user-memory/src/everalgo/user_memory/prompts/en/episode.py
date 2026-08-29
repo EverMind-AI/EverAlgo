@@ -8,6 +8,10 @@ Constants:
       additional placeholder ``{user_name}`` on top of the four above. Used by
       ``EpisodeExtractor`` when ``sender_id`` is provided. Pass ``sender_id=None`` to fall back to
       the generic ``EPISODE_GENERATION_PROMPT``.
+    - ``SUMMARY_COMPRESS_PROMPT`` — repair prompt for an over-wide ``summary``: rewrites the
+      preview from the extracted ``content`` alone (placeholders ``{language_rule}`` /
+      ``{episode_text}``), returning plain text rather than JSON. Used by the width guard in
+      ``episode.py``; keep its wording aligned with the ``summary`` field spec above.
 
 Output schema (both variants): ``{"title": str, "content": str, "summary": str}``.
 
@@ -65,7 +69,7 @@ Please generate a structured episodic memory and return only a JSON object conta
 {{
     "title": "A concise, descriptive title that accurately summarizes the theme (10-20 words)",
     "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information. Resolve every non-absolute time reference using the individual message's timestamp, not the conversation start time.",
-    "summary": "A faithful preview of this episode, readable on its own without the content field. Name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses. Under 50 words; use as few as the episode needs."
+    "summary": "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). COMPRESS, never restate: do not reuse content's sentences — write shorter new ones that name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses."
 }}
 
 Requirements:
@@ -187,7 +191,7 @@ Please generate a structured episodic memory and return only a JSON object conta
 {{
     "title": "(Record of [core event] about `{user_name}`, YYYY-MM-DD)",
     "content": "(A {user_name}-centred objective, coherent narrative.)",
-    "summary": "A faithful preview of this episode, readable on its own without the content field. Name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses. Under 50 words; use as few as the episode needs."
+    "summary": "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). COMPRESS, never restate: do not reuse content's sentences — write shorter new ones that name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses."
 }}
 
 Example (incorrect style — too subjective):
@@ -208,10 +212,21 @@ Self-check list:
 - Is the return strictly in JSON format?
 - Do `title`, `content` and `summary` all strictly revolve around `{user_name}`?
 - Does `summary` read on its own, and say only what `content` already says?
+- Is `summary` at most 3 short sentences and much shorter than `content`?
 - Is `content` a fluent experiential narrative, not a heap of scattered facts?
 - Are all key points woven naturally into the narrative?
 
 {language_rule}
 
 Return only the JSON object, do not add any other text:
+"""
+
+
+SUMMARY_COMPRESS_PROMPT = """
+{language_rule}
+
+The text below is an episodic memory record. Write its display preview: 1-3 short sentences, at most ~50 English words / ~100 Chinese characters. Name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not in the record. Do not refer to the record itself — no 'this record', 'the above'. Return ONLY the preview text — no JSON, no quotes, no explanations.
+
+Record:
+{episode_text}
 """
