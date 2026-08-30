@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0rc1] - 2026-08-29
+
 ### Added
 
 - **`EpisodeExtractor` enforces a summary width cap (400 ASCII-equivalent units, ~65 English words / ~200 CJK characters) with a three-tier guard that never raises**: a compliant summary passes untouched; an over-cap one triggers one repair call over the extracted `content` alone (`SUMMARY_COMPRESS_PROMPT`, plain-text output); a repair that fails or still exceeds the cap degrades to sentence-boundary truncation, the ellipsis replacing the final terminator — whole model-written sentences only, hard-cut solely when no sentence terminator fits the budget. Raising was rejected by the caller's failure model: the cloud add path retries the WHOLE extraction on error and drops the episode after the last attempt, so an exception over the display preview would cost the main product. Production motivation (2026-08, s0002 pool): with a qwen3-4b finetune on the episode scene, 22.1% of a month's summaries exceeded 400 units (30,169 rows, max 9,038 chars) — the model restated `content` as `summary` (top offenders' summary length ≈ body length), and nothing in the engine or the store bounded the field.
@@ -209,7 +211,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.7.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc1...HEAD
+[0.8.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.7.0...everalgo-user-memory/v0.8.0rc1
 [0.7.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.6.0...everalgo-user-memory/v0.7.0
 [0.6.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.5.0...everalgo-user-memory/v0.6.0
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.4.1...everalgo-user-memory/v0.5.0
