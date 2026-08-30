@@ -17,10 +17,33 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.7.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.8.0rc1 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Release candidate — 2026-08-29 (user-memory 0.8.0rc1)
+
+Two production-driven changes, both verified on lifecycle/matrix experiments before shipping.
+
+**Profile items go atomic** (breaking): one fact, one item — `category` becomes a group key that many
+items share instead of a unique key whose single item absorbs its whole dimension. The fold path
+(`"; "`-joining new prose into an existing item) is removed; growth moves to the item-count axis where
+dedupe, caps (60 total / 8 per label / 250-unit width backstop) and the new group-scoped REGROUP pass
+govern it. `implicit_traits` is redefined as grounded inference (`{trait, description, basis}`, no
+`evidence` field). Verified over a 720-run lifecycle matrix: max description 123-294 chars vs baseline
+564-1483, recall within pre-registered bounds, noise-round churn ≈0.
+
+**Episode summaries get a hard width cap**: production 2026-08 had 22.1% of a month's summaries over
+400 ASCII-equivalent units (max 9,038 chars — the scene's qwen3-4b finetune restated `content` as
+`summary`). The extractor now enforces the cap with a three-tier guard that never raises: compliant
+passes untouched → one compress call over `content` → sentence-boundary truncation with the ellipsis
+replacing the final terminator. Prompt spec rewritten around compression (1-3 short sentences, bilingual
+anchors); 540-run matrix across three stock models: no regression, the failure shape reproduced 0/540
+on stock models — the guard, not the prompt, is the load-bearing fix.
+
+RC note: cloud consumers pin exact versions, so `==0.8.0rc1` installs normally; the pre-release
+marker keeps it out of any unpinned resolution until the final 0.8.0.
 
 ## Minor release — 2026-08-20 (user-memory)
 
