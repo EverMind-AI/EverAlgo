@@ -1781,6 +1781,65 @@ async def test_total_cap_breach_takes_the_compact_path_even_with_a_label_breach(
     assert _descriptions(profile) == ["rebuilt"]
 
 
+async def test_profile_extraction_logs_entry_exit_and_compact_trigger(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One extraction reads as one story in the log.
+
+    Entry (mode + existing counts), the compact trigger with its criterion values,
+    the compact result, and the exit counts.
+    """
+    crowded = [{"category": "crowd", "description": f"fact {i}", "evidence": "e"} for i in range(9)]
+    fillers = [
+        {"category": f"Cat{i}", "description": f"Desc{i}.", "evidence": "x"} for i in range(_PROFILE_MAX_ITEMS - 8)
+    ]
+    old = _old_profile(explicit_info=[*crowded, *fillers], implicit_traits=[])
+    compact_json = json.dumps(
+        {"explicit_info": [{"category": "clean", "description": "rebuilt", "evidence": "e"}], "implicit_traits": []}
+    )
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(content=json.dumps({"operations": [{"action": "none"}]}), model="fake"),
+            ChatResponse(content=compact_json, model="fake"),
+        ]
+    )
+
+    with caplog.at_level("INFO", logger="everalgo.user_memory.profile"):
+        await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old)
+
+    messages_logged = [r.message for r in caplog.records]
+    assert any("extracting profile: mode=UPDATE" in m for m in messages_logged)
+    assert any("profile update applied:" in m for m in messages_logged)
+    assert any("total cap breached" in m and "running full compact" in m for m in messages_logged)
+    assert any("profile compacted:" in m for m in messages_logged)
+    assert any("profile extracted: mode=UPDATE" in m for m in messages_logged)
+
+
+async def test_profile_regroup_logs_the_group_breach(caplog: pytest.LogCaptureFixture) -> None:
+    """A label breach logs the regroup entry at WARNING with the group's scale."""
+    crowded = [{"category": "crowd", "description": f"fact {i}", "evidence": "e"} for i in range(9)]
+    old = _old_profile(explicit_info=crowded, implicit_traits=[])
+    regroup_json = json.dumps(
+        {"items": [{"category": f"split{i}", "description": f"fact {i}", "evidence": "e"} for i in range(9)]}
+    )
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(content=json.dumps({"operations": [{"action": "none"}]}), model="fake"),
+            ChatResponse(content=regroup_json, model="fake"),
+        ]
+    )
+
+    with caplog.at_level("INFO", logger="everalgo.user_memory.profile"):
+        await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old)
+
+    messages_logged = [r.message for r in caplog.records]
+    assert any(
+        "profile group over cap, regrouping:" in m and "label=crowd" in m and "group_items=9" in m
+        for m in messages_logged
+    )
+    assert any("profile regroup done: label=crowd" in m for m in messages_logged)
+
+
 def test_regroup_prompt_carries_its_contract() -> None:
     """Scoped rewrite: split/rename/merge-restatements are the legal moves; deletion is not a cap tool."""
     from everalgo.user_memory.prompts.en.profile import PROFILE_REGROUP_PROMPT

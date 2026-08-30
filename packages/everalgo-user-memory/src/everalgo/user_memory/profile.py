@@ -124,17 +124,34 @@ class ProfileExtractor:
                 f"available user senders: {sorted(user_senders)!r}"
             )
 
+        mode = "INIT" if old_profile is None else "UPDATE"
+        logger.info(
+            "extracting profile: mode=%s, %d memcells, existing explicit=%d implicit=%d, output_language=%s",
+            mode,
+            len(memcells),
+            len(getattr(old_profile, "explicit_info", []) or []) if old_profile else 0,
+            len(getattr(old_profile, "implicit_traits", []) or []) if old_profile else 0,
+            output_language,
+        )
         if old_profile is None:
-            return await self._init_extract(
+            result = await self._init_extract(
                 memcells, sender_id=sender_id, prompt=prompt, output_language=output_language
             )
-        return await self._update_extract(
-            memcells,
-            sender_id=sender_id,
-            old_profile=old_profile,
-            prompt=prompt,
-            output_language=output_language,
+        else:
+            result = await self._update_extract(
+                memcells,
+                sender_id=sender_id,
+                old_profile=old_profile,
+                prompt=prompt,
+                output_language=output_language,
+            )
+        logger.info(
+            "profile extracted: mode=%s -> explicit=%d implicit=%d",
+            mode,
+            len(getattr(result, "explicit_info", []) or []),
+            len(getattr(result, "implicit_traits", []) or []),
         )
+        return result
 
     extract = async_to_sync(aextract)
 
@@ -205,12 +222,23 @@ class ProfileExtractor:
 
         explicit_info: list[Any] = list(getattr(merged_profile, "explicit_info", []) or [])
         implicit_traits: list[Any] = list(getattr(merged_profile, "implicit_traits", []) or [])
+        logger.info(
+            "profile update applied: %d ops -> explicit=%d implicit=%d",
+            len(ops_payload),
+            len(explicit_info),
+            len(implicit_traits),
+        )
         # Full-profile compaction ONLY on the total cap: rewriting everything to fix one
         # overcrowded group deletes valid items in groups that were fine (measured: a
         # noise round dropped 6 of 13 gold facts). Group-level breaches — too many items
         # under one label, or a runaway-length item — get a REGROUP pass scoped to that
         # one group, whose legal moves are split/rename/merge-restatements, not deletion.
         if len(explicit_info) + len(implicit_traits) > _PROFILE_MAX_ITEMS:
+            logger.warning(
+                "profile total cap breached (%d > %d items), running full compact",
+                len(explicit_info) + len(implicit_traits),
+                _PROFILE_MAX_ITEMS,
+            )
             return await self._compact(
                 merged_profile,
                 display_name=_sender_display_name(memcells, sender_id),
@@ -258,6 +286,14 @@ class ProfileExtractor:
         ]
         rest: list[Any] = [it for it in buckets[bucket] if it not in group]
         other_labels = sorted({lbl for it in rest if (lbl := _item_label(it, label_field)) is not None})
+        logger.warning(
+            "profile group over cap, regrouping: bucket=%s label=%s group_items=%d (cap %d/label, %d-unit width backstop)",
+            bucket,
+            label,
+            len(group),
+            _PROFILE_MAX_PER_CATEGORY,
+            _ITEM_WIDTH_BACKSTOP,
+        )
         rendered = render_prompt(
             PROFILE_REGROUP_PROMPT,
             None,
@@ -284,6 +320,12 @@ class ProfileExtractor:
         if still > _PROFILE_MAX_PER_CATEGORY:
             logger.warning("profile regroup left label over cap: label=%s count=%d", label, still)
         buckets[bucket] = new_bucket
+        logger.info(
+            "profile regroup done: label=%s group %d -> %d items",
+            label,
+            len(group),
+            len(kept),
+        )
         return Profile.model_validate(
             {
                 "owner_id": profile.owner_id,
@@ -325,6 +367,11 @@ class ProfileExtractor:
         data = await _call_llm_for_profile_compact(self._llm, rendered)
         new_explicit = _dedupe(data["explicit_info"], source="compact")
         new_implicit = _dedupe(data["implicit_traits"], source="compact")
+        logger.info(
+            "profile compacted: %d -> %d items",
+            total_items,
+            len(new_explicit) + len(new_implicit),
+        )
         summary = _build_summary(new_explicit, new_implicit)
         return Profile.model_validate(
             {
