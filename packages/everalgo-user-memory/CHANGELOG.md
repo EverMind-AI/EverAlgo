@@ -6,6 +6,23 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `EpisodeExtractor` logs its key branch points, so one extraction reads as one story in the
+  log: an INFO entry line (item count, rendered size, template, output language), the summary
+  width guard's tier boundaries — entering the compress repair at WARNING with the original
+  width, a successful repair at INFO with the width change, joining the existing repair-failure
+  and truncation warnings — and an INFO exit line with the product widths. The tier-2 rate IS
+  the production model's violation rate and repaired-vs-truncated its repair success rate;
+  neither was previously observable anywhere.
+- `ProfileExtractor` gets the same treatment: an INFO entry line (mode INIT/UPDATE, memcell
+  count, existing item counts, output language), UPDATE's applied-ops stats, the maintenance
+  routing decisions with their criterion values — total-cap breach entering full compact at
+  WARNING, a group-level breach entering the scoped regroup at WARNING with the group's size —
+  the compact and regroup results, and an INFO exit line with the final item counts. Joins the
+  pre-existing warnings (malformed regroup items dropped, label still over cap, rejected ops,
+  duplicates).
+
 ## [0.8.0rc1] - 2026-08-29
 
 ### Added

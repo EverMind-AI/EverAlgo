@@ -954,6 +954,70 @@ def test_truncation_without_any_sentence_end_hard_cuts_with_ellipsis() -> None:
     assert len(out) <= 60
 
 
+async def test_guard_logs_the_violation_and_the_repair(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Tier-2 entry logs at WARNING, a successful repair at INFO.
+
+    These two lines are what make the production violation rate and repair success
+    rate observable — neither is recorded anywhere else.
+    """
+    calls: list[int] = []
+
+    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+        calls.append(1)
+        if len(calls) == 1:
+            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+        return ChatResponse(content="A short faithful preview.", model="fake")
+
+    with caplog.at_level("INFO", logger="everalgo.user_memory.episode"):
+        await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
+
+    messages_logged = [r.message for r in caplog.records]
+    assert any("over cap" in m and "attempting compress repair" in m for m in messages_logged)
+    assert any("repaired by compress" in m for m in messages_logged)
+
+
+async def test_guard_logs_the_truncation_fallback(caplog: pytest.LogCaptureFixture) -> None:
+    """A repair that dies leaves both the failure and the truncation in the log."""
+    calls: list[int] = []
+
+    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
+        calls.append(1)
+        if len(calls) == 1:
+            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+        raise RuntimeError("compress model down")
+
+    with caplog.at_level("WARNING", logger="everalgo.user_memory.episode"):
+        await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
+
+    messages_logged = [r.message for r in caplog.records]
+    assert any("compress call failed" in m for m in messages_logged)
+    assert any("truncating" in m for m in messages_logged)
+
+
+async def test_extraction_logs_entry_and_exit(caplog: pytest.LogCaptureFixture) -> None:
+    """One extraction reads as one story in the log: an entry line and an exit line.
+
+    Entry carries scale, template and language; exit carries the product widths.
+    """
+    fake = FakeLLMClient(
+        responses=[
+            ChatResponse(
+                content='{"title": "T", "content": "Alice met Bob.", "summary": "Alice met Bob."}',
+                model="fake",
+            )
+        ]
+    )
+
+    with caplog.at_level("INFO", logger="everalgo.user_memory.episode"):
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+
+    messages_logged = [r.message for r in caplog.records]
+    assert any("extracting episode:" in m and "template=user-centred" in m for m in messages_logged)
+    assert any("episode extracted:" in m and "summary" in m for m in messages_logged)
+
+
 def test_compress_prompt_carries_its_contract() -> None:
     """Placeholders present; data slot last, matching the assembly arc convention."""
     assert "{language_rule}" in SUMMARY_COMPRESS_PROMPT

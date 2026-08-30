@@ -96,6 +96,13 @@ class EpisodeExtractor:
         conv_start = _format_prompt_time(memcell.items[0].timestamp)
         conversation = _render_conversation(memcell)
         language_rule = build_language_rule(output_language)
+        logger.info(
+            "extracting episode: %d items, %d rendered chars, template=%s, output_language=%s",
+            len(memcell.items),
+            len(conversation),
+            "user-centred" if sender_id is not None else "generic",
+            output_language,
+        )
 
         if sender_id is None:
             rendered = render_prompt(
@@ -126,7 +133,13 @@ class EpisodeExtractor:
             content=str(data["content"]),
             language_rule=compress_rule,
         )
-        return _build_episode(data, sender_id=sender_id, memcell=memcell)
+        episode = _build_episode(data, sender_id=sender_id, memcell=memcell)
+        logger.info(
+            "episode extracted: content %d units, summary %d units",
+            ascii_width(episode.episode),
+            ascii_width(str(getattr(episode, "summary", ""))),
+        )
+        return episode
 
     extract = async_to_sync(aextract)
 
@@ -176,10 +189,24 @@ async def _ensure_summary_within_cap(llm: LLMClient, *, summary: str, content: s
     even when the model refuses to be. The truncated preview ends with an ellipsis and
     loses coverage, never correctness: every kept sentence is one the model wrote.
     """
-    if ascii_width(summary) <= _SUMMARY_WIDTH_CAP:
+    original_width = ascii_width(summary)
+    if original_width <= _SUMMARY_WIDTH_CAP:
         return summary
+    # Tier boundaries are logged on purpose: the tier-2 rate IS the production model's
+    # violation rate, and repaired-vs-truncated is the repair's success rate — neither
+    # is observable anywhere else.
+    logger.warning(
+        "episode summary over cap (%d > %d units), attempting compress repair",
+        original_width,
+        _SUMMARY_WIDTH_CAP,
+    )
     rewritten = await _compress_summary(llm, content=content, language_rule=language_rule)
     if rewritten is not None and ascii_width(rewritten) <= _SUMMARY_WIDTH_CAP:
+        logger.info(
+            "episode summary repaired by compress: %d -> %d units",
+            original_width,
+            ascii_width(rewritten),
+        )
         return rewritten
     if rewritten is not None and ascii_width(rewritten) < ascii_width(summary):
         summary = rewritten
