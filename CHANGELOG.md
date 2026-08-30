@@ -17,10 +17,20 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.8.0rc1 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.8.0rc2 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Release candidate — 2026-08-30 (user-memory 0.8.0rc2)
+
+Observability follow-up to rc1: `EpisodeExtractor` and `ProfileExtractor` log their key branch
+points with criterion values, so one extraction reads as one story in the log. The episode summary
+guard's tier boundaries become visible — the tier-2 entry rate IS the production model's violation
+rate, repaired-vs-truncated its repair success rate — and the profile lane logs its maintenance
+routing (total-cap breach → compact, group breach → scoped regroup) with the numbers that triggered
+it. Five caplog tests pin the surface. No behaviour changes; rc2 supersedes rc1 for the dev
+verification round so the logs are there to read.
 
 ## Release candidate — 2026-08-29 (user-memory 0.8.0rc1)
 
