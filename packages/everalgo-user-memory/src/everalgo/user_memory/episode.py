@@ -21,6 +21,7 @@ from everalgo.user_memory._render import chat_messages, render_content
 from everalgo.user_memory._width import ascii_width
 from everalgo.user_memory.prompts.en.episode import (
     DEFAULT_CUSTOM_INSTRUCTIONS,
+    EPISODE_DECLARE_LANGUAGE_ADDITION,
     EPISODE_GENERATION_PROMPT,
     SUMMARY_COMPRESS_PROMPT,
     USER_EPISODE_GENERATION_PROMPT,
@@ -39,6 +40,7 @@ _SUMMARY_WIDTH_CAP = 400
 
 # Input guard for the compress call; it only trims pathological model outputs.
 _SUMMARY_COMPRESS_INPUT_MAX_CHARS = 8000
+_DECLARED_LANGUAGE_LOG_MAX_CHARS = 80
 
 _ELLIPSIS = "\u2026"
 
@@ -76,9 +78,7 @@ class EpisodeExtractor:
             custom_instructions: Extra instruction block appended to the system prompt; ``None`` uses the default.
             output_language: Language to write the episode in, as an :class:`OutputLanguage` member or
                 equivalent string in any casing. Naming one removes the decision from the model, which measured zero wrong
-                languages; leaving it ``None`` asks the model to follow the participants, which costs roughly
-                one episode in thirteen and fails towards Chinese. See
-                ``prompts/en/_language.py`` for the measurements.
+                languages; leaving it ``None`` makes the model declare the participants' language before writing.
 
         Raises:
             LLMError: From the LLM call.
@@ -88,9 +88,12 @@ class EpisodeExtractor:
         The returned ``summary`` is guaranteed no wider than ``_SUMMARY_WIDTH_CAP`` ASCII-equivalent
         units: an over-cap one is repaired by one compress call over that ``summary``, then by
         sentence-boundary truncation — never by failing the extraction (see
-        ``_ensure_summary_within_cap``).
+        ``_ensure_summary_within_cap``). The returned ``Episode`` also exposes a normalized
+        ``user_language`` extra field; unsupported or missing declarations become ``None``.
         """
         custom_instr = custom_instructions or DEFAULT_CUSTOM_INSTRUCTIONS
+        if output_language is None:
+            custom_instr += EPISODE_DECLARE_LANGUAGE_ADDITION
         conv_start = _format_prompt_time(memcell.items[0].timestamp)
         conversation = _render_conversation(memcell)
         language_rule = build_language_rule(output_language)
@@ -124,17 +127,41 @@ class EpisodeExtractor:
             )
 
         data = await _call_llm_for_episode(self._llm, rendered)
+        declared_language = data.get("user_language")
+        user_language = (
+            _normalize_declared_language(declared_language)
+            if output_language is None
+            else str(OutputLanguage(output_language))
+        )
+        if output_language is None and user_language is None:
+            if declared_language is None:
+                rejection_reason = "missing"
+            elif not isinstance(declared_language, str):
+                rejection_reason = "non-string"
+            else:
+                rejection_reason = "unsupported"
+            logger.warning(
+                "episode language declaration rejected: value=%s, reason=%s",
+                repr(declared_language)[:_DECLARED_LANGUAGE_LOG_MAX_CHARS],
+                rejection_reason,
+            )
         compress_rule = language_rule if output_language is not None else SOURCE_TEXT_LANGUAGE_RULE
         data["summary"] = await _ensure_summary_within_cap(
             self._llm,
             summary=str(data["summary"]),
             language_rule=compress_rule,
         )
-        episode = _build_episode(data, sender_id=sender_id, memcell=memcell)
+        episode = _build_episode(
+            data,
+            sender_id=sender_id,
+            memcell=memcell,
+            user_language=user_language,
+        )
         logger.info(
-            "episode extracted: content %d units, summary %d units",
+            "episode extracted: content %d units, summary %d units, user_language=%s",
             ascii_width(episode.episode),
             ascii_width(str(getattr(episode, "summary", ""))),
+            user_language,
         )
         return episode
 
@@ -287,7 +314,28 @@ def _resolve_user_name(memcell: MemCell, sender_id: str) -> str:
     return sender_id
 
 
-def _build_episode(data: dict[str, Any], *, sender_id: str | None, memcell: MemCell) -> Episode:
+def _normalize_declared_language(raw: object) -> str | None:
+    """Map the model-declared language to an :class:`OutputLanguage` value, or ``None``.
+
+    The closed :class:`OutputLanguage` set is the injection guard because the declared value later flows into
+    extractor prompts as ``output_language``. Unknown or non-string values therefore degrade to ``None`` rather
+    than passing through.
+    """
+    if not isinstance(raw, str):
+        return None
+    try:
+        return str(OutputLanguage(raw))
+    except ValueError:
+        return None
+
+
+def _build_episode(
+    data: dict[str, Any],
+    *,
+    sender_id: str | None,
+    memcell: MemCell,
+    user_language: str | None,
+) -> Episode:
     """Assemble an :class:`Episode` from the parsed LLM payload and memcell metadata.
 
     The body carries the times the model wrote, with no code-built prefix in front of them. The prompt
@@ -302,6 +350,7 @@ def _build_episode(data: dict[str, Any], *, sender_id: str | None, memcell: MemC
             "subject": str(data["title"]),
             "summary": str(data["summary"]),
             "timestamp": memcell.timestamp,
+            "user_language": user_language,
         }
     )
 

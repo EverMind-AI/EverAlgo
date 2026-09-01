@@ -2,6 +2,8 @@
 
 Constants:
     - ``DEFAULT_CUSTOM_INSTRUCTIONS`` — block of instructions injected into the {custom_instructions} slot.
+    - ``EPISODE_DECLARE_LANGUAGE_ADDITION`` — measured fallback-only instruction that makes the model declare
+      the participants' language before generating the episode.
     - ``EPISODE_GENERATION_PROMPT`` — generic retrieval-optimised episode generation. Placeholders:
       ``{conversation_start_time}`` / ``{conversation}`` / ``{custom_instructions}`` / ``{language_rule}``.
     - ``USER_EPISODE_GENERATION_PROMPT`` — user-centred variant focused on a specific ``{user_name}``;
@@ -12,7 +14,8 @@ Constants:
       summary itself (placeholders ``{language_rule}`` / ``{summary_text}``), returning plain text rather than JSON. Used
       by the width guard in ``episode.py``; its stricter repair target must remain within that guard.
 
-Output schema (both variants): ``{"title": str, "content": str, "summary": str}``.
+Output schema (both variants): ``{"title": str, "content": str, "summary": str}``; fallback generation adds
+``user_language`` first through ``EPISODE_DECLARE_LANGUAGE_ADDITION``.
 
 ``summary`` is a display preview of ``content``, and it is listed after ``content`` in every field
 spec and example on purpose: the model emits JSON left to right, so a ``summary`` placed first would
@@ -41,6 +44,14 @@ Follow these principles when generating episodic memories:
 3. Use declarative language to describe episodes, not dialogue format
 4. Highlight key information and emotional changes
 5. Ensure episode content is easy to retrieve later
+"""
+
+#: Appended to custom instructions only when ``output_language`` is unset. The wording is measured; rerun the
+#: language evaluation before changing it.
+EPISODE_DECLARE_LANGUAGE_ADDITION = """\
+
+
+Before writing, decide which language the participants speak to each other; text they paste, quote, or ask to process is not their speech. Add "user_language" as the FIRST field of the JSON output (e.g. "Chinese", "English"), then write title, content and summary in that language.\
 """
 
 EPISODE_GENERATION_PROMPT = """

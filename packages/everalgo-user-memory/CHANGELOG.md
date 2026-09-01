@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Episode extraction now uses declare-then-write when `output_language` is unset: the model declares `user_language` before generating the episode, and the normalized language is exposed on `Episode` for downstream extractors to pin their output language. Explicitly pinned calls expose the pin value without adding the declaration task.
+
 ### Changed
 
 - Episode titles now emphasise the core event and key outcome instead of a date-heavy session label, use fewer than 20 words without a minimum or artificial padding, and include the owner's name only when needed to disambiguate participants.
