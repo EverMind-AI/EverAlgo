@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Episode titles now emphasise the core event and key outcome instead of a date-heavy session label, use fewer than 20 words without a minimum or artificial padding, and include the owner's name only when needed to disambiguate participants.
+- Generic and user-centred episode prompts now share one relative-time contract: the conversation start is context only; resolvable references use the containing message's timestamp and preserve their granularity; vague references such as `recently` stay vague instead of gaining invented bounds. The worked `last week` example now names its reference timestamp and ISO Monday-Sunday week convention.
+- Episode generation prompts now require summaries to remain faithful to the content without inventing facts or distorting their meaning.
+- Episode summaries now use a 400-unit hard width cap aligned with the 50-English-word generation target, and an over-cap summary is repaired from that summary alone rather than regenerated from the full episode content.
+
 ## [0.8.0rc2] - 2026-08-30
 
 ### Added

@@ -31,16 +31,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Hard cap on the stored ``summary``, in ASCII-equivalent units (~65 English words /
-# ~200 Chinese characters — one notch looser than the prompt's 1-3-sentence target, so the
-# guard only catches real violations, not compliant output on the margin). Production
+# Hard cap on the stored ``summary``, in ASCII-equivalent units. The 400-unit ceiling accommodates the prompt's
+# ~50-English-word target with headroom while still catching pathological outputs. Production
 # 2026-08: a qwen3-4b finetune restated the whole ``content`` as ``summary`` on ~22% of
 # episodes (max 9038 chars) — the prompt alone does not hold the line, so the extractor does.
 _SUMMARY_WIDTH_CAP = 400
 
-# Input guard for the compress call, mirroring the caller-side cap on stored narratives:
-# well above any sane ``content``, it only trims pathological ones.
-_SUMMARY_SOURCE_MAX_CHARS = 8000
+# Input guard for the compress call; it only trims pathological model outputs.
+_SUMMARY_COMPRESS_INPUT_MAX_CHARS = 8000
 
 _ELLIPSIS = "\u2026"
 
@@ -88,7 +86,7 @@ class EpisodeExtractor:
                 names no supported language.
 
         The returned ``summary`` is guaranteed no wider than ``_SUMMARY_WIDTH_CAP`` ASCII-equivalent
-        units: an over-cap one is repaired by one compress call over ``content``, then by
+        units: an over-cap one is repaired by one compress call over that ``summary``, then by
         sentence-boundary truncation — never by failing the extraction (see
         ``_ensure_summary_within_cap``).
         """
@@ -130,7 +128,6 @@ class EpisodeExtractor:
         data["summary"] = await _ensure_summary_within_cap(
             self._llm,
             summary=str(data["summary"]),
-            content=str(data["content"]),
             language_rule=compress_rule,
         )
         episode = _build_episode(data, sender_id=sender_id, memcell=memcell)
@@ -179,12 +176,11 @@ async def _call_llm_for_episode(llm: LLMClient, rendered: str) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 
 
-async def _ensure_summary_within_cap(llm: LLMClient, *, summary: str, content: str, language_rule: str) -> str:
+async def _ensure_summary_within_cap(llm: LLMClient, *, summary: str, language_rule: str) -> str:
     """Return a summary no wider than ``_SUMMARY_WIDTH_CAP``.
 
     Tier 1: the extractor's own summary, when compliant (the normal path, free).
-    Tier 2: one cheap compress call over ``content`` alone — not the full conversation —
-    when the extractor restated instead of compressing.
+    Tier 2: one cheap compress call over the over-wide ``summary`` itself.
     Tier 3: sentence-boundary truncation, so an increment is compliant by construction
     even when the model refuses to be. The truncated preview ends with an ellipsis and
     loses coverage, never correctness: every kept sentence is one the model wrote.
@@ -200,7 +196,7 @@ async def _ensure_summary_within_cap(llm: LLMClient, *, summary: str, content: s
         original_width,
         _SUMMARY_WIDTH_CAP,
     )
-    rewritten = await _compress_summary(llm, content=content, language_rule=language_rule)
+    rewritten = await _compress_summary(llm, summary=summary, language_rule=language_rule)
     if rewritten is not None and ascii_width(rewritten) <= _SUMMARY_WIDTH_CAP:
         logger.info(
             "episode summary repaired by compress: %d -> %d units",
@@ -218,14 +214,15 @@ async def _ensure_summary_within_cap(llm: LLMClient, *, summary: str, content: s
     return _truncate_at_sentence_boundary(summary, _SUMMARY_WIDTH_CAP)
 
 
-async def _compress_summary(llm: LLMClient, *, content: str, language_rule: str) -> str | None:
-    """One repair call: rewrite the preview from ``content``. ``None`` on any failure.
+async def _compress_summary(llm: LLMClient, *, summary: str, language_rule: str) -> str | None:
+    """One repair call: shorten the over-wide ``summary``. ``None`` on any failure.
 
     Plain-text output (no JSON) keeps the failure surface small; the broad except is the
     point — no repair failure may ever cost the episode itself.
     """
     prompt = SUMMARY_COMPRESS_PROMPT.format(
-        language_rule=language_rule, episode_text=content[:_SUMMARY_SOURCE_MAX_CHARS]
+        language_rule=language_rule,
+        summary_text=summary[:_SUMMARY_COMPRESS_INPUT_MAX_CHARS],
     )
     try:
         response = await llm.chat(messages=[LLMChatMessage(role="user", content=prompt)])
