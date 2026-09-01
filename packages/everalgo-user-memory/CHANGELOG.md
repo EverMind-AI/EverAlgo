@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0rc3] - 2026-09-01
+
 ### Added
 
 - Episode extraction now uses declare-then-write when `output_language` is unset: the model declares `user_language` before generating the episode, and the normalized language is exposed on `Episode` for downstream extractors to pin their output language. Explicitly pinned calls expose the pin value without adding the declaration task.
@@ -241,7 +243,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc3...HEAD
+[0.8.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc2...everalgo-user-memory/v0.8.0rc3
 [0.8.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc1...everalgo-user-memory/v0.8.0rc2
 [0.8.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.7.0...everalgo-user-memory/v0.8.0rc1
 [0.7.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.6.0...everalgo-user-memory/v0.7.0
