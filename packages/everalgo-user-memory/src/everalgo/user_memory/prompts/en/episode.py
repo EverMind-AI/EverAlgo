@@ -8,10 +8,9 @@ Constants:
       additional placeholder ``{user_name}`` on top of the four above. Used by
       ``EpisodeExtractor`` when ``sender_id`` is provided. Pass ``sender_id=None`` to fall back to
       the generic ``EPISODE_GENERATION_PROMPT``.
-    - ``SUMMARY_COMPRESS_PROMPT`` — repair prompt for an over-wide ``summary``: rewrites the
-      preview from the extracted ``content`` alone (placeholders ``{language_rule}`` /
-      ``{episode_text}``), returning plain text rather than JSON. Used by the width guard in
-      ``episode.py``; keep its wording aligned with the ``summary`` field spec above.
+    - ``SUMMARY_COMPRESS_PROMPT`` — repair prompt for an over-wide ``summary``: shortens that
+      summary itself (placeholders ``{language_rule}`` / ``{summary_text}``), returning plain text rather than JSON. Used
+      by the width guard in ``episode.py``; its stricter repair target must remain within that guard.
 
 Output schema (both variants): ``{"title": str, "content": str, "summary": str}``.
 
@@ -57,29 +56,29 @@ Custom instructions:
 {custom_instructions}
 
 IMPORTANT TIME HANDLING:
-- "Conversation start time" indicates when this conversation began
-- Each message has its own timestamp. ANY non-absolute time reference must be resolved to an absolute date using the timestamp of the specific message that contains it — NOT the conversation start time
-- Examples: "yesterday", "last Friday", "last summer", "recently" — any granularity
-- Preserve both the original expression AND the resolved absolute date
-- Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (2023-07-21)"
+- Use the provided "Conversation start time" only as context for when this conversation/episode began; do not copy it into content or use it to resolve time references
+- When the conversation mentions a resolvable non-absolute time reference, preserve the original expression and resolve it to an absolute date or range at the same granularity
+- Preserve vague references without a deterministic boundary, such as "recently", "later", or "someday", without inventing an absolute date or range
+- Each message has its own timestamp. Resolve the reference using the timestamp of the specific message that contains it — NOT the conversation start time
+- Format: "original expression (absolute date or range)". For a message timestamped "2023-05-15 10:00 UTC (Monday)", write "last Friday (2023-05-12)" or, using an ISO Monday-Sunday calendar week, "last week (2023-05-08 to 2023-05-14)"
 - This dual format supports both absolute and relative time-based questions
 - Every absolute time that states a clock time MUST carry the UTC zone label: write "2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00". A date with no clock time needs no label — "last Friday (2023-07-21)" is already correct. Clock times quoted from what a speaker said keep their original wording ("at 3:30 PM"), because the speaker's own timezone is unknown
 
 Please generate a structured episodic memory and return only a JSON object containing the following three fields:
 {{
-    "title": "A concise, descriptive title that accurately summarizes the theme (10-20 words)",
-    "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information. Resolve every non-absolute time reference using the individual message's timestamp, not the conversation start time.",
-    "summary": "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). COMPRESS, never restate: do not reuse content's sentences — write shorter new ones that name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses."
+    "title": "A concise, descriptive title that accurately summarizes the theme (fewer than 20 words; use only as many words as needed)",
+    "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information.",
+    "summary": "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). COMPRESS, never restate: do not reuse content's sentences — write shorter new ones that name the main participants and what actually happened, including the outcome or decision reached. Faithfully summarize the content without inventing facts or distorting their meaning. You may omit minor details, but every included detail must remain faithful to the content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'."
 }}
 
 Requirements:
-1. The title should be specific and easy to search (including key topics/activities).
+1. The title should be specific and easy to search (including key topics/activities), use fewer than 20 words, and never be padded solely to make it longer.
 2. The content must include all important information from the conversation while being concise.
 3. Convert the dialogue format into a narrative description.
 4. Maintain chronological order and causal relationships.
 5. Use third-person unless explicitly first-person.
 6. Include specific details that aid keyword search, especially concrete activities, places, and objects.
-7. For time references, resolve ANY non-absolute time expression using the message's own timestamp: "original expression (absolute date)" — e.g., "last summer (summer 2022)".
+7. For resolvable time references, use the message's own timestamp and preserve the original granularity: "original expression (absolute date or range)". Preserve vague references without inventing dates.
 8. When describing decisions or actions, naturally include the reasoning or motivation behind them, but avoid repetitive explanations.
 9. Use specific names consistently rather than pronouns to avoid ambiguity in retrieval.
 10. CONCISENESS AND REDUNDANCY REMOVAL:
@@ -106,7 +105,7 @@ Requirements:
 Example:
 If the conversation start time is "2024-03-14 15:00 UTC (Thursday)" and the conversation is about Caroline planning to go hiking:
 {{
-    "title": "Caroline's Mount Rainier Hiking Plan 2024-03-14: Weekend Adventure Planning Session",
+    "title": "Caroline Plans an Early Saturday Start for a Mount Rainier Sunrise Hike",
     "content": "Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16) to catch the sunrise and planned to invite friends. She was excited about the trip.",
     "summary": "Caroline planned a sunrise hike at Mount Rainier for the weekend (2024-03-16 to 2024-03-17) and asked for advice. Melanie suggested boots, warm clothing, a flashlight, water and high-energy food. Caroline settled on an early Saturday start and planned to invite friends, excited for the trip."
 }}
@@ -173,15 +172,17 @@ Output quality requirements (continued from the principles above):
     - Document repetition counts (e.g., "asked about the project status twice")
 
 8.  **TIME REFERENCES — DUAL FORMAT**:
-    - ANY non-absolute time reference must be resolved to an absolute date using the timestamp of the specific message that contains it — NOT the conversation start time
-    - Examples: "yesterday", "last Friday", "last summer", "recently" — any granularity
-    - Preserve both the original expression AND the resolved absolute date
-    - Format: "original expression (absolute date)" — e.g., "last summer (summer 2022)", "last Friday (2023-07-21)"
+    - Use the provided "Conversation start time" only as context for when this conversation/episode began; do not copy it into content or use it to resolve time references
+    - ANY resolvable non-absolute time reference must be resolved to an absolute date or range at the same granularity using the timestamp of the specific message that contains it — NOT the conversation start time
+    - Examples of resolvable references: "yesterday", "last Friday", "last week" — any granularity
+    - Preserve vague references without a deterministic boundary, such as "recently", "later", or "someday", without inventing an absolute date or range
+    - Preserve both the original expression AND the resolved absolute date or range
+    - Format: "original expression (absolute date or range)". For a message timestamped "2023-05-15 10:00 UTC (Monday)", write "last Friday (2023-05-12)" or, using an ISO Monday-Sunday calendar week, "last week (2023-05-08 to 2023-05-14)"
     - Every absolute time that states a clock time MUST carry the UTC zone label: write "2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00". A date with no clock time needs no label — "last Friday (2023-07-21)" is already correct. Clock times quoted from what a speaker said keep their original wording ("at 3:30 PM"), because the speaker's own timezone is unknown
 
-9.  **TITLE LENGTH AND PREFIX**:
-    - Keep the title within 15-25 words
-    - Include the `{user_name}` prefix as shown in the schema below
+9.  **TITLE SHAPE AND LENGTH**:
+    - Use fewer than 20 words. There is no minimum length; never pad the title solely to make it longer
+    - The title does not need to begin with or include `{user_name}`. Include the name only when needed to disambiguate participants; otherwise prioritise the core event and key outcome
 
 10. **NARRATIVE FORM**:
     - Use third-person throughout (consistent with principle 1)
@@ -189,9 +190,9 @@ Output quality requirements (continued from the principles above):
 
 Please generate a structured episodic memory and return only a JSON object containing the following three fields:
 {{
-    "title": "(Record of [core event] about `{user_name}`, YYYY-MM-DD)",
+    "title": "(A title of fewer than 20 words naming the core event and key outcome; use only as many words as needed and include `{user_name}` only when needed to disambiguate participants)",
     "content": "(A {user_name}-centred objective, coherent narrative.)",
-    "summary": "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). COMPRESS, never restate: do not reuse content's sentences — write shorter new ones that name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not already in content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'. When you mention a time, write it in the same format content uses."
+    "summary": "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). COMPRESS, never restate: do not reuse content's sentences — write shorter new ones that name the main participants and what actually happened, including the outcome or decision reached. Faithfully summarize the content without inventing facts or distorting their meaning. You may omit minor details, but every included detail must remain faithful to the content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'."
 }}
 
 Example (incorrect style — too subjective):
@@ -203,7 +204,7 @@ Example (incorrect style — too subjective):
 
 Example (correct style — objective recording):
 {{
-    "title": "{user_name} participating in weekend Mount Rainier hike planning (2024-03-14)",
+    "title": "Early Saturday Start Chosen for a Mount Rainier Sunrise Hike with Friends",
     "content": "{user_name} proposed hiking Mount Rainier this weekend in the conversation and asked for gear suggestions. After listening to others' advice on hiking boots and warm clothing, {user_name} decided to leave early Saturday morning (2024-03-16) to catch the sunrise, and mentioned inviting friends along.",
     "summary": "{user_name} proposed a weekend hike to Mount Rainier and asked for gear advice. After hearing suggestions on boots and warm clothing, {user_name} chose to leave early Saturday (2024-03-16) for the sunrise and mentioned inviting friends."
 }}
@@ -225,8 +226,8 @@ Return only the JSON object, do not add any other text:
 SUMMARY_COMPRESS_PROMPT = """
 {language_rule}
 
-The text below is an episodic memory record. Write its display preview: 1-3 short sentences, at most ~50 English words / ~100 Chinese characters. Name the main participants and what actually happened, including the outcome or decision reached. Introduce no fact that is not in the record. Do not refer to the record itself — no 'this record', 'the above'. Return ONLY the preview text — no JSON, no quotes, no explanations.
+The text below is an episode summary that exceeds the display limit. Shorten it to 1-3 short sentences, at most ~50 English words / ~100 Chinese characters. Shorten only by removing complete sentences or clauses. Keep all retained wording unchanged; do not paraphrase, merge statements, add facts, or infer. Return ONLY the shortened summary — no JSON, no quotes, no explanations.
 
-Record:
-{episode_text}
+Summary:
+{summary_text}
 """

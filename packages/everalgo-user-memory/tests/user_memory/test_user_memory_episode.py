@@ -762,7 +762,8 @@ def test_both_variants_bound_the_summary_length_and_self_containment(name: str) 
     prompt = getattr(mod, name)
     assert "1-3 short sentences" in prompt
     assert "COMPRESS, never restate" in prompt
-    assert "Introduce no fact that is not already in content" in prompt
+    assert "without inventing facts or distorting their meaning" in prompt
+    assert "every included detail must remain faithful to the content" in prompt
     assert "Do not refer to the record itself" in prompt
 
 
@@ -785,12 +786,30 @@ def _extract_example_field(prompt_text: str, heading: str, field: str) -> str:
     return match.group(1)
 
 
-def test_en_dual_format_examples_use_iso_dates() -> None:
-    """The dual-format rule used to show three different date shapes; unify on YYYY-MM-DD."""
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
+def test_en_dual_format_examples_preserve_granularity_and_use_iso_dates(name: str) -> None:
+    """Both variants preserve relative-time granularity and use ISO dates in their examples."""
+    import everalgo.user_memory.prompts.en.episode as mod
 
-    assert "(2023-07-21)" in EPISODE_GENERATION_PROMPT
-    assert "July 21, 2023" not in EPISODE_GENERATION_PROMPT
+    prompt = getattr(mod, name)
+    assert 'message timestamped "2023-05-15 10:00 UTC (Monday)"' in prompt
+    assert "last Friday (2023-05-12)" in prompt
+    assert "last week (2023-05-08 to 2023-05-14)" in prompt
+    assert "ISO Monday-Sunday calendar week" in prompt
+    assert "at the same granularity" in prompt
+    assert _MONTH_NAME_DATE_RE.search(prompt) is None
+
+
+@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
+def test_en_time_rules_keep_conversation_start_contextual_and_vague_references_vague(name: str) -> None:
+    """Neither variant writes the conversation anchor into content or invents bounds for vague references."""
+    import everalgo.user_memory.prompts.en.episode as mod
+
+    prompt = getattr(mod, name)
+    assert "only as context for when this conversation/episode began" in prompt
+    assert "do not copy it into content or use it to resolve time references" in prompt
+    assert 'such as "recently", "later", or "someday"' in prompt
+    assert "without inventing an absolute date or range" in prompt
 
 
 def test_en_generic_example_body_has_no_timestamp_prefix() -> None:
@@ -806,17 +825,48 @@ def test_en_generic_example_body_has_no_timestamp_prefix() -> None:
     assert _LEADING_TIMESTAMP_RE.match(content) is None
 
 
-def test_en_generic_example_title_uses_iso_date() -> None:
-    """Generic title example used `March 14, 2024` while the user variant used `2024-03-14`.
-
-    The negative half guards against ANY month-name date shape being reintroduced, not just the
-    one historical string.
-    """
+def test_en_generic_example_title_prioritises_event_and_outcome_over_date() -> None:
+    """The generic title should carry searchable event details without a redundant calendar date."""
     from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
 
     title = _extract_example_field(EPISODE_GENERATION_PROMPT, "If the conversation start time is", "title")
-    assert "2024-03-14" in title
+    assert "Caroline" in title
+    assert "Mount Rainier" in title
+    assert "Early Saturday Start" in title
+    assert "2024-03-14" not in title
     assert _MONTH_NAME_DATE_RE.search(title) is None
+
+
+def test_en_user_example_title_prioritises_event_and_outcome_over_date() -> None:
+    """The user-centred title should record the decision without repeating an unneeded owner name."""
+    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT
+
+    title = _extract_example_field(USER_EPISODE_GENERATION_PROMPT, "Example (correct style", "title")
+    assert "{user_name}" not in title
+    assert "Mount Rainier Sunrise Hike" in title
+    assert "Early Saturday Start" in title
+    assert "with Friends" in title
+    assert "2024-03-14" not in title
+    assert _MONTH_NAME_DATE_RE.search(title) is None
+
+
+def test_en_user_title_requires_a_name_only_for_disambiguation() -> None:
+    """Owner identity belongs to metadata unless participant ambiguity makes the name useful."""
+    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT
+
+    assert "does not need to begin with or include `{user_name}`" in USER_EPISODE_GENERATION_PROMPT
+    assert "only when needed to disambiguate participants" in USER_EPISODE_GENERATION_PROMPT
+
+
+@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
+def test_en_title_length_has_only_an_upper_bound(name: str) -> None:
+    """Both variants allow naturally short titles and forbid padding to meet a minimum."""
+    import everalgo.user_memory.prompts.en.episode as mod
+
+    prompt = getattr(mod, name)
+    assert "fewer than 20 words" in prompt
+    assert "10-20 words" not in prompt
+    assert "never" in prompt and "pad" in prompt
 
 
 def test_en_example_start_time_uses_input_side_format() -> None:
@@ -845,11 +895,16 @@ def test_all_variants_require_utc_label_on_absolute_clock_times() -> None:
 # Summary width guard (three tiers)
 # ==========================================================================
 
-_LONG_BODY = "The team met and decided many things. " * 30  # ~1170 units, over the cap
+_CONTENT_BODY = "CONTENT_ONLY_MARKER: Alice and Bob discussed database capacity."
+_LONG_SUMMARY = "SUMMARY_ONLY_MARKER. The team met and decided many things. " * 30
 
 
 def _episode_json(summary: str) -> str:
-    return json.dumps({"title": "T", "content": _LONG_BODY, "summary": summary})
+    return json.dumps({"title": "T", "content": _CONTENT_BODY, "summary": summary})
+
+
+def test_summary_width_cap_is_400_ascii_equivalent_units() -> None:
+    assert _SUMMARY_WIDTH_CAP == 400
 
 
 async def test_compliant_summary_passes_untouched_with_one_llm_call() -> None:
@@ -868,23 +923,22 @@ async def test_compliant_summary_passes_untouched_with_one_llm_call() -> None:
 
 
 async def test_overwide_summary_is_replaced_by_the_compress_call() -> None:
-    """Tier 2: an over-cap summary triggers one repair call over content alone."""
+    """Tier 2: repair sees the over-cap summary and never the episode content."""
     calls: list[str] = []
 
     async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
         assert isinstance(messages[0].content, str)
         calls.append(messages[0].content)
         if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
         return ChatResponse(content="A short faithful preview.", model="fake")
 
     ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
 
     assert ep.summary == "A short faithful preview."  # type: ignore[attr-defined]
     assert len(calls) == 2
-    # the repair call sees the extracted content, not the raw conversation
-    assert _LONG_BODY[:80] in calls[1]
-    assert "speaker" not in calls[1]
+    assert _LONG_SUMMARY[:80] in calls[1]
+    assert _CONTENT_BODY not in calls[1]
 
 
 async def test_failed_compress_degrades_to_sentence_truncation_not_an_error() -> None:
@@ -894,7 +948,7 @@ async def test_failed_compress_degrades_to_sentence_truncation_not_an_error() ->
     async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
         calls.append(1)
         if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
         raise RuntimeError("compress model down")
 
     ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
@@ -905,7 +959,7 @@ async def test_failed_compress_degrades_to_sentence_truncation_not_an_error() ->
     # whole sentences kept, with the ellipsis REPLACING the final terminator
     body = summary.removesuffix("\u2026")
     assert not body.endswith((".", "!", "?"))
-    assert (body + ". ") in _LONG_BODY  # the kept prefix ends exactly where a sentence did
+    assert (body + ". ") in _LONG_SUMMARY  # the kept prefix ends exactly where a sentence did
 
 
 async def test_compress_output_still_over_cap_falls_through_to_truncation() -> None:
@@ -915,7 +969,7 @@ async def test_compress_output_still_over_cap_falls_through_to_truncation() -> N
     async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
         calls.append(1)
         if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
         return ChatResponse(content="Still very wordy. " * 40, model="fake")
 
     ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
@@ -967,7 +1021,7 @@ async def test_guard_logs_the_violation_and_the_repair(
     async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
         calls.append(1)
         if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
         return ChatResponse(content="A short faithful preview.", model="fake")
 
     with caplog.at_level("INFO", logger="everalgo.user_memory.episode"):
@@ -985,7 +1039,7 @@ async def test_guard_logs_the_truncation_fallback(caplog: pytest.LogCaptureFixtu
     async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
         calls.append(1)
         if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_BODY), model="fake")
+            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
         raise RuntimeError("compress model down")
 
     with caplog.at_level("WARNING", logger="everalgo.user_memory.episode"):
@@ -1021,6 +1075,9 @@ async def test_extraction_logs_entry_and_exit(caplog: pytest.LogCaptureFixture) 
 def test_compress_prompt_carries_its_contract() -> None:
     """Placeholders present; data slot last, matching the assembly arc convention."""
     assert "{language_rule}" in SUMMARY_COMPRESS_PROMPT
-    assert "{episode_text}" in SUMMARY_COMPRESS_PROMPT
-    assert SUMMARY_COMPRESS_PROMPT.rstrip().endswith("{episode_text}")
+    assert "{summary_text}" in SUMMARY_COMPRESS_PROMPT
+    assert "{episode_text}" not in SUMMARY_COMPRESS_PROMPT
+    assert SUMMARY_COMPRESS_PROMPT.rstrip().endswith("{summary_text}")
     assert "1-3 short sentences" in SUMMARY_COMPRESS_PROMPT
+    assert "~50 English words / ~100 Chinese characters" in SUMMARY_COMPRESS_PROMPT
+    assert "removing complete sentences or clauses" in SUMMARY_COMPRESS_PROMPT
