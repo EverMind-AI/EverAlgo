@@ -69,8 +69,8 @@ class ProfileExtractor:
     """Synthesize one owner-scoped Profile from chronological memory inputs.
 
     ``aextract`` reads MemCells and silently skips non-ChatMessage items. ``aextract_from_episode_texts``
-    reads generic or reflected Episode narratives and validates the resolved owner reference in every item.
-    Both inputs must be ordered chronologically.
+    reads generic or reflected Episode narratives, skips items that do not reference the resolved owner,
+    and raises only when none reference that owner. Both inputs must be ordered chronologically.
     """
 
     def __init__(self, *, llm: LLMClient) -> None:
@@ -176,11 +176,11 @@ class ProfileExtractor:
         """Extract one owner-scoped Profile from chronological Episode narratives.
 
         Args:
-            episode_texts: Non-empty Episode narratives ordered from oldest to newest. Every item must contain
-                the resolved target reference: ``owner_name`` when non-blank, otherwise ``owner_id``.
+            episode_texts: Non-empty Episode narratives ordered from oldest to newest. Items that do not contain
+                the resolved target reference are excluded from extraction; at least one item must contain it.
             owner_id: Authoritative owner identifier written to ``Profile.owner_id``.
             timestamp: Unix epoch milliseconds written to ``Profile.timestamp``; normally the newest Episode's.
-            owner_name: Optional display name used to locate the owner in every Episode narrative. A blank or
+            owner_name: Optional display name used to select Episode narratives about the owner. A blank or
                 missing name falls back to ``owner_id``.
             old_profile: Existing profile for UPDATE mode; None triggers INIT mode.
             categories: Complete current category snapshot for ``explicit_info``. Values are stripped, blank
@@ -202,16 +202,17 @@ class ProfileExtractor:
             json.JSONDecodeError: On an unparseable response.
         """
         target_user = _resolve_episode_target(owner_id, owner_name)
-        _validate_episode_texts(episode_texts, target_user=target_user)
+        selected_episode_texts = _select_episode_texts(episode_texts, target_user=target_user)
         available_categories = _render_available_categories(_normalize_available_categories(categories))
         if old_profile is not None and old_profile.owner_id != owner_id:
             raise ValueError(f"old_profile.owner_id {old_profile.owner_id!r} does not match owner_id {owner_id!r}")
 
         mode = "INIT" if old_profile is None else "UPDATE"
         logger.info(
-            "extracting profile from Episode texts: mode=%s, %d episodes, existing explicit=%d implicit=%d, "
-            "output_language=%s",
+            "extracting profile from Episode texts: mode=%s, %d/%d matching episodes, existing explicit=%d "
+            "implicit=%d, output_language=%s",
             mode,
+            len(selected_episode_texts),
             len(episode_texts),
             len(getattr(old_profile, "explicit_info", []) or []) if old_profile else 0,
             len(getattr(old_profile, "implicit_traits", []) or []) if old_profile else 0,
@@ -219,7 +220,7 @@ class ProfileExtractor:
         )
         if old_profile is None:
             result = await self._init_extract_from_episode_texts(
-                episode_texts,
+                selected_episode_texts,
                 owner_id=owner_id,
                 target_user=target_user,
                 timestamp=timestamp,
@@ -229,7 +230,7 @@ class ProfileExtractor:
             )
         else:
             result = await self._update_extract_from_episode_texts(
-                episode_texts,
+                selected_episode_texts,
                 owner_id=owner_id,
                 target_user=target_user,
                 timestamp=timestamp,
@@ -658,23 +659,28 @@ def _extract_json_object(text: str) -> str:
 
 
 def _resolve_episode_target(owner_id: str, owner_name: str | None) -> str:
-    """Resolve the one literal owner reference required in every Episode narrative."""
+    """Resolve the one literal owner reference used to select Episode narratives."""
     if not owner_id.strip():
         raise ValueError("owner_id must be a non-blank string")
     return owner_name.strip() if owner_name and owner_name.strip() else owner_id.strip()
 
 
-def _validate_episode_texts(episode_texts: Sequence[object], *, target_user: str) -> None:
-    """Validate each Episode independently without exposing its narrative in errors or logs."""
+def _select_episode_texts(episode_texts: Sequence[object], *, target_user: str) -> tuple[str, ...]:
+    """Validate Episode inputs and retain only narratives that reference the target user."""
     if isinstance(episode_texts, (str, bytes)) or not episode_texts:
         raise ValueError("episode_texts must be a non-empty sequence of strings")
 
     normalized_target = _normalize(target_user)
+    selected: list[str] = []
     for index, episode_text in enumerate(episode_texts):
         if not isinstance(episode_text, str) or not episode_text.strip():
             raise ValueError(f"episode_texts[{index}] must be a non-blank string")
-        if normalized_target not in _normalize(episode_text):
-            raise ValueError(f"episode_texts[{index}] does not reference target user {target_user!r}")
+        if normalized_target in _normalize(episode_text):
+            selected.append(episode_text)
+
+    if not selected:
+        raise ValueError(f"no episode_texts reference target user {target_user!r}")
+    return tuple(selected)
 
 
 def _normalize_available_categories(categories: object) -> tuple[str, ...]:

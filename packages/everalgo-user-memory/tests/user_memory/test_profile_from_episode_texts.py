@@ -111,7 +111,7 @@ async def test_init_falls_back_to_owner_id_when_name_is_missing_or_blank() -> No
         (cast("Sequence[str]", "Alice selected Python."), "non-empty sequence"),
         (["   "], r"episode_texts\[0\] must be a non-blank string"),
         (cast("Sequence[str]", [42]), r"episode_texts\[0\] must be a non-blank string"),
-        (["Bob selected Python."], r"episode_texts\[0\] does not reference target user 'Alice'"),
+        (["Bob selected Python.", "The team selected Ruff."], "no episode_texts reference target user 'Alice'"),
     ],
 )
 async def test_invalid_episode_batches_fail_before_llm(
@@ -148,7 +148,7 @@ async def test_blank_owner_id_fails_before_llm() -> None:
 async def test_owner_name_takes_precedence_over_owner_id_during_validation() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    with pytest.raises(ValueError, match=r"episode_texts\[0\].*'Alice'"):
+    with pytest.raises(ValueError, match="no episode_texts reference target user 'Alice'"):
         await ProfileExtractor(llm=fake).aextract_from_episode_texts(
             [f"{_OWNER_ID} selected Python."],
             owner_id=_OWNER_ID,
@@ -159,18 +159,37 @@ async def test_owner_name_takes_precedence_over_owner_id_during_validation() -> 
     assert fake.call_count == 0
 
 
-async def test_every_episode_must_reference_the_resolved_target() -> None:
+async def test_init_skips_episodes_that_do_not_reference_the_resolved_target() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    with pytest.raises(ValueError, match=r"episode_texts\[1\].*'Alice'"):
-        await ProfileExtractor(llm=fake).aextract_from_episode_texts(
-            ["Alice selected Python.", "The team selected Ruff."],
-            owner_id=_OWNER_ID,
-            owner_name=_OWNER_NAME,
-            timestamp=_TIMESTAMP,
-        )
+    await ProfileExtractor(llm=fake).aextract_from_episode_texts(
+        ["Alice selected Python.", "UNRELATED_EPISODE selected Ruff.", "Alice adopted uv."],
+        owner_id=_OWNER_ID,
+        owner_name=_OWNER_NAME,
+        timestamp=_TIMESTAMP,
+    )
 
-    assert fake.call_count == 0
+    prompt = cast("str", fake.calls[0].messages[0].content)
+    assert "Alice selected Python." in prompt
+    assert "Alice adopted uv." in prompt
+    assert prompt.index("Alice selected Python.") < prompt.index("Alice adopted uv.")
+    assert "UNRELATED_EPISODE selected Ruff." not in prompt
+
+
+async def test_update_skips_episodes_that_do_not_reference_the_resolved_target() -> None:
+    fake = FakeLLMClient(responses=[json.dumps({"operations": [{"action": "none"}]})])
+
+    await ProfileExtractor(llm=fake).aextract_from_episode_texts(
+        ["UNRELATED_EPISODE selected Ruff.", "Alice adopted uv."],
+        owner_id=_OWNER_ID,
+        owner_name=_OWNER_NAME,
+        timestamp=_TIMESTAMP,
+        old_profile=_old_profile(),
+    )
+
+    prompt = cast("str", fake.calls[0].messages[0].content)
+    assert "Alice adopted uv." in prompt
+    assert "UNRELATED_EPISODE selected Ruff." not in prompt
 
 
 async def test_existing_profile_owner_must_match_before_llm() -> None:

@@ -40,7 +40,7 @@ class ProfileExtractor:
 | 接口 | 输入 | 目标用户定位方式 |
 |---|---|---|
 | `aextract` | 按时间排序的 `Sequence[MemCell]` | 根据结构化用户消息验证 `sender_id` |
-| `aextract_from_episode_texts` | 按时间排序的 Episode 叙事 `Sequence[str]` | 从 `owner_name` 或 `owner_id` 确定一个目标引用，再对每条叙事执行校验 |
+| `aextract_from_episode_texts` | 按时间排序的 Episode 叙事 `Sequence[str]` | 从 `owner_name` 或 `owner_id` 确定一个目标引用，再选择包含该引用的叙事 |
 
 ## 参数
 
@@ -48,7 +48,7 @@ class ProfileExtractor:
 
 非空、按时间升序排列的 Episode 叙事正文列表，每一项都必须是非空白字符串。每项可以是 generic Episode，也可以是 reflected Episode。
 
-每项文本都必须包含同一个已确定的目标引用。`owner_name` 非空时，EverAlgo 使用姓名；没有有效姓名时回退到 `owner_id`。
+`owner_name` 非空时，EverAlgo 使用姓名；没有有效姓名时回退到 `owner_id`。不包含已确定目标引用的文本会被排除，其余文本保持原有相对顺序。至少需要一项包含目标引用。
 
 列表必须从最早到最新排序。由于本接口不接收 Episode ID，EverOS 必须在转换为字符串列表前完成 Episode 去重。
 
@@ -95,7 +95,7 @@ EverAlgo 会去除每个分类字符串两端的空白、忽略空白值，并�
 
 ## 目标用户校验
 
-所有校验必须在第一次 LLM 调用前完成。EverAlgo 必须逐条校验 Episode 文本，只校验拼接后的整批文本是不够的。
+所有校验和目标筛选必须在第一次 LLM 调用前完成。EverAlgo 必须逐条检查 Episode 文本；只检查拼接后的整批文本是不够的，因为不含目标用户的正文不得进入提示词。
 
 EverAlgo 在校验文本前只确定一次目标引用：
 
@@ -105,20 +105,21 @@ target_user = owner_name.strip() if owner_name and owner_name.strip() else owner
 
 对每个 `episode_texts[index]` 执行：
 
-1. 文本为空白时拒绝该输入。
-2. 使用一致的规则规范化文本和 `target_user`。
-3. 文本包含 `target_user` 的字面目标引用时通过。
-4. 不包含目标引用时，拒绝整个调用并抛出 `ValueError`。
+1. 任一文本为空白或不是字符串时拒绝整个调用。
+2. 使用一致的规则规范化每项文本和 `target_user`。
+3. 文本包含 `target_user` 的字面目标引用时保留该项。
+4. 不包含目标引用时跳过该项，不把正文传给 LLM。
+5. 检查完全部文本后，仅在没有剩余文本时抛出 `ValueError`。
 
-异常必须包含未通过校验的列表下标和目标用户参数，但不得在异常或日志中输出 Episode 正文。
+结构校验异常必须包含无效项的列表下标；全部未命中异常必须包含目标用户参数。异常和日志都不得输出 Episode 正文。
 
 错误示例：
 
 ```text
-episode_texts[2] does not reference target user 'Alice'
+no episode_texts reference target user 'Alice'
 ```
 
-该校验是确定性的安全保护，不是身份认证。它能够发现缺少目标用户或明显传错用户的情况，但不能区分两个同名用户。EverOS 仍然负责提供权威的 owner 信息和已经按 owner 划分的 Episode 批次。
+该筛选是确定性的安全保护，不是身份认证。它能阻止未命中的叙事影响抽取，但无法区分两个同名用户。EverOS 仍负责提供权威的 owner 信息和已经按 owner 划分的 Episode 批次。
 
 ## 提取行为
 
@@ -169,7 +170,7 @@ EverOS 必须把这些证据视为 Episode 派生证据，而不是原始对话�
 - `episode_texts` 为空；
 - 任一 Episode 文本为空白；
 - `owner_id` 为空白；
-- 任一 Episode 文本不包含已确定的目标引用；
+- 所有 Episode 文本都不包含已确定的目标引用；
 - `old_profile.owner_id` 与 `owner_id` 不一致；
 - `output_language` 不受支持。
 
@@ -192,7 +193,7 @@ EverOS 必须把这些证据视为 Episode 派生证据，而不是原始对话�
 3. 按时间从最早到最新排序。
 4. 只提取每个 Episode 的叙事正文。
 5. 从参与人元数据中解析权威的 `owner_id`，并在有姓名时解析 `owner_name`。
-6. 传入姓名时，确保每条叙事都包含准确的 `owner_name`；未传姓名时，确保每条叙事都包含准确的 `owner_id`。
+6. 有准确姓名时传入 `owner_name`，否则依赖 `owner_id`；EverAlgo 会过滤不包含已确定值的叙事。
 7. 将最大 Episode 时间戳作为 `timestamp`。
 8. 如果目标用户已有 Profile，加载后作为 `old_profile` 传入。
 9. 组装并传入当前完整的 `explicit_info` 分类快照；当前没有可用分类时传入 `None`。
@@ -247,7 +248,8 @@ EverOS 集成测试必须覆盖：
 - INIT、UPDATE、COMPACT 和 REGROUP 收到同一份规范化分类快照。
 - 有准确匹配项时按事实语义选用；没有准确匹配项时允许创建必要分类。
 - 分类快照不约束 `implicit_traits.trait`。
-- 任意一条文本缺少已确定的目标引用时，在调用 LLM 前失败。
+- 缺少已确定目标引用的叙事不会进入 LLM 提示词，命中的叙事保持输入顺序。
+- 所有文本都缺少已确定的目标引用时，在调用 LLM 前失败。
 - 已有 Profile 的 owner 不一致时，在调用 LLM 前失败。
 - 构造文本列表前，已根据 Episode ID 完成去重。
 - 文本按时间排序，且 `timestamp` 等于最新 Episode 的时间戳。
@@ -256,4 +258,4 @@ EverOS 集成测试必须覆盖：
 
 ## 为什么选择这个接口
 
-使用 `Sequence[str]` 可以让 EverAlgo 与 EverOS 的持久化模型解耦，并符合无状态算法边界。`owner_id` 始终决定 Profile 归属，可选的 `owner_name` 用于在可能不包含 ID 的模型生成叙事中定位目标人物。提取前只确定一个目标引用，并强制每条叙事都包含它，可以在调用 LLM 前暴露输入错误，避免多参与人画像静默抽取到错误用户身上。单独接收当前分类快照，可以让分类策略仍由调用方管理，同时让无状态的提取与维护阶段应用同一套语义规则。
+使用 `Sequence[str]` 可以让 EverAlgo 与 EverOS 的持久化模型解耦，并符合无状态算法边界。`owner_id` 始终决定 Profile 归属，可选的 `owner_name` 用于在可能不包含 ID 的模型生成叙事中定位目标人物。提取前只确定一个目标引用并逐条筛选，既能阻止无关叙事影响 Profile，也不会因为一条无关 Episode 丢弃仍可使用的整批输入；全部未命中时继续拒绝抽取，避免在没有 owner 证据时生成画像。单独接收当前分类快照，可以让分类策略仍由调用方管理，同时让无状态的提取与维护阶段应用同一套语义规则。

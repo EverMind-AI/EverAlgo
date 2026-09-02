@@ -40,7 +40,7 @@ The existing [`ProfileExtractor.aextract`](../../packages/everalgo-user-memory/s
 | Method | Input | Target resolution |
 |---|---|---|
 | `aextract` | Chronological `Sequence[MemCell]` | Validates `sender_id` against structured user messages |
-| `aextract_from_episode_texts` | Chronological `Sequence[str]` of Episode narratives | Resolves one target reference from `owner_name` or `owner_id`, then validates it against every narrative |
+| `aextract_from_episode_texts` | Chronological `Sequence[str]` of Episode narratives | Resolves one target reference from `owner_name` or `owner_id`, then selects narratives that contain it |
 
 ## Parameters
 
@@ -48,7 +48,7 @@ The existing [`ProfileExtractor.aextract`](../../packages/everalgo-user-memory/s
 
 A non-empty chronological sequence of non-blank Episode narrative bodies. Each item may be either a generic Episode narrative or a reflected Episode narrative.
 
-Every item must contain the same resolved target reference. EverAlgo uses non-blank `owner_name` when available and falls back to `owner_id` otherwise.
+EverAlgo uses non-blank `owner_name` when available and falls back to `owner_id` otherwise. It excludes items that do not contain the resolved target reference, while preserving the relative order of the remaining items. At least one item must contain the target.
 
 The sequence must be ordered from oldest to newest. EverOS must deduplicate Episodes before converting them to strings because this API deliberately does not receive Episode IDs.
 
@@ -95,7 +95,7 @@ The requested output language as an `OutputLanguage` value or equivalent case-in
 
 ## Target-owner validation
 
-Validation must finish before the first LLM call. EverAlgo validates every Episode text independently; checking only the concatenated batch is not sufficient.
+Validation and target selection finish before the first LLM call. EverAlgo checks every Episode text independently; checking only the concatenated batch is not sufficient because a narrative without the target must not reach the prompt.
 
 EverAlgo resolves the target reference once before validating the texts:
 
@@ -105,20 +105,21 @@ target_user = owner_name.strip() if owner_name and owner_name.strip() else owner
 
 For each `episode_texts[index]`:
 
-1. Reject the item if it is blank.
-2. Normalize the text and `target_user` consistently for comparison.
-3. Accept the item if it contains `target_user` as a literal target reference.
-4. Otherwise, reject the entire call with `ValueError`.
+1. Reject the call if any item is blank or not a string.
+2. Normalize each text and `target_user` consistently for comparison.
+3. Retain the item if it contains `target_user` as a literal target reference.
+4. Skip the item otherwise, without passing its body to the LLM.
+5. After checking the full sequence, reject the call with `ValueError` only if no items remain.
 
-The failure must identify the rejected list index and target values, but must not include the Episode body in the exception or logs.
+Structural failures identify the invalid list index. An all-unmatched failure identifies the target value. Neither errors nor logs include Episode bodies.
 
 Example error:
 
 ```text
-episode_texts[2] does not reference target user 'Alice'
+no episode_texts reference target user 'Alice'
 ```
 
-This check is a deterministic safety guard, not identity proof. It catches a missing or obviously mismatched target but cannot disambiguate two people with the same display name. EverOS remains responsible for supplying authoritative owner metadata and owner-scoped Episode batches.
+This selection is a deterministic safety guard, not identity proof. It prevents unmatched narratives from influencing extraction but cannot disambiguate two people with the same display name. EverOS remains responsible for supplying authoritative owner metadata and owner-scoped Episode batches.
 
 ## Extraction behavior
 
@@ -169,7 +170,7 @@ The method raises `ValueError` before calling the LLM when:
 - `episode_texts` is empty;
 - an Episode text is blank;
 - `owner_id` is blank;
-- any Episode text does not contain the resolved target reference;
+- no Episode text contains the resolved target reference;
 - `old_profile.owner_id` differs from `owner_id`; or
 - `output_language` is unsupported.
 
@@ -192,7 +193,7 @@ Before calling EverAlgo, EverOS must:
 3. Sort them by timestamp from oldest to newest.
 4. Convert each Episode to its narrative body only.
 5. Resolve the authoritative `owner_id` and, when available, `owner_name` from participant metadata.
-6. Ensure every narrative contains the exact `owner_name` when one is supplied, or the exact `owner_id` when no name is supplied.
+6. Supply the exact `owner_name` when one is available, or rely on `owner_id` otherwise; EverAlgo filters narratives that do not contain the resolved value.
 7. Pass the maximum Episode timestamp as `timestamp`.
 8. Load the existing owner Profile, if any, and pass it as `old_profile`.
 9. Assemble and pass the complete current `explicit_info` category snapshot as `categories`, or pass `None` when no category is currently available.
@@ -247,7 +248,8 @@ The EverOS integration is ready when all of the following are covered by tests:
 - INIT, UPDATE, COMPACT, and REGROUP receive the same normalized category snapshot.
 - A matching available category is selected by semantic accuracy, while a necessary category may be created when no listed category fits.
 - The category snapshot does not constrain `implicit_traits.trait`.
-- The call fails before LLM invocation when any one text lacks the resolved target reference.
+- Narratives that lack the resolved target reference are absent from the LLM prompt, while matching narratives retain their input order.
+- The call fails before LLM invocation when every text lacks the resolved target reference.
 - The call fails before LLM invocation for a mismatched existing Profile owner.
 - Duplicate Episode IDs are removed upstream before the text list is built.
 - Texts are passed in chronological order and `timestamp` equals the newest Episode timestamp.
@@ -256,4 +258,4 @@ The EverOS integration is ready when all of the following are covered by tests:
 
 ## Why this interface
 
-Accepting `Sequence[str]` keeps EverAlgo independent of EverOS persistence models and matches the stateless algorithm boundary. `owner_id` always controls Profile ownership, while optional `owner_name` locates the person in model-written narratives that may not contain IDs. Resolving one target reference before extraction and requiring every narrative to contain it fails early instead of allowing a multi-party Profile extraction to silently target the wrong person. Accepting the current category snapshot separately keeps classification policy caller-owned while allowing the stateless extraction and maintenance stages to apply one consistent semantic rule.
+Accepting `Sequence[str]` keeps EverAlgo independent of EverOS persistence models and matches the stateless algorithm boundary. `owner_id` always controls Profile ownership, while optional `owner_name` locates the person in model-written narratives that may not contain IDs. Resolving one target reference and filtering independently before extraction prevents unrelated narratives from influencing the Profile without discarding a usable batch because of one unrelated Episode; rejecting an all-unmatched batch still prevents extraction without owner evidence. Accepting the current category snapshot separately keeps classification policy caller-owned while allowing the stateless extraction and maintenance stages to apply one consistent semantic rule.

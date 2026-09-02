@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `ProfileExtractor.aextract_from_episode_texts` now skips individual Episode narratives that do not reference the resolved target user and raises only when no narrative in the batch references that user.
+
 ## [0.8.0rc4] - 2026-09-02
 
 ### Added
