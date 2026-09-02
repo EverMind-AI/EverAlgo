@@ -19,6 +19,12 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 
 ---
 
+## Integration contracts
+
+- [`从 Episode 文本提取 Profile`](profile-from-episode-texts.zh-CN.md) — Chinese upstream integration contract for `ProfileExtractor.aextract_from_episode_texts`. The [English version](profile-from-episode-texts.md) remains the repository reference.
+
+---
+
 ## Key types at a glance
 
 All shared data contracts are in `everalgo.types`:

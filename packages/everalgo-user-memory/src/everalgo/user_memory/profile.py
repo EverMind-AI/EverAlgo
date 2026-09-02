@@ -1,9 +1,10 @@
-"""Synthesize a user Profile from a chronological sequence of MemCells."""
+"""Synthesize a user Profile from chronological MemCells or Episode narrative texts."""
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -15,6 +16,7 @@ from everalgo.prompts import render_prompt
 from everalgo.types import MemCell, Profile
 from everalgo.user_memory._language import (
     COMPACTED_PROFILE_LANGUAGE_RULE,
+    EPISODE_PROFILE_INIT_LANGUAGE_RULE,
     EXISTING_PROFILE_LANGUAGE_RULE,
     PROFILE_INIT_LANGUAGE_RULE,
     OutputLanguage,
@@ -28,10 +30,14 @@ from everalgo.user_memory.prompts.en.profile import (
     PROFILE_REGROUP_PROMPT,
     PROFILE_UPDATE_PROMPT,
 )
+from everalgo.user_memory.prompts.en.profile_from_episode_texts import (
+    PROFILE_COMPACT_FROM_EPISODE_TEXTS_PROMPT,
+    PROFILE_INITIAL_FROM_EPISODE_TEXTS_PROMPT,
+    PROFILE_REGROUP_FROM_EPISODE_TEXTS_PROMPT,
+    PROFILE_UPDATE_FROM_EPISODE_TEXTS_PROMPT,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -60,11 +66,11 @@ _ITEM_WIDTH_BACKSTOP = 250
 
 
 class ProfileExtractor:
-    """Synthesize a Profile from a chronologically ordered sequence of MemCells.
+    """Synthesize one owner-scoped Profile from chronological memory inputs.
 
-    Non-ChatMessage items are silently skipped (agent → user-memory contract).
-    ``memcells`` must be ordered chronologically; the last element is the most recent and
-    its timestamp becomes ``Profile.timestamp``.
+    ``aextract`` reads MemCells and silently skips non-ChatMessage items. ``aextract_from_episode_texts``
+    reads generic or reflected Episode narratives and validates the resolved owner reference in every item.
+    Both inputs must be ordered chronologically.
     """
 
     def __init__(self, *, llm: LLMClient) -> None:
@@ -155,6 +161,93 @@ class ProfileExtractor:
 
     extract = async_to_sync(aextract)
 
+    async def aextract_from_episode_texts(
+        self,
+        episode_texts: Sequence[str],
+        *,
+        owner_id: str,
+        timestamp: int,
+        owner_name: str | None = None,
+        old_profile: Profile | None = None,
+        categories: Sequence[str] | None = None,
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,
+    ) -> Profile:
+        """Extract one owner-scoped Profile from chronological Episode narratives.
+
+        Args:
+            episode_texts: Non-empty Episode narratives ordered from oldest to newest. Every item must contain
+                the resolved target reference: ``owner_name`` when non-blank, otherwise ``owner_id``.
+            owner_id: Authoritative owner identifier written to ``Profile.owner_id``.
+            timestamp: Unix epoch milliseconds written to ``Profile.timestamp``; normally the newest Episode's.
+            owner_name: Optional display name used to locate the owner in every Episode narrative. A blank or
+                missing name falls back to ``owner_id``.
+            old_profile: Existing profile for UPDATE mode; None triggers INIT mode.
+            categories: Complete current category snapshot for ``explicit_info``. Values are stripped, blank
+                values are ignored, and exact duplicates are removed in first-seen order. None or an empty
+                result lets the model create concise categories as needed. This does not constrain
+                ``implicit_traits.trait``.
+            prompt: Prompt override for INIT or UPDATE; None uses the matching bundled Episode-text prompt.
+            output_language: Language to write the profile in. None makes INIT inherit the Episode language and
+                UPDATE preserve the existing Profile language.
+
+        Returns:
+            The extracted or updated Profile.
+
+        Raises:
+            TypeError: If ``categories`` is not a sequence of strings or contains a non-string value.
+            ValueError: If owner or Episode validation fails, ``old_profile`` belongs to another owner, the LLM
+                response is malformed, or ``output_language`` names no supported language.
+            LLMError: From the LLM call.
+            json.JSONDecodeError: On an unparseable response.
+        """
+        target_user = _resolve_episode_target(owner_id, owner_name)
+        _validate_episode_texts(episode_texts, target_user=target_user)
+        available_categories = _render_available_categories(_normalize_available_categories(categories))
+        if old_profile is not None and old_profile.owner_id != owner_id:
+            raise ValueError(f"old_profile.owner_id {old_profile.owner_id!r} does not match owner_id {owner_id!r}")
+
+        mode = "INIT" if old_profile is None else "UPDATE"
+        logger.info(
+            "extracting profile from Episode texts: mode=%s, %d episodes, existing explicit=%d implicit=%d, "
+            "output_language=%s",
+            mode,
+            len(episode_texts),
+            len(getattr(old_profile, "explicit_info", []) or []) if old_profile else 0,
+            len(getattr(old_profile, "implicit_traits", []) or []) if old_profile else 0,
+            output_language,
+        )
+        if old_profile is None:
+            result = await self._init_extract_from_episode_texts(
+                episode_texts,
+                owner_id=owner_id,
+                target_user=target_user,
+                timestamp=timestamp,
+                available_categories=available_categories,
+                prompt=prompt,
+                output_language=output_language,
+            )
+        else:
+            result = await self._update_extract_from_episode_texts(
+                episode_texts,
+                owner_id=owner_id,
+                target_user=target_user,
+                timestamp=timestamp,
+                old_profile=old_profile,
+                available_categories=available_categories,
+                prompt=prompt,
+                output_language=output_language,
+            )
+        logger.info(
+            "profile extracted from Episode texts: mode=%s -> explicit=%d implicit=%d",
+            mode,
+            len(getattr(result, "explicit_info", []) or []),
+            len(getattr(result, "implicit_traits", []) or []),
+        )
+        return result
+
+    extract_from_episode_texts = async_to_sync(aextract_from_episode_texts)
+
     # ------------------------------------------------------------------
     # Private: INIT path
     # ------------------------------------------------------------------
@@ -191,6 +284,39 @@ class ProfileExtractor:
             }
         )
 
+    async def _init_extract_from_episode_texts(
+        self,
+        episode_texts: Sequence[str],
+        *,
+        owner_id: str,
+        target_user: str,
+        timestamp: int,
+        available_categories: str,
+        prompt: str | None,
+        output_language: OutputLanguage | str | None,
+    ) -> Profile:
+        rendered = render_prompt(
+            PROFILE_INITIAL_FROM_EPISODE_TEXTS_PROMPT,
+            prompt,
+            episode_texts=_render_episode_texts(episode_texts),
+            target_user=target_user,
+            available_categories=available_categories,
+            language_rule=build_language_rule(output_language, fallback=EPISODE_PROFILE_INIT_LANGUAGE_RULE),
+        )
+
+        data = await _call_llm_for_profile_init(self._llm, rendered)
+        explicit_info = _dedupe(data["explicit_info"], source="episode-text-init")
+        implicit_traits = _dedupe(data["implicit_traits"], source="episode-text-init")
+        return Profile.model_validate(
+            {
+                "owner_id": owner_id,
+                "summary": _build_summary(explicit_info, implicit_traits),
+                "timestamp": timestamp,
+                "explicit_info": explicit_info,
+                "implicit_traits": implicit_traits,
+            }
+        )
+
     # ------------------------------------------------------------------
     # Private: UPDATE path
     # ------------------------------------------------------------------
@@ -220,11 +346,71 @@ class ProfileExtractor:
         ops_payload = data["operations"]
         merged_profile = _apply_ops(old_profile, ops_payload, timestamp=memcells[-1].timestamp)
 
+        return await self._maintain_updated_profile(
+            merged_profile,
+            operation_count=len(ops_payload),
+            display_name=_sender_display_name(memcells, sender_id),
+            sender_id=sender_id,
+            output_language=output_language,
+            compact_prompt=PROFILE_COMPACT_PROMPT,
+            regroup_prompt=PROFILE_REGROUP_PROMPT,
+            available_categories=None,
+        )
+
+    async def _update_extract_from_episode_texts(
+        self,
+        episode_texts: Sequence[str],
+        *,
+        owner_id: str,
+        target_user: str,
+        timestamp: int,
+        old_profile: Profile,
+        available_categories: str,
+        prompt: str | None,
+        output_language: OutputLanguage | str | None,
+    ) -> Profile:
+        rendered = render_prompt(
+            PROFILE_UPDATE_FROM_EPISODE_TEXTS_PROMPT,
+            prompt,
+            current_profile=_render_profile_for_episode_update(old_profile),
+            episode_texts=_render_episode_texts(episode_texts),
+            target_user=target_user,
+            available_categories=available_categories,
+            language_rule=build_language_rule(output_language, fallback=EXISTING_PROFILE_LANGUAGE_RULE),
+        )
+
+        data = await _call_llm_for_profile_update(self._llm, rendered)
+        operations = data["operations"]
+        merged_profile = _apply_ops(old_profile, operations, timestamp=timestamp)
+        return await self._maintain_updated_profile(
+            merged_profile,
+            operation_count=len(operations),
+            display_name=target_user,
+            sender_id=owner_id,
+            output_language=output_language,
+            compact_prompt=PROFILE_COMPACT_FROM_EPISODE_TEXTS_PROMPT,
+            regroup_prompt=PROFILE_REGROUP_FROM_EPISODE_TEXTS_PROMPT,
+            available_categories=available_categories,
+        )
+
+    async def _maintain_updated_profile(
+        self,
+        merged_profile: Profile,
+        *,
+        operation_count: int,
+        display_name: str,
+        sender_id: str,
+        output_language: OutputLanguage | str | None,
+        compact_prompt: str,
+        regroup_prompt: str,
+        available_categories: str | None = None,
+    ) -> Profile:
+        """Apply the shared post-UPDATE cap maintenance with source-specific prompts."""
         explicit_info: list[Any] = list(getattr(merged_profile, "explicit_info", []) or [])
         implicit_traits: list[Any] = list(getattr(merged_profile, "implicit_traits", []) or [])
         logger.info(
             "profile update applied: %d ops -> explicit=%d implicit=%d",
-            len(ops_payload),
+            operation_count,
             len(explicit_info),
             len(implicit_traits),
         )
@@ -241,9 +427,11 @@ class ProfileExtractor:
             )
             return await self._compact(
                 merged_profile,
-                display_name=_sender_display_name(memcells, sender_id),
+                display_name=display_name,
                 sender_id=sender_id,
                 output_language=output_language,
+                prompt_template=compact_prompt,
+                available_categories=available_categories,
             )
         result = merged_profile
         for bucket, label in _overcrowded_labels(explicit_info, implicit_traits):
@@ -251,9 +439,11 @@ class ProfileExtractor:
                 result,
                 bucket=bucket,
                 label=label,
-                display_name=_sender_display_name(memcells, sender_id),
+                display_name=display_name,
                 sender_id=sender_id,
                 output_language=output_language,
+                prompt_template=regroup_prompt,
+                available_categories=available_categories,
             )
         return result
 
@@ -265,6 +455,8 @@ class ProfileExtractor:
         label: str,
         display_name: str,
         sender_id: str,
+        prompt_template: str,
+        available_categories: str | None = None,
         output_language: OutputLanguage | str | None = None,
     ) -> Profile:
         """Reorganise ONE overcrowded group in place; every other item passes through untouched.
@@ -295,7 +487,7 @@ class ProfileExtractor:
             _ITEM_WIDTH_BACKSTOP,
         )
         rendered = render_prompt(
-            PROFILE_REGROUP_PROMPT,
+            prompt_template,
             None,
             label=label,
             label_field=label_field,
@@ -305,6 +497,7 @@ class ProfileExtractor:
             items_text=json.dumps(group, ensure_ascii=False, indent=2),
             target_user=display_name,
             target_user_id=sender_id,
+            available_categories=available_categories or "[]",
             language_rule=build_language_rule(output_language, fallback=COMPACTED_PROFILE_LANGUAGE_RULE),
         )
         data = await _call_llm_for_profile_regroup(self._llm, rendered)
@@ -342,6 +535,8 @@ class ProfileExtractor:
         *,
         display_name: str,
         sender_id: str,
+        prompt_template: str,
+        available_categories: str | None = None,
         output_language: OutputLanguage | str | None = None,
     ) -> Profile:
         explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
@@ -353,7 +548,7 @@ class ProfileExtractor:
             indent=2,
         )
         rendered = render_prompt(
-            PROFILE_COMPACT_PROMPT,
+            prompt_template,
             None,
             total_items=total_items,
             max_items=_PROFILE_MAX_ITEMS,
@@ -361,6 +556,7 @@ class ProfileExtractor:
             profile_text=profile_text,
             target_user=display_name,
             target_user_id=sender_id,
+            available_categories=available_categories or "[]",
             language_rule=build_language_rule(output_language, fallback=COMPACTED_PROFILE_LANGUAGE_RULE),
         )
 
@@ -461,6 +657,57 @@ def _extract_json_object(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_episode_target(owner_id: str, owner_name: str | None) -> str:
+    """Resolve the one literal owner reference required in every Episode narrative."""
+    if not owner_id.strip():
+        raise ValueError("owner_id must be a non-blank string")
+    return owner_name.strip() if owner_name and owner_name.strip() else owner_id.strip()
+
+
+def _validate_episode_texts(episode_texts: Sequence[object], *, target_user: str) -> None:
+    """Validate each Episode independently without exposing its narrative in errors or logs."""
+    if isinstance(episode_texts, (str, bytes)) or not episode_texts:
+        raise ValueError("episode_texts must be a non-empty sequence of strings")
+
+    normalized_target = _normalize(target_user)
+    for index, episode_text in enumerate(episode_texts):
+        if not isinstance(episode_text, str) or not episode_text.strip():
+            raise ValueError(f"episode_texts[{index}] must be a non-blank string")
+        if normalized_target not in _normalize(episode_text):
+            raise ValueError(f"episode_texts[{index}] does not reference target user {target_user!r}")
+
+
+def _normalize_available_categories(categories: object) -> tuple[str, ...]:
+    """Validate and normalize a caller-provided category snapshot without changing its order."""
+    if categories is None:
+        return ()
+    if isinstance(categories, (str, bytes)) or not isinstance(categories, Sequence):
+        raise TypeError("categories must be a sequence of strings or None")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    category_values = cast("Sequence[object]", categories)
+    for index, category in enumerate(category_values):
+        if not isinstance(category, str):
+            raise TypeError(f"categories[{index}] must be a string")
+        stripped = category.strip()
+        if not stripped or stripped in seen:
+            continue
+        seen.add(stripped)
+        normalized.append(stripped)
+    return tuple(normalized)
+
+
+def _render_available_categories(categories: Sequence[str]) -> str:
+    """Render the normalized category snapshot as deterministic JSON for prompt injection."""
+    return json.dumps(list(categories), ensure_ascii=False, indent=2)
+
+
+def _render_episode_texts(episode_texts: Sequence[str]) -> str:
+    """Join validated Episode narratives without adding synthetic identifiers or numbering."""
+    return "\n\n---\n\n".join(episode_text.strip() for episode_text in episode_texts)
+
+
 def _user_senders(memcells: Sequence[MemCell]) -> set[str]:
     """Return sender_ids of human (``role == "user"``) chat messages across all memcells.
 
@@ -507,6 +754,13 @@ def _render_profile_for_update(profile: Profile) -> str:
     return "\n".join(
         (_render_label_inventory(explicit_info, implicit_traits), _render_indexed_items(explicit_info, implicit_traits))
     )
+
+
+def _render_profile_for_episode_update(profile: Profile) -> str:
+    """Render indexed items without treating stored category names as preferred classification choices."""
+    explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
+    implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
+    return _render_indexed_items(explicit_info, implicit_traits)
 
 
 def _render_label_inventory(explicit_info: list[Any], implicit_traits: list[Any]) -> str:

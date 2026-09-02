@@ -101,12 +101,13 @@ back out. Note also that `category` and `trait` labels are model-authored, so th
 with the descriptions (`Location` versus `居住地`) — worth knowing if you group or filter on them.
 
 What "leave it out" means depends on the operator. The four reading a raw conversation judge the language from
-what the participants write, which is the 10.2% path above. The two reading already-extracted memory —
-`AtomicFactExtractor.aextract_from_text` and `EpisodeReflector.areflect` — instead inherit the language of
-their input, which is a much easier call for a single-language narrative but not free: `areflect` takes
-*several* episodes at once, so episodes that disagree on language leave the model to pick one, and an
-`areflect` update inherits whatever the existing narrative says. Name a language when the inputs may
-disagree, or to move a narrative that is already in the wrong one.
+what the participants write, which is the 10.2% path above. The three reading already-extracted memory —
+`AtomicFactExtractor.aextract_from_text`, `ProfileExtractor.aextract_from_episode_texts`, and
+`EpisodeReflector.areflect` — instead inherit the language of their input, which is a much easier call for a
+single-language narrative but not free. The Profile Episode-text path and `areflect` can take several episodes,
+so inputs that disagree on language leave the model to pick one; an update inherits the existing Profile or
+narrative language. Name a language when inputs may disagree, or to move an existing result that is already in
+the wrong one.
 
 ## Customising prompts
 
@@ -182,6 +183,17 @@ class ProfileExtractor:
         output_language: OutputLanguage | str | None = None,   # None → the model infers it
     ) -> Profile: ...
 
+    async def aextract_from_episode_texts(
+        self, episode_texts: Sequence[str], *,
+        owner_id: str,
+        timestamp: int,
+        owner_name: str | None = None,     # non-blank name targets the owner; otherwise owner_id
+        old_profile: Profile | None = None,
+        categories: Sequence[str] | None = None,   # complete current explicit_info category snapshot
+        prompt: str | None = None,
+        output_language: OutputLanguage | str | None = None,   # None → inherited from Episode text/profile
+    ) -> Profile: ...
+
 class EpisodeReflector:
     def __init__(self, *, llm: LLMClient) -> None: ...
     async def areflect(
@@ -202,9 +214,9 @@ for it — a truncation cut mid-word in English, and in Chinese a verbatim copy 
 
 `EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).
 
-`ProfileExtractor` has two modes: `old_profile=None` triggers INIT extraction; passing an existing profile triggers UPDATE (LLM emits add/update/delete ops). When the merged profile exceeds an internal item count threshold a second compact LLM pass runs automatically — this is transparent to the caller.
+`ProfileExtractor` accepts either chronological `MemCell` objects through `aextract` or chronological generic/reflected Episode narrative strings through `aextract_from_episode_texts`. The Episode-text path resolves one target from non-blank `owner_name` or falls back to `owner_id`, then requires every narrative to contain that target before the first LLM call. Its optional `categories` argument is the complete current category snapshot for `explicit_info`: all four processing stages receive the same normalized list, select the most semantically accurate listed match, and may create a concise category when none fits; the list does not constrain `implicit_traits.trait`. Both paths use `old_profile=None` for INIT and an existing Profile for UPDATE; transparent compact and regroup maintenance is shared. See the [Episode-text integration contract](../../docs/api/profile-from-episode-texts.md).
 
-All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)` — only for non-event-loop callers (CLI scripts, plain unit tests).
+All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, and the Episode-text Profile method is exposed as `extract_from_episode_texts(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
 
 ## Testing
 
