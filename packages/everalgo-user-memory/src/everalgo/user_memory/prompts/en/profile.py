@@ -74,7 +74,7 @@ _TARGET_USER = """\
 The conversation may have multiple speakers; each line is tagged with the speaker's ``user_id``. {verb} only for the speaker whose ``user_id`` equals ``{target_user_id}``; anything stated by or about another participant belongs to THAT participant. Do not treat assistant suggestions as this person's traits. The label and id above only locate their lines — neither appears in your output."""
 
 _ITEM_SHAPE = """\
-An explicit_info item is {{"category", "description", "evidence"}}; an implicit_traits item is {{"trait", "description", "basis"}} — no evidence field, its grounding is the basis. Keep each description to one or two short sentences — concise and plain; if a description needs "also" or a semicolon to hold together, it is more than one item. "evidence" gives when something was said and quotes it, naming no one — e.g. "2024-10-03: '...'" — and carries **at most two dated quotes**; when a third arrives, keep the two most recent. "basis" names the signals themselves — the choices or assertions you are reading the disposition from, each one findable in the conversation. Restating the requirement ("one clear signal", "multiple instances", "repeated choices") is not a basis; if you cannot name the signals, the trait does not belong here at all."""
+An explicit_info item is {{"category", "description", "evidence"}}; an implicit_traits item is {{"trait", "description", "basis"}} — no evidence field, its grounding is the basis. Keep each description to one or two short sentences — concise and plain; if a description needs "also" or a semicolon to hold together, it is more than one item. "evidence" and "basis" are JSON strings, never arrays; when either carries two grounds, combine them inside that one string. "evidence" gives when something was said and quotes it, naming no one — e.g. "2024-10-03: '...'" — and carries **at most two dated quotes**; when a third arrives, keep the two most recent. "basis" names the signals themselves — the choices or assertions you are reading the disposition from, each one findable in the conversation. Restating the requirement ("one clear signal", "multiple instances", "repeated choices") is not a basis; if you cannot name the signals, the trait does not belong here at all."""
 
 
 # --------------------------------------------------------------------------------------------------
@@ -139,7 +139,7 @@ You are a user-profile updater. A stored profile and new conversation records ar
 
 【Rules】
 1. **Index semantics**: every index resolves against the profile snapshot exactly as numbered in the 【Stored Profile】 section. Operations within one response never shift each other's indices — do not adjust an index to compensate for another operation in the same list. "add" takes no index. Indices for explicit_info and implicit_traits are independent.
-2. **Keep an item internally consistent**: fields you omit from an "update" keep their stored values, so when you rewrite a "description" carry its matching "evidence" in the same operation — otherwise the item asserts one thing while quoting the opposite.
+2. **Keep an item internally consistent**: fields you omit from an "update" keep their stored values, so when you rewrite a "description" carry its matching grounding field ("evidence" or "basis") in the same operation — otherwise the item asserts one thing while its grounding supports another.
 3. **Add versus update is decided by the FACT, the category inventory only names the group.** Before "add", scan the stored items for the same fact under any wording — found means "update" that item. Not found means "add", filed under the existing category name that covers its dimension (coin a new name only for a genuinely new dimension).
 
 【Output】
@@ -203,7 +203,7 @@ The stored profile given in the 【Stored Profile】 section at the end is over 
 4. **Merge only restatements of the SAME fact.** Two items saying one thing in different words become one item keeping the better wording. Distinct facts stay distinct items — never collapse a dimension's items into one summary item; that recreates the blob this rewrite exists to remove.
 5. **Regroup the categories.** Near-synonymous names for one dimension all take the name already covering most of its items; a name that has swallowed facts of several dimensions is split into dimension-true categories. Items keep their own content either way — regrouping renames, it never rewrites.
 6. **Keep the evidence** of every item you keep — at most the two most recent dated quotes each, naming no one.
-7. Prefer deleting a weak item over merging or shortening a strong one. The caps are met by deleting, merging restatements and regrouping — NEVER by rephrasing a stated fact as an implicit trait; what this person said stays in explicit_info whatever the caps say. Ending well under the caps is fine — they are ceilings, not targets.
+7. Prefer deleting a weak item over merging or shortening a strong one. The caps are met by deleting, merging restatements and regrouping — NEVER by inventing a claim or grounding. Ending well under the caps is fine — they are ceilings, not targets.
 
 【Output】
 """
@@ -244,7 +244,7 @@ One group of a stored user profile has grown past its cap: {count} items share t
 1. **Merge restatements of the SAME fact** into one item, keeping the better wording and at most the two most recent dated quotes of evidence. Distinct facts stay distinct items.
 2. **Split the name if it has swallowed several dimensions.** File each item under the {label_field} name of ITS OWN dimension — reuse a name from the 【Other names in use】 section when one fits, otherwise coin a coarse new one. Renaming never rewrites a description.
 3. **Delete only what was never a portrait item**: an action restated as a capability, duty, skill, familiarity, interest or attitude; a passing state; anything trivial or expired. Deleting is NOT a way to meet the cap — a real fact stays, filed under a better name.
-4. **Never change an item's bucket.** These items stay in the bucket they came from, whatever their wording suggests.
+4. **Never change an item's bucket.** These items stay in the bucket they came from, whatever their wording suggests; never invent content, and keep every claim and grounding within what the shown items support.
 
 【Output】
 """

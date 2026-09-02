@@ -6,6 +6,14 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `ProfileExtractor.aextract_from_episode_texts` and its sync bridge extract one owner-scoped Profile from chronological generic or reflected Episode narrative strings, with deterministic owner-name/ID resolution, per-item pre-LLM target validation, a caller-provided current category snapshot shared by INIT, UPDATE, COMPACT, and REGROUP, and Episode-grounded evidence prompts.
+
+### Changed
+
+- Episode-text Profile prompts now make factual correctness and category accuracy co-equal highest priorities, keep `evidence` and `basis` as scalar JSON strings, permit only source-grounded Episode excerpts or faithful paraphrases, prevent maintenance from inventing grounding, apply current categories without treating them as a whitelist or constraining traits, and keep REGROUP within its one visible bucket while COMPACT may correct misfiled items across both visible buckets.
+
 ## [0.8.0rc3] - 2026-09-01
 
 ### Added

@@ -1012,6 +1012,14 @@ def test_item_shape_says_what_basis_holds() -> None:
     assert "if you cannot name the signals, the trait does not belong here at all" in _ITEM_SHAPE
 
 
+def test_item_shape_requires_scalar_grounding_fields() -> None:
+    """Both grounding fields stay scalar even when they retain two sources."""
+    from everalgo.user_memory.prompts.en.profile import _ITEM_SHAPE
+
+    assert '"evidence" and "basis" are JSON strings, never arrays' in _ITEM_SHAPE
+    assert "combine them inside that one string" in _ITEM_SHAPE
+
+
 def test_nothing_permission_lives_in_the_portrait_block_and_is_not_duplicated() -> None:
     """The permission to produce nothing lives ONCE, in ``_PORTRAIT``.
 
@@ -1106,21 +1114,14 @@ def test_compact_prompt_deletes_before_merging() -> None:
     )
 
 
-def test_compact_prompt_rehomes_a_trait_that_merely_restates_a_statement() -> None:
-    """Compaction is the only path that rewrites both lists, so it is the only one that can move an item.
-
-    A stated fact filed as a disposition ("insists on the team's merge process" for "we must go through MRs")
-    is the same fact in the wrong bucket; leaving it there splits one dimension across two lists.
-    """
+def test_compact_prompt_rehomes_a_trait_without_inventing_content() -> None:
+    """Full-profile compaction may correct a bucket using stored content, but may not invent content."""
     from everalgo.user_memory.prompts.en.profile import PROFILE_COMPACT_PROMPT
 
     assert "**Move anything misfiled.**" in PROFILE_COMPACT_PROMPT
     assert "A trait that merely restates something this person said is an explicit_info fact" in PROFILE_COMPACT_PROMPT
     assert "do not leave a copy behind in implicit_traits" in PROFILE_COMPACT_PROMPT
-    # Deleting non-portrait items first keeps this step from rehoming an item that should simply go.
-    assert PROFILE_COMPACT_PROMPT.index("Delete everything that was never") < PROFILE_COMPACT_PROMPT.index(
-        "Move anything misfiled"
-    )
+    assert "NEVER by inventing a claim or grounding" in PROFILE_COMPACT_PROMPT
 
 
 def test_no_prompt_demonstrates_a_forbidden_form() -> None:

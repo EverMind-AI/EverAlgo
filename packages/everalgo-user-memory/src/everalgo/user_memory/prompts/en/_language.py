@@ -102,6 +102,14 @@ already been through extraction, so it is a single-language narrative and there 
 the language was settled upstream and this layer inherits it.
 """
 
+EPISODE_PROFILE_INIT_LANGUAGE_RULE = (
+    SOURCE_TEXT_LANGUAGE_RULE
+    + "\n\nThis is the call that fixes the profile's language: later update and compaction calls preserve "
+    "whatever language you use here, so every personality tag must be written in that language too — "
+    "never in a different language from the rest of the profile."
+)
+"""Fallback for Profile INIT from Episode texts: inherit the narrative language and bind its tags."""
+
 PARTICIPANT_LANGUAGE_RULE = (
     "**CRITICAL LANGUAGE RULE**: Write ALL output fields in the language the participants use when they "
     "talk to each other. If they talk in Chinese, write in Chinese; if in English, write in English; if in "
