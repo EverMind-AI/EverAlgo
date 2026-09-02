@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0rc5] - 2026-09-02
+
 ### Changed
 
 - `ProfileExtractor.aextract_from_episode_texts` now skips individual Episode narratives that do not reference the resolved target user and raises only when no narrative in the batch references that user.
@@ -257,7 +259,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc4...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc5...HEAD
+[0.8.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc4...everalgo-user-memory/v0.8.0rc5
 [0.8.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc3...everalgo-user-memory/v0.8.0rc4
 [0.8.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc2...everalgo-user-memory/v0.8.0rc3
 [0.8.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc1...everalgo-user-memory/v0.8.0rc2
