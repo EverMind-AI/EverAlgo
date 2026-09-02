@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-user-memory"
-version = "0.8.0rc4"
+version = "0.8.0rc5"
 description = "EverAlgo user memory: Episode / Foresight / AtomicFact / Profile extractors (re-exports boundary as Chat/WorkspaceMemCellExtractor)."
 requires-python = ">=3.12"
 license = "Apache-2.0"
