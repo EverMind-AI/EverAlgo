@@ -1,7 +1,7 @@
-"""Stage 4 — Answer generation.
+"""Stage 6 — Answer generation.
 
 For each retrieved question: build context from top-K event_ids (matching
-Stage 1's serialized memcells), call the LLM with the dataset's answer_prompt,
+Stage 3's enriched episodes), call the LLM with the dataset's answer_prompt,
 extract the FINAL ANSWER section. Output: answers.json.
 """
 
@@ -189,7 +189,7 @@ def _build_speakers_lookup(ctx: StageContext) -> dict[str, tuple[str, str]]:
 
 
 async def run_answer_stage(ctx: StageContext) -> StageStats:
-    """Stage 4 — generate an answer for every retrieved question."""
+    """Stage 6 — generate an answer for every retrieved question."""
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     stats = StageStats(stage_name="answer")
     started = time.monotonic()

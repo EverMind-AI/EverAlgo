@@ -10,10 +10,10 @@
 | [version-policy.md](version-policy.md) | SemVer policy, Python version support, deprecation |
 | [contributing.md](contributing.md) | How to contribute; links to AGENTS.md for the full rules |
 | [concepts/architecture.md](concepts/architecture.md) | High-level architecture, subpackage layout, naming, LLM injection |
-| [concepts/stateless-design.md](concepts/stateless-design.md) | Why operators are pure functions and what that means for callers |
+| [concepts/stateless-design.md](concepts/stateless-design.md) | What business-stateless means, including the parser I/O boundary |
 | [concepts/async-sync-bridge.md](concepts/async-sync-bridge.md) | The `a`-prefix convention and the sync bridge |
-| [concepts/stage1-boundary-detection-flow.md](concepts/stage1-boundary-detection-flow.md) | Stage 1 boundary detection flow |
-| [concepts/stage3-agentic-retrieval-flow.md](concepts/stage3-agentic-retrieval-flow.md) | Stage 3 agentic retrieval flow |
+| [concepts/stage1-boundary-detection-flow.md](concepts/stage1-boundary-detection-flow.md) | Stage 1 extract-base flow |
+| [concepts/stage5-agentic-retrieval-flow.md](concepts/stage5-agentic-retrieval-flow.md) | Stage 5 agentic retrieval flow |
 | [releasing.md](releasing.md) | Release process and checklist |
 | [api/README.md](api/README.md) | Index linking to each package README and the generated API reference |
 

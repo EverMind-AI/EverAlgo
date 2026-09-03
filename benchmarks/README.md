@@ -55,7 +55,7 @@ Defaults live in `benchmarks/config.toml` (single source of truth). Override any
 field via a named TOML file under `benchmarks/`:
 
 ```bash
-# Load benchmarks/fast.toml (unset fields fall back to benchmark.toml defaults).
+# Load benchmarks/fast.toml (unset fields fall back to BenchmarkConfig defaults).
 uv run python -m benchmarks.cli --dataset locomo --config fast --run-name fast-run
 ```
 

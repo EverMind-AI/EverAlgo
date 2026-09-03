@@ -1,6 +1,6 @@
 # everalgo-rank
 
-Memory ranking for EverAlgo — four business-facing ranker classes (`EpisodicRanker` / `CaseRanker` / `SkillRanker` / profile `rank`) composed over a shared toolkit (`fusion` / `weight` / `rerank`). Pure in-memory rank, no storage I/O.
+Memory retrieval and ranking for EverAlgo. The package has two public layers: composable retrieval strategies over caller-injected `RetrieveFn` / `RerankFn` callables, and four business rankers over pre-fetched `RankInput` data. EverAlgo owns the algorithms but never the caller's storage or model clients.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -14,6 +14,12 @@ pip install everalgo-rank
 
 | Symbol | Role |
 |---|---|
+| `ahybrid_retrieve` / `hybrid_retrieve` | Parallel dense + sparse recall followed by RRF or LR fusion |
+| `aagentic_retrieve` / `agentic_retrieve` | LLM sufficiency check with optional multi-query or refined-query Round 2 over any base retriever |
+| `acluster_retrieve` / `cluster_retrieve` | Select top clusters from base recall and expand their full membership |
+| `amaxsim_retrieve` / `maxsim_retrieve` | Child recall → parent max-pool → parent hydration |
+| `acategory_retrieve` / `category_retrieve` | Base recall → category-mass rollup → caller rerank → category boost |
+| `RetrieveFn` / `RerankFn` | Async callable contracts implemented by the caller; storage/index/model clients stay inside the callbacks |
 | `EpisodicRanker` | Class facade — episodic memory ranking; LLM bound at construction |
 | `CaseRanker` | Class facade — agent case ranking; LLM bound at construction |
 | `SkillRanker` | Class facade — agent skill ranking; LLM bound at construction |
@@ -24,7 +30,22 @@ pip install everalgo-rank
 | `arank` / `rank` | Top-level async / sync dispatch — routes to the registered ranker by `RankInput.memory_type` |
 | `arerank` / `rerank` | Low-level LLM rerank step (not top-level: import from `everalgo.rank.rerank`) |
 
-## Quick start
+## Retrieval composition quick start
+
+```python
+from everalgo.rank import ahybrid_retrieve
+
+hits = await ahybrid_retrieve(
+    "Python async retry patterns",
+    dense_retrieve=dense_retrieve,
+    sparse_retrieve=sparse_retrieve,
+    top_n=20,
+)
+```
+
+`dense_retrieve` and `sparse_retrieve` are caller-owned async functions with the shape `(query: str, top_k: int) -> list[Candidate]`. They can bind any vector store, keyword index, or test fixture; `ahybrid_retrieve` only runs and fuses them.
+
+## Business-ranker quick start
 
 ```python
 import asyncio
@@ -79,6 +100,11 @@ reranked = await arerank(
 
 | Symbol | Module | Signature summary |
 |---|---|---|
+| `ahybrid_retrieve` | `everalgo.rank` | `(query, *, dense_retrieve, sparse_retrieve, ...) → list[Candidate]` |
+| `aagentic_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, llm, rerank_fn=None, ...) → tuple[list[Candidate], AgenticDecision]` |
+| `acluster_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, clusters, all_docs, ...) → list[Candidate]` |
+| `amaxsim_retrieve` | `everalgo.rank` | `(query, *, child_retrieve, parent_fetch, ...) → list[Candidate]` |
+| `acategory_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, rerank_fn, ...) → list[Candidate]` |
 | `EpisodicRanker` | `everalgo.rank` | `__init__(*, llm)` → `arank(rank_input, *, config, prompt, enable_rerank, ...) → RankOutput` |
 | `CaseRanker` | `everalgo.rank` | Same shape as `EpisodicRanker` |
 | `SkillRanker` | `everalgo.rank` | Same shape as `EpisodicRanker` |

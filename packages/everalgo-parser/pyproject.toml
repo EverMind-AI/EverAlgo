@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "everalgo-parser"
 version = "0.2.1"
-description = "EverAlgo parser: multimodal raw-file parsing (image / audio / document / video / url) into ParsedContent."
+description = "EverAlgo parser: image, audio, document, and URL parsing into ParsedContent."
 requires-python = ">=3.12"
 license = "Apache-2.0"
 readme = "README.md"

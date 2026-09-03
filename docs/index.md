@@ -2,8 +2,8 @@
 
 EverAlgo is the **algorithm library** for memory extraction and ranking used by [EverOS](https://github.com/EverMind-AI/everos), EverMind's open-source AI memory framework.
 
-It is **stateless and storage-free**: every operator takes in-memory data structures and returns in-memory data structures.
-No database connections, no filesystem reads, no business-state ownership — those responsibilities belong to EverOS, the orchestration layer that calls EverAlgo.
+It is **business-stateless and persistence-free**: operators use explicit in-memory inputs and outputs and never own caller storage or business state.
+EverAlgo does not connect to caller databases or indexes. Parser operators are the narrow I/O exception: URL parsing fetches HTTP(S), and Office conversion uses a managed temporary directory before returning in-memory `ParsedContent`.
 
 ---
 
@@ -22,20 +22,27 @@ result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
 episode = await EpisodeExtractor(llm=fake).aextract(result.cells[0], sender_id="u_alice")
 ```
 
-**Rank (read path)** — Re-rank multi-route recall candidates for a retrieval response.
+**Retrieve / Rank (read path)** — Compose caller-provided recall functions or rank already-fetched business candidates.
 
 ```python
 from everalgo import rank
 
-# Synchronous pure-compute fusion (no LLM needed)
+# Low-level synchronous fusion.
 merged = rank.fusion.rrf(vec_hits, keyword_hits)
+
+# High-level retrieval strategies accept caller-injected RetrieveFn callables.
+hits = await rank.ahybrid_retrieve(
+    query,
+    dense_retrieve=dense_retrieve,
+    sparse_retrieve=sparse_retrieve,
+)
 ```
 
 ---
 
 ## What EverAlgo does not do
 
-- Connect to any database or filesystem
+- Connect to caller databases or indexes, read arbitrary local paths, or persist business state (the parser may fetch HTTP(S) URLs and use controlled temporary files while converting Office documents)
 - Own retry logic, multi-key rotation, or provider fallback
 - Route requests to different LLM models by business scene (that is EverOS's `SceneRouter`)
 - Compute embeddings (the caller computes and passes vectors in)
@@ -50,12 +57,12 @@ Install only what your use case needs:
 | Distribution | Purpose |
 |---|---|
 | `everalgo-core` | Types, LLM client + providers, prompt validators, testing helpers |
-| `everalgo-boundary` | `MemCell` boundary detection (chat / workspace / agent) |
+| `everalgo-boundary` | Low-level chat boundary primitives + unimplemented workspace placeholder |
 | `everalgo-clustering` | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
-| `everalgo-rank` | 4 retrieval strategies (hybrid / agentic / cluster / maxsim) + 4 business rankers (episodic / profile / case / skill) + fusion / weight / rerank tools |
+| `everalgo-rank` | 4 retrieval strategies (hybrid / agentic / cluster / maxsim) + category-aware retrieval + 4 business rankers (episodic / profile / case / skill) + fusion / weight / rerank tools |
 | `everalgo-parser` | Multimodal raw-file → `ParsedContent` |
 | `everalgo-user-memory` | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
-| `everalgo-agent-memory` | `AgentCase` / `AgentSkill` extractors |
+| `everalgo-agent-memory` | `AgentCaseExtractor`, `AgentSkillExtractor`, `AgentProfileExtractor` |
 | `everalgo-knowledge` | `KnowledgeMemory` extractor |
 
 ---
@@ -67,7 +74,7 @@ Install only what your use case needs:
 | Install and run a first example in 5 minutes | [Getting started](getting-started.md) |
 | Understand the full architecture | [Architecture](concepts/architecture.md) |
 | Install options and prerequisites | [Installation](installation.md) |
-| Understand why operators are pure functions | [Stateless design](concepts/stateless-design.md) |
+| Understand the difference between stateless operators and pure compute | [Stateless design](concepts/stateless-design.md) |
 | Understand the `a`-prefix async convention | [Async–sync bridge](concepts/async-sync-bridge.md) |
 | Browse per-package API docs | [API index](api/README.md) |
 | Versioning and support policy | [Version policy](version-policy.md) |

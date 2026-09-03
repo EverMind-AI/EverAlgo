@@ -1,4 +1,4 @@
-"""Unit tests for Stage 3 retrieval primitives (entity-split data model)."""
+"""Unit tests for Stage 5 retrieval primitives (entity-split data model)."""
 
 from unittest.mock import AsyncMock
 

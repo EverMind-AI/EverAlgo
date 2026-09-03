@@ -1,16 +1,19 @@
 # Async–Sync Bridge
 
-EverAlgo operators follow a strict naming convention to distinguish async I/O methods from synchronous pure-compute methods.
+EverAlgo operators follow a strict naming convention that identifies the calling convention. It distinguishes native async APIs from synchronous APIs; a synchronous API may be either pure compute or a blocking bridge over async I/O.
 
 ---
 
 ## The `a`-prefix rule
 
 **Methods with an `a` prefix** — `aextract`, `adetect`, `arank`, `aparse` — are **native async**.
-They perform real I/O (LLM calls, OCR, ASR, URL fetch) and must be called with `await`.
+They may perform or orchestrate I/O (LLM calls, caller-injected retrieval, OCR, ASR, URL fetch) and must be called with `await`.
 
-**Methods without an `a` prefix** — `extract`, `rank`, `count_tokens`, `rrf` — are **synchronous**.
-They are pure-compute (no I/O) and must be called without `await`.
+**Most methods without an `a` prefix** — `extract`, `rank`, `count_tokens`, `rrf` — are **synchronous**.
+Call those without `await`, then distinguish two categories:
+
+- Pure compute such as `count_tokens`, `rrf`, and `cluster_by_geometry` returns directly and performs no I/O.
+- Sync bridges such as `extract`, `detect`, `rank`, and `parse` block while running a native async implementation through `asgiref.async_to_sync`; use them only outside a running event loop.
 
 ```python
 # ✅ Correct — async I/O method, use await
@@ -20,12 +23,15 @@ episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alic
 merged  = cluster_by_geometry(new_cluster, existing_clusters)
 fused   = rank.fusion.rrf(vec_hits, keyword_hits)
 n       = boundary._tokenize.count_tokens(text)
+
+# ✅ Correct — blocking sync bridge, only outside a running event loop
+episode = EpisodeExtractor(llm=client).extract(memcell, sender_id="u_alice")
 ```
 
-Reading the method name tells you its calling convention immediately — no need to look up documentation.
+An `a` prefix always tells you to use `await`; absence of the prefix is not a complete test because of the historical exceptions below. For synchronous names, the name alone also does not tell you whether the implementation is pure compute or a blocking bridge.
 This is the same convention used by `dspy.acall` / `dspy.aforward`, `litellm.acompletion`, and `instructor.AsyncInstructor`.
 
-**Exception — `LLMClient`.** The `a`-prefix rule governs EverAlgo *operator* methods. The `LLMClient` Protocol (`everalgo.llm.protocols`) is a caller-injected client interface, not an operator; its single method is `async def chat(...)` — async but without the `a` prefix — to mirror the OpenAI SDK client surface. EverAlgo operators call it internally via `await self._llm.chat(...)`.
+**Historical exceptions.** Three native-async interfaces lack the prefix and must still be awaited: `LLMClient.chat`, low-level `detect_boundaries`, and `cluster_by_llm`. The client method mirrors the OpenAI SDK surface; the two function names predate the otherwise consistent operator convention. Neither function currently exposes a synchronous bridge.
 
 ---
 
@@ -41,9 +47,9 @@ If a specific computation grows large enough to block the event loop (roughly ab
 
 ---
 
-## The sync bridge for I/O operators
+## Sync bridges where exposed
 
-Every I/O operator provides a synchronous wrapper as a convenience for non-event-loop callers (CLI scripts, plain unit tests).
+Most high-level I/O operators provide synchronous wrappers as a convenience for non-event-loop callers (CLI scripts, plain unit tests).
 The wrapper is derived from the async implementation using `asgiref.sync.async_to_sync`, which means there is exactly one implementation to maintain.
 
 ```python
@@ -76,10 +82,14 @@ Calling the sync bridge from within a running event loop will raise a `RuntimeEr
 | `EpisodeExtractor` | `extract` | sync bridge | `extractor.extract(mc, sender_id=...)` — non-event-loop only |
 | `BoundaryDetector` | `adetect` | async I/O | `await detector.adetect(messages, is_final=True)` |
 | `BoundaryDetector` | `detect` | sync bridge | `detector.detect(messages, is_final=True)` — non-event-loop only |
+| `detect_boundaries` | `detect_boundaries` | async I/O exception | `await detect_boundaries(messages, llm=..., is_final=True)` |
 | `cluster_by_geometry` | `cluster_by_geometry` | sync pure-compute | `cluster_by_geometry(new_cluster, existing_clusters)` |
+| `cluster_by_llm` | `cluster_by_llm` | async I/O exception | `await cluster_by_llm(new_cluster, existing_clusters, llm=...)` |
 | `rank.episodic.arank` | `arank` | async I/O | `await rank.episodic.arank(rank_input)` |
 | `rank.profile.rank` | `rank` | sync pure-compute | `rank.profile.rank(rank_input)` |
 | `rank.fusion.rrf` | `rrf` | sync pure-compute | `rank.fusion.rrf(hits_a, hits_b)` |
+| `ahybrid_retrieve` | `ahybrid_retrieve` | async caller-I/O orchestration | `await ahybrid_retrieve(query, dense_retrieve=..., sparse_retrieve=...)` |
+| `hybrid_retrieve` | `hybrid_retrieve` | sync bridge | `hybrid_retrieve(query, dense_retrieve=..., sparse_retrieve=...)` — non-event-loop only |
 
 ---
 
@@ -99,4 +109,4 @@ fused    = rank.fusion.rrf(vec_hits, keyword_hits)
 n_tokens = boundary._tokenize.count_tokens(text)
 ```
 
-The naming convention ensures there is no ambiguity even when both styles appear in the same function.
+The convention covers the current high-level APIs; consult the quick-reference exceptions for the two legacy function names.

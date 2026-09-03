@@ -4,12 +4,12 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![PyPI - everalgo-core](https://img.shields.io/pypi/v/everalgo-core)](https://pypi.org/project/everalgo-core/)
 
-EverAlgo is the **algorithm library** behind EverMind's memory system — stateless, storage-free, focused on extraction and ranking only. Orchestration, persistence, and routing live upstream in EverOS.
+EverAlgo is the **algorithm library** behind EverMind's memory system — business-stateless, persistence-free, focused on extraction and ranking only. Orchestration, durable storage, and routing live upstream in EverOS.
 
 ## Why split EverAlgo from EverOS?
 
 - **Algorithm engineers iterate fast.** EverAlgo is the algorithm team's home base — every change to extraction strategies, prompts, fusion math, and ranker weights happens here without going through service-layer ceremony.
-- **Pure functions, easy to reason about.** No DB, no filesystem, no business state. All operators are plain in-memory transforms with explicit input / output types.
+- **Explicit stateless transforms, easy to reason about.** No caller database/index access, no persistence, and no owned business state. Operators use explicit in-memory contracts; parser implementations may fetch HTTP(S) URLs or use managed temporary files for Office conversion.
 - **One codebase serves both the open-source and the commercial cloud builds.** The same `everalgo.*` packages are consumed by both editions.
 
 The full architecture lives in [`docs/concepts/architecture.md`](docs/concepts/architecture.md).
@@ -23,10 +23,10 @@ This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespac
 | [`everalgo-core`](packages/everalgo-core/) | Types, LLM client + providers, prompt helpers, testing utilities |
 | [`everalgo-boundary`](packages/everalgo-boundary/) | `detect_boundaries` + `DetectionResult` + token helpers |
 | [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
-| [`everalgo-rank`](packages/everalgo-rank/) | 4 rankers (episodic / profile / case / skill) over fusion / weight / rerank toolkit |
+| [`everalgo-rank`](packages/everalgo-rank/) | 4 composable retrieval strategies + category-aware retrieval + 4 business rankers + fusion / weight / rerank toolkit |
 | [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (image, audio, PDF, HTML, email, office, URL; video deferred) |
 | [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
-| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCase` / `AgentSkill` extractors |
+| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCaseExtractor` / `AgentSkillExtractor` / `AgentProfileExtractor` |
 | [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeExtractor` pipeline + `aclassify_category` (file-based knowledge extraction) |
 
 ## 60-second quickstart
@@ -68,8 +68,8 @@ from everalgo.user_memory import (
 )
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "should_wait": False})
-_EPISODE_JSON  = json.dumps({"title": "Alice asks about async", "content": "Alice explored async patterns."})
-_FORE_JSON     = json.dumps([{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}])
+_EPISODE_JSON  = json.dumps({"title": "Alice asks about async", "content": "Alice explored async patterns.", "summary": "Alice explored async patterns."})
+_FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _FACT_JSON     = json.dumps({"atomic_facts": {"time": "Nov 14 2023", "atomic_fact": ["Alice is learning Python async."]}})
 _PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"trait": "Pragmatic", "description": "Prefers minimal-ceremony tooling."}]})
 
@@ -135,7 +135,7 @@ All eight distributions are published on PyPI. Two operators are **unimplemented
 | `WorkspaceMemCellExtractor` | `everalgo.boundary.workspace` | Jira / Email / Confluence slicing — not implemented |
 | video parsing | `everalgo.parser.video` | deferred pending an ADR (Gemini Video vs Whisper + frame sampling) |
 
-Everything else is fully implemented and tested: boundary detection, both clustering operators, all four rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile), the agent-memory extractors (Case / Skill), and the knowledge extractor (KnowledgeExtractor + document classification).
+Everything else is fully implemented and tested: boundary detection, both clustering operators, four retrieval strategies plus four business rankers, the user-memory extractors (Episode / Foresight / AtomicFact / Profile), the agent-memory extractors (Case / Skill / Profile), and the knowledge extractor (KnowledgeExtractor + document classification).
 
 ## Releasing
 

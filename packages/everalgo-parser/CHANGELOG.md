@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- git-cliff-unreleased-start -->
 ## [Unreleased]
+
+### Fixed
+
+- Corrected the local-file rejection message so it distinguishes caller-selected filesystem paths from the parser's managed temporary directory used for Office conversion.
 <!-- git-cliff-unreleased-end -->
 
 ## [0.2.1] - 2026-06-15

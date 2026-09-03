@@ -1,4 +1,4 @@
-"""Tests for Stage 3 run_search_stage (agentic path via aagentic_retrieve, entity-split model)."""
+"""Tests for Stage 5 run_search_stage (agentic path via aagentic_retrieve, entity-split model)."""
 
 from __future__ import annotations
 

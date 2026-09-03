@@ -1,6 +1,6 @@
-# LoCoMo Benchmark Reproduction Guide
+# Historical LoCoMo 93.05 Reproduction Guide
 
-EverAlgo on the [LoCoMo](https://github.com/silin159/locomo) long-conversation benchmark: **93.05%** accuracy (1433/1540).
+EverAlgo on the [LoCoMo](https://github.com/silin159/locomo) long-conversation benchmark: **93.05%** accuracy (1433/1540). This directory records the historical five-stage pipeline and is not a guide to the current seven-stage runner; use [`../locomo-93.51/REPRODUCTION.md`](../locomo-93.51/REPRODUCTION.md) for the current workflow.
 
 ## Quick Start — Full Run from Scratch
 
@@ -8,11 +8,12 @@ EverAlgo on the [LoCoMo](https://github.com/silin159/locomo) long-conversation b
 # Prerequisites: Python 3.12+, uv, API keys in benchmarks/.env
 #   OPENROUTER_API_KEY=...
 #   DEEPINFRA_API_KEY=...
+git checkout benchmarks/v93.05
 uv sync --all-packages --group dev
 uv run python -m benchmarks --dataset locomo --run-name my-run
 ```
 
-This runs all 5 stages end-to-end (~55 min, ~$7). Results land in `benchmarks/results/locomo-my-run/`.
+On the tagged historical code, this runs all 5 stages end-to-end (~55 min, ~$7). Running the same command on current `main` executes the seven-stage pipeline and does not reproduce this artifact layout.
 
 > Stage 1 (extract) uses LLM calls with non-zero temperature, so each run produces slightly different
 > MemCells. Expect ±1pp accuracy variation across runs.

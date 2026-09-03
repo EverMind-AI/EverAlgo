@@ -1,9 +1,8 @@
-"""Raw input data contracts — pre-boundary inputs to EverAlgo.
+"""Raw input data contracts — pre-boundary and parser inputs to EverAlgo.
 
-EverAlgo is a stateless algorithm library: it never reads the filesystem,
-never fetches URLs. Callers must hydrate raw bytes upstream (in EverOS or
-the application layer) and hand them to the algorithm operators via
-``RawFile.content``.
+``RawFile`` accepts caller-hydrated bytes or an HTTP(S) URL. It never points
+the parser at a caller-selected local path; parser implementations may fetch
+the URL or use an internal managed temporary directory during conversion.
 """
 
 from __future__ import annotations
@@ -33,8 +32,8 @@ class RawFile(BaseModel):
     - ``content`` empty + ``uri`` set + scheme is ``http``/``https`` → the
       parser fetches via HTTP and fills ``content`` internally.
     - ``content`` empty + ``uri`` empty → ``ValueError`` at parse time.
-    - ``file://`` and other local-filesystem URIs are *rejected* — the library
-      never reads the filesystem (AGENTS.md §1).
+    - ``file://`` and other local-filesystem URIs are *rejected* so callers
+      cannot make the parser read an arbitrary local path (AGENTS.md §1).
 
     Parser dispatch precedence (cheapest to most reliable):
     1. ``extension`` (when present) — maps to ``Modality`` via

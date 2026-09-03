@@ -1,6 +1,6 @@
 # everalgo-parser
 
-Multimodal parsing — image / audio / document / video / url raw inputs into `ParsedContent`. Used by `everalgo-knowledge` for file ingestion and by EverOS step 1 for inline parsing.
+Multimodal parsing — image / audio / document / URL raw inputs into `ParsedContent`; video is deferred. Used by `everalgo-knowledge` for file ingestion and by EverOS step 1 for inline parsing.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -68,7 +68,7 @@ The parser detects `soffice` via `shutil.which("soffice")` and the canonical mac
 
 - `aparse(...)` is async; `parse(...)` is the sync bridge via `asgiref.async_to_sync`.
 - Prompts live as module-level string constants under `prompts/{en,zh}/<operator>.py` ([AGENTS.md §5](../../AGENTS.md#5-code-style)). Swap languages by re-binding the constant at startup.
-- The library is **stateless**: it never reads the filesystem and never owns business state. HTTP I/O (LLM calls, URL fetching) is explicitly allowed.
+- The parser owns no durable state and never reads caller-selected local paths. URL parsing performs HTTP(S) I/O, and Office conversion writes files only inside a parser-managed temporary directory that is removed before the call returns.
 - No retry / fallback / metrics inside operators — surface failures via `LLMError`, let the caller wrap.
 
 ## Security notes for callers
