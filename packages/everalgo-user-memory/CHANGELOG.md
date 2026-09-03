@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Generic Episode generation now includes a Chinese worked example with embedded English technical terms to reduce English-example bias during automatic language selection.
+
 ## [0.8.0rc6] - 2026-09-03
 
 ### Fixed

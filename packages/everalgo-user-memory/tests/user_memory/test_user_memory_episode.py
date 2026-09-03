@@ -97,13 +97,26 @@ Before writing, decide which language the participants speak to each other; text
     )
 
 
-def test_generic_prompt_schema_and_example_put_user_language_first() -> None:
+def test_generic_prompt_schema_and_examples_put_user_language_first() -> None:
     schema = EPISODE_GENERATION_PROMPT.split("return only a JSON object containing", 1)[1].split("Requirements:", 1)[0]
-    example = EPISODE_GENERATION_PROMPT.split("Example:", 1)[1].split("{language_rule}", 1)[0]
+    english_example = EPISODE_GENERATION_PROMPT.split("English example:", 1)[1].split("Chinese example", 1)[0]
+    chinese_example = EPISODE_GENERATION_PROMPT.split("Chinese example", 1)[1].split("{language_rule}", 1)[0]
 
-    for block in (schema, example):
+    for block in (schema, english_example, chinese_example):
         assert block.count('"user_language"') == 1
         assert block.index('"user_language"') < block.index('"title"')
+
+
+def test_generic_prompt_chinese_example_keeps_technical_terms_in_chinese_output() -> None:
+    chinese_example = EPISODE_GENERATION_PROMPT.split("Chinese example", 1)[1].split("{language_rule}", 1)[0]
+
+    assert '"user_language": "Chinese"' in chinese_example
+    assert '"title": "林然和周敏排查 payment API 超时并制定 retry 方案"' in chinese_example
+    assert '"content": "林然报告 payment API' in chinese_example
+    assert "payment API 在 staging 环境出现 timeout" in chinese_example
+    assert '"summary": "林然和周敏排查 staging 环境的 payment API 超时' in chinese_example
+    output_example = chinese_example.split("{{", 1)[1]
+    assert "2026-08-20 09:30 UTC" not in output_example
 
 
 def test_generic_prompt_keeps_language_metadata_in_english_after_language_rule() -> None:
