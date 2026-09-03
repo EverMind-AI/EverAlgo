@@ -116,13 +116,22 @@ Requirements:
    - Include habitual actions (e.g., "usually has coffee at 8 AM before work")
    - Document repetition counts (e.g., "asked about the project status twice")
 
-Example:
+English example:
 If the conversation start time is "2024-03-14 15:00 UTC (Thursday)" and the conversation is about Caroline planning to go hiking:
 {{
     "user_language": "English",
     "title": "Caroline Plans an Early Saturday Start for a Mount Rainier Sunrise Hike",
     "content": "Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16) to catch the sunrise and planned to invite friends. She was excited about the trip.",
     "summary": "Caroline planned a sunrise hike at Mount Rainier for the weekend (2024-03-16 to 2024-03-17) and asked for advice. Melanie suggested boots, warm clothing, a flashlight, water and high-energy food. Caroline settled on an early Saturday start and planned to invite friends, excited for the trip."
+}}
+
+Chinese example (English technical terms do not change the selected language):
+If the conversation start time is "2026-08-20 09:30 UTC (Thursday)" and the participants diagnose an API timeout in Chinese while using English technical terms:
+{{
+    "user_language": "Chinese",
+    "title": "林然和周敏排查 payment API 超时并制定 retry 方案",
+    "content": "林然报告 payment API 在 staging 环境出现 timeout。周敏建议检查 gateway 日志，并将 retry 次数从 1 调整为 3。林然同意先完成压测，再决定是否部署。",
+    "summary": "林然和周敏排查 staging 环境的 payment API 超时，并计划将 retry 次数调整为 3。林然将先完成压测再决定是否部署。"
 }}
 
 {language_rule}
