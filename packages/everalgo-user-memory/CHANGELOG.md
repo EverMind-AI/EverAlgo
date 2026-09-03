@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0rc6] - 2026-09-03
+
 ### Fixed
 
 - Generic Episode generation now includes `user_language` as the first field in both its output schema and worked example, preventing the model from following a conflicting three-field JSON contract when language inference is enabled.
@@ -263,7 +265,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc5...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc6...HEAD
+[0.8.0rc6]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc5...everalgo-user-memory/v0.8.0rc6
 [0.8.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc4...everalgo-user-memory/v0.8.0rc5
 [0.8.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc3...everalgo-user-memory/v0.8.0rc4
 [0.8.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc2...everalgo-user-memory/v0.8.0rc3
