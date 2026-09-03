@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "everalgo-boundary"
 version = "0.3.0"
-description = "EverAlgo boundary: MemCell extractors (chat / workspace / agent)."
+description = "EverAlgo boundary: low-level chat boundary detection and a reserved workspace boundary stub."
 requires-python = ">=3.12"
 license = "Apache-2.0"
 readme = "README.md"

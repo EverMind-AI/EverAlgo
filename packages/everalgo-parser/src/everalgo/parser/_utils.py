@@ -41,7 +41,7 @@ async def fetch_uri(uri: str, *, timeout: float = 30.0) -> tuple[bytes, str]:
     """Fetch ``http``/``https`` URI and return ``(content_bytes, content_type)``.
 
     Adapted from an upstream internal URL extractor reference implementation;
-    rejects non-http(s) schemes per AGENTS.md §1 (no filesystem access).
+    rejects non-http(s) schemes so callers cannot select local filesystem paths.
 
     Parameters
     ----------
@@ -72,8 +72,8 @@ async def fetch_uri(uri: str, *, timeout: float = 30.0) -> tuple[bytes, str]:
     if parsed.scheme not in ("http", "https"):
         raise ValueError(
             f"fetch_uri: only http/https supported, got scheme={parsed.scheme!r}. "
-            f"file:// and other local-filesystem URIs are rejected by design "
-            f"(AGENTS.md §1: stateless library, no filesystem access)."
+            f"file:// and other caller-selected local-filesystem URIs are rejected by design "
+            f"(AGENTS.md §1: the parser does not own caller storage)."
         )
 
     headers = {"User-Agent": _DEFAULT_USER_AGENT}

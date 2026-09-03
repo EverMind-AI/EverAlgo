@@ -1,4 +1,4 @@
-"""Stage 2 — BM25 + Embedding index building (fact-level MaxSim).
+"""Stage 4 — BM25 + Embedding index building (fact-level MaxSim).
 
 Reads the entity-split files produced by the upstream Extract + Enrich stages:
 
@@ -21,7 +21,7 @@ Produces per-conversation index artifacts:
 
 - **Cluster index** (``cluster_index_conv_<i>.pkl``): when upstream clustering
   is always built in agentic mode), reshaped cluster
-  assignments consumed by Stage 3's 2-level retrieval path.
+  assignments consumed by Stage 5's 2-level retrieval path.
 """
 
 from __future__ import annotations
@@ -112,8 +112,8 @@ def _build_bm25_fact_level(
     """Build a fact-level BM25 corpus + ``fact_to_doc_idx`` parent mapping.
 
     Each episode is treated as a "document" at its list index. Every searchable unit (each
-    atomic fact's ``content`` + episode ``subject``) becomes one BM25 row mapped to that
-    episode's index via ``fact_to_doc_idx``.
+    atomic fact's ``content``, the episode ``subject``, and the first 200 characters of its body)
+    becomes one BM25 row mapped to that episode's index via ``fact_to_doc_idx``.
 
     Returns ``(BM25Okapi, fact_to_doc_idx)`` or ``None`` if no episode produced any tokenizable unit.
     """
@@ -182,7 +182,7 @@ def _build_emb_index(
 
 
 def _build_cluster_index(clusters_data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Reshape a cluster JSON into ``list[Cluster.model_dump()]`` for Stage 3.
+    """Reshape a cluster JSON into ``list[Cluster.model_dump()]`` for Stage 5.
 
     Aligns the cluster pkl schema with the algo ``Cluster`` type
     (``everalgo.clustering.state.Cluster``): same field names (``id`` / ``count`` /
@@ -295,7 +295,7 @@ def _build_and_write_cluster_index(conv_idx: int, output_dir: Path, ctx: StageCo
     """Build and persist the cluster index for one conversation.
 
     Failure propagates to the caller — cluster index errors terminate the stage
-    rather than silently falling back to flat hybrid retrieval in Stage 3.
+    rather than silently falling back to flat hybrid retrieval in Stage 5.
     """
     cluster_path = ctx.input_dir / f"clusters_conv_{conv_idx}.json"
     if not cluster_path.exists():
@@ -309,7 +309,7 @@ def _build_and_write_cluster_index(conv_idx: int, output_dir: Path, ctx: StageCo
 
 
 async def run_index_stage(ctx: StageContext) -> StageStats:
-    """Stage 2 — build BM25 + Embedding indices per conversation.
+    """Stage 4 — build BM25 + Embedding indices per conversation.
 
     Reads entity-split files (episodes + atomic_facts) from ``ctx.input_dir``.
     All embeddings are pre-computed — this stage performs no embedding API calls.

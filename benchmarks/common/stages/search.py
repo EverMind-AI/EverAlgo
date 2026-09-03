@@ -1,4 +1,4 @@
-"""Stage 3 — Retrieval primitives + agentic loop + main entry.
+"""Stage 5 — Retrieval primitives + agentic loop + main entry.
 
 Provides pure scoring/fusion primitives (BM25, embedding MaxSim, RRF) and a
 unified retrieval path that delegates to the algo facade:
@@ -12,7 +12,7 @@ and ``hybrid_full`` as ``round2_retrieve`` so Round 2 spills out to the full cor
 
 Security: this module uses ``pickle`` to load benchmark index artifacts
 (``bm25_conv_*.pkl`` / ``emb_conv_*.pkl`` / ``cluster_index_conv_*.pkl``)
-produced by Stage 2 in the same trusted local workspace. **Never point the
+produced by Stage 4 in the same trusted local workspace. **Never point the
 ``input_dir`` at untrusted / network-shared paths** — a tampered ``.pkl`` can
 execute arbitrary code on load. The ``benchmarks/`` package is internal-only
 (``[tool.uv] package = false``) and is not published to PyPI.
@@ -202,7 +202,7 @@ def search_with_bm25_index(
 
     Args:
         query: Raw query text (tokenized internally).
-        bm25_index: Fact-level BM25 payload as persisted by stage 2.
+        bm25_index: Fact-level BM25 payload as persisted by Stage 4.
         top_n: Maximum number of results to return.
 
     Returns:
@@ -707,9 +707,9 @@ def _make_emb_amaxsim_pair(
 
 
 async def run_search_stage(ctx: StageContext) -> StageStats:
-    """Stage 3 — agentic retrieval for every (conv, question).
+    """Stage 5 — agentic retrieval for every (conv, question).
 
-    Loads per-conversation BM25 + embedding indices written by Stage 2
+    Loads per-conversation BM25 + embedding indices written by Stage 4
     (``index.py``), runs agentic retrieval for every QA pair, and writes
     ``search_results.json`` to ``ctx.output_dir``.
 
@@ -794,7 +794,7 @@ async def _search_one_conversation(
     Returns the list of successful retrieval result dicts on success, or
     ``None`` when the per-conv BM25 / embedding indices are missing (soft skip).
     Retrieval failures propagate (caller fast-fails the whole stage per
-    Stage 1/2 contract); ``None`` entries in the gathered list represent
+    Stage 1-4 artifact contract); ``None`` entries in the gathered list represent
     filtered-out categories (e.g. adversarial), not failures.
     """
     conv_idx = _conv_index(conv.id)
@@ -1131,16 +1131,16 @@ async def _attempt_single_qa(
 def _load_cluster_index(input_dir: Any, conv_idx: int) -> list[Cluster]:
     """Load cluster snapshot as ``list[Cluster]``.
 
-    Stage 2 writes the pkl as ``list[Cluster.model_dump()]`` (one entry per cluster);
+    Stage 4 writes the pkl as ``list[Cluster.model_dump()]`` (one entry per cluster);
     we round-trip via ``Cluster.model_validate`` so downstream gets a typed view.
 
-    Always loads in agentic mode — the cluster index MUST exist. Stage 1 fast-fails
-    on cluster build, so an absent pkl indicates a corrupted run.
+    Always loads in agentic mode — the cluster index MUST exist. Stage 1 builds the
+    source clusters and Stage 4 builds this index, so an absent pkl indicates an incomplete run.
     """
     cluster_path = input_dir / f"cluster_index_conv_{conv_idx}.pkl"
     if not cluster_path.exists():
         raise FileNotFoundError(
-            f"Cluster index not found for conv_{conv_idx}; expected: {cluster_path}. Re-run stage 1."
+            f"Cluster index not found for conv_{conv_idx}; expected: {cluster_path}. Re-run stage 4."
         )
     with cluster_path.open("rb") as fh:
         raw = pickle.load(fh)
@@ -1152,7 +1152,7 @@ def _conv_index(conv_id: str) -> int:
 
     Raises ``ValueError`` on a malformed ``conv_id`` — fail-loud rather than
     silently defaulting to 0 (which would route a broken conv to conv_0's
-    indices and corrupt Stage 3 metrics).
+    indices and corrupt Stage 5 metrics).
     """
     prefix = "locomo_exp_user_"
     try:

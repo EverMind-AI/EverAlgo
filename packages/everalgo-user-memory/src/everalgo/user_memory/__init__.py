@@ -1,7 +1,7 @@
 """User-side memory extractors — 4 Extractors + EpisodeReflector + boundary facade + DetectionResult re-export.
 
-The user-scenario boundary facade (:class:`BoundaryDetector`) lives here; agent-trajectory
-boundary detection will be added to ``everalgo.agent_memory`` in Stage 4.
+The user-scenario boundary facade (:class:`BoundaryDetector`) lives here; the agent-trajectory
+facade (:class:`everalgo.agent_memory.AgentBoundaryDetector`) lives in ``everalgo.agent_memory``.
 """
 
 import logging

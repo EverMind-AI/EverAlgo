@@ -1,4 +1,4 @@
-"""Tests for Stage 2 index building (entity-split data model)."""
+"""Tests for Stage 4 index building (entity-split data model)."""
 
 from __future__ import annotations
 

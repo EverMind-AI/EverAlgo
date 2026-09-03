@@ -1,4 +1,4 @@
-"""Stage 5 — LLM judge + per-category aggregation.
+"""Stage 7 — LLM judge + per-category aggregation.
 
 Reads ``answers.json``, drops adversarial categories, runs N parallel judge
 calls per QA, and writes ``eval_results.json``. Headline accuracy is the
@@ -157,7 +157,7 @@ def _strip_internal_keys(detailed: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 async def run_evaluate_stage(ctx: StageContext) -> StageStats:
-    """Stage 5 — judge every answer and aggregate per-category accuracy."""
+    """Stage 7 — judge every answer and aggregate per-category accuracy."""
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     stats = StageStats(stage_name="evaluate")
     started = time.monotonic()

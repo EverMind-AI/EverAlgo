@@ -14,7 +14,7 @@ pip install everalgo-core
 
 | Subpackage | What it contains |
 |---|---|
-| `everalgo.types` | All shared data types: `MemCell`, `ChatMessage`, `ConversationItem`, `Episode`, `Foresight`, `AtomicFact`, `Profile`, `AgentCase`, `AgentSkill`, `RankInput`, `RankOutput`, `Candidate`, `ScoredItem`, `ParsedContent`, `RawFile`, tool-call types |
+| `everalgo.types` | Key shared data types: `MemCell`, `ChatMessage`, `ConversationItem`, user / agent / knowledge memories, ranking contracts, parsed / raw content, modality helpers, tool-call types |
 | `everalgo.llm` | `LLMClient` Protocol, `LLMConfig`, `ChatMessage` / `ChatResponse` / `Usage`, `LLMError`, `build_client` factory |
 | `everalgo.llm.format` | `format_atomic_fact_time`, `format_message_timestamp`, `format_natural_language_time` — timestamp rendering for LLM prompts |
 | `everalgo.llm.parse` | `parse_llm_json_object` — three-tier robust JSON-object extraction |
@@ -100,7 +100,7 @@ result = parse_llm_json_object('```json\n{"key": "value"}\n```')
 | `ChatMessage` | `everalgo.types` | Chat wire type: `id`, `role`, `content`, `timestamp`, `sender_id`, `sender_name` |
 | `ConversationItem` | `everalgo.types` | `ChatMessage \| ToolCallRequest \| ToolCallResult` discriminated union |
 | `Episode` / `Foresight` / `AtomicFact` / `Profile` | `everalgo.types` | User-side memory output types |
-| `AgentCase` / `AgentSkill` | `everalgo.types` | Agent-side memory output types |
+| `AgentCase` / `AgentSkill` / `AgentProfilePatch` / `AgentProfileSignal` / `AgentProfileUpdate` | `everalgo.types` | Agent-side memory and config-update output types |
 | `RankInput` / `RankOutput` / `Candidate` / `ScoredItem` | `everalgo.types` | Rank I/O contracts |
 | `LLMClient` | `everalgo.llm` | Protocol — `chat(messages, *, model=None, ...) → ChatResponse` |
 | `LLMConfig` | `everalgo.llm` | `model`, `api_key` (SecretStr), `base_url`, `temperature`, `max_tokens`, `timeout` |
@@ -122,7 +122,7 @@ result = parse_llm_json_object('```json\n{"key": "value"}\n```')
 ## Related distributions
 
 - [`everalgo-boundary`](../everalgo-boundary/) — uses `MemCell`, `ChatMessage`, `LLMClient`
-- [`everalgo-clustering`](../everalgo-clustering/) — uses `MemCell`, `LLMClient`
+- [`everalgo-clustering`](../everalgo-clustering/) — uses `LLMClient` and core prompt helpers
 - [`everalgo-rank`](../everalgo-rank/) — uses `RankInput`, `RankOutput`, `Candidate`, `ScoredItem`
 - [`everalgo-user-memory`](../everalgo-user-memory/) — uses all user-side types + `LLMClient`
 - [`everalgo-agent-memory`](../everalgo-agent-memory/) — uses agent-side types + `LLMClient`

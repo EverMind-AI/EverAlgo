@@ -9,7 +9,7 @@ This document describes EverAlgo's structure, the two algorithm axes, the subpac
 **EverOS** is the AI memory management system: it owns the API gateway, database persistence, orchestration, concurrency control, scene routing (which algorithm step uses which model), and the memory lifecycle.
 
 **EverAlgo** is the algorithm library that EverOS depends on.
-It is stateless and has no knowledge of storage, deployment topology, or scene routing.
+It owns no durable business state and has no knowledge of caller storage, deployment topology, or scene routing. Most operators only transform in-memory values. Parser operators additionally support caller-supplied HTTP(S) URLs and use an internal temporary directory for Office conversion; neither path gives EverAlgo ownership of persistent storage.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -17,38 +17,42 @@ It is stateless and has no knowledge of storage, deployment topology, or scene r
 │  API gateway / persistence / orchestration       │
 │  concurrency / scene routing / lifecycle         │
 └────────────────┬─────────────────────────────────┘
-                 │  in-memory data structures
+                 │  in-memory values / injected callables
                  ▼
 ┌──────────────────────────────────────────────────┐
 │  EverAlgo — algorithm library                    │
-│  stateless · Extract / Rank operators            │
+│  business-stateless · Extract / Retrieve / Rank  │
 └──────────────────────────────────────────────────┘
 ```
 
 **EverAlgo's boundary in one sentence per axis:**
 
-- EverAlgo does not know about the database. The caller loads data and passes it in.
+- EverAlgo does not know about the caller's database or index. The caller loads data or injects retrieval functions.
 - EverAlgo does not know which LLM to use for which business scenario. The caller selects a client and injects it.
 - EverAlgo does not know about concurrency or distributed locks. The caller serialises read-modify-write cycles.
+- Parser URL fetches and temporary Office conversion are implementation I/O, not persistence or caller-filesystem ownership.
 
 ---
 
-## 2. Two algorithm axes: Extract and Rank
+## 2. Two algorithm axes: Extract and Retrieve / Rank
 
-Every operator in EverAlgo belongs to one of two axes.
-The contract is symmetric: both axes are **stateless**, **in-memory I/O**, and **storage-free**.
+Every product operator in EverAlgo contributes to one of two axes. Both axes are **business-stateless** and **persistence-free**, but they are not all referentially transparent pure functions: LLM calls, caller-injected retrieval functions, URL fetching, and Office conversion perform I/O.
 
 | Axis | When | Input | Output |
 |---|---|---|---|
-| **Extract** | write path | `list[ChatMessage]` → `MemCell` → extractors | structured memories: `Episode` / `Foresight` / `AtomicFact` / `Profile` / `AgentCase` / `AgentSkill` / `KnowledgeMemory` |
-| **Rank** | read path | `RankInput` (multi-route recall candidates + pre-fetched cross-memory linkage) | `RankOutput` (ranked list) |
+| **Extract** | write path | conversations, `MemCell`, `AgentCase`, or `ParsedContent` supplied by the caller | structured memories and updates: `Episode` / `Foresight` / `AtomicFact` / `Profile` / `AgentCase` / `AgentSkill` / `AgentProfileUpdate` / `KnowledgeMemory` |
+| **Retrieve / Rank** | read path | either query + caller-injected `RetrieveFn` / `RerankFn`, or a pre-built `RankInput` | either `list[Candidate]` (plus `AgenticDecision` for agentic retrieval), or `RankOutput` from a business ranker |
 
-**Extract** is a two-stage pipeline.
-The **boundary stage** (`BoundaryDetector.adetect`) consumes raw conversation messages and produces `MemCell` segments — coherent conversation units.
-The **extractor stage** consumes each `MemCell` and produces derived memories.
+**Extract** has several composable product flows rather than one universal two-stage pipeline:
 
-**Rank** performs no storage I/O at all.
-Cross-memory linkage (e.g. an episode's atomic facts) must be pre-fetched by the caller and passed into the `RankInput`; the ranker operates entirely in memory.
+- User conversations: `BoundaryDetector.adetect` produces `MemCell` segments; user-memory extractors produce `Episode`, `Foresight`, `AtomicFact`, or `Profile`, and `EpisodeReflector` can merge episodes.
+- Agent trajectories: `AgentBoundaryDetector.adetect` produces mixed-item `MemCell` segments. `AgentCaseExtractor` distils one segment into an `AgentCase`; `AgentSkillExtractor` combines a case with caller-supplied existing skills and supporting cases; `AgentProfileExtractor` screens a segment for config updates.
+- Raw files and URLs: `everalgo.parser.aparse` produces `ParsedContent`; `KnowledgeExtractor` produces `KnowledgeMemory`.
+
+**Retrieve / Rank** has two public layers that coexist:
+
+- The retrieval-composition layer exposes `hybrid`, `agentic`, `cluster`, and `maxsim` strategies plus a category-aware wrapper. They consume caller-injected `RetrieveFn` / `RerankFn` callables. Most return ranked `Candidate` lists, `acluster_retrieve` returns an unranked cluster expansion in the caller's `all_docs` order, and agentic retrieval returns `(candidates, AgenticDecision)`. The callbacks may perform storage or model I/O, but EverAlgo does not own those clients.
+- The business-ranker layer exposes episodic, profile, case, and skill facades. The caller pre-fetches candidate sets and cross-memory linkage (for example Episode → AtomicFact) into `RankInput`; the facade returns `RankOutput` without accessing storage.
 
 ---
 
@@ -61,10 +65,10 @@ everalgo/                              # PEP 420 namespace package — no __init
 ├── everalgo-core/                     # types / llm / prompts / testing
 ├── everalgo-boundary/                 # MemCell extractors + tokenize / split
 ├── everalgo-clustering/               # cluster_by_geometry / cluster_by_llm over list[Cluster]
-├── everalgo-rank/                     # 4 rankers + fusion / weight / rerank tools
+├── everalgo-rank/                     # retrieval strategies + business rankers + ranking tools
 ├── everalgo-parser/                   # multimodal raw-file → ParsedContent
 ├── everalgo-user-memory/              # Episode / Foresight / AtomicFact / Profile
-├── everalgo-agent-memory/             # AgentCase / AgentSkill
+├── everalgo-agent-memory/             # AgentCase / AgentSkill / AgentProfile updates
 └── everalgo-knowledge/                # KnowledgeMemory
 ```
 
@@ -91,50 +95,50 @@ Sibling distributions at the same layer do not depend on each other (e.g. `user-
 
 ### Subpackage roles
 
-**Product subpackages** — each produces a specific structured memory type:
+**Product subpackages** — each produces structured memory or update types:
 
 | Subpackage | Memory types produced |
 |---|---|
 | `user_memory` | `Episode`, `Foresight`, `AtomicFact`, `Profile` |
-| `agent_memory` | `AgentCase`, `AgentSkill` |
+| `agent_memory` | `AgentCase`, `AgentSkill`, `AgentProfileUpdate` |
 | `knowledge` | `KnowledgeMemory` |
 
 **Tool subpackages** — cross-cutting operators consumed by multiple product subpackages:
 
 | Subpackage | Role |
 |---|---|
-| `boundary` | MemCell boundary detection (chat / workspace / agent) |
+| `boundary` | Low-level chat boundary primitives plus an unimplemented workspace placeholder; scenario facades live in `user_memory` and `agent_memory` |
 | `clustering` | `cluster_by_geometry` / `cluster_by_llm` operating on caller-owned `list[Cluster]` |
-| `rank` | 4 retrieval strategies (`hybrid` / `agentic` / `cluster` / `maxsim`) + 4 business facades (`episodic` / `profile` / `case` / `skill`) + algorithm tools (`fusion` / `weight` / `rerank`) |
+| `rank` | 4 retrieval strategies (`hybrid` / `agentic` / `cluster` / `maxsim`) + category-aware retrieval + 4 business facades (`episodic` / `profile` / `case` / `skill`) + algorithm tools (`fusion` / `weight` / `rerank`) |
 | `parser` | Multimodal raw-file → `ParsedContent` (OCR, ASR, document layout, URL fetch) |
 
 **Infrastructure subpackages** (all in `everalgo-core`):
 
 | Subpackage | Role |
 |---|---|
-| `types` | Shared data contracts: `ChatMessage`, `MemCell`, `Episode`, `RankInput`, `RankOutput`, etc. |
+| `types` | Shared data contracts: `ChatMessage`, `MemCell`, `Episode`, `Candidate`, `RankInput`, `RankOutput`, etc. |
 | `llm` | `LLMClient` Protocol, `LLMConfig`, provider routing, `LLMError` hierarchy |
 | `prompts` | Prompt validator; prompt strings live as module-level constants in each subpackage's `prompts/en/` (and `prompts/zh/` where a package still ships translations — `user_memory` dropped its tree in favour of an `output_language` argument) |
 | `testing` | `FakeLLMClient`, `CallRecord`, structural assertion helpers |
 
 ---
 
-## 4. Two import paths — same class
+## 4. Product facades and low-level primitives
 
-Physical layout follows algorithm responsibility (so algorithm engineers can iterate on a specific module without crossing package boundaries).
-The public product API is expressed through `__init__.py` re-exports.
-Both paths resolve to the same class:
+Physical layout follows algorithm responsibility. Product packages expose scenario-specific facade classes, while tool packages expose lower-level primitives. The user-memory package root and its physical module resolve to the same `BoundaryDetector` class; the boundary package exposes a separate function primitive:
 
 ```python
-# Product path — used by EverOS and external callers
-from everalgo.user_memory import BoundaryDetector, EpisodeExtractor
+# Product facade — used by EverOS and external callers.
+from everalgo.user_memory import BoundaryDetector
 
-# Physical path — used by algorithm engineers iterating on boundary logic
-from everalgo.boundary.chat import BoundaryDetector
+# Physical module containing that same facade class.
+from everalgo.user_memory.boundary import BoundaryDetector
+
+# Lower-level async primitive used by facade implementations.
+from everalgo.boundary import detect_boundaries
 ```
 
-The `everalgo.user_memory` package re-exports `BoundaryDetector` from `everalgo.boundary.chat`.
-If you change the boundary algorithm, import whichever path is natural for your work — they are identical objects.
+`everalgo.boundary.chat` does not define `BoundaryDetector`; it defines `detect_boundaries`, `adetect_boundary_step`, and their result types. Agent trajectories use the distinct `everalgo.agent_memory.AgentBoundaryDetector` facade because their `MemCell` items may include tool calls and tool results.
 
 ---
 
@@ -146,10 +150,12 @@ If you change the boundary algorithm, import whichever path is natural for your 
 | Import path | `everalgo.*` namespace + underscore subpackage | `everalgo.user_memory` |
 | Physical directory | underscore | `everalgo/user_memory/` |
 | Class names | PascalCase | `EpisodeExtractor`, `BoundaryDetector` |
-| Async methods | `a` prefix | `aextract`, `adetect`, `arank`, `aparse` |
-| Sync methods (pure compute) | no prefix | `rrf`, `count_tokens` |
+| Native async methods | `a` prefix | `aextract`, `adetect`, `arank`, `aparse` |
+| Sync pure-compute functions | no prefix | `rrf`, `count_tokens`, `cluster_by_geometry` |
+| Sync bridges over async I/O | no prefix | `extract`, `detect`, `rank`, `parse` |
+| Historical native-async exceptions | no prefix | `LLMClient.chat`, `detect_boundaries`, `cluster_by_llm` |
 
-The `a` prefix is a strict convention for EverAlgo operator methods: a method named `aextract` always performs real I/O and must be `await`-ed; a method without the prefix is always synchronous pure compute. (One deliberate exception: `LLMClient.chat` — a caller-injected client Protocol, not an EverAlgo operator — is async without the `a` prefix, mirroring the OpenAI SDK client interface.)
+The `a` prefix is a one-way calling-convention marker: every such name is native async and must be awaited. Most names without the prefix are synchronous, either pure compute or a blocking bridge created with `async_to_sync`; never call a sync bridge from a running event loop. The three tabled historical exceptions are also native async and must be awaited.
 See [Async–sync bridge](async-sync-bridge.md) for the full contract.
 
 ---
@@ -159,10 +165,13 @@ See [Async–sync bridge](async-sync-bridge.md) for the full contract.
 Every I/O operator class binds an `LLMClient` at construction time via `llm=` and holds it as `self._llm`. There is no global default, no scoped context manager, and no per-call `llm=` override. The caller constructs the right client and passes it in.
 
 ```python
+from everalgo.llm import LLMConfig
 from everalgo.llm.providers.openai_compat import OpenAICompatClient
 from everalgo.user_memory import EpisodeExtractor
 
-client = OpenAICompatClient(api_key="sk-...", base_url="https://api.openai.com/v1", model="gpt-4o-mini")
+client = OpenAICompatClient(
+    LLMConfig(model="gpt-4o-mini", api_key="sk-...", base_url="https://api.openai.com/v1")
+)
 extractor = EpisodeExtractor(llm=client)
 episode = await extractor.aextract(memcell, sender_id="u_alice")
 ```

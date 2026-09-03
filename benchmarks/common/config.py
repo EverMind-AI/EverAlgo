@@ -80,7 +80,7 @@ class BenchmarkConfig(BaseModel):
 
     # === Clustering (Stage 1 extract_base → Stage 2 reflect → Stage 4 index cluster path) ===
     # Clustering is always on; these parameters tune its behaviour.
-    # Stage 1 assigns each memcell to a cluster via ``everalgo.clustering.cluster_by_geometry``
+    # Stage 1 assigns each episode to a cluster via ``everalgo.clustering.cluster_by_geometry``
     # (cosine + time-window). Stage 4 turns the cluster state into a cluster index, and Stage 5
     # uses it for 2-level retrieval.
     cluster_similarity_threshold: float = 0.70
@@ -132,7 +132,7 @@ class BenchmarkConfig(BaseModel):
     def from_toml(cls, name: str = "config", *, config_dir: Path | None = None) -> BenchmarkConfig:
         """Load config from a TOML file under ``benchmarks/``.
 
-        Reads ``benchmark.toml`` when no name is given (the single source of truth for all
+        Reads ``config.toml`` when no name is given (the single source of truth for all
         default parameter values). A named config (e.g. ``benchmark_reflection``) overrides
         the defaults with its own values.
 

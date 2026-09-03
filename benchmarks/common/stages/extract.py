@@ -533,7 +533,8 @@ async def run_extract_base_stage(ctx: StageContext) -> StageStats:
 
     Reads conversations from ``ctx.dataset``, runs BoundaryDetector +
     EpisodeExtractor on each, and writes three JSON files per conversation
-    under ``ctx.output_dir``. Errors are isolated per conversation.
+    under ``ctx.output_dir``. Boundary and Episode extraction errors are isolated per conversation;
+    clustering errors propagate because they indicate an invalid artifact contract.
     """
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     stats = StageStats(stage_name="extract")

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "everalgo-agent-memory"
 version = "0.5.0"
-description = "EverAlgo agent memory: AgentCase / AgentSkill extractors and AgentBoundaryDetector facade."
+description = "EverAlgo agent memory: AgentCase, AgentSkill, and AgentProfile extractors plus the AgentBoundaryDetector facade."
 requires-python = ">=3.12"
 license = "Apache-2.0"
 readme = "README.md"

@@ -11,11 +11,11 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 | `everalgo-core` | [`packages/everalgo-core/README.md`](../../packages/everalgo-core/README.md) | `ChatMessage`, `MemCell`, `Episode`, `RankInput`/`RankOutput`, `LLMClient`, `LLMConfig`, `FakeLLMClient` |
 | `everalgo-boundary` | [`packages/everalgo-boundary/README.md`](../../packages/everalgo-boundary/README.md) | `detect_boundaries`, `DetectionResult`, `BoundaryDecision` |
 | `everalgo-clustering` | [`packages/everalgo-clustering/README.md`](../../packages/everalgo-clustering/README.md) | `Cluster`, `cluster_by_geometry`, `cluster_by_llm` |
-| `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `rank.episodic`, `rank.profile`, `rank.case`, `rank.skill`, `rank.fusion`, `rank.weight`, `rank.rerank` |
-| `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `ParsedContent`, image / audio / document / URL parsers (video deferred) |
-| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor` |
-| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `AgentBoundaryDetector`, `AgentCaseExtractor`, `AgentSkillExtractor`, `AgentProfileExtractor`, `CaseSkipReason`, `SkillSkipReason` |
-| `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `aclassify_category`, `KnowledgeMemory`, `CategorySpec` |
+| `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `hybrid`, `agentic`, `cluster`, `maxsim`, `category`, business rankers, `fusion`, `weight`, `rerank` |
+| `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `parse`, `ParsedContent`, `Modality`, `RawFile`; image / audio / document / URL parsers (video deferred) |
+| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `EpisodeReflector`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `OutputLanguage` |
+| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `AgentBoundaryDetector`, three extractors, extraction result / skip reason types, `OpOutcome` |
+| `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `aclassify_category`, `classify_category`; `KnowledgeMemory` / `CategorySpec` live in `everalgo.types` |
 
 ---
 
@@ -38,17 +38,17 @@ from everalgo.types import (
     MemCell,            # boundary-segmented conversation slice; items: list[ConversationItem]
     Episode,            # narrative memory — owner_id, episode, subject, summary, timestamp
     Foresight,          # anticipated future event — owner_id, foresight, evidence, start_time, end_time, duration_days
-    AtomicFact,         # single verifiable assertion — owner_id (str | None), fact, timestamp
+    AtomicFact,         # single verifiable assertion — owner_id (str | None), content, timestamp
     Profile,            # structured user profile — owner_id, summary, timestamp; extra fields via extra="allow"
     AgentCase,          # distilled agent trajectory — id, timestamp, task_intent, approach, quality_score, key_insight
     AgentSkill,         # aggregated skill — id, cluster_id (caller-stamped), name, description, content, confidence
     AgentProfilePatch,  # one section-level SOUL.md / AGENTS.md edit — file, action, section, old_text, new_text
     AgentProfileUpdate, # AgentProfileExtractor result — patches, soul_diff / agents_diff, new_*_md, signals
     AgentProfileSignal, # below-gate implicit signal — caller persists and feeds back as pending_signals
-    KnowledgeMemory,    # extracted knowledge from a file (EXPERIMENTAL)
+    KnowledgeMemory,    # extracted knowledge from a file
     RankInput,          # multi-route recall candidates + cross-memory linkage
     RankOutput,         # ranked memory list
-    ParsedContent,      # multimodal file parsed into structured content (EXPERIMENTAL)
+    ParsedContent,      # multimodal file parsed into structured content
 )
 ```
 

@@ -1,7 +1,7 @@
 """Public data contracts for EverAlgo.
 
-Adding more memory types (AtomicFact, Foresight, Profile, AgentCase, AgentSkill, ClusterState, ...)
-later is a SemVer minor bump for users that import from this module.
+This module re-exports the stable cross-distribution contracts. Adding another public type is a SemVer minor bump for
+users that import from this module.
 """
 
 import logging

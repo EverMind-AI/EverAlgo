@@ -29,10 +29,10 @@ LoCoMo JSON  ───┐
 
 | 阶段 | 输出目录 | 格式 | 使用的 EverAlgo 包 | 外部服务 |
 |---|---|---|---|---|
-| 1 抽取基础 | `stage1_extract_base/` | 每对话 3 个 JSON（memcells / episodes / clusters） | `boundary`, `user-memory` (episode), `clustering` | OpenRouter (`gpt-4.1-mini`), DeepInfra (`Qwen3-Embedding-4B`) |
+| 1 抽取基础 | `stage1_extract_base/` | 每对话 4 个 JSON（memcells / episodes / clusters / stats） | `boundary`, `user-memory` (episode), `clustering` | OpenRouter (`gpt-4.1-mini`), DeepInfra (`Qwen3-Embedding-4B`) |
 | 2 反思 | `stage2_reflect/` | 每对话 1 个 JSON（合并后 episodes） | `user-memory` | OpenRouter (`gpt-4.1-mini`) |
 | 3 充实 | `stage3_enrich/` | 每对话 1 个 JSON（atomic_facts） | `user-memory` (atomic_fact) | OpenRouter (`gpt-4.1-mini`), DeepInfra (`Qwen3-Embedding-4B`) |
-| 4 建索引 | `stage4_index/` | 每对话多个 Pickle（bm25 / emb / cluster_index） | `clustering`（仅 `Cluster` 类型） | DeepInfra (`Qwen3-Embedding-4B`) |
+| 4 建索引 | `stage4_index/` | 每对话 3 个 Pickle（bm25 / emb / cluster_index） | `clustering`（仅 `Cluster` 类型） | 无；复用阶段 1/3 的向量 |
 | 5 检索 | `stage5_search/` | 单个 JSON | `rank`（融合 + MaxSim）| OpenRouter + DeepInfra (`Qwen3-Reranker-4B`) |
 | 6 回答 | `stage6_answer/` | 单个 JSON | — | OpenRouter (`gpt-4.1-mini`) |
 | 7 评估 | `stage7_evaluate/` | 单个 JSON | — | OpenRouter (`gpt-4o-mini`) |
@@ -83,7 +83,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 
 未运行的提取器：`ForesightExtractor` / `ProfileExtractor` 在 stage1 代码里**从未被调用**（也不存在 `enable_foresight_extraction` / `enable_profile_extraction` 这两个开关）。
 
-### 输出：每对话 3 个文件
+### 输出：每对话 4 个文件
 
 #### `memcells_conv_<i>.json` —— 纯消息分组
 
@@ -116,8 +116,12 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 [
   {
     "id": "0",
+    "owner_id": null,
+    "memcell_ids": ["0"],
     "subject": "Caroline reconnects with Melanie",
     "episode": "2023-05-08 03:56 UTC — Caroline and Melanie reconnected after years apart and caught up on each other's lives...",
+    "summary": "Caroline and Melanie reconnected after years apart.",
+    "timestamp": 1683525360000,
     "embeddings": {
       "episode": [0.01, -0.02, "..."],
       "subject": [0.03, 0.01, "..."]
@@ -126,7 +130,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 ]
 ```
 
-字段名是 **`episode`**（算法命名），不是 `content`。没有 `summary` 字段。正文由 LLM 原样产出、代码不做任何拼接（`everalgo.user_memory.episode._build_episode`）。正文里的时间全部由模型书写，属于事件要素，格式由 prompt 约束：带钟点的绝对时间必须标 `UTC`（`2024-03-14 15:00 UTC`），不含钟点的日期无需标注。`timestamp` 字段（ms epoch）另行保存该切片的关闭时间，但**不进答题上下文** —— 答题阶段只取 `subject` 与 `episode` 两个字段（见 `common/stages/answer.py`），所以正文是答题模型能读到的唯一时间来源。
+字段名是 **`episode`**（算法命名），不是 `content`；`summary` 是必填展示摘要。正文和摘要均来自 LLM，代码不拼接时间文本（`everalgo.user_memory.episode._build_episode`）。`timestamp` 字段（ms epoch）另行保存该切片的关闭时间，但**不进答题上下文**——答题阶段只取 `subject` 与 `episode` 两个字段（见 `common/stages/answer.py`），所以正文中的时间线索必须由模型生成。
 
 #### `clusters_conv_<i>.json` —— 簇信息
 
@@ -134,14 +138,18 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 {
   "clusters": [
     {
-      "cluster_id": 0,
-      "episode_ids": ["0", "3", "7"]
+      "id": "cluster_0",
+      "centroid": [0.01, -0.02, "..."],
+      "count": 3,
+      "last_ts": 1683525360000,
+      "episode_ids": ["0", "3", "7"],
+      "preview": ["Episode body..."]
     }
   ],
   "episode_to_cluster": {
-    "0": 0,
-    "3": 0,
-    "7": 0
+    "0": "cluster_0",
+    "3": "cluster_0",
+    "7": "cluster_0"
   }
 }
 ```
@@ -217,29 +225,30 @@ list[AtomicFact { content, episode_id }]
 
 ## 阶段 4 —— 建索引（Index）
 
-对每个对话的实体集合分别建两套检索结构。
+对每个对话的实体集合建立 BM25、Embedding 和 Cluster 三套本地索引。该阶段只读取已计算的向量，不调用 embedding 服务。
 
 ### BM25（关键词检索）
 
-**fact 级索引**：每个 atomic fact 的 `content`、对应 Episode 的 `subject` 各自 tokenize 成一条独立 BM25 document（不拼接、不加权重复），`fact_to_doc_idx` 把每行映射回父 Episode。检索时取一个 doc 所有 fact 行的最高分（MaxSim 聚合）。
+**fact 级索引**：每个 atomic fact 的 `content`、对应 Episode 的 `subject`、Episode 正文前 200 个字符各自 tokenize 成一条独立 BM25 document（不拼接、不加权重复），`fact_to_doc_idx` 把每行映射回父 Episode。检索时取一个 doc 所有行的最高分（MaxSim 聚合）。
 
 ```python
 # extract_searchable_units：每个 unit 一行 doc
 units = list(atomic_fact_contents)   # 每个 fact 一行
 if subject: units.append(subject)
-# 不再有 summary 或 content fallback
+if episode: units.append(episode[:200])
+# 不使用 summary
 # _tokenize：lower -> word_tokenize -> 保留 alpha 且 len>=2 且非停词 -> PorterStemmer
 tokens = ["carolin", "reconnect", "melani", "lgbtq", "support"]
 bm25 = BM25Okapi(fact_corpus)    # 所有 unit 跨所有 Episode 摊平成一个语料
 ```
 
-落盘 `bm25_conv_<i>.pkl`：`{"bm25", "docs": episodes, "fact_to_doc_idx", "index_type": "maxsim"}`，约 200 KB。纯本地计算。
+落盘 `bm25_conv_<i>.pkl`，包含 `bm25`、`docs`、`fact_to_doc_idx`、`index_type` 四个键，约 200 KB。纯本地计算。
 
 ### Embedding（语义检索）
 
-**整个对话 flatten 后批量 embed**（不是「每个 Episode 一次 API」）：把全对话所有待 embed 文本摊平成一个列表，按 `embedding_batch_size=256` 分批、最多 `embedding_concurrent_batches=5` 个批并发、组间 sleep 1s。Stage 1/3 已算过的 embedding 会被复用，跳过重复 embed。
+Stage 4 不执行 embedding。它直接读取 Stage 1 的 Episode 正文/subject 向量和 Stage 3 的 AtomicFact 向量，并转换为 NumPy 数组写入索引。
 
-字段选择 —— **atomic_facts + subject 两者都 embed**：
+索引字段如下；这些向量均由上游阶段预先计算：
 
 ```python
 # 从 atomic_facts_conv_<i>.json 加载 fact embeddings（stage 3 已预计算）
@@ -247,13 +256,13 @@ bm25 = BM25Okapi(fact_corpus)    # 所有 unit 跨所有 Episode 摊平成一个
 # 不存在 summary 或 content fallback
 ```
 
-每个 Episode 存成 `{"doc": episode, "embeddings": {...}}`，`embeddings` 含 `atomic_facts: [ndarray, ...]` + `subject: ndarray`。subject 即使有 atomic_facts 也照样 embed，让 MaxSim 同时覆盖主题级信号。
+每个 Episode 存成 `{"doc_id": episode_id, "embeddings": {...}}`，`embeddings` 可含 `atomic_facts: [ndarray, ...]`、`subject: ndarray` 和 `episode: ndarray`。Stage 5 当前只用 AtomicFact 与 subject 做 MaxSim；Episode 正文向量虽被保存，但不参与当前 dense 打分。
 
 落盘 `emb_conv_<i>.pkl`，约 7~10 MB（每个对话）。**这是磁盘占用的大头。**
 
 ### 为什么 dim=1024 不是 2560
 
-Qwen3-Embedding-4B 是 Matryoshka 模型，DeepInfra 默认返回 2560 维；传 `dimensions=1024` 参数让服务端截断到 1024 维。对齐 the upstream reference 的 `HybridVectorizeConfig.dimensions=1024`，确保 cosine 相似度与 RRF 排名跟 baseline 可逐字节对比。
+Qwen3-Embedding-4B 是 Matryoshka 模型。向量在 Stage 1/3 请求时通过 `dimensions=1024` 截断，Stage 4 仅将这些既有向量装入索引。该维度对齐 the upstream reference 的 `HybridVectorizeConfig.dimensions=1024`。
 
 ### 为什么 atomic_facts 用一组向量、而非合并成一个
 
@@ -365,7 +374,7 @@ LLM 输入：原 query + missing_info + key_information_found，输出 3 个 ref
 | `round1_rerank_top_n` | 10 | R1 rerank 后进充分性检查的窗口 |
 | `response_top_k` | 10 | 最终返回 Top（拼 context 用） |
 | `multi_query_num` | 3 | 第 2 轮改写数 |
-| `max_concurrent_qa` | 20 | QA 并发数（stage 5-7）|
+| `max_concurrent_qa` | 20 | QA 并发数（stage 5-7；来自 `benchmarks/config.toml`）|
 
 ---
 
@@ -374,7 +383,7 @@ LLM 输入：原 query + missing_info + key_information_found，输出 3 个 ref
 **输入**：
 
 - `stage5_search/search_results.json`（每题的 `members`，即检索出的 episode 本地 id 列表）
-- `stage1_extract_base/episodes_*.json`（按 member id 反查完整 Episode）
+- `stage3_enrich/episodes_conv_*.json`（透传最终 Episode，按 member id 反查）
 
 ### 流程（每题一次）
 
@@ -414,7 +423,7 @@ def _extract_final_answer(raw: str) -> str:
     return raw.strip()
 ```
 
-Stage 5 的 `aagentic_retrieve` 以 `top_n=response_top_k=10` 返回，`members` 通常已是 10 条；Stage 6 再按 `response_top_k=10` 截取拼 context。Context 中**有意不渲染原始毫秒 timestamp**（LLM 无法 parse 毫秒 epoch；时间线索靠 `episode` 字段内的日期文本 —— 每条 episode 正文本身以代码拼接的 UTC 时间戳开头，叙述中也可能夹杂 LLM 按 dual-format 规则写下的相对时间解析结果，如「上周五（2023-07-21）」）。
+Stage 5 的 `aagentic_retrieve` 以 `top_n=response_top_k=10` 返回，`members` 通常已是 10 条；Stage 6 再按 `response_top_k=10` 截取拼 context。Context 中**有意不渲染原始毫秒 timestamp**；时间线索只来自 LLM 生成的 `episode` 正文，代码不会给正文自动添加 UTC 时间戳。
 
 ### 输出：`answers.json`
 
@@ -576,7 +585,7 @@ LoCoMo 会触发：`everalgo-boundary` / `everalgo-user-memory`（episode + atom
 不会触发：
 
 - `everalgo-agent-memory` —— agent 轨迹场景，与对话场景正交
-- `everalgo-parser` —— 多模态输入（实验性）
-- `everalgo-knowledge` —— knowledge memory（实验性）
+- `everalgo-parser` —— 多模态文件和 URL 输入；仅 video 路径尚未实现
+- `everalgo-knowledge` —— knowledge memory 抽取
 
 如果未来扩展数据集（如 LongMemEval、PersonaMem），在 `benchmarks/datasets/<name>/` 下放新的 `Dataset` 实现即可，不需要改 `common/`。

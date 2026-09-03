@@ -8,10 +8,10 @@ No API key is needed: all LLM calls are handled by `FakeLLMClient`.
 ## 1. Install
 
 ```bash
-pip install everalgo-user-memory
+pip install everalgo-user-memory everalgo-clustering
 ```
 
-This pulls `everalgo-core` and `everalgo-boundary` automatically.
+`everalgo-user-memory` pulls `everalgo-core` and `everalgo-boundary` automatically. The explicit `everalgo-clustering` install is needed by the example below.
 
 For the monorepo development install, see [Installation](installation.md).
 
@@ -151,7 +151,7 @@ total LLM calls: 5  (expected 5)
 ### The `a`-prefix convention
 
 Methods named `adetect`, `aextract`, `arank`, `aparse` are **native async** — they make real I/O calls (LLM, network) and must be called with `await`.
-Methods without the `a` prefix (`rank`, `rrf`, `count_tokens`) are **synchronous pure-compute** — call them directly.
+Most names without the `a` prefix are **synchronous**. Some (`rrf`, `count_tokens`) are pure compute; others (`extract`, `detect`, `rank`, `parse`) are blocking sync bridges over async I/O and must not run inside an event loop. Three established interfaces are native async despite lacking the prefix: `LLMClient.chat`, `detect_boundaries`, and `cluster_by_llm`; all three must be awaited.
 
 ```python
 # async: always await
@@ -159,6 +159,9 @@ episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alic
 
 # sync: no await
 merged = rank.fusion.rrf(vec_hits, keyword_hits)
+
+# blocking sync bridge: only outside an event loop
+episode = EpisodeExtractor(llm=client).extract(memcell, sender_id="u_alice")
 ```
 
 See [Async–sync bridge](concepts/async-sync-bridge.md) for the full explanation.
@@ -169,32 +172,38 @@ See [Async–sync bridge](concepts/async-sync-bridge.md) for the full explanatio
 For production or experiments with a real model, build an `OpenAICompatClient` and pass it to each extractor:
 
 ```python
+from everalgo.llm import LLMConfig
 from everalgo.llm.providers.openai_compat import OpenAICompatClient
 from everalgo.user_memory import EpisodeExtractor
 
 client = OpenAICompatClient(
-    api_key="sk-...",
-    base_url="https://api.openai.com/v1",
-    model="gpt-4o-mini",
+    LLMConfig(
+        model="gpt-4o-mini",
+        api_key="sk-...",
+        base_url="https://api.openai.com/v1",
+    )
 )
 episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alice")
 ```
 
 The `llm=` argument is bound at construction time. There is no global default — each operator instance holds its own client.
 
-### Two access paths, same class
+### Product facade and low-level primitive
 
-Every operator can be imported via the **product path** (what EverOS uses) or the **physical path** (what algorithm engineers use to iterate on specific modules):
+The product package exposes the scenario facade. The tool package exposes the lower-level boundary function used by facade implementations:
 
 ```python
 # Product path — follow EverOS contracts
 from everalgo.user_memory import BoundaryDetector
 
-# Physical path — edit boundary logic, prompt, tokenize
-from everalgo.boundary.chat import BoundaryDetector
+# Physical module containing that same facade class
+from everalgo.user_memory.boundary import BoundaryDetector
+
+# Low-level async primitive — a function, not the facade class
+from everalgo.boundary import detect_boundaries
 ```
 
-Both import the same class.
+The first two imports resolve to the same class. `everalgo.boundary.chat` does not define `BoundaryDetector`; it contains `detect_boundaries`, `adetect_boundary_step`, and their result types.
 
 ---
 
