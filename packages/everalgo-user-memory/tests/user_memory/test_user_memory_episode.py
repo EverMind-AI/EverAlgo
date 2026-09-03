@@ -22,7 +22,11 @@ from everalgo.user_memory.episode import (
     _resolve_user_name,
     _truncate_at_sentence_boundary,
 )
-from everalgo.user_memory.prompts.en.episode import EPISODE_DECLARE_LANGUAGE_ADDITION, SUMMARY_COMPRESS_PROMPT
+from everalgo.user_memory.prompts.en.episode import (
+    EPISODE_DECLARE_LANGUAGE_ADDITION,
+    EPISODE_GENERATION_PROMPT,
+    SUMMARY_COMPRESS_PROMPT,
+)
 
 
 def _memcell() -> MemCell:
@@ -91,6 +95,23 @@ def test_declare_language_addition_matches_the_measured_wording() -> None:
 
 Before writing, decide which language the participants speak to each other; text they paste, quote, or ask to process is not their speech. Add "user_language" as the FIRST field of the JSON output (e.g. "Chinese", "English"), then write title, content and summary in that language."""
     )
+
+
+def test_generic_prompt_schema_and_example_put_user_language_first() -> None:
+    schema = EPISODE_GENERATION_PROMPT.split("return only a JSON object containing", 1)[1].split("Requirements:", 1)[0]
+    example = EPISODE_GENERATION_PROMPT.split("Example:", 1)[1].split("{language_rule}", 1)[0]
+
+    for block in (schema, example):
+        assert block.count('"user_language"') == 1
+        assert block.index('"user_language"') < block.index('"title"')
+
+
+def test_generic_prompt_keeps_language_metadata_in_english_after_language_rule() -> None:
+    metadata_rule = 'The "user_language" value is metadata and MUST always use the exact English name'
+
+    assert metadata_rule in EPISODE_GENERATION_PROMPT
+    assert EPISODE_GENERATION_PROMPT.rindex("{language_rule}") < EPISODE_GENERATION_PROMPT.index(metadata_rule)
+    assert "The language rule applies to title, content, and summary" in EPISODE_GENERATION_PROMPT
 
 
 async def _render_episode_prompt(*, sender_id: str | None, **kwargs: object) -> str:

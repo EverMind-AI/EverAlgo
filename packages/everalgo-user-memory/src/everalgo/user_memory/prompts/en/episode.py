@@ -14,7 +14,9 @@ Constants:
       summary itself (placeholders ``{language_rule}`` / ``{summary_text}``), returning plain text rather than JSON. Used
       by the width guard in ``episode.py``; its stricter repair target must remain within that guard.
 
-Output schema (both variants): ``{"title": str, "content": str, "summary": str}``; fallback generation adds
+Output schemas: the generic variant emits
+``{"user_language": str, "title": str, "content": str, "summary": str}``; the user-centred variant emits
+``{"title": str, "content": str, "summary": str}``, with fallback generation asking for
 ``user_language`` first through ``EPISODE_DECLARE_LANGUAGE_ADDITION``.
 
 ``summary`` is a display preview of ``content``, and it is listed after ``content`` in every field
@@ -75,8 +77,9 @@ IMPORTANT TIME HANDLING:
 - This dual format supports both absolute and relative time-based questions
 - Every absolute time that states a clock time MUST carry the UTC zone label: write "2024-03-14 15:00 UTC", never "2024-03-14 15:00" and never a bare "15:00". A date with no clock time needs no label — "last Friday (2023-07-21)" is already correct. Clock times quoted from what a speaker said keep their original wording ("at 3:30 PM"), because the speaker's own timezone is unknown
 
-Please generate a structured episodic memory and return only a JSON object containing the following three fields:
+Please generate a structured episodic memory and return only a JSON object containing the following fields:
 {{
+    "user_language": "The exact English name of the language used for title, content, and summary (e.g. Chinese, English, French)",
     "title": "A concise, descriptive title that accurately summarizes the theme (fewer than 20 words; use only as many words as needed)",
     "content": "A concise factual record of the conversation in third-person narrative. It must include all important information: who participated at what time, what was discussed, what decisions were made, what emotions were expressed, and what plans or outcomes were formed. Write it as a chronological account focusing on observable actions and direct statements. Remove redundant expressions and verbose descriptions while preserving all facts, entities (names, dates, locations), and specific details. Keep the content concise without losing key information.",
     "summary": "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). COMPRESS, never restate: do not reuse content's sentences — write shorter new ones that name the main participants and what actually happened, including the outcome or decision reached. Faithfully summarize the content without inventing facts or distorting their meaning. You may omit minor details, but every included detail must remain faithful to the content. Do not refer to the record itself — no 'this conversation', 'the above', 'the user asked'."
@@ -116,12 +119,15 @@ Requirements:
 Example:
 If the conversation start time is "2024-03-14 15:00 UTC (Thursday)" and the conversation is about Caroline planning to go hiking:
 {{
+    "user_language": "English",
     "title": "Caroline Plans an Early Saturday Start for a Mount Rainier Sunrise Hike",
     "content": "Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16) to catch the sunrise and planned to invite friends. She was excited about the trip.",
     "summary": "Caroline planned a sunrise hike at Mount Rainier for the weekend (2024-03-16 to 2024-03-17) and asked for advice. Melanie suggested boots, warm clothing, a flashlight, water and high-energy food. Caroline settled on an early Saturday start and planned to invite friends, excited for the trip."
 }}
 
 {language_rule}
+
+The "user_language" value is metadata and MUST always use the exact English name of the selected language. The language rule applies to title, content, and summary; it does not translate this metadata value.
 
 Return only the JSON object, do not add any other text:
 """
