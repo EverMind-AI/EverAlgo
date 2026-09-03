@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Generic Episode generation now includes `user_language` as the first field in both its output schema and worked example, preventing the model from following a conflicting three-field JSON contract when language inference is enabled.
+
 ## [0.8.0rc5] - 2026-09-02
 
 ### Changed
