@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `ProfileExtractor.aextract_from_episode_texts(episode_texts: Sequence[str], *, timestamp, ...)` is replaced by `aextract_from_episodes(episodes: Sequence[Episode], ...)` (sync bridge `extract_from_episodes`). Each Episode's own `timestamp` is its observation date; the batch may arrive in any order and is sorted internally, each narrative is rendered under its date, and the explicit `timestamp` argument is gone. Passing a non-`Episode` item raises `TypeError`.
+- Profile merging is now time-aware. Every `explicit_info` / `implicit_traits` item carries `observed_at` (epoch ms), the observation date of the source that last established its description; `Profile.timestamp` becomes `max(stored, batch)` and never moves backwards. An UPDATE whose source is older than a stored item can add facts and grounding but can no longer rewrite that item's description or delete it — such operations are dropped with `reason=stale evidence`. This applies to the MemCell path too. Items written before the field existed are read as the stored profile's timestamp; items rewritten by COMPACT / REGROUP take the profile's timestamp; any `observed_at` the model writes is discarded.
+- `aextract_from_episodes` in UPDATE mode splits a batch that straddles the stored `Profile.timestamp` into a historical pass (older Episodes, additions only) followed by a current pass, so one mixed backfill batch costs at most one extra LLM call and cannot let a newer narrative's date vouch for an older narrative's rewrite.
+- Episode Profile prompts explain the per-narrative observation date and, in UPDATE, the rule that older narratives never rewrite newer state; the implicit-trait gate now lets a stored `explicit_info` item stand as one of the two required cross-Episode signals, so single-Episode incremental batches can still ground a trait.
+
 ## [0.8.0rc7] - 2026-09-04
 
 ### Changed

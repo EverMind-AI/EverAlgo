@@ -102,7 +102,7 @@ with the descriptions (`Location` versus `居住地`) — worth knowing if you g
 
 What "leave it out" means depends on the operator. The four reading a raw conversation judge the language from
 what the participants write, which is the 10.2% path above. The three reading already-extracted memory —
-`AtomicFactExtractor.aextract_from_text`, `ProfileExtractor.aextract_from_episode_texts`, and
+`AtomicFactExtractor.aextract_from_text`, `ProfileExtractor.aextract_from_episodes`, and
 `EpisodeReflector.areflect` — instead inherit the language of their input, which is a much easier call for a
 single-language narrative but not free. The Profile Episode-text path and `areflect` can take several episodes,
 so inputs that disagree on language leave the model to pick one; an update inherits the existing Profile or
@@ -183,10 +183,9 @@ class ProfileExtractor:
         output_language: OutputLanguage | str | None = None,   # None → the model infers it
     ) -> Profile: ...
 
-    async def aextract_from_episode_texts(
-        self, episode_texts: Sequence[str], *,
+    async def aextract_from_episodes(
+        self, episodes: Sequence[Episode], *,   # dated narratives, any order; only the ones new to the profile
         owner_id: str,
-        timestamp: int,
         owner_name: str | None = None,     # non-blank name targets the owner; otherwise owner_id
         old_profile: Profile | None = None,
         categories: Sequence[str] | None = None,   # complete current explicit_info category snapshot
@@ -214,9 +213,11 @@ for it — a truncation cut mid-word in English, and in Chinese a verbatim copy 
 
 `EpisodeExtractor` has two modes: pass `sender_id=str` to extract a user-focused episode (uses `USER_EPISODE_GENERATION_PROMPT`); pass `sender_id=None` for a generic whole-memcell episode (uses `EPISODE_GENERATION_PROMPT`).
 
-`ProfileExtractor` accepts either chronological `MemCell` objects through `aextract` or chronological generic/reflected Episode narrative strings through `aextract_from_episode_texts`. The Episode-text path resolves one target from non-blank `owner_name` or falls back to `owner_id`, skips narratives that do not contain that target, and raises before the first LLM call only when none contain it. Its optional `categories` argument is the complete current category snapshot for `explicit_info`: all four processing stages receive the same normalized list, select the most semantically accurate listed match, and may create a concise category when none fits; the list does not constrain `implicit_traits.trait`. Both paths use `old_profile=None` for INIT and an existing Profile for UPDATE; transparent compact and regroup maintenance is shared. See the [Episode-text integration contract](../../docs/api/profile-from-episode-texts.md).
+`ProfileExtractor` accepts either chronological `MemCell` objects through `aextract` or dated generic/reflected `Episode` objects, in any order, through `aextract_from_episodes`. The Episode path resolves one target from non-blank `owner_name` or falls back to `owner_id`, skips narratives that do not contain that target, and raises before the first LLM call only when none contain it. Its optional `categories` argument is the complete current category snapshot for `explicit_info`: all four processing stages receive the same normalized list, select the most semantically accurate listed match, and may create a concise category when none fits; the list does not constrain `implicit_traits.trait`. Both paths use `old_profile=None` for INIT and an existing Profile for UPDATE; transparent compact and regroup maintenance is shared.
 
-All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, and the Episode-text Profile method is exposed as `extract_from_episode_texts(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
+The merge is time-aware. Every profile item carries `observed_at`, the observation date of the narrative that last established it, and `Profile.timestamp` never moves backwards. An Episode observed before an item was established may add facts and evidence but cannot rewrite or delete that item — the rule is stated in the UPDATE prompt and enforced in code — so a backfilled older Episode arriving after a newer one cannot turn the profile back in time. Callers pass only the Episodes new to the profile; a batch that straddles the stored `Profile.timestamp` is split into a historical pass and a current pass. See the [Episode integration contract](../../docs/api/profile-from-episode-texts.md).
+
+All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, and the Episode Profile method is exposed as `extract_from_episodes(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
 
 ## Testing
 

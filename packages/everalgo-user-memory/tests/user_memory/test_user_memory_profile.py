@@ -1709,7 +1709,8 @@ async def test_update_routes_a_label_breach_to_regroup_not_compact() -> None:
     assert "untouched fact" not in calls[1]  # the bystander group is not shown to the regroup call
     ei = cast("list[dict[str, Any]]", profile.explicit_info)  # type: ignore[attr-defined]
     assert {it["category"] for it in ei} == {"half a", "half b", "elsewhere"}
-    assert bystander in ei  # bystander survives byte-for-byte
+    # The bystander survives untouched; a pre-observed_at item only gains the profile's own date.
+    assert {**bystander, "observed_at": old.timestamp} in ei
 
 
 async def test_regroup_drops_malformed_items_and_keeps_the_rest(caplog: pytest.LogCaptureFixture) -> None:
