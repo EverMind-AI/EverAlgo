@@ -1,4 +1,4 @@
-"""Synthesize a user Profile from chronological MemCells or Episode narrative texts."""
+"""Synthesize a user Profile from chronological MemCells or dated Episodes, keeping the profile's timeline."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from asgiref.sync import async_to_sync
 from everalgo.llm.format import format_message_timestamp
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.prompts import render_prompt
-from everalgo.types import MemCell, Profile
+from everalgo.types import Episode, MemCell, Profile
 from everalgo.user_memory._language import (
     COMPACTED_PROFILE_LANGUAGE_RULE,
     EPISODE_PROFILE_INIT_LANGUAGE_RULE,
@@ -63,14 +63,24 @@ _ITEM_WIDTH_BACKSTOP = 250
 # Full-profile compaction fires ONLY on the total cap; per-label breaches (count or width) get a
 # group-scoped regroup instead — see _overcrowded_labels and _regroup. Compaction remains the only
 # path that removes never-was-a-portrait items (UPDATE emits such deletes in ~1 run out of 10).
+#
+# Per-item observation date (epoch ms): the date of the source that last established the item's
+# description. Written by this module only — the model is shown it as a date but any value it echoes
+# back is discarded — so that a narrative observed BEFORE an item was established cannot rewrite or
+# delete it (see _collect_indexed). Without it a backfilled older Episode arriving after a newer one
+# would overwrite the newer state, because the UPDATE prompt otherwise treats every new narrative as
+# the latest word.
+_OBSERVED_AT = "observed_at"
 
 
 class ProfileExtractor:
     """Synthesize one owner-scoped Profile from chronological memory inputs.
 
-    ``aextract`` reads MemCells and silently skips non-ChatMessage items. ``aextract_from_episode_texts``
-    reads generic or reflected Episode narratives, skips items that do not reference the resolved owner,
-    and raises only when none reference that owner. Both inputs must be ordered chronologically.
+    ``aextract`` reads chronologically ordered MemCells and silently skips non-ChatMessage items.
+    ``aextract_from_episodes`` reads dated generic or reflected Episodes in any order, skips items that do not
+    reference the resolved owner, raises only when none reference that owner, and keeps the profile's timeline
+    itself: an Episode observed before the stored profile's newest date can add to the profile but never
+    rewrites or deletes what a later Episode established.
     """
 
     def __init__(self, *, llm: LLMClient) -> None:
@@ -161,25 +171,30 @@ class ProfileExtractor:
 
     extract = async_to_sync(aextract)
 
-    async def aextract_from_episode_texts(
+    async def aextract_from_episodes(
         self,
-        episode_texts: Sequence[str],
+        episodes: Sequence[Episode],
         *,
         owner_id: str,
-        timestamp: int,
         owner_name: str | None = None,
         old_profile: Profile | None = None,
         categories: Sequence[str] | None = None,
         prompt: str | None = None,
         output_language: OutputLanguage | str | None = None,
     ) -> Profile:
-        """Extract one owner-scoped Profile from chronological Episode narratives.
+        """Extract one owner-scoped Profile from dated Episode narratives.
+
+        Each Episode's ``timestamp`` is the observation date of what it narrates. The batch is ordered by that
+        date, every narrative is shown to the model under it, and in UPDATE mode the batch is split around the
+        stored ``Profile.timestamp``: Episodes observed before it are older knowledge that may add facts and
+        evidence but never rewrite or delete what a later Episode established; Episodes observed after it update
+        normally. Callers therefore pass whatever Episodes are new to them, in any order — the profile's timeline
+        is kept here, not upstream.
 
         Args:
-            episode_texts: Non-empty Episode narratives ordered from oldest to newest. Items that do not contain
-                the resolved target reference are excluded from extraction; at least one item must contain it.
+            episodes: Non-empty Episodes with non-blank narratives. Items that do not contain the resolved target
+                reference are excluded from extraction; at least one item must contain it.
             owner_id: Authoritative owner identifier written to ``Profile.owner_id``.
-            timestamp: Unix epoch milliseconds written to ``Profile.timestamp``; normally the newest Episode's.
             owner_name: Optional display name used to select Episode narratives about the owner. A blank or
                 missing name falls back to ``owner_id``.
             old_profile: Existing profile for UPDATE mode; None triggers INIT mode.
@@ -187,67 +202,70 @@ class ProfileExtractor:
                 values are ignored, and exact duplicates are removed in first-seen order. None or an empty
                 result lets the model create concise categories as needed. This does not constrain
                 ``implicit_traits.trait``.
-            prompt: Prompt override for INIT or UPDATE; None uses the matching bundled Episode-text prompt.
+            prompt: Prompt override for INIT or UPDATE; None uses the matching bundled Episode prompt.
             output_language: Language to write the profile in. None makes INIT inherit the Episode language and
                 UPDATE preserve the existing Profile language.
 
         Returns:
-            The extracted or updated Profile.
+            The extracted or updated Profile. ``Profile.timestamp`` is the newest observation date seen so far and
+            never moves backwards; every item carries ``observed_at``, the observation date of the narrative that
+            last established its description.
 
         Raises:
-            TypeError: If ``categories`` is not a sequence of strings or contains a non-string value.
+            TypeError: If an item of ``episodes`` is not an :class:`Episode`, or ``categories`` is not a sequence
+                of strings or contains a non-string value.
             ValueError: If owner or Episode validation fails, ``old_profile`` belongs to another owner, the LLM
                 response is malformed, or ``output_language`` names no supported language.
             LLMError: From the LLM call.
             json.JSONDecodeError: On an unparseable response.
         """
         target_user = _resolve_episode_target(owner_id, owner_name)
-        selected_episode_texts = _select_episode_texts(episode_texts, target_user=target_user)
+        selected = _select_episodes(episodes, target_user=target_user)
         available_categories = _render_available_categories(_normalize_available_categories(categories))
         if old_profile is not None and old_profile.owner_id != owner_id:
             raise ValueError(f"old_profile.owner_id {old_profile.owner_id!r} does not match owner_id {owner_id!r}")
 
         mode = "INIT" if old_profile is None else "UPDATE"
         logger.info(
-            "extracting profile from Episode texts: mode=%s, %d/%d matching episodes, existing explicit=%d "
-            "implicit=%d, output_language=%s",
+            "extracting profile from Episodes: mode=%s, %d/%d matching episodes observed %s..%s, "
+            "existing explicit=%d implicit=%d, output_language=%s",
             mode,
-            len(selected_episode_texts),
-            len(episode_texts),
+            len(selected),
+            len(episodes),
+            format_message_timestamp(selected[0].timestamp),
+            format_message_timestamp(selected[-1].timestamp),
             len(getattr(old_profile, "explicit_info", []) or []) if old_profile else 0,
             len(getattr(old_profile, "implicit_traits", []) or []) if old_profile else 0,
             output_language,
         )
         if old_profile is None:
-            result = await self._init_extract_from_episode_texts(
-                selected_episode_texts,
+            result = await self._init_extract_from_episodes(
+                selected,
                 owner_id=owner_id,
                 target_user=target_user,
-                timestamp=timestamp,
                 available_categories=available_categories,
                 prompt=prompt,
                 output_language=output_language,
             )
         else:
-            result = await self._update_extract_from_episode_texts(
-                selected_episode_texts,
+            result = await self._update_extract_from_episodes(
+                selected,
                 owner_id=owner_id,
                 target_user=target_user,
-                timestamp=timestamp,
                 old_profile=old_profile,
                 available_categories=available_categories,
                 prompt=prompt,
                 output_language=output_language,
             )
         logger.info(
-            "profile extracted from Episode texts: mode=%s -> explicit=%d implicit=%d",
+            "profile extracted from Episodes: mode=%s -> explicit=%d implicit=%d",
             mode,
             len(getattr(result, "explicit_info", []) or []),
             len(getattr(result, "implicit_traits", []) or []),
         )
         return result
 
-    extract_from_episode_texts = async_to_sync(aextract_from_episode_texts)
+    extract_from_episodes = async_to_sync(aextract_from_episodes)
 
     # ------------------------------------------------------------------
     # Private: INIT path
@@ -272,26 +290,26 @@ class ProfileExtractor:
         )
 
         data = await _call_llm_for_profile_init(self._llm, rendered)
-        explicit_info = _dedupe(data["explicit_info"], source="init")
-        implicit_traits = _dedupe(data["implicit_traits"], source="init")
+        observed_at = memcells[-1].timestamp
+        explicit_info = _stamp_observed_at(_dedupe(data["explicit_info"], source="init"), observed_at)
+        implicit_traits = _stamp_observed_at(_dedupe(data["implicit_traits"], source="init"), observed_at)
         summary = _build_summary(explicit_info, implicit_traits)
         return Profile.model_validate(
             {
                 "owner_id": sender_id,
                 "summary": summary,
-                "timestamp": memcells[-1].timestamp,
+                "timestamp": observed_at,
                 "explicit_info": explicit_info,
                 "implicit_traits": implicit_traits,
             }
         )
 
-    async def _init_extract_from_episode_texts(
+    async def _init_extract_from_episodes(
         self,
-        episode_texts: Sequence[str],
+        episodes: Sequence[Episode],
         *,
         owner_id: str,
         target_user: str,
-        timestamp: int,
         available_categories: str,
         prompt: str | None,
         output_language: OutputLanguage | str | None,
@@ -299,20 +317,21 @@ class ProfileExtractor:
         rendered = render_prompt(
             PROFILE_INITIAL_FROM_EPISODE_TEXTS_PROMPT,
             prompt,
-            episode_texts=_render_episode_texts(episode_texts),
+            episode_texts=_render_episodes(episodes),
             target_user=target_user,
             available_categories=available_categories,
             language_rule=build_language_rule(output_language, fallback=EPISODE_PROFILE_INIT_LANGUAGE_RULE),
         )
 
         data = await _call_llm_for_profile_init(self._llm, rendered)
-        explicit_info = _dedupe(data["explicit_info"], source="episode-text-init")
-        implicit_traits = _dedupe(data["implicit_traits"], source="episode-text-init")
+        observed_at = episodes[-1].timestamp
+        explicit_info = _stamp_observed_at(_dedupe(data["explicit_info"], source="episode-init"), observed_at)
+        implicit_traits = _stamp_observed_at(_dedupe(data["implicit_traits"], source="episode-init"), observed_at)
         return Profile.model_validate(
             {
                 "owner_id": owner_id,
                 "summary": _build_summary(explicit_info, implicit_traits),
-                "timestamp": timestamp,
+                "timestamp": observed_at,
                 "explicit_info": explicit_info,
                 "implicit_traits": implicit_traits,
             }
@@ -358,13 +377,53 @@ class ProfileExtractor:
             available_categories=None,
         )
 
-    async def _update_extract_from_episode_texts(
+    async def _update_extract_from_episodes(
         self,
-        episode_texts: Sequence[str],
+        episodes: Sequence[Episode],
         *,
         owner_id: str,
         target_user: str,
-        timestamp: int,
+        old_profile: Profile,
+        available_categories: str,
+        prompt: str | None,
+        output_language: OutputLanguage | str | None,
+    ) -> Profile:
+        """Run UPDATE in up to two passes: Episodes older than the stored profile first, then the rest.
+
+        A pass carries ONE observation date — its newest narrative — and ``_collect_indexed`` judges every
+        rewrite against that date. Mixing an older and a newer narrative in one pass would let the newer one's
+        date vouch for a rewrite the older one actually motivated, so the split is what gives the guard its
+        meaning. Real-time ingestion never has an older half; only backfill and out-of-order delivery do.
+        """
+        historical = [episode for episode in episodes if episode.timestamp < old_profile.timestamp]
+        current = list(episodes[len(historical) :])
+        if historical:
+            logger.info(
+                "profile update split around stored timestamp %s: %d historical, %d current narratives",
+                format_message_timestamp(old_profile.timestamp),
+                len(historical),
+                len(current),
+            )
+        profile = old_profile
+        for batch in (historical, current):
+            if batch:
+                profile = await self._update_pass_from_episodes(
+                    batch,
+                    owner_id=owner_id,
+                    target_user=target_user,
+                    old_profile=profile,
+                    available_categories=available_categories,
+                    prompt=prompt,
+                    output_language=output_language,
+                )
+        return profile
+
+    async def _update_pass_from_episodes(
+        self,
+        episodes: Sequence[Episode],
+        *,
+        owner_id: str,
+        target_user: str,
         old_profile: Profile,
         available_categories: str,
         prompt: str | None,
@@ -374,7 +433,7 @@ class ProfileExtractor:
             PROFILE_UPDATE_FROM_EPISODE_TEXTS_PROMPT,
             prompt,
             current_profile=_render_profile_for_episode_update(old_profile),
-            episode_texts=_render_episode_texts(episode_texts),
+            episode_texts=_render_episodes(episodes),
             target_user=target_user,
             available_categories=available_categories,
             language_rule=build_language_rule(output_language, fallback=EXISTING_PROFILE_LANGUAGE_RULE),
@@ -382,7 +441,7 @@ class ProfileExtractor:
 
         data = await _call_llm_for_profile_update(self._llm, rendered)
         operations = data["operations"]
-        merged_profile = _apply_ops(old_profile, operations, timestamp=timestamp)
+        merged_profile = _apply_ops(old_profile, operations, timestamp=episodes[-1].timestamp)
         return await self._maintain_updated_profile(
             merged_profile,
             operation_count=len(operations),
@@ -495,7 +554,7 @@ class ProfileExtractor:
             count=len(group),
             max_per_category=_PROFILE_MAX_PER_CATEGORY,
             other_labels=", ".join(other_labels) if other_labels else "(none)",
-            items_text=json.dumps(group, ensure_ascii=False, indent=2),
+            items_text=json.dumps(_without_observed_at(group), ensure_ascii=False, indent=2),
             target_user=display_name,
             target_user_id=sender_id,
             available_categories=available_categories or "[]",
@@ -507,7 +566,8 @@ class ProfileExtractor:
         dropped_malformed = len(returned) - len(kept)
         if dropped_malformed:
             logger.warning("profile regroup dropped %d malformed item(s) label=%s", dropped_malformed, label)
-        new_bucket = _dedupe([*rest, *kept], source="regroup")
+        # Same as compaction: a regrouped item has no traceable origin, so it takes the profile's own date.
+        new_bucket = _dedupe([*rest, *_stamp_observed_at(kept, profile.timestamp)], source="regroup")
         still = sum(
             1 for it in new_bucket if (lbl := _item_label(it, label_field)) is not None and _normalize(lbl) == wanted
         )
@@ -544,7 +604,10 @@ class ProfileExtractor:
         implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
         total_items = len(explicit_info) + len(implicit_traits)
         profile_text = json.dumps(
-            {"explicit_info": explicit_info, "implicit_traits": implicit_traits},
+            {
+                "explicit_info": _without_observed_at(explicit_info),
+                "implicit_traits": _without_observed_at(implicit_traits),
+            },
             ensure_ascii=False,
             indent=2,
         )
@@ -562,8 +625,10 @@ class ProfileExtractor:
         )
 
         data = await _call_llm_for_profile_compact(self._llm, rendered)
-        new_explicit = _dedupe(data["explicit_info"], source="compact")
-        new_implicit = _dedupe(data["implicit_traits"], source="compact")
+        # Rewritten items cannot be traced back to the ones they came from, so they take the profile's own
+        # date: the newest known, which keeps them protected from older narratives.
+        new_explicit = _stamp_observed_at(_dedupe(data["explicit_info"], source="compact"), profile.timestamp)
+        new_implicit = _stamp_observed_at(_dedupe(data["implicit_traits"], source="compact"), profile.timestamp)
         logger.info(
             "profile compacted: %d -> %d items",
             total_items,
@@ -665,22 +730,24 @@ def _resolve_episode_target(owner_id: str, owner_name: str | None) -> str:
     return owner_name.strip() if owner_name and owner_name.strip() else owner_id.strip()
 
 
-def _select_episode_texts(episode_texts: Sequence[object], *, target_user: str) -> tuple[str, ...]:
-    """Validate Episode inputs and retain only narratives that reference the target user."""
-    if isinstance(episode_texts, (str, bytes)) or not episode_texts:
-        raise ValueError("episode_texts must be a non-empty sequence of strings")
+def _select_episodes(episodes: Sequence[object], *, target_user: str) -> tuple[Episode, ...]:
+    """Validate the batch, keep the Episodes whose narrative references the target user, order them by date."""
+    if isinstance(episodes, (str, bytes)) or not episodes:
+        raise ValueError("episodes must be a non-empty sequence of Episode")
 
     normalized_target = _normalize(target_user)
-    selected: list[str] = []
-    for index, episode_text in enumerate(episode_texts):
-        if not isinstance(episode_text, str) or not episode_text.strip():
-            raise ValueError(f"episode_texts[{index}] must be a non-blank string")
-        if normalized_target in _normalize(episode_text):
-            selected.append(episode_text)
+    selected: list[Episode] = []
+    for index, episode in enumerate(episodes):
+        if not isinstance(episode, Episode):
+            raise TypeError(f"episodes[{index}] must be an Episode")
+        if not episode.episode.strip():
+            raise ValueError(f"episodes[{index}].episode must be a non-blank string")
+        if normalized_target in _normalize(episode.episode):
+            selected.append(episode)
 
     if not selected:
-        raise ValueError(f"no episode_texts reference target user {target_user!r}")
-    return tuple(selected)
+        raise ValueError(f"no episodes reference target user {target_user!r}")
+    return tuple(sorted(selected, key=lambda episode: episode.timestamp))
 
 
 def _normalize_available_categories(categories: object) -> tuple[str, ...]:
@@ -709,9 +776,11 @@ def _render_available_categories(categories: Sequence[str]) -> str:
     return json.dumps(list(categories), ensure_ascii=False, indent=2)
 
 
-def _render_episode_texts(episode_texts: Sequence[str]) -> str:
-    """Join validated Episode narratives without adding synthetic identifiers or numbering."""
-    return "\n\n---\n\n".join(episode_text.strip() for episode_text in episode_texts)
+def _render_episodes(episodes: Sequence[Episode]) -> str:
+    """Join narratives oldest to newest, each under its observation date; no synthetic identifiers or numbering."""
+    return "\n\n---\n\n".join(
+        f"[{format_message_timestamp(episode.timestamp)} UTC]\n{episode.episode.strip()}" for episode in episodes
+    )
 
 
 def _user_senders(memcells: Sequence[MemCell]) -> set[str]:
@@ -755,8 +824,7 @@ def _render_conversation(memcells: Sequence[MemCell]) -> str:
 
 def _render_profile_for_update(profile: Profile) -> str:
     """Render the existing profile for the UPDATE prompt: label inventory first, then indexed JSON."""
-    explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
-    implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
+    explicit_info, implicit_traits = _dated_buckets(profile)
     return "\n".join(
         (_render_label_inventory(explicit_info, implicit_traits), _render_indexed_items(explicit_info, implicit_traits))
     )
@@ -764,9 +832,19 @@ def _render_profile_for_update(profile: Profile) -> str:
 
 def _render_profile_for_episode_update(profile: Profile) -> str:
     """Render indexed items without treating stored category names as preferred classification choices."""
-    explicit_info: list[Any] = list(getattr(profile, "explicit_info", []) or [])
-    implicit_traits: list[Any] = list(getattr(profile, "implicit_traits", []) or [])
-    return _render_indexed_items(explicit_info, implicit_traits)
+    return _render_indexed_items(*_dated_buckets(profile))
+
+
+def _dated_buckets(profile: Profile) -> tuple[list[Any], list[Any]]:
+    """The profile's two buckets with every item dated, exactly as ``_apply_ops`` will judge them.
+
+    Rendering and merging must agree: an item the model sees without a date is one it cannot reason about, and
+    an item the guard dates differently from what the model saw is a rule the model could not have followed.
+    """
+    return (
+        _fill_observed_at(list(getattr(profile, "explicit_info", []) or []), profile.timestamp),
+        _fill_observed_at(list(getattr(profile, "implicit_traits", []) or []), profile.timestamp),
+    )
 
 
 def _render_label_inventory(explicit_info: list[Any], implicit_traits: list[Any]) -> str:
@@ -803,11 +881,70 @@ def _render_indexed_items(explicit_info: list[Any], implicit_traits: list[Any]) 
     """Render both buckets as ``[i] {json}`` lines — the numbering every op index resolves against."""
     parts: list[str] = ["=== explicit_info ==="]
     for i, item in enumerate(explicit_info):
-        parts.append(f"[{i}] {json.dumps(item, ensure_ascii=False)}")
+        parts.append(f"[{i}] {_render_item(item)}")
     parts.append("=== implicit_traits ===")
     for i, item in enumerate(implicit_traits):
-        parts.append(f"[{i}] {json.dumps(item, ensure_ascii=False)}")
+        parts.append(f"[{i}] {_render_item(item)}")
     return "\n".join(parts)
+
+
+def _render_item(item: Any) -> str:
+    """One item as JSON, with ``observed_at`` shown as the date the model can compare against narrative dates."""
+    if isinstance(item, dict):
+        item = cast("dict[str, Any]", item)
+        observed_at = item.get(_OBSERVED_AT)
+        if _is_timestamp(observed_at):
+            item = {**item, _OBSERVED_AT: f"{format_message_timestamp(observed_at)} UTC"}
+    return json.dumps(item, ensure_ascii=False)
+
+
+def _is_timestamp(value: object) -> bool:
+    """True for an epoch-ms int; ``bool`` is an int subclass and is excluded."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _stamp_observed_at(items: list[Any], observed_at: int) -> list[Any]:
+    """Copies of the dict items with ``observed_at`` SET to ``observed_at``, whatever the model wrote there."""
+    return [
+        {**cast("dict[str, Any]", item), _OBSERVED_AT: observed_at} if isinstance(item, dict) else item
+        for item in items
+    ]
+
+
+def _fill_observed_at(items: list[Any], observed_at: int) -> list[Any]:
+    """Copies of the dict items with a missing or malformed ``observed_at`` set to ``observed_at``.
+
+    Profiles written before the field existed carry none; their items take the profile's own date, the newest
+    knowledge they can be assumed to reflect.
+    """
+    return [
+        item
+        if not isinstance(item, dict) or _is_timestamp(cast("dict[str, Any]", item).get(_OBSERVED_AT))
+        else {**cast("dict[str, Any]", item), _OBSERVED_AT: observed_at}
+        for item in items
+    ]
+
+
+def _without_observed_at(items: list[Any]) -> list[Any]:
+    """Copies of the dict items with ``observed_at`` removed, for prompts that rewrite items rather than date them."""
+    return [
+        {k: v for k, v in cast("dict[str, Any]", item).items() if k != _OBSERVED_AT} if isinstance(item, dict) else item
+        for item in items
+    ]
+
+
+def _is_stale_for(item: Any, observed_at: int) -> bool:
+    """True when ``observed_at`` is earlier than the date that established ``item``: older knowledge, no rewrites."""
+    if not isinstance(item, dict):
+        return False
+    established = cast("dict[str, Any]", item).get(_OBSERVED_AT)
+    return isinstance(established, int) and not isinstance(established, bool) and observed_at < established
+
+
+def _changes_description(item: dict[str, Any], patch: dict[str, Any]) -> bool:
+    """True when ``patch`` states a different fact than ``item``; grounding-only patches are not rewrites."""
+    proposed = _identity_key(patch)
+    return proposed is not None and proposed != _identity_key(item)
 
 
 @dataclass
@@ -828,34 +965,39 @@ def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: in
     widen the bound an out-of-range index is checked against. Ops that fail validation are dropped
     with a warning instead of landing on a neighbouring item.
 
+    ``timestamp`` is the observation date of the source the ops came from. It stamps every added item and every
+    rewritten description, and it is what an update or delete is judged against: an item established by a
+    LATER source is not rewritten or deleted on the strength of this one. The merged profile's own timestamp
+    never moves backwards.
+
     Args:
         old_profile: Profile the ops were generated against; supplies the index numbering.
         ops: Raw ``operations`` payload from the LLM, unvalidated.
-        timestamp: Timestamp for the merged Profile, normally the newest MemCell's.
+        timestamp: Observation date (epoch ms) of the source batch, normally its newest MemCell's or Episode's.
 
     Returns:
         A new Profile; ``old_profile`` is left untouched.
     """
-    buckets = {
-        "explicit_info": list(getattr(old_profile, "explicit_info", []) or []),
-        "implicit_traits": list(getattr(old_profile, "implicit_traits", []) or []),
-    }
-    collected = _collect_ops(ops, buckets)
-    explicit_info = _apply_bucket_ops(buckets["explicit_info"], collected["explicit_info"])
-    implicit_traits = _apply_bucket_ops(buckets["implicit_traits"], collected["implicit_traits"])
+    explicit_items, implicit_items = _dated_buckets(old_profile)
+    buckets = {"explicit_info": explicit_items, "implicit_traits": implicit_items}
+    collected = _collect_ops(ops, buckets, observed_at=timestamp)
+    explicit_info = _apply_bucket_ops(buckets["explicit_info"], collected["explicit_info"], observed_at=timestamp)
+    implicit_traits = _apply_bucket_ops(buckets["implicit_traits"], collected["implicit_traits"], observed_at=timestamp)
 
     return Profile.model_validate(
         {
             "owner_id": old_profile.owner_id,
             "summary": _build_summary(explicit_info, implicit_traits),
-            "timestamp": timestamp,
+            "timestamp": max(old_profile.timestamp, timestamp),
             "explicit_info": explicit_info,
             "implicit_traits": implicit_traits,
         }
     )
 
 
-def _collect_ops(ops: list[dict[str, Any]], buckets: dict[str, list[Any]]) -> dict[str, _BucketOps]:
+def _collect_ops(
+    ops: list[dict[str, Any]], buckets: dict[str, list[Any]], *, observed_at: int
+) -> dict[str, _BucketOps]:
     """Group ops by bucket, validating each against ``buckets`` without modifying it.
 
     ``buckets`` doubles as the bucket-name whitelist, so an unrecognised ``type`` cannot fall through
@@ -872,7 +1014,7 @@ def _collect_ops(ops: list[dict[str, Any]], buckets: dict[str, list[Any]]) -> di
         elif action == "add":
             _collect_add(op, collected[op_type], items=buckets[op_type], label_field=_LABEL_FIELDS[op_type])
         elif action in ("update", "delete"):
-            _collect_indexed(op, collected[op_type], items=buckets[op_type])
+            _collect_indexed(op, collected[op_type], items=buckets[op_type], observed_at=observed_at)
         else:
             _log_rejected_op(op, "unknown action")
 
@@ -896,6 +1038,7 @@ def _collect_add(op: dict[str, Any], slot: _BucketOps, *, items: list[Any], labe
         _log_rejected_op(op, "data is not an object")
         return
     item = cast("dict[str, Any]", data)
+    item.pop(_OBSERVED_AT, None)  # code-owned; stamped in _apply_bucket_ops
     if _identity_key(item) is None:
         _log_rejected_op(op, "missing description")
         return
@@ -952,14 +1095,23 @@ def _overcrowded_labels(explicit_info: list[Any], implicit_traits: list[Any]) ->
     return flagged
 
 
-def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: list[Any]) -> None:
-    """Queue an update or delete whose index falls inside the original snapshot."""
+def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: list[Any], observed_at: int) -> None:
+    """Queue an update or delete whose index falls inside the original snapshot.
+
+    ``observed_at`` is the source batch's date. Against an item established later than that, a delete or a
+    description rewrite is stale evidence and is dropped — the later source already settled the current state
+    — while a grounding-only update still lands, since more evidence for a fact is never wrong.
+    """
     idx = op.get("index")
-    # bool is an int subclass, so a JSON `true` would otherwise address item 1.
-    if not isinstance(idx, int) or isinstance(idx, bool) or not 0 <= idx < len(items):
+    if not _is_timestamp(idx) or not 0 <= cast("int", idx) < len(items):
         _log_rejected_op(op, "index out of range")
         return
+    idx = cast("int", idx)
+    stale = _is_stale_for(items[idx], observed_at)
     if op.get("action") == "delete":
+        if stale:
+            _log_rejected_op(op, "stale evidence")
+            return
         slot.deletes.add(idx)
         return
     data = op.get("data")
@@ -969,8 +1121,13 @@ def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: list[Any]) 
     if not isinstance(items[idx], dict):
         _log_rejected_op(op, "target item is not an object")
         return
+    patch = cast("dict[str, Any]", data)
+    patch.pop(_OBSERVED_AT, None)  # code-owned; re-stamped in _apply_bucket_ops when the description changes
+    if stale and _changes_description(cast("dict[str, Any]", items[idx]), patch):
+        _log_rejected_op(op, "stale evidence")
+        return
     # An update is a partial merge, so two of them on one index accumulate rather than replace.
-    slot.updates[idx] = {**slot.updates.get(idx, {}), **cast("dict[str, Any]", data)}
+    slot.updates[idx] = {**slot.updates.get(idx, {}), **patch}
 
 
 def _drop_updates_superseded_by_delete(slot: _BucketOps) -> None:
@@ -984,17 +1141,22 @@ def _drop_updates_superseded_by_delete(slot: _BucketOps) -> None:
         logger.warning("profile update op rejected: action=update index=%d reason=superseded by delete", idx)
 
 
-def _apply_bucket_ops(items: list[Any], bucket_ops: _BucketOps) -> list[Any]:
+def _apply_bucket_ops(items: list[Any], bucket_ops: _BucketOps, *, observed_at: int) -> list[Any]:
     """Apply one bucket's ops: patch by original index, drop deletes, then append the new items.
 
     Deletes are removed in a single filtering pass rather than by repeated ``pop``, which is what kept
     the surviving indices aligned with the numbering every op was validated against. Every index here
-    was validated during collection, including that the item it addresses is an object.
+    was validated during collection, including that the item it addresses is an object. A rewritten
+    description and every added item take ``observed_at``; a grounding-only patch keeps the item's date.
     """
     for idx, patch in bucket_ops.updates.items():
-        items[idx] = {**cast("dict[str, Any]", items[idx]), **patch}
+        current = cast("dict[str, Any]", items[idx])
+        merged = {**current, **patch}
+        if _changes_description(current, patch):
+            merged[_OBSERVED_AT] = observed_at
+        items[idx] = merged
     kept = [item for i, item in enumerate(items) if i not in bucket_ops.deletes]
-    kept.extend(bucket_ops.adds)
+    kept.extend(_stamp_observed_at(bucket_ops.adds, observed_at))
     return _dedupe(kept, source="update")
 
 
