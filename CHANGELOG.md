@@ -17,10 +17,16 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.8.0rc7 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.8.0rc8 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [everalgo-user-memory/0.8.0rc8] - 2026-09-08
+
+Profile extraction from Episodes becomes time-aware. **Breaking:** `ProfileExtractor.aextract_from_episode_texts(Sequence[str], *, timestamp)` is replaced by `aextract_from_episodes(Sequence[Episode])`, so every narrative keeps its own observation date. Each profile item now carries `observed_at`, `Profile.timestamp` never moves backwards, and an Episode observed before an item was established can add facts and evidence but can no longer rewrite or delete that item — enforced in code, not only in the prompt. Callers pass only the Episodes new to the profile; a batch that straddles the stored timestamp runs as a historical pass followed by a current pass. Motivated by an EverOS backfill in which older Episodes delivered after newer ones overwrote the newer state.
+
+Detail in [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md).
 
 ## [everalgo-user-memory/0.8.0rc7] - 2026-09-04
 

@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0rc8] - 2026-09-08
+
 ### Changed
 
 - **Breaking:** `ProfileExtractor.aextract_from_episode_texts(episode_texts: Sequence[str], *, timestamp, ...)` is replaced by `aextract_from_episodes(episodes: Sequence[Episode], ...)` (sync bridge `extract_from_episodes`). Each Episode's own `timestamp` is its observation date; the batch may arrive in any order and is sorted internally, each narrative is rendered under its date, and the explicit `timestamp` argument is gone. Passing a non-`Episode` item raises `TypeError`.
@@ -278,7 +280,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc7...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc8...HEAD
+[0.8.0rc8]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc7...everalgo-user-memory/v0.8.0rc8
 [0.8.0rc7]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc6...everalgo-user-memory/v0.8.0rc7
 [0.8.0rc6]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc5...everalgo-user-memory/v0.8.0rc6
 [0.8.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc4...everalgo-user-memory/v0.8.0rc5
