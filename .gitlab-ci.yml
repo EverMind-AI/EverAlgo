@@ -107,15 +107,16 @@ pytest:
 # Release: publish ONE distribution to PyPI when a `everalgo-<dist>/v<semver>` tag is pushed.
 # Auth is PyPI Trusted Publishing over GitLab OIDC — NO long-lived token is stored.
 #
-# One-time prerequisites (NOT done by this file; require a PyPI project owner):
-#   1. Add a GitLab Trusted Publisher for each distribution on PyPI:
+# Prerequisites:
+#   1. A PyPI project owner must add a GitLab Trusted Publisher for each distribution:
 #      https://docs.pypi.org/trusted-publishers/adding-a-publisher/
-#   2. The 0.2.0 version bump must land first — this job publishes whatever version the tag names.
+#   2. The version bump must land before tagging. This job builds the version declared in pyproject.toml
+#      and does not validate that it matches the version encoded in CI_COMMIT_TAG.
 #
 # Mechanism reference (GitLab id_tokens + twine OIDC exchange):
 #   https://docs.pypi.org/trusted-publishers/using-a-publisher/
-# UNVERIFIED end-to-end: the OIDC handshake must be validated with one real tag push before
-# this is relied on. uv has no documented GitLab trusted-publishing path, hence twine is used.
+# Trusted Publishing has been verified end-to-end by prior release-tag pipelines. uv has no
+# documented GitLab trusted-publishing path, hence twine is used.
 # ---------------------------------------------------------------------------
 publish:
   stage: publish

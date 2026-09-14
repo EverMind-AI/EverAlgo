@@ -20,7 +20,13 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-user-memory` | 0.8.0rc8 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.1.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.2.0rc1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [everalgo-knowledge/0.2.0rc1] - 2026-09-14
+
+Knowledge extraction now caps a single atom at 20,000 tokens before assembling 80,000-token LLM batches. Oversized Markdown tables and lists split on line boundaries, table headers repeat across pieces, and block ids remain dense so downstream topic references preserve their positional contract. This release candidate fixes the production failure where a table-heavy document collapsed into one 270,000-token request; ordinary documents below the cap retain byte-identical atomization.
+
+Detail in [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md).
 
 ## [everalgo-user-memory/0.8.0rc8] - 2026-09-08
 
