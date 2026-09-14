@@ -861,3 +861,32 @@ def test_episode_regroup_preserves_bucket_and_grounding_contracts() -> None:
     """Single-bucket regroup cannot manufacture content or move an item to the unseen bucket."""
     assert "Never change an item's bucket" in PROFILE_REGROUP_FROM_EPISODE_TEXTS_PROMPT
     assert "shown items support" in PROFILE_REGROUP_FROM_EPISODE_TEXTS_PROMPT
+
+
+async def test_historical_pass_carries_its_own_rule_and_the_current_pass_does_not() -> None:
+    """A batch straddling the stored timestamp renders the historical-pass rule only for the older half."""
+    from everalgo.user_memory.prompts.en.profile_from_episode_texts import HISTORICAL_PASS_RULE
+
+    fake = FakeLLMClient(responses=[json.dumps({"operations": []}), json.dumps({"operations": []})])
+    old = Profile.model_validate(
+        {
+            "owner_id": _OWNER_ID,
+            "summary": "",
+            "timestamp": 1_800_000_000_000,
+            "explicit_info": [],
+            "implicit_traits": [],
+        }
+    )
+    await ProfileExtractor(llm=fake).aextract_from_episodes(
+        [
+            _episode("Alice moved.", timestamp=1_900_000_000_000),
+            _episode("Alice studied.", timestamp=1_700_000_000_000),
+        ],
+        owner_id=_OWNER_ID,
+        owner_name=_OWNER_NAME,
+        old_profile=old,
+    )
+    assert fake.call_count == 2
+    first, second = _prompt(fake, 0), _prompt(fake, 1)
+    assert HISTORICAL_PASS_RULE in first and "{pass_rule}" not in first
+    assert HISTORICAL_PASS_RULE not in second and "{pass_rule}" not in second

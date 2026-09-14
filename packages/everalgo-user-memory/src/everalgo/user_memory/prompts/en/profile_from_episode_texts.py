@@ -32,6 +32,11 @@ _EPISODE_PRIORITY_RULES = """\
 Do not generate an implicit trait merely because the input is detailed or because an output with both buckets looks richer."""
 
 
+HISTORICAL_PASS_RULE = """\
+5. **Every narrative in this batch is older than everything on file.** A dimension that already holds a value was settled by a later narrative — leave it alone, whatever this batch says about it: do not add its earlier value as a new item. Add only facts for dimensions that have no value yet, and attach additional evidence to existing items where the narrative supports them."""
+"""Appended to the UPDATE prompt only for the historical pass (see ``_update_extract_from_episodes``); the current pass gets an empty ``{pass_rule}``."""
+
+
 PROFILE_INITIAL_FROM_EPISODE_TEXTS_PROMPT = (
     """
 {language_rule}
@@ -100,6 +105,7 @@ You are a user-profile updater. A stored profile and new Episode narratives are 
 2. **Keep an item internally consistent**: fields you omit from an "update" keep their stored values, so when you rewrite a "description" carry its matching grounding field ("evidence" or "basis") in the same operation — otherwise the item asserts one thing while its grounding supports another.
 3. **Add versus update is decided by the FACT.** Before "add", scan the stored items for the same fact under any wording — found means "update" that item. Not found means "add". For every explicit_info item an operation adds or updates, assign its category by the same available-category rule; this includes an update that otherwise changes only wording or grounding.
 4. **Older narratives never rewrite newer state.** Every stored item shows observed_at, the date of the narrative that last established its description, and every narrative shows its own date. A narrative dated before an item's observed_at is older knowledge about this person: it may "add" a fact not yet on file and may "update" that item with additional evidence, but it must not rewrite the item's description or "delete" it — a later narrative already established the current state. The system maintains observed_at and discards operations that break this rule; never write observed_at yourself.
+{pass_rule}
 
 【Output】
 """
