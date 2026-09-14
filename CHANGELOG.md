@@ -17,7 +17,7 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.8.0rc8 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.8.0rc9 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.2.0rc1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
@@ -27,6 +27,12 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 Knowledge extraction now caps a single atom at 20,000 tokens before assembling 80,000-token LLM batches. Oversized Markdown tables and lists split on line boundaries, table headers repeat across pieces, and block ids remain dense so downstream topic references preserve their positional contract. This release candidate fixes the production failure where a table-heavy document collapsed into one 270,000-token request; ordinary documents below the cap retain byte-identical atomization.
 
 Detail in [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md).
+
+## [everalgo-user-memory/0.8.0rc9] - 2026-09-14
+
+The UPDATE historical pass gets a rule of its own. Rule 4 already stopped an older narrative from rewriting newer state, and the code discards operations that try — but it still permitted adding "a fact not yet on file", which let a backfilled narrative reintroduce a superseded value as a sibling of the current one (a March narrative saying Beijing landing next to a stored Hangzhou established in August). The historical pass knows every narrative in it predates the stored profile, so it now withdraws that permission for dimensions that already hold a value; only dimensions with no value yet are added, and existing items may still gain evidence. The current pass is unaffected. **This RC's benefit is model-dependent** — measured as an improvement on `glm-5.3-flash` and a regression on `gemini-3.1-flash-lite`, so a consumer pinning it should move to the former in the same change.
+
+Detail in [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md).
 
 ## [everalgo-user-memory/0.8.0rc8] - 2026-09-08
 
