@@ -6,9 +6,11 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0rc9] - 2026-09-14
+
 ### Changed
 
-- The UPDATE historical pass now carries a rule of its own: a dimension that already holds a value is left alone and its earlier value is never added as a new item, so a backfilled narrative can no longer reintroduce a superseded value as a sibling of the current one. Only dimensions with no value yet are added, and existing items may still gain evidence. The current pass renders an empty rule slot and is byte-identical to before.
+- The UPDATE historical pass now carries a rule of its own: a dimension that already holds a value is left alone and its earlier value is never added as a new item, so a backfilled narrative can no longer reintroduce a superseded value as a sibling of the current one. Only dimensions with no value yet are added, and existing items may still gain evidence. The current pass renders an empty rule slot, so its instructions are unchanged.
 
 ## [0.8.0rc8] - 2026-09-08
 
@@ -284,7 +286,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc8...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc9...HEAD
+[0.8.0rc9]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc8...everalgo-user-memory/v0.8.0rc9
 [0.8.0rc8]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc7...everalgo-user-memory/v0.8.0rc8
 [0.8.0rc7]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc6...everalgo-user-memory/v0.8.0rc7
 [0.8.0rc6]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc5...everalgo-user-memory/v0.8.0rc6
