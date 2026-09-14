@@ -22,6 +22,8 @@ from functools import lru_cache
 import tiktoken
 
 __all__ = [
+    "DEFAULT_MAX_TOKENS_PER_ATOM",
+    "DEFAULT_MAX_TOKENS_PER_BATCH",
     "TABLE_END_MARKER",
     "TABLE_START_MARKER",
     "format_numbered_paragraphs",
@@ -40,6 +42,14 @@ _O200K_ENCODING_NAME = "o200k_base"
 # Default token budget per LLM-window batch. 80K leaves headroom on a 128K-context
 # model after the topic-extraction prompt + JSON response. Tunable per call.
 DEFAULT_MAX_TOKENS_PER_BATCH = 80_000
+
+# Ceiling for a single atom. The table / list merge rules below are unbounded by
+# design — a table is most useful to the segmenter as one unit — so a page that is
+# mostly one table used to collapse into a single atom that no batch budget could
+# contain, and the whole document went to the model in one over-budget prompt.
+# This cap is deliberately loose: it never fires on an ordinary table and only
+# rescues the pathological case.
+DEFAULT_MAX_TOKENS_PER_ATOM = DEFAULT_MAX_TOKENS_PER_BATCH // 4
 
 
 @lru_cache(maxsize=1)
@@ -111,7 +121,100 @@ def _consume_list_items(lines: list[str], i: int) -> tuple[str, int]:
     return "\n".join(list_lines), j
 
 
-def split_content_to_blocks(content: str) -> list[tuple[int, str]]:
+_MAX_TOKENS_PER_CHAR = 4
+"""Hard upper bound on tokens per character: 4 UTF-8 bytes max, 1 token per byte max."""
+
+_TABLE_SEPARATOR_CHARS = set("-: |")
+
+
+def _table_header(lines: list[str]) -> list[str]:
+    """Return the ``[header, separator]`` rows when ``lines`` opens a markdown table."""
+    if len(lines) >= 2 and lines[0].lstrip().startswith("|"):
+        second = lines[1].strip()
+        if second.startswith("|") and set(second) <= _TABLE_SEPARATOR_CHARS:
+            return lines[:2]
+    return []
+
+
+def _split_long_line(text: str, max_tokens: int) -> list[str]:
+    """Split a single line that alone exceeds ``max_tokens``, on CHARACTER boundaries.
+
+    Slicing the *token* list instead would cut a multi-token character in half, and
+    decoding the halves independently yields U+FFFD on both sides — measured on a
+    66,000-character CJK line, which came back 66,006 characters with mojibake at
+    every seam. Character slices concatenate back to the original exactly.
+    """
+    enc = _get_tokenizer()
+    tokens_per_char = len(enc.encode(text)) / len(text)
+    # 0.9 leaves margin for a denser stretch than the whole-line average.
+    window = max(1, int(max_tokens / tokens_per_char * 0.9))
+
+    pieces: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + window, len(text))
+        while end - start > 1 and len(enc.encode(text[start:end])) > max_tokens:
+            end = start + (end - start) * 3 // 4
+        pieces.append(text[start:end])
+        start = end
+    return pieces
+
+
+def _split_oversized_atom(text: str, max_tokens: int) -> list[str]:
+    """Break one over-budget atom into pieces that each fit ``max_tokens``.
+
+    Splits on line boundaries, and re-emits a markdown table's header rows at the
+    head of every piece so a segmenter reading piece 2 still sees the column names.
+    The pieces stay adjacent in the atom list, so a topic that claims all of them
+    reassembles the original text through ``_topic_build._rebuild_content``.
+    """
+    enc = _get_tokenizer()
+    lines = text.split("\n")
+    header = _table_header(lines)
+    header_text = "\n".join(header)
+    header_tokens = len(enc.encode(header_text)) if header else 0
+
+    pieces: list[str] = []
+    current: list[str] = []
+    current_tokens = header_tokens
+
+    def flush() -> None:
+        if current:
+            pieces.append("\n".join(header + current) if header else "\n".join(current))
+
+    newline_tokens = len(enc.encode("\n"))
+    for line in lines[len(header) :]:
+        # Count the "\n" that ``join`` will insert. Omitting it undercounts a piece by
+        # roughly one token per line, which pushes long runs over the budget and drops
+        # them into the character-boundary fallback — splitting list items mid-item.
+        line_tokens = len(enc.encode(line)) + newline_tokens
+        if current and current_tokens + line_tokens > max_tokens:
+            flush()
+            current, current_tokens = [line], header_tokens + line_tokens
+        else:
+            current.append(line)
+            current_tokens += line_tokens
+    flush()
+    if not pieces:  # pragma: no cover - defensive; ``lines`` is never empty here
+        pieces = [text]
+
+    # A line longer than the budget on its own cannot split on line boundaries, so fall
+    # back to character boundaries. Without this the "every atom fits" invariant
+    # silently fails on the shape that motivated the cap: CJK prose extracted from a
+    # PDF often arrives as one very long unwrapped line.
+    bounded: list[str] = []
+    for piece in pieces:
+        if len(enc.encode(piece)) <= max_tokens:
+            bounded.append(piece)
+        else:
+            bounded.extend(_split_long_line(piece, max_tokens))
+    return bounded
+
+
+def split_content_to_blocks(
+    content: str,
+    max_atom_tokens: int = DEFAULT_MAX_TOKENS_PER_ATOM,
+) -> list[tuple[int, str]]:
     """Split ``content`` into indexed atom blocks ``[(id, text), ...]``.
 
     Merging rules (applied in this order):
@@ -123,8 +226,18 @@ def split_content_to_blocks(content: str) -> list[tuple[int, str]]:
     3. Consecutive list items (lines starting with ``-`` or ``*`` followed by
        whitespace) merge into one atom.
     4. Otherwise each non-empty line becomes its own atom.
+    5. A merged atom exceeding ``max_atom_tokens`` is broken on line boundaries
+       into adjacent pieces that each fit, with a markdown table's header rows
+       repeated at the head of every piece.
 
-    Blank lines act only as separators and never become atoms.
+    Rule 5 exists because rules 1-3 are unbounded: a page that is mostly one table
+    or one list otherwise collapses into a single atom that no batch budget can
+    contain (``split_and_batch_content`` emits such an atom as its own over-budget
+    batch rather than dropping it). Pass a larger ``max_atom_tokens`` to loosen it,
+    or ``0`` to disable splitting entirely.
+
+    Blank lines act only as separators and never become atoms. Ids stay dense and
+    sequential over the returned list, which is the contract ``block_refs`` relies on.
     """
     if not content:
         return []
@@ -151,8 +264,19 @@ def split_content_to_blocks(content: str) -> list[tuple[int, str]]:
             i += 1
 
         if merged:
-            blocks.append((idx, merged))
-            idx += 1
+            # Cheap pre-filter so the tokenizer stays off the path for ordinary atoms.
+            # A character is at most 4 UTF-8 bytes and BPE emits at most one token per
+            # byte, so ``4 * len(text)`` is a hard upper bound on the token count. Do
+            # NOT tighten this to ``len(text)``: CJK and emoji exceed one token per
+            # character (traditional Chinese ~1.05, emoji ~2.7), which would let an
+            # over-budget atom through exactly on the corpora we care about.
+            if max_atom_tokens > 0 and _MAX_TOKENS_PER_CHAR * len(merged) >= max_atom_tokens:
+                pieces = _split_oversized_atom(merged, max_atom_tokens)
+            else:
+                pieces = [merged]
+            for piece in pieces:
+                blocks.append((idx, piece))
+                idx += 1
 
     return blocks
 
