@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The UPDATE historical pass now carries a rule of its own: a dimension that already holds a value is left alone and its earlier value is never added as a new item, so a backfilled narrative can no longer reintroduce a superseded value as a sibling of the current one. Only dimensions with no value yet are added, and existing items may still gain evidence. The current pass renders an empty rule slot and is byte-identical to before.
+
 ## [0.8.0rc8] - 2026-09-08
 
 ### Changed

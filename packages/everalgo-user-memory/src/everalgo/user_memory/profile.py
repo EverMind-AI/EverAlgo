@@ -31,6 +31,7 @@ from everalgo.user_memory.prompts.en.profile import (
     PROFILE_UPDATE_PROMPT,
 )
 from everalgo.user_memory.prompts.en.profile_from_episode_texts import (
+    HISTORICAL_PASS_RULE,
     PROFILE_COMPACT_FROM_EPISODE_TEXTS_PROMPT,
     PROFILE_INITIAL_FROM_EPISODE_TEXTS_PROMPT,
     PROFILE_REGROUP_FROM_EPISODE_TEXTS_PROMPT,
@@ -405,7 +406,7 @@ class ProfileExtractor:
                 len(current),
             )
         profile = old_profile
-        for batch in (historical, current):
+        for batch, is_historical in ((historical, True), (current, False)):
             if batch:
                 profile = await self._update_pass_from_episodes(
                     batch,
@@ -415,6 +416,7 @@ class ProfileExtractor:
                     available_categories=available_categories,
                     prompt=prompt,
                     output_language=output_language,
+                    historical=is_historical,
                 )
         return profile
 
@@ -428,7 +430,11 @@ class ProfileExtractor:
         available_categories: str,
         prompt: str | None,
         output_language: OutputLanguage | str | None,
+        historical: bool = False,
     ) -> Profile:
+        # The historical pass knows every narrative predates the stored profile, so it can withdraw the general
+        # permission to add "a fact not yet on file" for dimensions that already hold a value: an earlier value of a
+        # settled dimension is not a new fact. The current pass renders an empty rule slot.
         rendered = render_prompt(
             PROFILE_UPDATE_FROM_EPISODE_TEXTS_PROMPT,
             prompt,
@@ -437,6 +443,7 @@ class ProfileExtractor:
             target_user=target_user,
             available_categories=available_categories,
             language_rule=build_language_rule(output_language, fallback=EXISTING_PROFILE_LANGUAGE_RULE),
+            pass_rule=HISTORICAL_PASS_RULE if historical else "",
         )
 
         data = await _call_llm_for_profile_update(self._llm, rendered)
