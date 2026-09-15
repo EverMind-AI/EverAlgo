@@ -4,6 +4,8 @@ All notable changes to this package are documented here. Format follows
 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [0.2.0] - 2026-09-15
 
 ### Fixed
