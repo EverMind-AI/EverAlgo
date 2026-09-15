@@ -536,7 +536,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-knowledge"
-version = "0.2.0rc1"
+version = "0.2.0"
 source = { editable = "packages/everalgo-knowledge" }
 dependencies = [
     { name = "asgiref" },
