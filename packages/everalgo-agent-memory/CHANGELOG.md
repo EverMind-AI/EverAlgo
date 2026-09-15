@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **`AGENT_SKILL_SUCCESS_EXTRACT_PROMPT` now preserves contrastive insights during consolidation.** New hard rules keep the minority lessons carried by failed-then-corrected cases from being averaged away: root-cause checks that standard checks missed must land in Steps/Decision branches (not only Pitfalls) and survive condensation; "if `<check>` passes → proceed" branches are forbidden when any case shows the check passing while the problem persisted; look-alike variants require an explicit discriminator; independently-controlled capabilities must be verified per control. The pitfall cap rises from 4 to 6, and failure-derived pitfalls can no longer be evicted by generic advice. Validated on a τ²-bench telecom support benchmark where the stock prompt consolidated 74 calls into skills that dropped the decisive correction; with this change held-out resolution went from 50% to 62% against an otherwise identical pipeline.
+
 ## [0.5.0] - 2026-08-19
 
 ### Changed

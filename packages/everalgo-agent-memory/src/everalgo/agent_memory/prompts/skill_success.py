@@ -12,11 +12,29 @@ Your job: distill **actionable strategies** into reusable **Skills** via increme
 - Reasoning principles WITH concrete patterns: teaches HOW to think, not just what to do
 - Decision branches that cover the different problem variants seen across cases
 - A FEW well-chosen examples that illustrate distinct branches — not an exhaustive catalog
+- Preserves hard-won corrections: the checks that distinguish look-alike situations, learned from cases that initially failed or were escalated
 
 **What makes a BAD skill:**
 - Too abstract: "Analyze constraints" without showing what analysis looks like in practice
 - Too narrow: A single solution template that only works for one exact case
 - **Bloated**: Listing dozens of case-specific details (names, dates, institutions, compounds, etc.) inside parentheses or comma-separated lists. Each How/Decision/e.g. field should contain 1-2 illustrative examples, NOT an inventory of every case seen
+
+**Contrastive insight preservation (HARD RULES):**
+- When a case's key_insight or close-out note reveals a root cause that the
+  standard checks missed (the attempt failed or was escalated before the true
+  cause was found), the distinguishing check MUST appear as a numbered Step or
+  a Decision branch — not only as a Pitfall — and MUST survive every later
+  condensation or update.
+- Never write a Decision branch of the form "if <check> passes → proceed" when
+  any case shows <check> passing while the problem persisted. Name the extra
+  check that separates those look-alike situations.
+- When similar symptoms were resolved by different fixes across cases, state
+  which observation or question tells the variants apart — listing both fixes
+  without the discriminator is not acceptable.
+- When one capability is governed by multiple independent controls (for
+  example a server-side setting and a client-side setting), verifying one
+  control does NOT verify the others: direct each control to be checked
+  independently.
 
 **Field-level requirements:**
 
@@ -44,7 +62,7 @@ Your job: distill **actionable strategies** into reusable **Skills** via increme
   - **Max 5 steps.**
   - **Max 2 examples per step.** Each example MUST be a SHORT, single-sentence illustration of a distinct decision branch. Do NOT list multiple sub-examples inside parentheses or comma-separated lists.
   - **Decision branches**: REQUIRED when the next action depends on what was found. For linear steps with no branching, Decision may be omitted. Each Decision should have at most 3 branches.
-  - **Max 4 pitfalls.** When adding a new one beyond 4, replace the most generic existing pitfall.
+  - **Max 6 pitfalls.** When adding a new one beyond 6, replace the most generic existing pitfall. A pitfall derived from a failed or escalated case MUST NOT be evicted in favor of generic advice.
   - **No parenthetical catalogs**: FORBIDDEN to stuff dozens of case-specific terms (names, dates, compounds, institutions, etc.) inside a single parenthetical `(e.g., X, Y, Z, ...)`. Keep each field concise — generalize the pattern, illustrate with 1-2 examples only.
 
 [New AgentCase(s) to integrate]
@@ -74,7 +92,7 @@ For each new case, compare against each existing skill:
 - **add**: The new case tackles a **different problem pattern** (coverage < 60% against all existing skills). Create a new skill. confidence = `0.5`.
 
 - **update**: The new case overlaps an existing skill (coverage >= 60%). Enrich it with new Decision branches, better examples, or sharper How explanations.
-  - You MAY substantially rewrite content (restructure steps, replace examples, refine How explanations), but **preserve existing verified content unless the new case directly contradicts it**.
+  - You MAY substantially rewrite content (restructure steps, replace examples, refine How explanations), but **preserve existing verified content unless the new case directly contradicts it**. Contrastive checks and failure-derived pitfalls are load-bearing: preserve or strengthen them, never summarize them away.
   - **CRITICAL: The updated content MUST stay within 2000 tokens. Do NOT simply append new content — replace weaker examples with stronger ones, merge redundant steps, and compress prose. If the existing content is already long, aggressively condense it while preserving the core logic.**
   - **CRITICAL: The updated description MUST stay under 500 characters. Generalize — do NOT accumulate case-specific details.**
   - **Hypothesis promotion rule**: If the existing skill contains `## Potential Steps`, treat this update as a **promotion** — rewrite as `## Steps` using the new case as primary source. confidence = `0.6`.
