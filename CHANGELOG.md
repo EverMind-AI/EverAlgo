@@ -20,7 +20,13 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-user-memory` | 0.8.0rc9 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.2.0rc1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.2.0 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [everalgo-knowledge/0.2.0] - 2026-09-15
+
+`parse_llm_json` no longer throws away a response whose only defect is an unescaped backslash. A model copying LaTeX out of the source document writes `$\kappa$` as `\k`, which JSON does not accept, so a complete and well-formed topic tree was discarded and the document ingested as empty — reproducibly, on every model tried. The parser now retries once with those backslashes doubled, and only after a strict parse has already failed, so valid JSON is never rewritten. LaTeX that collides with a legal escape (`\theta` / `\frac` / `\bar` are tab / form-feed / backspace) stays lossy; recovering those needs the model to emit valid JSON in the first place.
+
+Detail in [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md).
 
 ## [everalgo-knowledge/0.2.0rc1] - 2026-09-14
 
