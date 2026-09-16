@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-knowledge"
-version = "0.2.0"
+version = "0.2.1"
 description = "EverAlgo knowledge: file-based knowledge extractors producing KnowledgeMemory."
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
   "asgiref>=3.0",
-  "everalgo-core>=0.3.0,<2.0.0",
+  "everalgo-core>=0.5.1,<2.0.0",
   "everalgo-parser>=0.2.0,<2.0.0",
 ]
 

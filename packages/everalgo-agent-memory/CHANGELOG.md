@@ -6,9 +6,15 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-16
+
+### Changed
+
+- The minimum `everalgo-core` version is now `0.5.1`, because `truncate_text` uses the shared special-token-safe encoder introduced in that release. This prevents dependency resolution from selecting an older core that cannot import the helper.
+
 ### Fixed
 
-- `truncate_text` no longer raises `ValueError` on a trajectory that quotes a tiktoken special-token literal such as `<|fim_prefix|>`. It encoded through the raw tokenizer, so it shared the defect fixed in `everalgo-core` (see that changelog for why `disallowed_special="all"` is wrong at this layer); it now goes through `everalgo._tokenize.encode`. Truncation positions for text without such a literal are unchanged.
+- `truncate_text` no longer raises `ValueError` on a trajectory that quotes an `o200k_base` special-token literal such as `<|endoftext|>`. It encoded through the raw tokenizer, so it shared the defect fixed in `everalgo-core` (see that changelog for why `disallowed_special="all"` is wrong at this layer); it now goes through `everalgo._tokenize.encode`. Truncation positions for text without such a literal are unchanged.
 
 ## [0.5.0] - 2026-08-19
 
@@ -73,7 +79,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.1...HEAD
+[0.5.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.0...everalgo-agent-memory/v0.5.1
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.4.0...everalgo-agent-memory/v0.5.0
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.1...everalgo-agent-memory/v0.4.0
 [0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.3.0...everalgo-agent-memory/v0.3.1

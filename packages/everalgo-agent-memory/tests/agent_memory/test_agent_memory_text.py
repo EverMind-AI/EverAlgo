@@ -121,10 +121,10 @@ class TestJsonDefault:
 def test_truncate_text_handles_special_token_literals() -> None:
     """Truncation encodes, so it shared the tokenizer defect.
 
-    An agent transcript that quotes ``<|fim_prefix|>`` — any code-completion discussion —
-    used to raise ValueError here instead of being truncated.
+    An agent transcript that quotes ``<|endoftext|>`` in a tokenizer bug report used to
+    raise ValueError here instead of being truncated.
     """
-    text = "<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|> " * 50
+    text = "The tokenizer rejected the literal <|endoftext|>. " * 50
     out = truncate_text(text, max_tokens=32)
     assert out  # truncated, not raised
     assert len(out) < len(text)

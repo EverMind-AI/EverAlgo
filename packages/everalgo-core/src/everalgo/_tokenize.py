@@ -24,11 +24,11 @@ def encode(text: str) -> list[int]:
 
     ``Encoding.encode`` defaults to ``disallowed_special="all"``, so it raises
     ``ValueError`` as soon as the input contains a literal such as ``<|endoftext|>`` or
-    ``<|fim_prefix|>``. That default exists to protect a caller who is ASSEMBLING A PROMPT
+    ``<|endofprompt|>``. That default exists to protect a caller who is ASSEMBLING A PROMPT
     from letting a user smuggle a control token into a model's input. Nothing in this
     library assembles a prompt here — this module only measures and slices text — so the
     default turns ordinary content into a crash instead: any conversation that merely
-    *mentions* those literals (a code-completion discussion, a tokenizer bug report) is
+    *mentions* those literals (for example, a tokenizer bug report) is
     unprocessable, and the failure is permanent because the same text is retried forever.
 
     ``disallowed_special=()`` encodes the literal as the several ordinary tokens it is

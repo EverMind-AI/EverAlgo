@@ -6,9 +6,15 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-16
+
+### Changed
+
+- The minimum `everalgo-core` version is now `0.5.1`, because knowledge splitting relies on that release's special-token-safe `count_tokens` behavior.
+
 ### Fixed
 
-- `split_content_to_blocks` and `split_and_batch_content` no longer raise `ValueError` on a document that quotes a tiktoken special-token literal such as `<|fim_prefix|>` — a knowledge document about code completion could not be ingested at all. `_block_split` had grown a second, independent tokenizer; it now counts through `everalgo._tokenize.count_tokens`, which is the shared entry point fixed in `everalgo-core` (see that changelog for the rationale). Block boundaries and batch budgets for documents without such a literal are unchanged.
+- `split_content_to_blocks` and `split_and_batch_content` no longer raise `ValueError` on a document that quotes an `o200k_base` special-token literal such as `<|endoftext|>` — tokenizer documentation and bug reports could not be ingested at all. `_block_split` had grown a second, independent tokenizer; it now counts through `everalgo._tokenize.count_tokens`, which is the shared entry point fixed in `everalgo-core` (see that changelog for the rationale). Block boundaries and batch budgets for documents without such a literal are unchanged.
 
 ### Removed
 
@@ -39,4 +45,5 @@ Previously a reserved namespace with `Private :: Do Not Upload`.
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0
 [0.2.0rc1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0rc1
 [0.1.1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.1.1
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.1...HEAD
+[0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.0...everalgo-knowledge/v0.2.1

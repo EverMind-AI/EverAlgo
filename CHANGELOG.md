@@ -13,14 +13,26 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.5.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-core` | 0.5.1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.8.0rc9 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.5.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.5.1 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.2.0 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.2.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Patch release — 2026-09-16
+
+Three distributions updated together because trajectory truncation and knowledge splitting both consume the shared core tokenizer. Text that quotes an `o200k_base` control-token literal such as `<|endoftext|>` is now measured and sliced as ordinary text instead of raising `ValueError`. The two downstream packages require `everalgo-core>=0.5.1`, so a clean resolver cannot select an older core that lacks the helper or retains the crash.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.5.1 | patch — special-token-safe shared encoding for token counting and splitting |
+| `everalgo-agent-memory` | 0.5.1 | patch — special-token-safe trajectory truncation and corrected core floor |
+| `everalgo-knowledge` | 0.2.1 | patch — special-token-safe block splitting, corrected core floor, and removal of the redundant direct `tiktoken` dependency |
+
+Detail in [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md), [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md), and [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md).
 
 ## [everalgo-knowledge/0.2.0] - 2026-09-15
 
