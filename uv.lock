@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -542,7 +542,6 @@ dependencies = [
     { name = "asgiref" },
     { name = "everalgo-core" },
     { name = "everalgo-parser" },
-    { name = "tiktoken" },
 ]
 
 [package.metadata]
@@ -550,7 +549,6 @@ requires-dist = [
     { name = "asgiref", specifier = ">=3.0" },
     { name = "everalgo-core", editable = "packages/everalgo-core" },
     { name = "everalgo-parser", editable = "packages/everalgo-parser" },
-    { name = "tiktoken", specifier = ">=0.7" },
 ]
 
 [[package]]

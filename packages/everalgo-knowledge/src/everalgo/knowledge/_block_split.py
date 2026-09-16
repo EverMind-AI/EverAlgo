@@ -17,9 +17,8 @@ the knowledge extractor pipeline.
 from __future__ import annotations
 
 import re
-from functools import lru_cache
 
-import tiktoken
+from everalgo._tokenize import count_tokens
 
 __all__ = [
     "DEFAULT_MAX_TOKENS_PER_ATOM",
@@ -37,8 +36,6 @@ __all__ = [
 TABLE_START_MARKER = "TABLE_START"
 TABLE_END_MARKER = "TABLE_END"
 
-_O200K_ENCODING_NAME = "o200k_base"
-
 # Default token budget per LLM-window batch. 80K leaves headroom on a 128K-context
 # model after the topic-extraction prompt + JSON response. Tunable per call.
 DEFAULT_MAX_TOKENS_PER_BATCH = 80_000
@@ -50,12 +47,6 @@ DEFAULT_MAX_TOKENS_PER_BATCH = 80_000
 # This cap is deliberately loose: it never fires on an ordinary table and only
 # rescues the pathological case.
 DEFAULT_MAX_TOKENS_PER_ATOM = DEFAULT_MAX_TOKENS_PER_BATCH // 4
-
-
-@lru_cache(maxsize=1)
-def _get_tokenizer() -> tiktoken.Encoding:
-    """Return the shared ``o200k_base`` encoding, initialising on first call."""
-    return tiktoken.get_encoding(_O200K_ENCODING_NAME)
 
 
 def preprocess_content(content: str) -> str:
@@ -144,8 +135,7 @@ def _split_long_line(text: str, max_tokens: int) -> list[str]:
     66,000-character CJK line, which came back 66,006 characters with mojibake at
     every seam. Character slices concatenate back to the original exactly.
     """
-    enc = _get_tokenizer()
-    tokens_per_char = len(enc.encode(text)) / len(text)
+    tokens_per_char = count_tokens(text) / len(text)
     # 0.9 leaves margin for a denser stretch than the whole-line average.
     window = max(1, int(max_tokens / tokens_per_char * 0.9))
 
@@ -153,7 +143,7 @@ def _split_long_line(text: str, max_tokens: int) -> list[str]:
     start = 0
     while start < len(text):
         end = min(start + window, len(text))
-        while end - start > 1 and len(enc.encode(text[start:end])) > max_tokens:
+        while end - start > 1 and count_tokens(text[start:end]) > max_tokens:
             end = start + (end - start) * 3 // 4
         pieces.append(text[start:end])
         start = end
@@ -168,11 +158,10 @@ def _split_oversized_atom(text: str, max_tokens: int) -> list[str]:
     The pieces stay adjacent in the atom list, so a topic that claims all of them
     reassembles the original text through ``_topic_build._rebuild_content``.
     """
-    enc = _get_tokenizer()
     lines = text.split("\n")
     header = _table_header(lines)
     header_text = "\n".join(header)
-    header_tokens = len(enc.encode(header_text)) if header else 0
+    header_tokens = count_tokens(header_text) if header else 0
 
     pieces: list[str] = []
     current: list[str] = []
@@ -182,12 +171,12 @@ def _split_oversized_atom(text: str, max_tokens: int) -> list[str]:
         if current:
             pieces.append("\n".join(header + current) if header else "\n".join(current))
 
-    newline_tokens = len(enc.encode("\n"))
+    newline_tokens = count_tokens("\n")
     for line in lines[len(header) :]:
         # Count the "\n" that ``join`` will insert. Omitting it undercounts a piece by
         # roughly one token per line, which pushes long runs over the budget and drops
         # them into the character-boundary fallback — splitting list items mid-item.
-        line_tokens = len(enc.encode(line)) + newline_tokens
+        line_tokens = count_tokens(line) + newline_tokens
         if current and current_tokens + line_tokens > max_tokens:
             flush()
             current, current_tokens = [line], header_tokens + line_tokens
@@ -204,7 +193,7 @@ def _split_oversized_atom(text: str, max_tokens: int) -> list[str]:
     # PDF often arrives as one very long unwrapped line.
     bounded: list[str] = []
     for piece in pieces:
-        if len(enc.encode(piece)) <= max_tokens:
+        if count_tokens(piece) <= max_tokens:
             bounded.append(piece)
         else:
             bounded.extend(_split_long_line(piece, max_tokens))
@@ -297,13 +286,12 @@ def split_and_batch_content(
     if not atoms:
         return []
 
-    enc = _get_tokenizer()
     batches: list[list[tuple[int, str]]] = []
     current_batch: list[tuple[int, str]] = []
     current_tokens = 0
 
     for atom in atoms:
-        atom_tokens = len(enc.encode(atom[1]))
+        atom_tokens = count_tokens(atom[1])
         if current_batch and current_tokens + atom_tokens > max_tokens:
             batches.append(current_batch)
             current_batch = [atom]
