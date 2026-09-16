@@ -6,9 +6,11 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-16
+
 ### Fixed
 
-- `count_tokens` and `force_split` no longer raise `ValueError` on text that quotes a tiktoken special-token literal such as `<|endoftext|>` or `<|fim_prefix|>`. `Encoding.encode` defaults to `disallowed_special="all"`, a guard meant for a caller assembling a prompt; this module only measures and slices text, so the default turned ordinary content — any conversation about code completion or tokenizers — into a permanent failure, retried forever on the same input. The new module-private `everalgo._tokenize.encode` passes `disallowed_special=()` and is the single sanctioned encode in every published distribution. Such a literal is now counted as the several ordinary tokens it is made of rather than as one control token; nothing else about token counts, split points, or truncation positions changes.
+- `count_tokens` and `force_split` no longer raise `ValueError` on text that quotes an `o200k_base` special-token literal such as `<|endoftext|>` or `<|endofprompt|>`. `Encoding.encode` defaults to `disallowed_special="all"`, a guard meant for a caller assembling a prompt; this module only measures and slices text, so the default turned ordinary tokenizer documentation and bug reports into a permanent failure, retried forever on the same input. The new module-private `everalgo._tokenize.encode` passes `disallowed_special=()` and is the single sanctioned encode in every published distribution. Such a literal is now counted as the several ordinary tokens it is made of rather than as one control token; nothing else about token counts, split points, or truncation positions changes.
 
 ## [0.5.0] - 2026-08-19
 
@@ -73,7 +75,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - LLM binding simplified to instance-only injection: `build_client` / constructor `llm=` parameter is the sole binding path. The prior 4-layer resolution (configure / use / current / resolve) was removed in favour of the pattern used by `openai-python`, `anthropic-sdk-python`, LangChain, and Instructor.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.1...HEAD
+[0.5.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.0...everalgo-core/v0.5.1
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.4.0...everalgo-core/v0.5.0
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.3.0...everalgo-core/v0.4.0
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.2.1...everalgo-core/v0.3.0

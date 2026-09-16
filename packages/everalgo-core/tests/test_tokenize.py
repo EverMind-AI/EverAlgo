@@ -74,8 +74,8 @@ def test_force_split_chunks_reassemble_decoded_token_stream() -> None:
 # ---------------------------------------------------------------------------
 
 # Literals from the o200k_base special set. They turn up in perfectly ordinary
-# content: any conversation about code completion or tokenizers quotes them.
-SPECIAL_TOKEN_LITERALS = ("<|endoftext|>", "<|fim_prefix|>", "<|fim_suffix|>", "<|endofprompt|>")
+# content such as tokenizer documentation and bug reports.
+SPECIAL_TOKEN_LITERALS = ("<|endoftext|>", "<|endofprompt|>")
 
 
 @pytest.mark.parametrize("literal", SPECIAL_TOKEN_LITERALS)
@@ -97,7 +97,7 @@ def test_count_tokens_counts_special_token_literals_as_text(literal: str) -> Non
 
 def test_count_tokens_handles_a_realistic_sentence_quoting_a_special_token() -> None:
     """The shape actually seen in production: prose that mentions the literal."""
-    text = "The FIM template is `<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>`."
+    text = "The tokenizer rejected a document containing the literal `<|endoftext|>`."
     assert count_tokens(text) > 0
 
 

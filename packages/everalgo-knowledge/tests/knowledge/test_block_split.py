@@ -298,9 +298,9 @@ def test_split_atoms_batch_within_budget_end_to_end() -> None:
 def test_split_handles_special_token_literals() -> None:
     """Block splitting counts tokens, so it shared the tokenizer defect.
 
-    A knowledge document about code completion quotes these literals; before the shared
-    encode wrapper that document could not be ingested at all.
+    A knowledge document about tokenizers quotes these literals; before the shared encode
+    wrapper that document could not be ingested at all.
     """
-    content = "The Qwen Coder FIM template is `<|fim_prefix|>{prefix}<|fim_suffix|>`.\n\n" * 20
+    content = "The tokenizer reserves the literal `<|endoftext|>` as a control token.\n\n" * 20
     blocks = split_content_to_blocks(content)
     assert blocks  # split, not raised

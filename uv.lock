@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -433,7 +433,7 @@ wheels = [
 
 [[package]]
 name = "everalgo-agent-memory"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "packages/everalgo-agent-memory" }
 dependencies = [
     { name = "asgiref" },
@@ -519,7 +519,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-core"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "packages/everalgo-core" }
 dependencies = [
     { name = "openai" },
@@ -536,7 +536,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-knowledge"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/everalgo-knowledge" }
 dependencies = [
     { name = "asgiref" },
