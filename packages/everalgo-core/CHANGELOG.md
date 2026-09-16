@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `count_tokens` and `force_split` no longer raise `ValueError` on text that quotes a tiktoken special-token literal such as `<|endoftext|>` or `<|fim_prefix|>`. `Encoding.encode` defaults to `disallowed_special="all"`, a guard meant for a caller assembling a prompt; this module only measures and slices text, so the default turned ordinary content — any conversation about code completion or tokenizers — into a permanent failure, retried forever on the same input. The new module-private `everalgo._tokenize.encode` passes `disallowed_special=()` and is the single sanctioned encode in every published distribution. Such a literal is now counted as the several ordinary tokens it is made of rather than as one control token; nothing else about token counts, split points, or truncation positions changes.
+
 ## [0.5.0] - 2026-08-19
 
 ### Changed

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from everalgo._tokenize import _get_tokenizer, count_tokens
+from everalgo._tokenize import _get_tokenizer, count_tokens, encode
 
 __all__ = ["count_tokens", "json_default", "truncate_text"]
 
@@ -27,7 +27,7 @@ def truncate_text(
     if not text:
         return text
     tokenizer = _get_tokenizer()
-    tokens = tokenizer.encode(text)
+    tokens = encode(text)
     if len(tokens) <= max_tokens:
         return text
 

@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `truncate_text` no longer raises `ValueError` on a trajectory that quotes a tiktoken special-token literal such as `<|fim_prefix|>`. It encoded through the raw tokenizer, so it shared the defect fixed in `everalgo-core` (see that changelog for why `disallowed_special="all"` is wrong at this layer); it now goes through `everalgo._tokenize.encode`. Truncation positions for text without such a literal are unchanged.
+
 ## [0.5.0] - 2026-08-19
 
 ### Changed

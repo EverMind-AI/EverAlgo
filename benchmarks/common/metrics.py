@@ -1,4 +1,12 @@
-"""Aggregation utilities for benchmark reports."""
+"""Aggregation utilities for benchmark reports.
+
+Every ``encode`` here passes ``disallowed_special=()``: ``Encoding.encode`` otherwise raises
+``ValueError`` on a transcript that merely quotes ``<|endoftext|>`` / ``<|fim_prefix|>``, which would
+abort a benchmark run over a corpus it is only supposed to be measuring. The library side routes
+through ``everalgo._tokenize.encode`` and ``tests/test_tokenizer_conventions.py`` enforces that; this
+module is exempt from the shared wrapper because it takes the encoding name as an argument, so the
+rule is carried here by hand.
+"""
 
 from __future__ import annotations
 
@@ -27,7 +35,7 @@ def estimate_tokens(text: str, encoding: str = "o200k_base") -> int:
     if not text:
         return 0
     enc = tiktoken.get_encoding(encoding)
-    return len(enc.encode(text))
+    return len(enc.encode(text, disallowed_special=()))
 
 
 def avg_context_tokens(
@@ -45,7 +53,7 @@ def avg_context_tokens(
         Integer mean token count; ``0`` if no non-empty contexts.
     """
     enc = tiktoken.get_encoding(encoding)
-    counts = [len(enc.encode(ctx)) for a in answers if (ctx := a.get("formatted_context"))]
+    counts = [len(enc.encode(ctx, disallowed_special=())) for a in answers if (ctx := a.get("formatted_context"))]
     return sum(counts) // len(counts) if counts else 0
 
 
