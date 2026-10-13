@@ -1,8 +1,8 @@
-"""Agent-side memory extractors — 3 Extractors + boundary facade."""
+"""Agent-side memory extractors — 3 Extractors + the re-exported ``everalgo.boundary.BoundaryDetector``."""
 
 import logging
 
-from everalgo.agent_memory.boundary import AgentBoundaryDetector
+from everalgo.agent_memory.boundary import BoundaryDetector
 from everalgo.agent_memory.case import AgentCaseExtractor
 from everalgo.agent_memory.profile import AgentProfileExtractor
 from everalgo.agent_memory.reasons import (
@@ -15,10 +15,10 @@ from everalgo.agent_memory.reasons import (
 from everalgo.agent_memory.skill import AgentSkillExtractor
 
 __all__ = [
-    "AgentBoundaryDetector",
     "AgentCaseExtractor",
     "AgentProfileExtractor",
     "AgentSkillExtractor",
+    "BoundaryDetector",
     "CaseExtractionResult",
     "CaseSkipReason",
     "OpOutcome",

@@ -1,7 +1,8 @@
 """Audio parser — ASR via multimodal LLM.
 
 Sends the audio bytes as a single ``image_url`` data URI (OpenRouter / Gemini accepts
-audio MIMEs through the same content-part shape) and the LLM transcribes.
+audio MIMEs through the same content-part shape) as the user message, the rules as
+the system message, and reads the transcription from the reply's ``text``.
 """
 
 from __future__ import annotations
@@ -11,11 +12,13 @@ from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
-from everalgo.llm import ChatMessage, LLMClient, TextPart, image_url_part_from_bytes
+from everalgo.llm import image_url_part_from_bytes
+from everalgo.parser._replies import _call_llm_for_text
 from everalgo.parser.prompts.en import PROMPT_FOR_AUDIO
 from everalgo.types import Modality, ParsedContent
 
 if TYPE_CHECKING:
+    from everalgo.llm import LLMClient
     from everalgo.types import RawFile
 
 __all__ = ["aparse", "parse"]
@@ -36,7 +39,12 @@ _MIME_MAP: dict[str, str] = {
 
 
 async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
-    """Parse an audio ``RawFile`` into ``ParsedContent`` (transcription)."""
+    """Parse an audio ``RawFile`` into ``ParsedContent`` (transcription).
+
+    Raises:
+        ValueError: If ``raw_file`` has no content or an unsupported extension.
+        LLMOutputError: If the reply is not a valid ``{"text": "..."}`` object.
+    """
     if not raw_file.content:
         raise ValueError("RawFile.content is empty; cannot parse audio")
 
@@ -47,24 +55,14 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
             f"audio.aparse: unsupported audio extension {raw_file.extension!r}. Supported: {sorted(_MIME_MAP)}"
         )
 
-    message = ChatMessage(
-        role="user",
-        content=[
-            TextPart(text=PROMPT_FOR_AUDIO),
-            image_url_part_from_bytes(raw_file.content, mime),
-        ],
-    )
     logger.debug("parsing audio extension=%s bytes=%d", extension, len(raw_file.content))
-    response = await llm.chat([message])
-    return ParsedContent(
-        text=response.content,
-        modality=Modality.AUDIO,
-        mime=raw_file.mime or mime,
-        metadata={
-            "model": response.model,
-            "finish_reason": response.finish_reason,
-        },
+    text = await _call_llm_for_text(
+        llm,
+        system=PROMPT_FOR_AUDIO,
+        user=[image_url_part_from_bytes(raw_file.content, mime)],
+        operator="parser audio",
     )
+    return ParsedContent(text=text, modality=Modality.AUDIO, mime=raw_file.mime or mime)
 
 
 parse = async_to_sync(aparse)

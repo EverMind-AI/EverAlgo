@@ -1,11 +1,20 @@
 """Image parser prompts (Chinese).
 
 Chinese counterpart to ``prompts/en/image.py``. Wire identity is preserved
-(``PROMPT_FOR_PICTURE`` + ``PROMPT_FOR_MERGE``) so callers can swap languages
-by changing the import.
+(``PROMPT_FOR_PICTURE`` + ``PROMPT_FOR_MERGE`` + ``MERGE_USER_PROMPT``) so callers can swap languages
+by changing the import: each system message ends with the shared English ``<reply_format>`` block, and
+``MERGE_USER_PROMPT`` is the English one, the markup holding no language.
 """
 
-PROMPT_FOR_PICTURE = """请阅读这张图片,像自然阅读一样返回它的内容。
+from __future__ import annotations
+
+__all__ = ["MERGE_USER_PROMPT", "PROMPT_FOR_MERGE", "PROMPT_FOR_PICTURE"]
+
+from everalgo.parser.prompts._reply_format import TEXT_REPLY_FORMAT
+from everalgo.parser.prompts.en.image import MERGE_USER_PROMPT
+from everalgo.utils import paragraphs
+
+_PICTURE_RULES = """请阅读这张图片,像自然阅读一样返回它的内容。
 
 关键指令:
 - 仅输出提取出来的内容,不要任何开场白或结束语。
@@ -21,8 +30,10 @@ PROMPT_FOR_PICTURE = """请阅读这张图片,像自然阅读一样返回它的�
 5. 对于非文字元素(照片、插图等),详细描述其主要内容与关键元素
 6. 保留原始结构与层级"""
 
+PROMPT_FOR_PICTURE = paragraphs(_PICTURE_RULES, TEXT_REPLY_FORMAT)
 
-PROMPT_FOR_MERGE = """下方是同一张长图片不同片段的 OCR 结果。相邻片段之间有重叠区域。
+
+_MERGE_RULES = """下方是同一张长图片不同片段的 OCR 结果。相邻片段之间有重叠区域。
 请智能地把这些片段合并成完整的文本。
 
 关键指令:
@@ -32,6 +43,6 @@ PROMPT_FOR_MERGE = """下方是同一张长图片不同片段的 OCR 结果。�
 要求:
 1. 识别并去除重叠区域里的重复内容
 2. 保证文本的连续性与完整性
-3. 保留原始格式与结构
+3. 保留原始格式与结构"""
 
-{parts_text}"""
+PROMPT_FOR_MERGE = paragraphs(_MERGE_RULES, TEXT_REPLY_FORMAT)

@@ -7,6 +7,8 @@ the URL or use an internal managed temporary directory during conversion.
 
 from __future__ import annotations
 
+__all__ = ["RawData", "RawFile"]
+
 from pydantic import BaseModel, ConfigDict, Field
 
 

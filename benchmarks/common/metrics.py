@@ -3,7 +3,7 @@
 Every ``encode`` here passes ``disallowed_special=()``: ``Encoding.encode`` otherwise raises
 ``ValueError`` on a transcript that merely quotes ``<|endoftext|>`` / ``<|fim_prefix|>``, which would
 abort a benchmark run over a corpus it is only supposed to be measuring. The library side routes
-through ``everalgo._tokenize.encode`` and ``tests/test_tokenizer_conventions.py`` enforces that; this
+through ``everalgo.utils.tokens.encode`` and ``tests/test_tokenizer_conventions.py`` enforces that; this
 module is exempt from the shared wrapper because it takes the encoding name as an argument, so the
 rule is carried here by hand.
 """
@@ -14,16 +14,20 @@ from typing import TYPE_CHECKING, Any
 
 import tiktoken
 
+from everalgo.llm import TextPart
+
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from benchmarks.common.stages.types import StageStats
+    from everalgo.llm import LLMMessage
 
 
 def estimate_tokens(text: str, encoding: str = "o200k_base") -> int:
     """Estimate token count using tiktoken.
 
-    Used for stages where actual API usage is not tracked (Stage 1 and
-    Stage 2).  The estimate is tiktoken-based and is documented as
-    approximate in the summary banner.
+    ``LLMClient.achat`` returns only the reply text, so every stage reports
+    estimated rather than billed usage; the summary banner says so.
 
     Args:
         text: Text to estimate tokens for.
@@ -36,6 +40,29 @@ def estimate_tokens(text: str, encoding: str = "o200k_base") -> int:
         return 0
     enc = tiktoken.get_encoding(encoding)
     return len(enc.encode(text, disallowed_special=()))
+
+
+def estimate_chat_tokens(messages: Sequence[LLMMessage], reply: str) -> tuple[int, int]:
+    """Estimate the prompt and completion tokens of one ``achat`` call.
+
+    Only text is counted: a multimodal part other than text contributes nothing.
+
+    Args:
+        messages: The messages the call sent.
+        reply: The reply text the call returned.
+
+    Returns:
+        ``(prompt_tokens, completion_tokens)``.
+    """
+    prompt_tokens = sum(estimate_tokens(text) for message in messages for text in _message_texts(message))
+    return prompt_tokens, estimate_tokens(reply)
+
+
+def _message_texts(message: LLMMessage) -> list[str]:
+    """The text of a message: its string content, or the text of each of its text parts."""
+    if isinstance(message.content, str):
+        return [message.content]
+    return [part.text for part in message.content if isinstance(part, TextPart)]
 
 
 def avg_context_tokens(

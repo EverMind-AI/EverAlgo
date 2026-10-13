@@ -57,8 +57,8 @@ Install only what your use case needs:
 | Distribution | Purpose |
 |---|---|
 | `everalgo-core` | Types, LLM client + providers, prompt validators, testing helpers |
-| `everalgo-boundary` | Low-level chat boundary primitives + unimplemented workspace placeholder |
-| `everalgo-clustering` | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
+| `everalgo-boundary` | `BoundaryDetector` (batch and incremental) and its function primitives + unimplemented workspace placeholder |
+| `everalgo-clustering` | `Cluster` value object + `cluster_by_geometry` / `acluster_by_llm` operators |
 | `everalgo-rank` | 4 retrieval strategies (hybrid / agentic / cluster / maxsim) + category-aware retrieval + 4 business rankers (episodic / profile / case / skill) + fusion / weight / rerank tools |
 | `everalgo-parser` | Multimodal raw-file → `ParsedContent` |
 | `everalgo-user-memory` | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
@@ -76,6 +76,7 @@ Install only what your use case needs:
 | Install options and prerequisites | [Installation](installation.md) |
 | Understand the difference between stateless operators and pure compute | [Stateless design](concepts/stateless-design.md) |
 | Understand the `a`-prefix async convention | [Async–sync bridge](concepts/async-sync-bridge.md) |
+| Understand why the user Profile merges, caps and dates its items the way it does | [Profile design notes](concepts/profile-design-notes.md) |
 | Browse per-package API docs | [API index](api/README.md) |
 | Versioning and support policy | [Version policy](version-policy.md) |
 | Contribute to EverAlgo | [Contributing](contributing.md) |

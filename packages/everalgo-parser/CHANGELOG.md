@@ -8,10 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- git-cliff-unreleased-start -->
 ## [Unreleased]
 
-### Fixed
-
-- Corrected the local-file rejection message so it distinguishes caller-selected filesystem paths from the parser's managed temporary directory used for Office conversion.
 <!-- git-cliff-unreleased-end -->
+
+## [0.3.0rc1] - 2026-10-13
+
+### Changed
+
+- **BREAKING:** every LLM call follows the new `LLMClient` contract: it passes `response_format=_TextReply`, a strict pydantic model of one field, `{"text": "..."}`, reads the `str` `achat` returns and validates it with `everalgo.llm.parse_reply`. A reply that is not that object — plain text, a missing or extra key, a non-string `text` — raises `everalgo.llm.LLMOutputError` from the image, PDF, HTML, Office and audio parsers. Two algorithm-level fallbacks keep their behaviour and now also cover an invalid reply: a tall-image merge that fails or comes back empty joins the slices' OCR (`metadata["merge_fallback"] = "deterministic_join"`), and an inline email image whose OCR fails gets the `[image: <name>, OCR failed]` placeholder. A custom client passed as `llm` must accept the mandatory keyword and return the reply text. See `everalgo-core` for the contract.
+- **BREAKING:** every call sends a system message and a user message instead of one user message. The system message is the prompt's rules, unchanged, followed by a `<reply_format>` block asking for `{"text": "..."}` (shared by the English and Chinese sets, `prompts/_reply_format.py`); `PROMPT_FOR_PICTURE`, `PROMPT_FOR_MERGE`, `PROMPT_FOR_FILE`, `PROMPT_FOR_HTML` and `PROMPT_FOR_AUDIO` are now these system messages. The user message is the input alone: the image, PDF or audio part with no text beside it; for HTML the cleaned page in `<html_content>` (new `HTML_USER_PROMPT`, slot `{{html}}`) instead of after a `---` line; for the tall-image merge the OCR texts, each in a `<part number="N">`, in `<ocr_parts count="N">` (new `MERGE_USER_PROMPT`, slots `{{count}}` and `{{parts}}`) instead of `=== Part N ===` sections in `PROMPT_FOR_MERGE`'s removed `{{parts_text}}` slot.
+- **BREAKING:** `ParsedContent.metadata` no longer carries `model` or `finish_reason`: `achat` returns only the reply text, and the model actually served is the host's to record. The image, audio, PDF, HTML and Office results keep their other keys.
+- **BREAKING:** operators call `LLMClient.achat`, the new name of the protocol method; a custom client passed as `llm` must implement `achat` instead of `chat`. See `everalgo-core` for the contract.
+- The URL parser fetches through `everalgo.utils.fetch_uri`, which moved to `everalgo-core`; the `ValueError` for a scheme other than `http` / `https` now reads `fetch_uri: only http and https are supported, got scheme 'file'` instead of `fetch_uri: only http/https supported, got scheme='file'. file:// and other local-filesystem URIs are rejected by design (...)`, so match on the exception type, not the text.
+- `everalgo-parser` no longer declares `httpx` itself: it makes no HTTP call of its own any more, and `everalgo-core` declares `httpx>=0.27` for the fetch.
 
 ## [0.2.1] - 2026-06-15
 
@@ -84,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `cairosvg >= 2.7.0` via `[svg]` extra.
 - System: LibreOffice (`soffice` on PATH) for Office document parsing.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.3.0rc1...HEAD
+[0.3.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.1...everalgo-parser/v0.3.0rc1
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.0...everalgo-parser/v0.2.1
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-parser/v0.2.0

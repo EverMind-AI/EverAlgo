@@ -64,7 +64,7 @@ Examples:
 ✨ feat(user-memory): add ProfileExtractor prompt zh variant
 🐛 fix(boundary): correct token count for emoji-only messages
 ♻️ refactor(rank): extract shared fusion helper
-✅ test(clustering): cover cluster_by_llm fast-path edge case
+✅ test(clustering): cover acluster_by_llm fast-path edge case
 📝 docs(concepts): clarify stateless-design operator contract
 ```
 

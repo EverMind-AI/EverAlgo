@@ -1,81 +1,72 @@
 """Tests for the everalgo.llm public API surface."""
 
+import pytest
+
+import everalgo.llm
+
 
 def test_top_level_exports_match_all() -> None:
-    from everalgo.llm import __all__
-
-    assert sorted(__all__) == sorted(
+    assert sorted(everalgo.llm.__all__) == sorted(
         [
-            # core wire types + protocol + factory + errors
+            # protocol: the client, its request types, and the one error the contract defines
             "LLMClient",
-            "ChatMessage",
-            "ChatResponse",
-            "Usage",
-            "LLMConfig",
-            "LLMError",
-            "Lang",
-            "build_client",
-            "format_atomic_fact_time",
-            "format_iso_timestamp",
-            "format_message_timestamp",
-            "format_natural_language_time",
-            "parse_llm_json_object",
-            # multimodal content parts (parser-migration)
+            "LLMMessage",
             "ContentPart",
             "ImageUrlInner",
             "ImageUrlPart",
             "TextPart",
             "image_url_part_from_bytes",
+            "LLMOutputError",
+            # response_format models: the base class, parsing a reply against one, and the helpers that turn one
+            # into request parameters
+            "StrictOutputModel",
+            "parse_reply",
+            "describe_errors",
+            "to_openai_response_format",
+            "to_anthropic_response_format",
+            "to_gemini_response_format",
+            "to_ollama_response_format",
         ]
     )
 
 
-def test_top_level_imports_resolve() -> None:
-    from everalgo.llm import (
-        ChatMessage,
-        ChatResponse,
-        Lang,
-        LLMClient,
-        LLMConfig,
-        LLMError,
-        Usage,
-        build_client,
-        format_atomic_fact_time,
-        format_iso_timestamp,
-        format_message_timestamp,
-        format_natural_language_time,
-        parse_llm_json_object,
-    )
-
-    assert ChatMessage.__name__ == "ChatMessage"
-    assert ChatResponse.__name__ == "ChatResponse"
-    assert LLMClient.__name__ == "LLMClient"
-    assert LLMConfig.__name__ == "LLMConfig"
-    assert LLMError.__name__ == "LLMError"
-    assert Usage.__name__ == "Usage"
-    assert build_client.__name__ == "build_client"
-    assert format_atomic_fact_time.__name__ == "format_atomic_fact_time"
-    assert format_iso_timestamp.__name__ == "format_iso_timestamp"
-    assert format_message_timestamp.__name__ == "format_message_timestamp"
-    assert format_natural_language_time.__name__ == "format_natural_language_time"
-    assert parse_llm_json_object.__name__ == "parse_llm_json_object"
-    # Lang is a runtime-accessible Literal alias — verify it is importable
-    assert Lang is not None
+def test_every_name_in_all_resolves() -> None:
+    for name in everalgo.llm.__all__:
+        assert getattr(everalgo.llm, name) is not None, name
 
 
-def test_multimodal_content_part_symbols_importable() -> None:
-    """Multimodal content part types added for the parser migration."""
-    from everalgo.llm import (
-        ContentPart,
-        ImageUrlInner,
-        ImageUrlPart,
-        TextPart,
-        image_url_part_from_bytes,
-    )
-
-    assert TextPart.__name__ == "TextPart"
-    assert ImageUrlInner.__name__ == "ImageUrlInner"
-    assert ImageUrlPart.__name__ == "ImageUrlPart"
-    # ContentPart is an Annotated[Union], not a class — just verify it's importable.
-    assert ContentPart is not None
-    assert callable(image_url_part_from_bytes)
+@pytest.mark.parametrize(
+    "removed",
+    [
+        # renamed without an alias
+        "ChatMessage",
+        # the response wrapper and its parts
+        "ChatResponse",
+        "Usage",
+        # wire-shaped response formats
+        "TextFormat",
+        "JsonObjectFormat",
+        "JsonSchemaSpec",
+        "JsonSchemaFormat",
+        "ResponseFormat",
+        # renamed without an alias
+        "json_schema_format",
+        # the reference implementation's error, which is not part of the contract
+        "LLMError",
+        # the reference implementation takes keyword arguments; a config object and a one-target factory added nothing
+        "LLMConfig",
+        "build_client",
+        # lenient fence / braces extraction contradicts strict model_validate_json parsing
+        "parse_llm_json_object",
+        # prompt timestamp helpers belong to everalgo.utils; the two without a caller are gone
+        "Lang",
+        "format_atomic_fact_time",
+        "format_iso_timestamp",
+        "format_message_timestamp",
+        "format_natural_language_time",
+        # removed outright: nothing raised it
+        "UnsupportedParameterError",
+    ],
+)
+def test_removed_names_are_no_longer_exported(removed: str) -> None:
+    assert not hasattr(everalgo.llm, removed)

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
-from everalgo.llm.types import ChatResponse
 from everalgo.parser import url
-from everalgo.parser._utils import fetch_uri
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Modality, RawFile
 
@@ -43,7 +42,7 @@ SAMPLE_HTML = b"""<!doctype html>
 
 
 def _fake(text: str = "extracted body") -> FakeLLMClient:
-    return FakeLLMClient(responses=[ChatResponse(content=text, model="fake", finish_reason="stop")])
+    return FakeLLMClient(responses=[json.dumps({"text": text})])
 
 
 @pytest.mark.asyncio
@@ -107,32 +106,6 @@ async def test_aparse_fetches_when_no_content(respx_mock: respx.MockRouter) -> N
     assert result.text == "LLM extracted body"
     assert result.metadata["title"] == "OG Title"
     assert result.metadata["fetched_mime"] == "text/html"
-
-
-# ---- fetch_uri direct tests ----
-
-
-@pytest.mark.asyncio
-async def test_fetch_uri_rejects_non_http_scheme() -> None:
-    """``file://`` must be rejected (AGENTS.md §1)."""
-    with pytest.raises(ValueError, match="only http/https supported"):
-        await fetch_uri("file:///etc/passwd")
-
-
-@pytest.mark.asyncio
-async def test_fetch_uri_rejects_empty_uri() -> None:
-    with pytest.raises(ValueError, match="empty uri"):
-        await fetch_uri("")
-
-
-@pytest.mark.asyncio
-async def test_fetch_uri_returns_bytes_and_mime(respx_mock: respx.MockRouter) -> None:
-    respx_mock.get("https://example.com/foo").mock(
-        return_value=httpx.Response(200, content=b"hello", headers={"content-type": "text/plain; charset=utf-8"})
-    )
-    body, mime = await fetch_uri("https://example.com/foo")
-    assert body == b"hello"
-    assert mime == "text/plain"
 
 
 # ---- Content-Type aware inner dispatch ----

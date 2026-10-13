@@ -1,6 +1,31 @@
-"""Prompt for AgentProfileExtractor — single-call gate screening + section-level patch proposal."""
+"""Prompts for AgentProfileExtractor: single-call gate screening + section-level patch proposal.
 
-AGENT_PROFILE_UPDATE_PROMPT = """You screen a conversation between a user and an AI agent for durable agent-configuration signals that belong in two injected config files, and propose MINIMAL section-level patches for the signals that qualify:
+The SYSTEM message holds the rules and the reply skeleton, with no placeholder, so every call shares it. The USER
+message carries only the data, each block in its own element: ``<current_soul_md>``, ``<current_agents_md>``,
+``<pending_signals>`` and ``<conversation>``, one ``(role) [time] speaker: text`` line per chat message.
+
+Every rule sentence is the single-message prompt's, unchanged. The four ``##`` labels and their data moved to the user
+message as element names; the parentheses of the last two labels became ``note`` attributes, verbatim. The skeleton's
+alternatives (``"soul" | "agents" | "none"``, the enumerations of the gates, ``{...} | null`` for the patch) were
+reduced to one value each so that the sample parses; the rules above it list every value, and the reply schema holds
+each field to them.
+
+Constants:
+    - ``AGENT_PROFILE_UPDATE_SYSTEM_PROMPT`` — the static rules.
+    - ``AGENT_PROFILE_UPDATE_USER_PROMPT`` — the data. Placeholders: ``{{soul_md}}``, ``{{agents_md}}``,
+      ``{{pending_signals}}`` and ``{{conversation}}``.
+
+Output schema: ``{"candidates": [candidate, ...]}``, held to ``agent_memory._replies._ProfileUpdateReply``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["AGENT_PROFILE_UPDATE_SYSTEM_PROMPT", "AGENT_PROFILE_UPDATE_USER_PROMPT"]
+
+from everalgo.utils import paragraphs, tagged
+
+AGENT_PROFILE_UPDATE_SYSTEM_PROMPT = """\
+You screen a conversation between a user and an AI agent for durable agent-configuration signals that belong in two injected config files, and propose MINIMAL section-level patches for the signals that qualify:
 
 - SOUL.md — who the agent IS: personality, values, tone, communication style. Descriptive identity statements.
 - AGENTS.md — global operating rules the agent MUST follow when acting: imperative "do / don't do X" constraints.
@@ -74,23 +99,17 @@ Tie-breaker between the two files: descriptive personality / tone / values → s
 - English files get English entries; if the file is written in another language, match it.
 - If a signal cannot be expressed as a clean local edit, set patch to null — a missed update is cheaper than a messy one.
 
-## Current SOUL.md
+Output JSON only. evidence must be a VERBATIM quote of the user's own words from the conversation — never paraphrase, never quote assistant turns or material. Emit one candidate per distinct signal; emit {"candidates": []} when nothing qualifies.
 
-{soul_md}
+{"candidates": [{"target": "soul", "signal": "one-sentence normalized statement of the preference/rule", "key": "short-kebab-slug", "evidence": "verbatim user quote", "speech_act": "directive", "persistence": "explicit", "directed_at": "agent", "novelty": "new", "conflict_excerpt": "verbatim existing rule or null", "matched_pending_key": "key-from-pending-list or null", "reason": "1 sentence, less than 30 tokens", "patch": {"action": "add", "section": "heading text without leading hashes", "old_text": "verbatim block or empty for add", "new_text": "replacement or appended text"}}]}"""
 
-## Current AGENTS.md
-
-{agents_md}
-
-## Pending implicit signals from previous sessions (JSON; may be empty)
-
-{pending_signals}
-
-## Conversation (assistant turns are context only — candidates must come from the user's own words)
-
-{conversation}
-
-Output JSON only. evidence must be a VERBATIM quote of the user's own words from the conversation — never paraphrase, never quote assistant turns or material. Emit one candidate per distinct signal; emit {{"candidates": []}} when nothing qualifies.
-
-{{"candidates": [{{"target": "soul" | "agents" | "none", "signal": "one-sentence normalized statement of the preference/rule", "key": "short-kebab-slug", "evidence": "verbatim user quote", "speech_act": "directive" | "question" | "venting" | "withdrawn" | "deferral" | "denial" | "material" | "information", "persistence": "explicit" | "implicit" | "one_off", "directed_at": "agent" | "task" | "user" | "other", "novelty": "new" | "redundant" | "conflict", "conflict_excerpt": "verbatim existing rule or null", "matched_pending_key": "key-from-pending-list or null", "reason": "1 sentence, less than 30 tokens", "patch": {{"action": "add" | "modify", "section": "heading text without leading hashes", "old_text": "verbatim block or empty for add", "new_text": "replacement or appended text"}} | null}}]}}
-"""
+AGENT_PROFILE_UPDATE_USER_PROMPT = paragraphs(
+    tagged("current_soul_md", "{{soul_md}}"),
+    tagged("current_agents_md", "{{agents_md}}"),
+    tagged("pending_signals", "{{pending_signals}}", note="JSON; may be empty"),
+    tagged(
+        "conversation",
+        "{{conversation}}",
+        note="assistant turns are context only — candidates must come from the user's own words",
+    ),
+)

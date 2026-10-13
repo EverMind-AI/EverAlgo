@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -11,9 +10,6 @@ from everalgo.rank import AgenticDecision, aagentic_retrieve
 from everalgo.rank.agentic import MultiQueryResponse, RefinedQueryResponse, SufficiencyCheckResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
-
-if TYPE_CHECKING:
-    from everalgo.llm.types import ChatResponse
 
 
 def _ep_cand(cid: str, score: float = 1.0) -> Candidate:
@@ -289,8 +285,8 @@ async def test_agentic_insufficient_refined_query_strategy() -> None:
                     "missing_information": ["date"],
                 }
             ),
-            # Refined-query prompt outputs plain text (evercore 93 format) — no JSON block.
-            "Refined Query: When did Alice move to New York?",
+            # The answer prefix the worked examples show is stripped from ``text``.
+            json.dumps({"text": "Refined Query: When did Alice move to New York?"}),
         ],
     )
 
@@ -361,7 +357,7 @@ async def test_agentic_propagates_llm_error() -> None:
     async def base_retrieve(q: str, k: int) -> list[Candidate]:
         return [_ep_cand("d1", 0.9)]
 
-    def _boom(*_a: object, **_kw: object) -> ChatResponse:
+    def _boom(*_a: object, **_kw: object) -> str:
         raise RuntimeError("llm down")
 
     fake = FakeLLMClient(handler=_boom)
@@ -438,9 +434,9 @@ from datetime import UTC, datetime  # noqa: E402
 from everalgo.rank.agentic import _format_docs  # noqa: E402
 
 
-def test_format_docs_renders_date_row_iso_z() -> None:
-    """Candidate with ms-epoch timestamp renders ``Date: YYYY-MM-DDTHH:MM:SSZ``."""
-    ts_ms = int(datetime(2024, 3, 15, 13, 0, 0, tzinfo=UTC).timestamp() * 1000)
+def test_format_docs_renders_date_row_as_utc_minute() -> None:
+    """Candidate with ms-epoch timestamp renders ``Date: YYYY-MM-DD HH:MM UTC``, seconds truncated."""
+    ts_ms = int(datetime(2024, 3, 15, 13, 0, 59, tzinfo=UTC).timestamp() * 1000)
     c = Candidate(
         id="mc_1",
         score=0.9,
@@ -450,7 +446,7 @@ def test_format_docs_renders_date_row_iso_z() -> None:
         },
     )
     rendered = _format_docs([c])
-    assert "Date: 2024-03-15T13:00:00Z" in rendered
+    assert "Date: 2024-03-15 13:00 UTC" in rendered
     assert "Title: fishing trip" in rendered
     assert "Content: Alice caught a fish" in rendered
 
@@ -479,42 +475,33 @@ def test_format_docs_truncates_long_body_to_500() -> None:
     assert "x" * 501 not in rendered
 
 
-# ─── _call_llm_for_refined_query plain-text parser tests ────────────────────
+# ─── _usable_refined_query cleanup tests ────────────────────────────────────
 
 
-from everalgo.rank.agentic import _call_llm_for_refined_query, _format_doc_timestamp  # noqa: E402
+from everalgo.rank.agentic import _format_doc_timestamp, _usable_refined_query  # noqa: E402
 
 
-async def test_call_llm_for_refined_query_strips_prefix() -> None:
-    """FakeLLM returns plain text with ``Refined Query:`` prefix; parser strips it."""
-    fake = FakeLLMClient(responses=["Refined Query: hello world more text"])
-    result = await _call_llm_for_refined_query(fake, "rendered prompt", original_query="what is X?")
-    assert result.refined_query == "hello world more text"
-    assert result.reasoning == ""
+def test_usable_refined_query_strips_prefix() -> None:
+    """A ``Refined Query:`` prefix the model copied from the worked examples is stripped."""
+    assert _usable_refined_query("Refined Query: hello world more text", "what is X?") == "hello world more text"
 
 
-async def test_call_llm_for_refined_query_falls_back_on_too_short() -> None:
-    """LLM returns a string shorter than 5 chars; parser falls back to original_query."""
-    fake = FakeLLMClient(responses=["hi"])
+def test_usable_refined_query_falls_back_on_too_short() -> None:
+    """A query shorter than 5 chars falls back to original_query."""
     original = "what happened yesterday?"
-    result = await _call_llm_for_refined_query(fake, "rendered prompt", original_query=original)
-    assert result.refined_query == original
+    assert _usable_refined_query("hi", original) == original
 
 
-async def test_call_llm_for_refined_query_falls_back_on_too_long() -> None:
-    """LLM returns a string longer than 300 chars; parser falls back to original_query."""
-    fake = FakeLLMClient(responses=["x" * 301])
+def test_usable_refined_query_falls_back_on_too_long() -> None:
+    """A query longer than 300 chars falls back to original_query."""
     original = "what happened yesterday?"
-    result = await _call_llm_for_refined_query(fake, "rendered prompt", original_query=original)
-    assert result.refined_query == original
+    assert _usable_refined_query("x" * 301, original) == original
 
 
-async def test_call_llm_for_refined_query_falls_back_when_identical() -> None:
-    """LLM echoes the original query (case-mismatched); parser falls back to original_query."""
+def test_usable_refined_query_falls_back_when_identical() -> None:
+    """An echo of the original query (case-mismatched) falls back to original_query."""
     original = "What did Alice do last Tuesday?"
-    fake = FakeLLMClient(responses=[original.upper()])  # case-insensitive identity check
-    result = await _call_llm_for_refined_query(fake, "rendered prompt", original_query=original)
-    assert result.refined_query == original
+    assert _usable_refined_query(original.upper(), original) == original
 
 
 # ─── _format_doc_timestamp edge-case tests ──────────────────────────────────
@@ -528,6 +515,11 @@ def test_format_doc_timestamp_returns_na_for_nan_inf_bool() -> None:
     assert _format_doc_timestamp(False) == "N/A"  # noqa: FBT003
     assert _format_doc_timestamp(None) == "N/A"
     assert _format_doc_timestamp("not a number") == "N/A"  # type: ignore[arg-type]
+
+
+def test_format_doc_timestamp_accepts_a_float_epoch() -> None:
+    """A float ms epoch (a JSON number) renders like its integer part."""
+    assert _format_doc_timestamp(1_710_507_659_999.9) == "2024-03-15 13:00 UTC"
 
 
 # ─── round2_retrieve + round2_cap parameter tests ───────────────────────────

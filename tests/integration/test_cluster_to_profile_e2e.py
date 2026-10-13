@@ -13,16 +13,17 @@ geometric decisions are predictable.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from everalgo.clustering import Cluster, cluster_by_geometry
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 from everalgo.user_memory.profile import ProfileExtractor
+
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
 
 
 def _memcell(content: str, ts_ms: int) -> MemCell:
@@ -103,23 +104,22 @@ async def test_two_similar_memcells_cluster_then_profile_sees_prior() -> None:
     # Downstream ProfileExtractor: feed [prior_cells..., mc_python_2] as one chronological list.
     captured_prompt: dict[str, str] = {}
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
-        assert isinstance(messages[0].content, str)  # narrow for test
-        captured_prompt["text"] = messages[0].content
-        return ChatResponse(
-            content=json.dumps(
-                {
-                    "explicit_info": [
-                        {
-                            "category": "Technical Skills",
-                            "description": "Alice is a Python developer interested in async.",
-                            "evidence": "Asked about async retries and timeouts.",
-                        }
-                    ],
-                    "implicit_traits": [],
-                }
-            ),
-            model="fake",
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        # The conversation is data, so it rides in the closing user message.
+        assert messages[-1].role == "user"
+        assert isinstance(messages[-1].content, str)  # narrow for test
+        captured_prompt["text"] = messages[-1].content
+        return json.dumps(
+            {
+                "explicit_info": [
+                    {
+                        "evidence": "Asked about async retries and timeouts.",
+                        "description": "Alice is a Python developer interested in async.",
+                        "category": "Technical Skills",
+                    }
+                ],
+                "implicit_traits": [],
+            }
         )
 
     fake = FakeLLMClient(handler=handler)

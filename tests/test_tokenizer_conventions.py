@@ -1,7 +1,7 @@
 """Cross-distribution tokenizer convention checks.
 
 Every tiktoken encode in a PUBLISHED DISTRIBUTION (``packages/*/src``) must go through
-``everalgo._tokenize.encode``, which passes ``disallowed_special=()``.
+``everalgo.utils.tokens.encode``, which passes ``disallowed_special=()``.
 
 WHY THIS IS A BUILD-BREAKING RULE RATHER THAN A STYLE PREFERENCE.
 ``Encoding.encode`` defaults to ``disallowed_special="all"``, so it raises ValueError the
@@ -31,10 +31,10 @@ import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_TOKENIZE_MODULE = "packages/everalgo-core/src/everalgo/_tokenize.py"
+_TOKENIZE_MODULE = "packages/everalgo-core/src/everalgo/utils/tokens.py"
 
 #: Binding a tokenizer object and calling ``.encode`` on it directly — the shape that
-#: skips the wrapper even without importing tiktoken (``from everalgo._tokenize import
+#: skips the wrapper even without importing tiktoken (``from everalgo.utils.tokens import
 #: _get_tokenizer``; ``_get_tokenizer().encode(text)``).
 _DIRECT_ENCODE = re.compile(r"(?:_get_tokenizer\(\)|\btokenizer|\benc)\s*\.encode\(")
 
@@ -56,7 +56,7 @@ def test_tiktoken_is_imported_in_exactly_one_module() -> None:
     ]
     assert offenders == [_TOKENIZE_MODULE], (
         "in a published distribution tiktoken must be imported only by the shared tokenizer "
-        f"module ({_TOKENIZE_MODULE}); found: {offenders}. Use everalgo._tokenize.encode / "
+        f"module ({_TOKENIZE_MODULE}); found: {offenders}. Use everalgo.utils.tokens.encode / "
         "count_tokens instead — a direct encode raises on text containing "
         "<|endoftext|> and friends."
     )
@@ -65,7 +65,7 @@ def test_tiktoken_is_imported_in_exactly_one_module() -> None:
 def test_no_module_calls_encode_on_a_tokenizer_directly() -> None:
     """Even with the import confined, a module can still fetch the shared Encoding.
 
-    ``_tokenize.py`` itself is exempt: it owns the one sanctioned call, and it passes
+    ``utils/tokens.py`` itself is exempt: it owns the one sanctioned call, and it passes
     ``disallowed_special=()``.
     """
     offenders = []
@@ -78,7 +78,7 @@ def test_no_module_calls_encode_on_a_tokenizer_directly() -> None:
                 offenders.append(f"{rel}:{lineno}")
     assert offenders == [], (
         f"direct tokenizer .encode() outside {_TOKENIZE_MODULE}: {offenders}. "
-        "Call everalgo._tokenize.encode (or count_tokens) so special-token literals "
+        "Call everalgo.utils.tokens.encode (or count_tokens) so special-token literals "
         "are treated as ordinary text."
     )
 

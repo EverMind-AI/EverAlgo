@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import json
 import math
+from typing import TYPE_CHECKING
 
 import pytest
 
-from everalgo.llm.types import ChatMessage, ChatResponse
+from everalgo.llm import LLMOutputError
 from everalgo.rank import rerank as rerank_mod
+from everalgo.rank._replies import _RerankReply
 from everalgo.rank.prompts.en.episodic import EPISODIC_RERANK_PROMPT_EN
+from everalgo.rank.prompts.rerank_user import RERANK_USER_PROMPT
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
+from everalgo.utils import render_prompt
+
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
 
 
 def _items() -> list[Candidate]:
@@ -89,23 +96,79 @@ async def test_arerank_returns_empty_for_empty_input() -> None:
     assert fake.call_count == 0
 
 
-async def test_arerank_raises_on_invalid_response() -> None:
-    """Invalid LLM response (not matching schema) → ValueError immediately (fail-loud, no retry)."""
-    fake = FakeLLMClient(responses=["not json at all"])
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "not json at all",
+        json.dumps({"items": [{"id": "a", "score": 0.5}]}),
+        json.dumps({"ranked": [{"id": "a"}]}),
+        json.dumps({"ranked": [{"id": "a", "score": 0.5}], "reasoning": "extra"}),
+        json.dumps({"ranked": [{"id": "a", "score": 0.5, "why": "extra"}]}),
+        json.dumps({"ranked": [{"id": 7, "score": 0.5}]}),
+    ],
+    ids=["not_json", "missing_ranked", "missing_score", "extra_field", "extra_item_field", "id_not_str"],
+)
+async def test_arerank_raises_llm_output_error_on_invalid_reply(reply: str) -> None:
+    """A reply off the ``ranked`` schema raises ``LLMOutputError`` immediately (fail-loud, no retry)."""
+    fake = FakeLLMClient(responses=[reply])
 
-    with pytest.raises(ValueError):
+    with pytest.raises(LLMOutputError, match="rerank reply is not a valid _RerankReply"):
         await rerank_mod.arerank(_items(), query="show me history", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
 
 
-def test_arerank_raises_on_prompt_with_unknown_placeholder() -> None:
-    """A prompt referencing keys we don't supply must surface as KeyError."""
+async def test_arerank_requests_the_rerank_model_with_no_temperature() -> None:
     fake = FakeLLMClient(responses=[json.dumps({"ranked": []})])
 
-    with pytest.raises(KeyError):
+    await rerank_mod.arerank(_items(), query="q", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake)
+
+    record = fake.calls[0]
+    assert record.response_format is _RerankReply
+    assert (record.temperature, record.max_tokens) == (None, None)
+
+
+async def test_arerank_sends_the_rules_with_top_k_then_the_query_and_candidates() -> None:
+    fake = FakeLLMClient(responses=[json.dumps({"ranked": []})])
+
+    await rerank_mod.arerank(_items(), query="show me history", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=2, llm=fake)
+
+    system, user = fake.calls[0].messages
+    payload = json.dumps([{"id": c.id, "score": c.score} for c in _items()])
+    assert (system.role, system.content) == ("system", render_prompt(EPISODIC_RERANK_PROMPT_EN, None, top_k=2))
+    assert "Return at most 2 items" in str(system.content)
+    assert (user.role, user.content) == (
+        "user",
+        render_prompt(RERANK_USER_PROMPT, None, query="show me history", candidates_json=payload),
+    )
+    assert user.content == f"<user_query>\nshow me history\n</user_query>\n\n<candidates>\n{payload}\n</candidates>"
+
+
+async def test_arerank_query_is_never_rendered_as_a_template() -> None:
+    fake = FakeLLMClient(responses=[json.dumps({"ranked": []})])
+
+    await rerank_mod.arerank(_items(), query="{{top_k}} {{candidates_json}}", prompt="Rules.", top_k=2, llm=fake)
+
+    assert str(fake.calls[0].messages[1].content).startswith("<user_query>\n{{top_k}} {{candidates_json}}\n")
+
+
+def test_arerank_raises_on_a_prompt_written_for_the_single_message_call() -> None:
+    """An override that still carries the data slots would send them literally; it fails loud instead."""
+    fake = FakeLLMClient(responses=[json.dumps({"ranked": []})])
+
+    with pytest.raises(ValueError, match=r"\{\{query\}\} \(no value supplied\)"):
+        rerank_mod.rerank(_items(), query="q", prompt="Rank for {{query}} at most {{top_k}}.", top_k=2, llm=fake)
+
+    assert fake.call_count == 0
+
+
+def test_arerank_raises_on_prompt_with_unknown_placeholder() -> None:
+    """A prompt naming a slot we do not supply must fail loudly rather than ship the literal slot."""
+    fake = FakeLLMClient(responses=[json.dumps({"ranked": []})])
+
+    with pytest.raises(ValueError, match=r"\{\{nonexistent\}\} \(no value supplied\)"):
         rerank_mod.rerank(
             _items(),
             query="test query",
-            prompt="bad template {nonexistent}",
+            prompt="bad template {{nonexistent}}",
             top_k=2,
             llm=fake,
         )
@@ -136,17 +199,11 @@ async def test_arerank_serializes_non_native_metadata_via_default_str() -> None:
 
     captured_prompt: list[str] = []
 
-    def _handler(messages: list[ChatMessage], **_kwargs: object) -> ChatResponse:
+    def _handler(messages: list[LLMMessage], **_kwargs: object) -> str:
         content = messages[-1].content
         assert isinstance(content, str)
         captured_prompt.append(content)
-        return ChatResponse(
-            content=json.dumps({"ranked": [{"id": "dt_item", "score": 0.88}]}),
-            model="fake",
-            usage=None,
-            finish_reason="stop",
-            raw=None,
-        )
+        return json.dumps({"ranked": [{"id": "dt_item", "score": 0.88}]})
 
     fake = FakeLLMClient(handler=_handler)
 
@@ -161,7 +218,7 @@ async def test_arerank_serializes_non_native_metadata_via_default_str() -> None:
         [candidate], query="recent events", prompt=EPISODIC_RERANK_PROMPT_EN, top_k=5, llm=fake
     )
 
-    # The serialized datetime string must appear in the prompt sent to the LLM
+    # The serialized datetime string must appear in the user message sent to the LLM
     assert len(captured_prompt) == 1
     assert ts_str in captured_prompt[0]
 

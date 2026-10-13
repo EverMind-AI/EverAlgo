@@ -6,7 +6,7 @@ import inspect
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -33,17 +33,10 @@ async def test_run_evaluate_stage_writes_eval_results_json(tmp_path: Path, monke
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
     # Mock judge LLM to always say correct.
-    # allm_judge reads resp.usage.prompt_tokens — mock must expose .usage with the right shape.
-    mock_usage = MagicMock(prompt_tokens=10, completion_tokens=5)
     monkeypatch.setattr(
         services.llm,
-        "chat",
-        AsyncMock(
-            return_value=MagicMock(
-                content='{"label": "CORRECT", "reasoning": "ok"}',
-                usage=mock_usage,
-            )
-        ),
+        "achat",
+        AsyncMock(return_value='{"reasoning": "ok", "label": "CORRECT"}'),
     )
 
     # Prepare stage 4 output (answers.json)
@@ -132,7 +125,7 @@ async def test_run_evaluate_stage_raises_when_judge_keeps_failing(tmp_path: Path
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
-    services.llm.chat = AsyncMock(side_effect=RuntimeError("judge LLM down"))  # type: ignore[method-assign]
+    services.llm.achat = AsyncMock(side_effect=RuntimeError("judge LLM down"))  # type: ignore[method-assign]
 
     stage4_dir: Path = tmp_path / "stage6_answer"
     stage4_dir.mkdir()

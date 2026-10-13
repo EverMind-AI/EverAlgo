@@ -2,14 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-
-from everalgo.llm.errors import LLMError
-
-# Retryable exception tuple shared by Extract and Enrich stages.
-_RETRYABLE_EXC = (json.JSONDecodeError, ValueError, LLMError)
 
 if TYPE_CHECKING:
     from pathlib import Path

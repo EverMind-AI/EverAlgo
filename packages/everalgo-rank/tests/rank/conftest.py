@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from everalgo.types import Candidate, FactCandidate
+from everalgo.types import Candidate
 
 
 @pytest.fixture
@@ -53,21 +53,3 @@ def skill_candidates() -> list[Candidate]:
             metadata={"maturity_score": 0.4, "confidence": 0.3},
         ),
     ]
-
-
-@pytest.fixture
-def episode_to_facts() -> dict[str, list[FactCandidate]]:
-    """Pre-fetched ep→fact linkage matching dense_candidates ids d1/d2/d3."""
-    return {
-        "d1": [
-            FactCandidate(id="f11", parent_episode_id="d1", score=0.92),
-            FactCandidate(id="f12", parent_episode_id="d1", score=0.88),
-        ],
-        "d2": [
-            FactCandidate(id="f21", parent_episode_id="d2", score=0.50),
-        ],
-        "d3": [
-            FactCandidate(id="f31", parent_episode_id="d3", score=0.78),
-            FactCandidate(id="f32", parent_episode_id="d3", score=0.65),
-        ],
-    }

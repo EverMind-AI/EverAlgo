@@ -37,24 +37,21 @@ _RerankFn = Callable[[str, list[Candidate]], Awaitable[list[Candidate]]]
 pytestmark = pytest.mark.integration
 
 
-# Generic rerank prompt — domain-neutral so the model judges on the candidate's
-# free-form ``text`` field rather than expecting case-specific fields.
+# Generic rerank system message — domain-neutral so the model judges on the candidate's
+# free-form ``text`` field rather than expecting case-specific fields. ``arerank`` sends the
+# query and the candidates in the user message; ``{{top_k}}`` is the only slot here.
 _GENERIC_RERANK_PROMPT = """\
 Score each candidate document for how directly it answers the user query, from
 0.0 (completely off-topic) to 1.0 (a precise, direct answer).
 
-User query:
-{query}
+Candidates in <candidates> (JSON array; each item has id, score, and a free-form
+text field describing the document).
 
-Candidates (JSON array; each item has ``id``, ``score``, and a free-form
-``text`` field describing the document):
-{candidates_json}
-
-Return at most {top_k} items sorted by score descending. Drop candidates whose
+Return at most {{top_k}} items sorted by score descending. Drop candidates whose
 score would be near 0.
 
 Output strictly the following JSON, no prose:
-{{"ranked": [{{"id": "<candidate_id>", "score": <float in 0..1>}}]}}
+{"ranked": [{"id": "<candidate_id>", "score": 0.9}]}
 """
 
 

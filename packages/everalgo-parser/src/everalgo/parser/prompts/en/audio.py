@@ -1,6 +1,17 @@
-"""Audio parser prompt."""
+"""Audio parser prompt: the system message of the transcription call.
 
-PROMPT_FOR_AUDIO = """This is a voice message sent by a user in a chat application. Transcribe it word by word.
+The user message is the audio part alone. The system message ends with ``<reply_format>``: the transcription goes in
+``{"text": "..."}``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["PROMPT_FOR_AUDIO"]
+
+from everalgo.parser.prompts._reply_format import TEXT_REPLY_FORMAT
+from everalgo.utils import paragraphs
+
+_AUDIO_RULES = """This is a voice message sent by a user in a chat application. Transcribe it word by word.
 
 CRITICAL INSTRUCTIONS:
 - Output ONLY the transcribed text directly. Do NOT include any preamble or postscript.
@@ -9,3 +20,5 @@ CRITICAL INSTRUCTIONS:
   1. No audio file is provided
   2. The audio file contains no content
   3. The audio file is corrupted or cannot be parsed"""
+
+PROMPT_FOR_AUDIO = paragraphs(_AUDIO_RULES, TEXT_REPLY_FORMAT)

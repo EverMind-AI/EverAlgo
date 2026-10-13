@@ -8,10 +8,8 @@ defined in prompts under ``user_memory/prompts/{en,zh}/``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.assertions import (
     assert_atomic_fact_shape,
     assert_episode_shape,
@@ -24,7 +22,10 @@ from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.episode import EpisodeExtractor
 from everalgo.user_memory.foresight import ForesightExtractor
 
-_BOUNDARY_CONTINUE_JSON = '{"reasoning": "single coherent topic", "boundaries": [], "should_wait": false}'
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
+
+_BOUNDARY_CONTINUE_JSON = '{"reasoning": "single coherent topic", "boundaries": [], "tail_complete": true}'
 
 
 def _two_msg_dialogue() -> list[ChatMessage]:
@@ -49,21 +50,21 @@ def _two_msg_dialogue() -> list[ChatMessage]:
 
 
 async def test_boundary_to_episode_pipeline_e2e() -> None:
-    """Boundary detects 1 MemCell, episode extracts 1 Episode with {title, content} shape."""
+    """Boundary detects 1 MemCell, episode extracts 1 Episode from a {content, summary, title} reply."""
     call_count = 0
 
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             content = _BOUNDARY_CONTINUE_JSON
         else:
             content = (
-                '{"title": "Meeting with Alice at 3pm",'
-                ' "content": "User scheduled a meeting with Alice at 3pm and plans to follow up next week.",'
-                ' "summary": "The user set up a 3pm meeting with Alice and intends to follow up next week."}'
+                '{"content": "User scheduled a meeting with Alice at 3pm and plans to follow up next week.",'
+                ' "summary": "The user set up a 3pm meeting with Alice and intends to follow up next week.",'
+                ' "title": "Meeting with Alice at 3pm"}'
             )
-        return ChatResponse(content=content, model="fake")
+        return content
 
     fake = FakeLLMClient(handler=handler)
     output = await BoundaryDetector(llm=fake).adetect(_two_msg_dialogue(), is_final=True)
@@ -83,7 +84,7 @@ async def test_boundary_to_foresight_pipeline_e2e() -> None:
     """Boundary detects 1 MemCell, foresight extracts forward-looking commitments (top-level JSON array)."""
     call_count = 0
 
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -96,7 +97,7 @@ async def test_boundary_to_foresight_pipeline_e2e() -> None:
                 ' "start_time": "2024-01-01", "end_time": "2024-01-08", "duration_days": 7}'
                 "]}"
             )
-        return ChatResponse(content=content, model="fake")
+        return content
 
     fake = FakeLLMClient(handler=handler)
     output = await BoundaryDetector(llm=fake).adetect(_two_msg_dialogue(), is_final=True)
@@ -118,7 +119,7 @@ async def test_boundary_to_atomic_fact_pipeline_e2e() -> None:
     """Boundary detects 1 MemCell, atomic_fact splits ``atomic_facts.atomic_fact`` into entities."""
     call_count = 0
 
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -126,13 +127,12 @@ async def test_boundary_to_atomic_fact_pipeline_e2e() -> None:
         else:
             content = (
                 '{"atomic_facts": {'
-                '"time": "March 14, 2024(Thursday) at 3:00 PM UTC", '
                 '"atomic_fact": ['
                 '"User scheduled a meeting with Alice at 3pm.",'
                 '"Assistant sent the invite for 3pm."'
                 "]}}"
             )
-        return ChatResponse(content=content, model="fake")
+        return content
 
     fake = FakeLLMClient(handler=handler)
     output = await BoundaryDetector(llm=fake).adetect(_two_msg_dialogue(), is_final=True)

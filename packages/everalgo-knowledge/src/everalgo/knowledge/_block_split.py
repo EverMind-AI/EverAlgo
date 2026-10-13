@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 
-from everalgo._tokenize import count_tokens
+from everalgo.utils import count_tokens
 
 __all__ = [
     "DEFAULT_MAX_TOKENS_PER_ATOM",

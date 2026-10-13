@@ -1,24 +1,38 @@
-"""Boundary detection — chat MemCell primitive.
+"""Boundary detection — cut a conversation into MemCells.
 
 Public surface:
-- detect_boundaries — async function: split chat messages into MemCells
-- DetectionResult    — ``(cells, tail, should_wait)`` NamedTuple returned by detect_boundaries
+- BoundaryDetector      — class binding an LLM client: ``adetect`` / ``detect`` (batch), ``adetect_step`` /
+                          ``detect_step`` (incremental, one message at a time)
+- adetect_boundaries    — async function: the batch path over ``ConversationItem`` (tool items are kept in the
+                          cells but never shown to the model)
+- detect_boundaries     — sync bridge over ``adetect_boundaries``; non-event-loop contexts only
+- DetectionResult       — ``(cells, tail, tail_complete)`` NamedTuple returned by all of the above
+- adetect_boundary_step — async function: the single LLM decision under ``adetect_step``
+- BoundaryDecision      — NamedTuple returned by ``adetect_boundary_step``
+
+``everalgo.user_memory`` and ``everalgo.agent_memory`` re-export ``BoundaryDetector`` unchanged.
 
 ``WorkspaceMemCellExtractor`` (Jira / Email / Confluence) is NOT YET IMPLEMENTED and is
 deliberately omitted from the public API — its methods raise ``NotImplementedError``. Import it
 directly from ``everalgo.boundary.workspace`` if you need the reserved placeholder.
-
-Facade classes (BoundaryDetector / AgentBoundaryDetector) live in everalgo-user-memory and
-everalgo-agent-memory respectively; see Stage 3-4 of the refactor.
 """
 
 import logging
 
-from everalgo.boundary.chat import BoundaryDecision, DetectionResult, adetect_boundary_step, detect_boundaries
+from everalgo.boundary._detector import (
+    BoundaryDecision,
+    BoundaryDetector,
+    DetectionResult,
+    adetect_boundaries,
+    adetect_boundary_step,
+    detect_boundaries,
+)
 
 __all__ = [
     "BoundaryDecision",
+    "BoundaryDetector",
     "DetectionResult",
+    "adetect_boundaries",
     "adetect_boundary_step",
     "detect_boundaries",
 ]

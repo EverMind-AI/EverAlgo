@@ -21,10 +21,8 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import SecretStr
 
-from everalgo.llm import build_client
-from everalgo.llm.config import LLMConfig
+from everalgo.llm.openai_compat import OpenAICompatClient
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -43,10 +41,9 @@ def real_llm() -> LLMClient:
     missing = [name for name in _REQUIRED_ENV_VARS if not os.environ.get(name)]
     if missing:
         pytest.skip(f"integration test needs env vars: {', '.join(missing)}")
-    return build_client(
-        LLMConfig(
-            api_key=SecretStr(os.environ["LLM_API_KEY"]),
-            base_url=os.environ["LLM_BASE_URL"],
-            model=os.environ["LLM_MODEL"],
-        ),
+    return OpenAICompatClient(
+        model=os.environ["LLM_MODEL"],
+        api_key=os.environ["LLM_API_KEY"],
+        base_url=os.environ["LLM_BASE_URL"],
+        temperature=0.0,
     )

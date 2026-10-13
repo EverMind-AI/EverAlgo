@@ -91,11 +91,11 @@ def test_load_qa_pairs_rejects_out_of_range():
 
 
 def test_answer_prompt_has_required_placeholders():
-    """Regression: answer_prompt must contain {context} and {question}."""
+    """Regression: answer_prompt must contain {{context}} and {{question}}."""
     ds = LocomoDataset(data_path=FIXTURE)
     prompt = ds.answer_prompt()
-    assert "{context}" in prompt
-    assert "{question}" in prompt
+    assert "{{context}}" in prompt
+    assert "{{question}}" in prompt
     assert "TBD" not in prompt
 
 
@@ -103,9 +103,9 @@ def test_judge_prompt_has_required_placeholders():
     """Regression: judge_prompt must contain the placeholders the upstream reference's grader uses."""
     ds = LocomoDataset(data_path=FIXTURE)
     prompt = ds.judge_prompt()
-    assert "{question}" in prompt
-    assert "{gold_answer}" in prompt
-    assert "{response}" in prompt
+    assert "{{question}}" in prompt
+    assert "{{gold_answer}}" in prompt
+    assert "{{response}}" in prompt
     assert "TBD" not in prompt
 
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from everalgo.knowledge._batch_merge import (
     MIN_TOPICS_FOR_MERGE,
     _apply_merge_groups_with_remap,
@@ -13,7 +15,11 @@ from everalgo.knowledge._batch_merge import (
     amerge_doc_summary,
     amerge_topics,
 )
+from everalgo.knowledge._replies import ContentMergeReply, TopicMergeReply
+from everalgo.llm import LLMOutputError
 from everalgo.testing.fake_llm import FakeLLMClient
+
+from ._scripted import content_merge_reply
 
 # ── pure-compute helpers ─────────────────────────────────────────────
 
@@ -143,7 +149,7 @@ async def test_merge_doc_summary_single_batch_does_not_call_llm() -> None:
 
 
 async def test_merge_doc_summary_returns_merged_field() -> None:
-    client = FakeLLMClient(responses=['{"summary": "combined"}'])
+    client = FakeLLMClient(responses=[content_merge_reply("combined")])
     out = await amerge_doc_summary(
         client,
         "T",
@@ -151,16 +157,27 @@ async def test_merge_doc_summary_returns_merged_field() -> None:
     )
     assert out == "combined"
     assert client.call_count == 1
+    assert client.calls[0].response_format is ContentMergeReply
 
 
-async def test_merge_doc_summary_falls_back_when_unparsable() -> None:
-    client = FakeLLMClient(responses=["not json"])
-    out = await amerge_doc_summary(client, "T", [{"summary": "fallback"}, {"summary": "s2"}])
-    assert out == "fallback"
+@pytest.mark.parametrize(
+    "reply",
+    [
+        pytest.param("not json", id="not-json"),
+        pytest.param('{"language": "English"}', id="missing-fields"),
+        pytest.param(
+            '{"language": "English", "summary": "s", "subject": "u", "keywords": [], "title": "x"}', id="extra-field"
+        ),
+    ],
+)
+async def test_merge_doc_summary_invalid_reply_raises(reply: str) -> None:
+    client = FakeLLMClient(responses=[reply])
+    with pytest.raises(LLMOutputError, match="knowledge content_merge reply is not a valid ContentMergeReply"):
+        await amerge_doc_summary(client, "T", [{"summary": "fallback"}, {"summary": "s2"}])
 
 
-async def test_merge_doc_summary_falls_back_when_field_missing() -> None:
-    client = FakeLLMClient(responses=['{"language": "English"}'])
+async def test_merge_doc_summary_falls_back_when_merged_summary_is_blank() -> None:
+    client = FakeLLMClient(responses=[content_merge_reply("   ")])
     out = await amerge_doc_summary(client, "T", [{"summary": "fallback"}, {"summary": "s2"}])
     assert out == "fallback"
 
@@ -182,6 +199,7 @@ async def test_merge_topics_returns_original_on_empty_merges() -> None:
     out = await amerge_topics(client, "T", topics)
     assert out is topics
     assert client.call_count == 1
+    assert client.calls[0].response_format is TopicMergeReply
 
 
 async def test_merge_topics_applies_merges() -> None:
@@ -200,8 +218,17 @@ async def test_merge_topics_applies_merges() -> None:
     assert out[0]["block_refs"] == "1,5"
 
 
-async def test_merge_topics_falls_back_on_unparsable_response() -> None:
+@pytest.mark.parametrize(
+    "reply",
+    [
+        pytest.param("garbage", id="not-json"),
+        pytest.param('{"merges": [{"indices": [0, 1], "topic": "t"}]}', id="missing-field"),
+        pytest.param('{"merges": [], "notes": "none"}', id="extra-field"),
+        pytest.param('{"merges": [{"indices": ["0", "1"], "topic": "t", "summary": "s"}]}', id="string-indices"),
+    ],
+)
+async def test_merge_topics_invalid_reply_raises(reply: str) -> None:
     topics = [{"topic": f"T{i}", "summary": "", "block_refs": str(i)} for i in range(MIN_TOPICS_FOR_MERGE)]
-    client = FakeLLMClient(responses=["garbage"])
-    out = await amerge_topics(client, "T", topics)
-    assert out is topics
+    client = FakeLLMClient(responses=[reply])
+    with pytest.raises(LLMOutputError, match="knowledge topic_merge reply is not a valid TopicMergeReply"):
+        await amerge_topics(client, "T", topics)

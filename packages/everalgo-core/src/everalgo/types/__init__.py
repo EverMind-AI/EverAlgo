@@ -4,44 +4,7 @@ This module re-exports the stable cross-distribution contracts. Adding another p
 users that import from this module.
 """
 
-import logging
-
-from everalgo.types.agent import (
-    AgentCase,
-    AgentProfilePatch,
-    AgentProfileSignal,
-    AgentProfileUpdate,
-    AgentSkill,
-    ToolCall,
-    ToolCallFunction,
-    ToolCallRequest,
-    ToolCallResult,
-)
-from everalgo.types.chat import ChatMessage
-from everalgo.types.content import ContentBlock, TextContent
-from everalgo.types.conversation import ConversationItem, MemCell
-from everalgo.types.knowledge import CategorySpec, KnowledgeMemory
-from everalgo.types.memories import AtomicFact, Episode, Foresight, Profile
-from everalgo.types.modality import (
-    EXTENSION_TO_MODALITY,
-    MIME_TO_EXTENSION,
-    MIME_TO_MODALITY,
-    SUPPORTED_EXTENSIONS,
-    SUPPORTED_MIMES,
-    Modality,
-    get_extension_from_mime,
-    get_modality,
-    get_modality_from_mime,
-)
-from everalgo.types.parsed import ParsedContent
-from everalgo.types.rank import (
-    Candidate,
-    FactCandidate,
-    RankInput,
-    RankOutput,
-    ScoredItem,
-)
-from everalgo.types.raw import RawData, RawFile
+from __future__ import annotations
 
 __all__ = [
     "EXTENSION_TO_MODALITY",
@@ -58,11 +21,11 @@ __all__ = [
     "Candidate",
     "CategorySpec",
     "ChatMessage",
-    "ContentBlock",
     "ConversationItem",
     "Episode",
-    "FactCandidate",
+    "ExplicitInfoItem",
     "Foresight",
+    "ImplicitTraitItem",
     "KnowledgeMemory",
     "MemCell",
     "Modality",
@@ -73,7 +36,6 @@ __all__ = [
     "RawData",
     "RawFile",
     "ScoredItem",
-    "TextContent",
     "ToolCall",
     "ToolCallFunction",
     "ToolCallRequest",
@@ -82,6 +44,43 @@ __all__ = [
     "get_modality",
     "get_modality_from_mime",
 ]
+
+import logging
+
+from everalgo.types.agent import (
+    AgentCase,
+    AgentProfilePatch,
+    AgentProfileSignal,
+    AgentProfileUpdate,
+    AgentSkill,
+    ToolCall,
+    ToolCallFunction,
+    ToolCallRequest,
+    ToolCallResult,
+)
+from everalgo.types.chat import ChatMessage
+from everalgo.types.conversation import ConversationItem, MemCell
+from everalgo.types.knowledge import CategorySpec, KnowledgeMemory
+from everalgo.types.memories import AtomicFact, Episode, ExplicitInfoItem, Foresight, ImplicitTraitItem, Profile
+from everalgo.types.modality import (
+    EXTENSION_TO_MODALITY,
+    MIME_TO_EXTENSION,
+    MIME_TO_MODALITY,
+    SUPPORTED_EXTENSIONS,
+    SUPPORTED_MIMES,
+    Modality,
+    get_extension_from_mime,
+    get_modality,
+    get_modality_from_mime,
+)
+from everalgo.types.parsed import ParsedContent
+from everalgo.types.rank import (
+    Candidate,
+    RankInput,
+    RankOutput,
+    ScoredItem,
+)
+from everalgo.types.raw import RawData, RawFile
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.
 logging.getLogger(__name__).addHandler(logging.NullHandler())

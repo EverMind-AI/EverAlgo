@@ -5,13 +5,13 @@ LLM context window, the topic-tree prompt runs once per batch and emits
 independent partial results. This module wires those partials into a
 single coherent extraction:
 
-* ``amerge_doc_summary`` — calls ``CONTENT_MERGE_PROMPT_EN`` to consolidate
+* ``amerge_doc_summary`` — calls the ``content_merge`` prompt to consolidate
   per-batch ``summary`` fields into one document-level summary. The
   prompt also returns subject / keywords; ``KnowledgeMemory`` has no
   field for them so they are dropped here. ``content_labels`` are not
   produced by this prompt — the caller union-dedupes them in code.
 
-* ``amerge_topics`` — calls ``TOPIC_MERGE_PROMPT_EN`` to identify true
+* ``amerge_topics`` — calls the ``topic_merge`` prompt to identify true
   duplicate topics across batch boundaries (e.g. the same event surfaced
   in two batches because it straddled the split). Hierarchy is flattened
   with parent-topic context so the LLM only reasons about siblings; the
@@ -26,10 +26,10 @@ Short-circuits (mirrors ``memsys_enterprise``):
   ``MIN_TOPICS_FOR_MERGE`` flattened topics exist — too small to benefit
   from de-duplication.
 
-Failure behavior: both functions log a warning and return the original
-input (rather than raising) when the LLM call fails or the response is
-unparsable. Long-document quality is best-effort; one bad merge call
-should not lose the underlying extraction.
+Failure behavior: a reply that fails its reply model raises
+``LLMOutputError``; the client's own exceptions propagate unchanged. A valid
+reply whose merged summary is blank falls back to the first batch's summary,
+and merge groups naming fewer than two in-range indices are ignored.
 
 NOT exposed in the package ``__all__`` — internal to the knowledge extractor.
 """
@@ -42,10 +42,11 @@ from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from everalgo.knowledge._llm_json import parse_llm_json
-from everalgo.knowledge.prompts.en.content_merge import CONTENT_MERGE_PROMPT_EN
-from everalgo.knowledge.prompts.en.topic_merge import TOPIC_MERGE_PROMPT_EN
-from everalgo.llm.types import ChatMessage
+from everalgo.knowledge._render import append_custom_instructions
+from everalgo.knowledge._replies import ContentMergeReply, TopicMergeReply, ask_llm
+from everalgo.knowledge.prompts.en.content_merge import CONTENT_MERGE_SYSTEM_PROMPT, CONTENT_MERGE_USER_PROMPT
+from everalgo.knowledge.prompts.en.topic_merge import TOPIC_MERGE_SYSTEM_PROMPT, TOPIC_MERGE_USER_PROMPT
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -69,9 +70,24 @@ async def amerge_doc_summary(
     title: str,
     batch_results: list[dict[str, Any]],
     *,
-    prompt: str = CONTENT_MERGE_PROMPT_EN,
+    custom_instructions: str | None = None,
 ) -> str:
-    """Consolidate per-batch document-level summaries via one LLM call."""
+    """Consolidate per-batch document-level summaries via one LLM call.
+
+    Args:
+        client: The client the call goes through.
+        title: Document title.
+        batch_results: Per-batch topic-tree replies as dicts; ``summary`` / ``subject`` / ``keywords`` are read.
+        custom_instructions: The caller's instructions, appended to the rules as a ``<custom_instructions>`` block,
+            always the system message's last. Placed verbatim, never rendered as a template; None or a blank string
+            adds nothing.
+
+    Returns:
+        The merged summary; the first batch's summary when there is one batch or the merged one is blank.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid content-merge output.
+    """
     if not batch_results:
         return ""
     fallback: str = batch_results[0].get("summary", "")
@@ -85,17 +101,19 @@ async def amerge_doc_summary(
             f"   Subject: {r.get('subject', '')}\n"
             f"   Keywords: {r.get('keywords', [])}",
         )
-    rendered = prompt.format(title=title, partial_results="\n\n".join(lines))
-    response = await client.chat([ChatMessage(role="user", content=rendered)])
-    data = parse_llm_json(response.content)
-    if not data:
-        logger.warning("multi-batch content-merge: unparsable LLM response; falling back to batch-1 summary")
+    reply = await ask_llm(
+        client,
+        system=append_custom_instructions(CONTENT_MERGE_SYSTEM_PROMPT, custom_instructions),
+        user=render_prompt(
+            CONTENT_MERGE_USER_PROMPT, None, title=title, count=len(lines), partial_results="\n\n".join(lines)
+        ),
+        reply_model=ContentMergeReply,
+        operator="knowledge content_merge",
+    )
+    if not reply.summary.strip():
+        logger.warning("multi-batch content-merge: empty summary field; falling back to batch-1 summary")
         return fallback
-    merged = data.get("summary")
-    if not isinstance(merged, str) or not merged.strip():
-        logger.warning("multi-batch content-merge: missing/empty summary field; falling back to batch-1 summary")
-        return fallback
-    return merged
+    return reply.summary
 
 
 merge_doc_summary = async_to_sync(amerge_doc_summary)
@@ -107,9 +125,24 @@ async def amerge_topics(
     title: str,
     all_topics: list[dict[str, Any]],
     *,
-    prompt: str = TOPIC_MERGE_PROMPT_EN,
+    custom_instructions: str | None = None,
 ) -> list[dict[str, Any]]:
-    """De-duplicate topics across batch boundaries via one LLM call."""
+    """De-duplicate topics across batch boundaries via one LLM call.
+
+    Args:
+        client: The client the call goes through.
+        title: Document title.
+        all_topics: The concatenated per-batch topic forests.
+        custom_instructions: The caller's instructions, appended to the rules as a ``<custom_instructions>`` block,
+            always the system message's last. Placed verbatim, never rendered as a template; None or a blank string
+            adds nothing.
+
+    Returns:
+        The rebuilt forest; ``all_topics`` itself when it is too small to merge or no group applies.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid topic-merge output.
+    """
     if not all_topics:
         return all_topics
 
@@ -126,21 +159,22 @@ async def amerge_topics(
         }
         for entry in flat_list
     ]
-    rendered = prompt.format(
-        title=title,
-        all_topics_json=json.dumps(indexed, ensure_ascii=False, indent=2),
+    reply = await ask_llm(
+        client,
+        system=append_custom_instructions(TOPIC_MERGE_SYSTEM_PROMPT, custom_instructions),
+        user=render_prompt(
+            TOPIC_MERGE_USER_PROMPT,
+            None,
+            title=title,
+            all_topics_json=json.dumps(indexed, ensure_ascii=False, indent=2),
+        ),
+        reply_model=TopicMergeReply,
+        operator="knowledge topic_merge",
     )
-    response = await client.chat([ChatMessage(role="user", content=rendered)])
-    data = parse_llm_json(response.content)
-    if not data:
-        logger.warning("multi-batch topic-merge: unparsable LLM response; returning original topics")
+    if not reply.merges:
         return all_topics
 
-    merges = data.get("merges", []) or []
-    if not merges:
-        return all_topics
-
-    merged_flat, index_remap = _apply_merge_groups_with_remap(flat_list, merges)
+    merged_flat, index_remap = _apply_merge_groups_with_remap(flat_list, [group.model_dump() for group in reply.merges])
     if not index_remap:
         return all_topics
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 
 import pytest
 
@@ -108,7 +109,6 @@ def test_rerank_dual_interface() -> None:
 def test_rank_io_schema_importable() -> None:
     from everalgo.types import (
         Candidate,
-        FactCandidate,
         RankInput,
         RankOutput,
         ScoredItem,
@@ -118,7 +118,6 @@ def test_rank_io_schema_importable() -> None:
         query="hi",
         memory_type="episodic",
         dense_candidates=[Candidate(id="x", score=0.5)],
-        episode_to_facts={"x": [FactCandidate(id="f", parent_episode_id="x", score=0.9)]},
     )
     assert rank_input.query == "hi"
     assert ScoredItem(id="y", score=0.3, item_type="case").item_type == "case"
@@ -129,6 +128,7 @@ def test_prompts_modules_export_required_constants() -> None:
     from everalgo.rank.prompts.en.case import CASE_RERANK_PROMPT_EN
     from everalgo.rank.prompts.en.episodic import EPISODIC_RERANK_PROMPT_EN
     from everalgo.rank.prompts.en.skill import SKILL_RERANK_PROMPT_EN
+    from everalgo.rank.prompts.rerank_user import RERANK_USER_PROMPT
     from everalgo.rank.prompts.zh.case import CASE_RERANK_PROMPT_ZH
     from everalgo.rank.prompts.zh.episodic import EPISODIC_RERANK_PROMPT_ZH
     from everalgo.rank.prompts.zh.skill import SKILL_RERANK_PROMPT_ZH
@@ -141,9 +141,9 @@ def test_prompts_modules_export_required_constants() -> None:
         CASE_RERANK_PROMPT_ZH,
         SKILL_RERANK_PROMPT_ZH,
     ):
-        assert "{query}" in p
-        assert "{candidates_json}" in p
-        assert "{top_k}" in p
+        assert re.findall(r"\{\{(\w+)\}\}", p) == ["top_k"], "the system message's only slot"
+
+    assert re.findall(r"\{\{(\w+)\}\}", RERANK_USER_PROMPT) == ["query", "candidates_json"]
 
 
 def test_rank_config_importable_and_frozen() -> None:

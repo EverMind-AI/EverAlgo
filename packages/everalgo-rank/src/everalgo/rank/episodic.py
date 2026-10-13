@@ -29,7 +29,7 @@ class EpisodicRanker:
         rank_input: RankInput,
         *,
         config: RankConfig = DEFAULT_RANK_CONFIG,
-        prompt: str | None = None,
+        custom_instructions: str | None = None,
         enable_rerank: bool = False,
         rerank_top_k: int | None = None,
     ) -> RankOutput:
@@ -38,7 +38,10 @@ class EpisodicRanker:
         Args:
             rank_input: Query + candidate sets for episodic memory ranking.
             config: Fusion mode and hyperparameters.
-            prompt: Per-call rerank prompt override; ``None`` uses the built-in default.
+            custom_instructions: The caller's instructions for the rerank call, appended to the built-in rerank
+                rules as a ``<custom_instructions>`` block, always the system message's last; it adds to the rules,
+                never replaces them. Placed verbatim, never rendered as a template. None or a blank string adds
+                nothing; no effect unless ``enable_rerank`` runs.
             enable_rerank: When ``True``, run the LLM rerank stage after fusion.
             rerank_top_k: When set, Phase-5 LLM rerank truncates to this count instead of
                 ``rank_input.top_k`` — lets fusion produce a wider candidate pool that the LLM
@@ -51,7 +54,7 @@ class EpisodicRanker:
             rank_input,
             config=config,
             llm=self._llm,
-            prompt=prompt,
+            custom_instructions=custom_instructions,
             enable_rerank=enable_rerank,
             rerank_top_k=rerank_top_k,
         )
@@ -65,7 +68,7 @@ async def arank(
     *,
     config: RankConfig = DEFAULT_RANK_CONFIG,
     llm: LLMClient | None = None,
-    prompt: str | None = None,
+    custom_instructions: str | None = None,
     enable_rerank: bool = False,
     rerank_top_k: int | None = None,
 ) -> RankOutput:
@@ -74,7 +77,7 @@ async def arank(
         rank_input,
         config=config,
         llm=llm,
-        prompt=prompt,
+        custom_instructions=custom_instructions,
         enable_rerank=enable_rerank,
         rerank_top_k=rerank_top_k,
     )

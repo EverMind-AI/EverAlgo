@@ -11,17 +11,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import everalgo.parser as parser_pkg
-from everalgo.boundary import detect_boundaries
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
+from everalgo.boundary import adetect_boundaries
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, Modality, RawFile
 
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
+
 # Scripted boundary response: no internal cut, all messages form one MemCell.
-_BOUNDARY_NO_CUT_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "should_wait": False})
+_BOUNDARY_NO_CUT_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "tail_complete": True})
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "packages" / "everalgo-parser" / "tests" / "fixtures"
 
@@ -29,8 +30,8 @@ _FIXTURES = Path(__file__).resolve().parents[2] / "packages" / "everalgo-parser"
 def _multi_purpose_fake() -> FakeLLMClient:
     """Returns boundary-shaped JSON for every call (parser doesn't invoke LLM on .txt DIRECT path)."""
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
-        return ChatResponse(content=_BOUNDARY_NO_CUT_JSON, model="fake", finish_reason="stop")
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        return _BOUNDARY_NO_CUT_JSON
 
     return FakeLLMClient(handler=handler)
 
@@ -68,7 +69,7 @@ async def test_txt_to_boundary_pipeline() -> None:
         ),
     ]
 
-    result = await detect_boundaries(msgs, llm=fake, is_final=True)
+    result = await adetect_boundaries(msgs, llm=fake, is_final=True)
     # Boundary stub said "no cut" + is_final=True → all msgs land in single cell.
     assert len(result.cells) == 1
     assert result.tail == []
@@ -83,15 +84,11 @@ async def test_pdf_to_boundary_pipeline() -> None:
     # Pattern: first LLM call = parser OCR (returns PDF text); subsequent calls = boundary JSON.
     calls: list[str] = []
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
         calls.append("call")
         if len(calls) == 1:
-            return ChatResponse(
-                content="Alice: learning async. Bob: try asyncio.",
-                model="fake",
-                finish_reason="stop",
-            )
-        return ChatResponse(content=_BOUNDARY_NO_CUT_JSON, model="fake", finish_reason="stop")
+            return json.dumps({"text": "Alice: learning async. Bob: try asyncio."})
+        return _BOUNDARY_NO_CUT_JSON
 
     fake = FakeLLMClient(handler=handler)
 
@@ -121,6 +118,6 @@ async def test_pdf_to_boundary_pipeline() -> None:
             )
         )
 
-    result = await detect_boundaries(msgs, llm=fake, is_final=True)
+    result = await adetect_boundaries(msgs, llm=fake, is_final=True)
     assert len(result.cells) >= 1
     assert fake.call_count >= 2  # parser OCR + boundary

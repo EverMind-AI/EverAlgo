@@ -15,9 +15,9 @@ caller. Likewise, ``detail`` carries the *numbers* behind a rejection (observed 
 structured data rather than prose, so callers can compose their own user-facing message without
 parsing strings.
 
-Exceptions are not reasons. Provider failures (``LLMError``) and malformed LLM output
-(``json.JSONDecodeError`` / ``ValueError``) still propagate — they mean the pipeline could not run,
-not that the input was judged unworthy.
+Exceptions are not reasons. Whatever the LLM client raises, and malformed LLM output
+(``LLMOutputError``), still propagate — they mean the pipeline could not run, not that the input
+was judged unworthy.
 """
 
 from __future__ import annotations
@@ -101,16 +101,12 @@ class SkillSkipReason(StrEnum):
     - ``CASE_QUALITY_BELOW_THRESHOLD`` — the source case scored below ``skip_quality_threshold``;
       no LLM call was made. ``pre_detail={"quality": ..., "threshold": ...}`` — note this one lands on
       ``pre_detail``, not on an ``OpOutcome.detail``, because it fires before any operation exists.
-    - ``OP_NOT_DICT`` — the LLM emitted a non-object entry in ``operations``.
     - ``OP_ACTION_NONE`` — the LLM explicitly decided this skill needs no change. Not a failure:
       a result of all-``OP_ACTION_NONE`` means the case carried nothing new.
-    - ``OP_UNKNOWN_ACTION`` — action outside add / update / none. ``detail={"action": ...}``.
     - ``ADD_CONTENT_EMPTY`` — add operation with no content.
     - ``ADD_CONTENT_INSUFFICIENT`` — add operation whose content is too short or too few lines to be
       an actionable skill. ``detail={"lines": ..., "chars": ..., "min_lines": ..., "min_chars": ...}``.
     - ``ADD_NAME_AND_DESC_EMPTY`` — add operation with neither a name nor a description.
-    - ``UPDATE_INDEX_INVALID`` — update operation whose ``index`` is not an integer.
-      ``detail={"raw": ...}``.
     - ``UPDATE_INDEX_OUT_OF_RANGE`` — ``index`` does not address any supplied existing skill.
       ``detail={"index": ..., "size": ...}``. A frequent cause is the caller passing an
       ``existing_relevant_skills`` list that does not match what the prompt was rendered against.
@@ -123,13 +119,10 @@ class SkillSkipReason(StrEnum):
     """
 
     CASE_QUALITY_BELOW_THRESHOLD = "case_quality_below_threshold"
-    OP_NOT_DICT = "op_not_dict"
     OP_ACTION_NONE = "op_action_none"
-    OP_UNKNOWN_ACTION = "op_unknown_action"
     ADD_CONTENT_EMPTY = "add_content_empty"
     ADD_CONTENT_INSUFFICIENT = "add_content_insufficient"
     ADD_NAME_AND_DESC_EMPTY = "add_name_and_desc_empty"
-    UPDATE_INDEX_INVALID = "update_index_invalid"
     UPDATE_INDEX_OUT_OF_RANGE = "update_index_out_of_range"
     UPDATE_DUPLICATE_INDEX = "update_duplicate_index"
     UPDATE_CONTENT_INSUFFICIENT = "update_content_insufficient"

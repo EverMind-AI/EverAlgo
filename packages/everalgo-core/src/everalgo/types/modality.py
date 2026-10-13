@@ -1,14 +1,24 @@
 """Modality classification for multimodal parser routing.
 
-A ``Modality`` is the *kind* of content a raw file holds — independent of
-the specific MIME / extension. Parsers dispatch by modality, not by
-extension; the ``extension_to_modality`` mapping covers the well-known cases
-and ``UNKNOWN`` absorbs everything else. Lives in ``everalgo-core`` so callers
-can classify a file before deciding whether to invoke ``everalgo-parser`` at
-all (``DIRECT`` content needs no parser).
+A ``Modality`` is the kind of content a raw file holds, independent of its MIME type or extension. Parsers dispatch
+by modality; ``EXTENSION_TO_MODALITY`` and ``MIME_TO_MODALITY`` cover the well-known cases and ``UNKNOWN`` absorbs the
+rest. It lives in ``everalgo-core`` so a caller can classify a file before deciding whether to invoke
+``everalgo-parser`` at all (``DIRECT`` content needs no parser).
 """
 
 from __future__ import annotations
+
+__all__ = [
+    "EXTENSION_TO_MODALITY",
+    "MIME_TO_EXTENSION",
+    "MIME_TO_MODALITY",
+    "SUPPORTED_EXTENSIONS",
+    "SUPPORTED_MIMES",
+    "Modality",
+    "get_extension_from_mime",
+    "get_modality",
+    "get_modality_from_mime",
+]
 
 from enum import StrEnum
 

@@ -1,25 +1,48 @@
-"""Tests for AtomicFactExtractor.aextract_from_text and its sync bridge extract_from_text."""
+"""Tests for AtomicFactExtractor.aextract_from_text, its sync bridge, and the atomic-fact reply contract.
+
+The prompt's system / user split is pinned in ``test_atomic_fact_from_text_prompt_split.py``.
+"""
 
 from __future__ import annotations
 
+import inspect
+import json
+import re
+
 import pytest
 
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
+from everalgo.llm import LLMOutputError, StrictOutputModel, to_openai_response_format
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory import OutputLanguage
 from everalgo.user_memory._language import SOURCE_TEXT_LANGUAGE_RULE
+from everalgo.user_memory._replies import _AtomicFactsBlock, _AtomicFactsReply
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
-from everalgo.user_memory.prompts.en.atomic_fact_from_text import ATOMIC_FACT_FROM_TEXT_PROMPT_EN
+from everalgo.user_memory.prompts.en.atomic_fact_from_text import (
+    ATOMIC_FACT_FROM_TEXT_SYSTEM_PROMPT,
+    ATOMIC_FACT_FROM_TEXT_USER_PROMPT,
+)
 
-# Unix epoch ms for 2024-03-10 Sunday 14:00:00 UTC  →  "March 10, 2024(Sunday) at 02:00 PM"  (evercore EventLog format)
+# 2024-03-10 14:00:00 UTC, a Sunday.
 _MARCH_10_2024_14H_UTC_MS: int = 1710079200000
-_EXPECTED_TIME_STR: str = "March 10, 2024(Sunday) at 02:00 PM"
+_EXPECTED_TIME_STR: str = "2024-03-10 14:00 UTC (Sunday)"
+_TIME_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \([A-Z][a-z]+\)$")
 
-_NESTED_HAPPY = '{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": ["fact 1", "fact 2"]}}'
-_NESTED_EMPTY = '{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": []}}'
-# evercore EventLog schema — same inner shape as ``atomic_facts``, only top-level key differs.
-_EVENT_LOG_HAPPY = '{"event_log": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": ["fact A", "fact B"]}}'
+
+def _reply(*facts: str) -> str:
+    return json.dumps({"atomic_facts": {"atomic_fact": list(facts)}})
+
+
+class _ClientError(Exception):
+    """A host-side client failure the operator must not wrap or retype."""
+
+
+async def _sent(text: str = "text", **kwargs: object) -> tuple[str, str]:
+    """The system and user message contents of one from-text extraction."""
+    fake = FakeLLMClient(responses=[_reply()])
+    await AtomicFactExtractor(llm=fake).aextract_from_text(text, timestamp=_MARCH_10_2024_14H_UTC_MS, **kwargs)  # type: ignore[arg-type]
+    system, user = fake.calls[0].messages
+    assert (system.role, user.role) == ("system", "user")
+    return str(system.content), str(user.content)
 
 
 # ---------------------------------------------------------------------------
@@ -29,149 +52,188 @@ _EVENT_LOG_HAPPY = '{"event_log": {"time": "March 10, 2024(Sunday) at 02:00 PM",
 
 async def test_returns_atomic_fact_list_on_happy_path() -> None:
     """FakeLLM returns two facts inside nested schema; result equals that list."""
-    fake = FakeLLMClient(responses=[_NESTED_HAPPY])
+    fake = FakeLLMClient(responses=[_reply("fact 1", "fact 2")])
     result = await AtomicFactExtractor(llm=fake).aextract_from_text("some text", timestamp=_MARCH_10_2024_14H_UTC_MS)
     assert [af.content for af in result] == ["fact 1", "fact 2"]
+    assert all(af.owner_id is None and af.timestamp == _MARCH_10_2024_14H_UTC_MS for af in result)
 
 
 async def test_empty_atomic_fact_list_returns_empty() -> None:
     """FakeLLM returns empty nested list; result is empty list."""
-    fake = FakeLLMClient(responses=[_NESTED_EMPTY])
+    fake = FakeLLMClient(responses=[_reply()])
     result = await AtomicFactExtractor(llm=fake).aextract_from_text(
         "greeting only", timestamp=_MARCH_10_2024_14H_UTC_MS
     )
     assert result == []
 
 
-# ---------------------------------------------------------------------------
-# Error cases
-# ---------------------------------------------------------------------------
-
-
-async def test_event_log_top_level_key_accepted() -> None:
-    """LLM response with evercore ``event_log`` top-level key is parsed identically to ``atomic_facts``.
-
-    Uses ``EVENT_LOG_PROMPT`` which instructs the LLM to emit
-    ``{"event_log": {...}}`` and the parser must accept it as an alias of the legacy schema.
-    """
-    fake = FakeLLMClient(responses=[_EVENT_LOG_HAPPY])
-    result = await AtomicFactExtractor(llm=fake).aextract_from_text("some text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-    assert [af.content for af in result] == ["fact A", "fact B"]
-
-
-async def test_missing_atomic_facts_key_raises_value_error() -> None:
-    """FakeLLM returns a dict with neither ``atomic_facts`` nor ``event_log`` → ValueError after 5 retries."""
-    bad_responses: list[str | ChatResponse] = ['{"foo": "bar"}'] * 5
-    fake = FakeLLMClient(responses=bad_responses)
-    with pytest.raises(ValueError, match="event_log/atomic_facts"):
-        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-
-
-async def test_missing_inner_atomic_fact_key_raises_value_error() -> None:
-    """FakeLLM returns 'atomic_facts' dict without inner 'atomic_fact' key → empty list (defaults to [])."""
-    # atomic_fact key missing → block.get("atomic_fact", []) returns [] → empty list, no error
-    fake = FakeLLMClient(responses=['{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM"}}'])
+async def test_blank_fact_sentences_are_dropped_and_the_rest_stripped() -> None:
+    fake = FakeLLMClient(responses=[_reply(" fact 1 ", "", "  ")])
     result = await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-    assert result == []
+    assert [af.content for af in result] == ["fact 1"]
 
 
-async def test_atomic_facts_not_a_dict_raises_type_error() -> None:
-    """FakeLLM returns 'atomic_facts' as a string → ValueError after 5 retries."""
-    bad_responses: list[str | ChatResponse] = ['{"atomic_facts": "not a dict"}'] * 5
-    fake = FakeLLMClient(responses=bad_responses)
-    with pytest.raises(ValueError):
-        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-
-
-async def test_atomic_fact_not_a_list_raises_type_error() -> None:
-    """FakeLLM returns 'atomic_fact' as a string inside atomic_facts → ValueError after 5 retries."""
-    bad_responses: list[str | ChatResponse] = [
-        '{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": "not a list"}}'
-    ] * 5
-    fake = FakeLLMClient(responses=bad_responses)
-    with pytest.raises(ValueError):
-        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-
-
-async def test_invalid_json_raises_value_error() -> None:
-    """FakeLLM returns non-JSON → ValueError after 5 retries."""
-    bad_responses: list[str | ChatResponse] = ["not json at all"] * 5
-    fake = FakeLLMClient(responses=bad_responses)
-    with pytest.raises(ValueError):
-        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-
-
-# ---------------------------------------------------------------------------
-# Prompt rendering
-# ---------------------------------------------------------------------------
-
-
-async def test_timestamp_formatted_in_prompt() -> None:
-    """_MARCH_10_2024_14H_UTC_MS renders to _EXPECTED_TIME_STR in the sent prompt."""
-    captured: list[str] = []
-
-    def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        captured.append(str(messages[0].content))
-        return ChatResponse(content=_NESTED_EMPTY, model="fake")
-
-    fake = FakeLLMClient(handler=handler)
+async def test_one_call_requests_the_reply_model() -> None:
+    fake = FakeLLMClient(responses=[_reply()])
     await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
-    assert _EXPECTED_TIME_STR in captured[0], (
-        f"Expected time string {_EXPECTED_TIME_STR!r} not found in rendered prompt"
+    assert fake.call_count == 1
+    assert fake.calls[0].response_format is _AtomicFactsReply
+
+
+# ---------------------------------------------------------------------------
+# Error cases — every invalid reply is an LLMOutputError on the one call
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("reply", "location"),
+    [
+        pytest.param('{"event_log": {"atomic_fact": ["fact A"]}}', "atomic_facts", id="event_log-alias"),
+        pytest.param('{"foo": "bar"}', "atomic_facts", id="missing-top-level-key"),
+        pytest.param('{"atomic_facts": {}}', "atomic_facts.atomic_fact", id="missing-inner-list"),
+        pytest.param('{"atomic_facts": "not a dict"}', "atomic_facts", id="block-not-an-object"),
+        pytest.param('{"atomic_facts": {"atomic_fact": "x"}}', "atomic_facts.atomic_fact", id="not-a-list"),
+        pytest.param('{"atomic_facts": {"atomic_fact": [1]}}', "atomic_facts.atomic_fact.0", id="non-str"),
+        pytest.param('```json\n{"atomic_facts": {"atomic_fact": []}}\n```', "<root>", id="fenced"),
+        pytest.param("not json at all", "<root>", id="not-json"),
+    ],
+)
+async def test_an_invalid_reply_raises_llm_output_error_naming_the_location(reply: str, location: str) -> None:
+    fake = FakeLLMClient(responses=[reply])
+
+    with pytest.raises(LLMOutputError, match="atomic_fact reply is not a valid _AtomicFactsReply") as excinfo:
+        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
+
+    assert f"{location}:" in str(excinfo.value)
+    assert fake.call_count == 1
+
+
+async def test_a_time_echo_is_an_extra_key() -> None:
+    """The reply no longer echoes ``<time>``; a model that still writes ``time`` breaks the strict skeleton."""
+    fake = FakeLLMClient(responses=['{"atomic_facts": {"time": "T", "atomic_fact": ["fact"]}}'])
+
+    with pytest.raises(LLMOutputError, match=r"atomic_facts\.time: Extra inputs are not permitted"):
+        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
+
+
+async def test_the_error_message_never_quotes_the_reply() -> None:
+    fake = FakeLLMClient(responses=['{"atomic_facts": {"atomic_fact": ["SECRET-FACT", 7]}}'])
+
+    with pytest.raises(LLMOutputError) as excinfo:
+        await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=_MARCH_10_2024_14H_UTC_MS)
+
+    assert "SECRET-FACT" not in str(excinfo.value)
+
+
+async def test_client_exception_propagates_unchanged() -> None:
+    """The host recognises call failures by its own types, so the operator neither wraps nor retypes them."""
+    error = _ClientError("upstream down")
+
+    with pytest.raises(_ClientError) as excinfo:
+        await AtomicFactExtractor(llm=FakeLLMClient(responses=[error])).aextract_from_text(
+            "text", timestamp=_MARCH_10_2024_14H_UTC_MS
+        )
+
+    assert excinfo.value is error
+
+
+# ---------------------------------------------------------------------------
+# What the model receives
+# ---------------------------------------------------------------------------
+
+
+async def test_timestamp_and_text_fill_the_user_message() -> None:
+    _, user = await _sent("UNIQUE_TEXT_MARKER_42")
+
+    assert user == f"<time>\n{_EXPECTED_TIME_STR}\n</time>\n\n<episode_text>\nUNIQUE_TEXT_MARKER_42\n</episode_text>"
+
+
+@pytest.mark.parametrize("timestamp", [_MARCH_10_2024_14H_UTC_MS, 1_700_000_000_000, 0], ids=["14h", "22h", "epoch"])
+async def test_time_is_the_utc_minute_with_its_weekday(timestamp: int) -> None:
+    """``<time>`` has the one shape every instant in a prompt has, 24-hour and zone-labelled, plus the weekday."""
+    fake = FakeLLMClient(responses=[_reply()])
+    await AtomicFactExtractor(llm=fake).aextract_from_text("text", timestamp=timestamp)
+    user = str(fake.calls[0].messages[1].content)
+
+    assert _TIME_SHAPE.match(user.split("<time>\n", 1)[1].split("\n</time>", 1)[0])
+
+
+async def test_default_system_message_is_the_static_rules_then_the_language_rule() -> None:
+    system, user = await _sent("MARKER_DEFAULT_PROMPT_CHECK")
+
+    assert system == (
+        f"{ATOMIC_FACT_FROM_TEXT_SYSTEM_PROMPT}\n\n<output_language>\n{SOURCE_TEXT_LANGUAGE_RULE}\n</output_language>"
+    )
+    assert user == ATOMIC_FACT_FROM_TEXT_USER_PROMPT.replace("{{time}}", _EXPECTED_TIME_STR).replace(
+        "{{episode_text}}", "MARKER_DEFAULT_PROMPT_CHECK"
     )
 
 
-async def test_text_substituted_in_prompt() -> None:
-    """Unique marker in text argument appears verbatim in the rendered prompt."""
-    captured: list[str] = []
+async def test_system_message_is_the_same_for_every_text() -> None:
+    """With the host's arguments fixed, the system message is a constant a prompt cache can share whole."""
+    first, _ = await _sent("hello")
+    second, _ = await _sent("something else entirely")
 
-    def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        captured.append(str(messages[0].content))
-        return ChatResponse(content=_NESTED_EMPTY, model="fake")
-
-    fake = FakeLLMClient(handler=handler)
-    await AtomicFactExtractor(llm=fake).aextract_from_text("UNIQUE_TEXT_MARKER_42", timestamp=_MARCH_10_2024_14H_UTC_MS)
-    assert "UNIQUE_TEXT_MARKER_42" in captured[0]
+    assert first == second
 
 
-async def test_prompt_override_used() -> None:
-    """Custom prompt template is used instead of the default."""
-    captured: list[str] = []
+async def test_text_is_never_rendered_as_a_template() -> None:
+    """A slot name inside the caller's text stays literal and never pulls another field in."""
+    _, user = await _sent("Rules {{episode_text}} and {{time}} stay literal.")
 
-    def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        captured.append(str(messages[0].content))
-        return ChatResponse(content=_NESTED_EMPTY, model="fake")
+    assert "<episode_text>\nRules {{episode_text}} and {{time}} stay literal.\n</episode_text>" in user
 
-    fake = FakeLLMClient(handler=handler)
-    await AtomicFactExtractor(llm=fake).aextract_from_text(
-        "hello", timestamp=_MARCH_10_2024_14H_UTC_MS, prompt="custom {{TEXT}} {{TIME}}"
+
+# ---------------------------------------------------------------------------
+# custom_instructions — appended to the rules, never a template, never an override
+# ---------------------------------------------------------------------------
+
+
+async def test_default_system_message_has_no_custom_instructions_block() -> None:
+    system, _ = await _sent("hello")
+
+    assert "custom_instructions" not in system
+
+
+async def test_custom_instructions_land_verbatim_after_the_language_rule_closing_the_message() -> None:
+    """The static rules stay a shared prefix; the caller's block follows ``<output_language>`` and ends the message."""
+    text = "Keep product names in English.\nSkip greetings."
+    system, user = await _sent("hello", custom_instructions=text)
+
+    assert system == (
+        f"{ATOMIC_FACT_FROM_TEXT_SYSTEM_PROMPT}\n\n<output_language>\n{SOURCE_TEXT_LANGUAGE_RULE}\n</output_language>"
+        f"\n\n<custom_instructions>\n{text}\n</custom_instructions>"
     )
-    assert captured[0] == f"custom hello {_EXPECTED_TIME_STR}"
+    assert system.endswith("\n</custom_instructions>")
+    assert text not in user
 
 
-async def test_default_prompt_is_atomic_fact_from_text_prompt_en() -> None:
-    """prompt=None must use ATOMIC_FACT_FROM_TEXT_PROMPT_EN with placeholders filled."""
-    captured: list[str] = []
+@pytest.mark.parametrize("blank", ["", " ", "\n\t  \n"])
+async def test_blank_custom_instructions_are_the_same_as_none(blank: str) -> None:
+    default, _ = await _sent("hello")
+    system, _ = await _sent("hello", custom_instructions=blank)
 
-    def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        captured.append(str(messages[0].content))
-        return ChatResponse(content=_NESTED_EMPTY, model="fake")
+    assert system == default
 
-    fake = FakeLLMClient(handler=handler)
-    marker = "MARKER_DEFAULT_PROMPT_CHECK"
-    await AtomicFactExtractor(llm=fake).aextract_from_text(marker, timestamp=_MARCH_10_2024_14H_UTC_MS, prompt=None)
-    # Default prompt uses {{EPISODE_TEXT}} placeholder (current) or {{TEXT}} (legacy fallback).
-    expected_body = (
-        ATOMIC_FACT_FROM_TEXT_PROMPT_EN.replace("{{EPISODE_TEXT}}", marker)
-        .replace("{{TEXT}}", marker)
-        .replace("{{TIME}}", _EXPECTED_TIME_STR)
-        .replace("{{LANGUAGE_RULE}}", SOURCE_TEXT_LANGUAGE_RULE)
-    )
-    assert captured[0] == expected_body
-    # Sanity: no un-substituted placeholders remain
-    assert "{{EPISODE_TEXT}}" not in captured[0]
-    assert "{{TIME}}" not in captured[0]
-    assert "{{LANGUAGE_RULE}}" not in captured[0]
+
+async def test_custom_instructions_are_never_rendered_as_a_template() -> None:
+    """Slot names, data slots and the retired single-brace shape all stay literal instead of filling or raising."""
+    text = "Keep {{LANGUAGE_RULE}}, {{time}}, {{episode_text}} and {TEXT} literal."
+    system, _ = await _sent("hello", custom_instructions=text)
+
+    assert f"<custom_instructions>\n{text}\n</custom_instructions>" in system
+    assert system.count(SOURCE_TEXT_LANGUAGE_RULE) == 1
+
+
+def test_aextract_from_text_takes_no_prompt_override() -> None:
+    """The bundled rules are the only rules; a host adds to them through ``custom_instructions``."""
+    assert list(inspect.signature(AtomicFactExtractor.aextract_from_text).parameters) == [
+        "self",
+        "text",
+        "timestamp",
+        "custom_instructions",
+        "output_language",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -181,28 +243,14 @@ async def test_default_prompt_is_atomic_fact_from_text_prompt_en() -> None:
 
 def test_sync_bridge_extract_from_text_works() -> None:
     """extract_from_text (sync bridge) called outside event loop returns valid list."""
-    fake = FakeLLMClient(
-        responses=['{"atomic_facts": {"time": "March 10, 2024(Sunday) at 02:00 PM", "atomic_fact": ["sync fact"]}}']
-    )
+    fake = FakeLLMClient(responses=[_reply("sync fact")])
     result = AtomicFactExtractor(llm=fake).extract_from_text("some text", timestamp=_MARCH_10_2024_14H_UTC_MS)
     assert [af.content for af in result] == ["sync fact"]
 
 
 # ==========================================================================
-# Language rule — from-text prompts inherit the EPISODE_TEXT language
+# Language rule — the from-text prompt inherits the <episode_text> language
 # ==========================================================================
-
-
-def test_from_text_prompts_carry_the_language_placeholder_at_both_ends() -> None:
-    """Long prompts lose middle instructions, so the rule is spliced at head and tail.
-
-    Double braces, unlike the other operators: this module substitutes by hand rather than through
-    ``render_prompt``, so its slot follows its own convention.
-    """
-    import everalgo.user_memory.prompts.en.atomic_fact_from_text as en_mod
-
-    assert en_mod.EVENT_LOG_PROMPT.count("{{LANGUAGE_RULE}}") == 2
-    assert en_mod.ATOMIC_FACT_FROM_TEXT_PROMPT_EN.count("{{LANGUAGE_RULE}}") == 2
 
 
 async def test_rendering_inherits_the_source_text_language_when_none_is_named() -> None:
@@ -212,40 +260,68 @@ async def test_rendering_inherits_the_source_text_language_when_none_is_named() 
     have nothing to adjudicate here, and asking for that judgement again could only disagree with the
     extraction that already made it.
     """
-    rendered = await _render_from_text_prompt()
+    system, user = await _sent("li moved to Hangzhou last month.")
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
-    assert "SAME language EPISODE_TEXT itself is written in" in rendered
-    assert "dominate" not in rendered
-    assert "{{LANGUAGE_RULE}}" not in rendered
+    assert system.count("CRITICAL LANGUAGE RULE") == 1
+    assert "SAME language <episode_text> itself is written in" in system
+    assert "dominate" not in system
+    assert "{{LANGUAGE_RULE}}" not in system
+    assert "CRITICAL LANGUAGE RULE" not in user
 
 
 async def test_rendering_injects_the_named_language() -> None:
-    rendered = await _render_from_text_prompt(output_language=OutputLanguage.GERMAN)
+    system, _ = await _sent("li moved to Hangzhou last month.", output_language=OutputLanguage.GERMAN)
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
-    assert "Write ALL output fields in German." in rendered
-    assert "SAME language EPISODE_TEXT itself is written in" not in rendered
-
-
-async def _render_from_text_prompt(output_language: OutputLanguage | str | None = None) -> str:
-    """Capture what the extractor hands the LLM; the rule only exists after rendering."""
-    captured: list[str] = []
-
-    class Capture:
-        async def chat(self, messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-            assert isinstance(messages[0].content, str)  # narrow for test
-            captured.append(messages[0].content)
-            raise _PromptCapturedError
-
-    with pytest.raises(_PromptCapturedError):
-        await AtomicFactExtractor(llm=Capture()).aextract_from_text(  # type: ignore[arg-type]
-            "li moved to Hangzhou last month.",
-            timestamp=1700000000000,
-            output_language=output_language,
+    assert (
+        system.count(
+            "Write every output field in German, whatever language the input is in, including anything already stored."
         )
-    return captured[0]
+        == 1
+    )
+    assert "German, whatever language the input is in." not in system
+    assert "CRITICAL LANGUAGE RULE" not in system
+    assert "SAME language <episode_text> itself is written in" not in system
 
 
-class _PromptCapturedError(Exception):
-    """Ends the call once the prompt has been captured — no LLM response is needed."""
+async def test_an_unsupported_language_is_rejected_before_the_llm_is_called() -> None:
+    fake = FakeLLMClient(responses=[_reply()])
+
+    with pytest.raises(ValueError, match="unsupported output_language"):
+        await AtomicFactExtractor(llm=fake).aextract_from_text(
+            "text", timestamp=_MARCH_10_2024_14H_UTC_MS, output_language="Klingon"
+        )
+
+    assert fake.call_count == 0
+
+
+# ===========================================================================
+# LLM contract — the operator-side obligations of docs/concepts/llm-contract.md §4.3
+# ===========================================================================
+
+
+_REPLY_MODELS: tuple[type[StrictOutputModel], ...] = (_AtomicFactsReply, _AtomicFactsBlock)
+
+
+@pytest.mark.parametrize("model", _REPLY_MODELS, ids=lambda model: model.__name__)
+def test_reply_models_are_strict_one_level_and_default_free(model: type[StrictOutputModel]) -> None:
+    """The reply model and its nested block inherit StrictOutputModel directly, require every field, no validators."""
+    assert model.__bases__ == (StrictOutputModel,)
+    assert model.model_config.get("strict") is True
+    assert model.model_config.get("extra") == "forbid"
+    for name, field in model.model_fields.items():
+        assert field.is_required(), f"{model.__name__}.{name} has a default"
+    assert not model.__pydantic_decorators__.field_validators
+    assert not model.__pydantic_decorators__.model_validators
+
+
+def test_reply_model_fits_the_strict_subset() -> None:
+    """The request builders raise on anything outside the strict subset or a non-object top level (§8.3)."""
+    response_format = to_openai_response_format(_AtomicFactsReply)
+
+    assert response_format is not None
+    assert response_format["json_schema"]["schema"]["type"] == "object"
+
+
+def test_reply_fields_keep_the_skeleton_order() -> None:
+    assert list(_AtomicFactsReply.model_fields) == ["atomic_facts"]
+    assert list(_AtomicFactsBlock.model_fields) == ["atomic_fact"]

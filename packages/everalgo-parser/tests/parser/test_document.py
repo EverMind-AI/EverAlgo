@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 
-from everalgo.llm.types import ChatResponse
+from everalgo.llm import LLMOutputError
 from everalgo.parser import document
+from everalgo.parser._replies import _TextReply
+from everalgo.parser.prompts.en import PROMPT_FOR_FILE, PROMPT_FOR_HTML
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Modality, RawFile
 
 PDF_BYTES = b"%PDF-1.4 fake pdf payload"
 
+# Not JSON; a missing field; an extra field; a wrong-typed field.
+BAD_REPLIES = ["# Extracted markdown", '{"txt": "x"}', '{"text": "x", "extra": 1}', '{"text": 1}']
+
+
+def _reply(text: str) -> str:
+    return json.dumps({"text": text})
+
 
 def _make_fake(text: str = "extracted") -> FakeLLMClient:
-    return FakeLLMClient(responses=[ChatResponse(content=text, model="fake-gemini", finish_reason="stop")])
+    return FakeLLMClient(responses=[_reply(text)])
 
 
 @pytest.mark.asyncio
@@ -28,24 +38,30 @@ async def test_aparse_pdf_invokes_llm_with_data_uri_part() -> None:
     assert result.text == "# Extracted markdown\nhello"
     assert result.modality is Modality.PDF
     assert result.mime == "application/pdf"
-    assert result.metadata["model"] == "fake-gemini"
-    assert result.metadata["finish_reason"] == "stop"
+    assert result.metadata == {}
 
-    # Verify the wire payload: text prompt + image_url data URI for the PDF bytes.
+    # Verify the wire payload: the rules as the system message, the PDF data URI alone as the user message.
     assert fake.call_count == 1
     call = fake.calls[0]
-    assert len(call.messages) == 1
-    message = call.messages[0]
-    assert message.role == "user"
-    assert isinstance(message.content, list)
-    assert len(message.content) == 2
-    text_part = message.content[0]
-    pdf_part = message.content[1]
-    assert text_part.type == "text"
-    assert "Read this document" in text_part.text
+    assert call.response_format is _TextReply
+    system, user = call.messages
+    assert system.role == "system"
+    assert system.content == PROMPT_FOR_FILE
+    assert user.role == "user"
+    assert isinstance(user.content, list)
+    assert len(user.content) == 1
+    pdf_part = user.content[0]
     assert pdf_part.type == "image_url"
     expected_b64 = base64.b64encode(PDF_BYTES).decode("ascii")
     assert pdf_part.image_url.url == f"data:application/pdf;base64,{expected_b64}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+async def test_aparse_pdf_invalid_reply_raises_llm_output_error(bad_reply: str) -> None:
+    fake = FakeLLMClient(responses=[bad_reply])
+    with pytest.raises(LLMOutputError, match="parser pdf reply is not a valid _TextReply"):
+        await document.aparse(RawFile(content=PDF_BYTES, extension="pdf"), llm=fake)
 
 
 @pytest.mark.asyncio
@@ -68,7 +84,7 @@ async def test_aparse_pdf_rejects_empty_content() -> None:
 
 @pytest.mark.asyncio
 async def test_aparse_html_invokes_llm_with_text_only_payload() -> None:
-    """HTML handler decodes bytes and sends as TextPart (no image_url part)."""
+    """HTML handler decodes bytes and sends the cleaned HTML as tagged text (no image_url part)."""
     fake = _make_fake("# heading\nbody")
     html = b"<html><body><h1>heading</h1><p>body</p></body></html>"
     rf = RawFile(content=html, extension="html")
@@ -77,12 +93,31 @@ async def test_aparse_html_invokes_llm_with_text_only_payload() -> None:
     assert result.text == "# heading\nbody"
     assert result.metadata["raw_chars"] == len(html.decode())
     assert "cleaned_chars" in result.metadata
-    # Wire: single TextPart, no image_url.
-    msg = fake.calls[0].messages[0]
-    assert isinstance(msg.content, list)
-    assert len(msg.content) == 1
-    assert msg.content[0].type == "text"
-    assert "Read this HTML" in msg.content[0].text
+    assert "model" not in result.metadata
+    # Wire: the rules as the system message, the cleaned HTML in <html_content> as the user message.
+    call = fake.calls[0]
+    assert call.response_format is _TextReply
+    system, user = call.messages
+    assert system.role == "system"
+    assert system.content == PROMPT_FOR_HTML
+    assert user.role == "user"
+    assert user.content == "<html_content>\n<body><h1>heading</h1><p>body</p></body>\n</html_content>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+async def test_aparse_html_invalid_reply_raises_llm_output_error(bad_reply: str) -> None:
+    fake = FakeLLMClient(responses=[bad_reply])
+    with pytest.raises(LLMOutputError, match="parser html reply is not a valid _TextReply"):
+        await document.aparse(RawFile(content=b"<p>body</p>", extension="html"), llm=fake)
+
+
+@pytest.mark.asyncio
+async def test_aparse_html_placeholder_like_text_reaches_the_model_verbatim() -> None:
+    """The page is data: a ``{{html}}`` it contains is not re-substituted."""
+    fake = _make_fake()
+    await document.aparse(RawFile(content=b"<p>{{html}} and {{count}}</p>", extension="html"), llm=fake)
+    assert fake.calls[0].messages[1].content == "<html_content>\n<p>{{html}} and {{count}}</p>\n</html_content>"
 
 
 @pytest.mark.asyncio
@@ -222,7 +257,7 @@ async def test_aparse_email_inline_image_ocr_failure_is_graceful() -> None:
     """If the OCR LLM call fails for a single image, it should not crash the whole parse."""
     call_count = 0
 
-    async def failing_handler(messages: list[object], **kwargs: object) -> ChatResponse:
+    async def failing_handler(messages: list[object], **kwargs: object) -> str:
         nonlocal call_count
         call_count += 1
         raise RuntimeError("simulated OCR failure")
@@ -251,3 +286,78 @@ async def test_aparse_email_inline_image_ocr_failure_is_graceful() -> None:
     assert result.modality is Modality.EMAIL
     # Placeholder for failed OCR must appear in output
     assert "OCR failed" in result.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+async def test_aparse_email_inline_image_invalid_reply_is_graceful(bad_reply: str) -> None:
+    """An invalid OCR reply is a failed OCR: that image gets the placeholder, the email still parses."""
+    fake = FakeLLMClient(responses=[bad_reply])
+    result = await document.aparse(RawFile(content=_inline_eml(), extension="eml"), llm=fake)
+    assert result.modality is Modality.EMAIL
+    assert "[image: image_1, OCR failed]" in result.text
+    assert fake.calls[0].response_format is _TextReply
+
+
+@pytest.mark.asyncio
+async def test_aparse_email_inline_image_empty_reply_marks_no_content() -> None:
+    fake = _make_fake("   ")
+    result = await document.aparse(RawFile(content=_inline_eml(), extension="eml"), llm=fake)
+    assert "[image: image_1, no content recognised]" in result.text
+
+
+def _inline_eml() -> bytes:
+    return (
+        b"From: a@example.com\r\n"
+        b'Content-Type: multipart/related; boundary="B"\r\n'
+        b"\r\n"
+        b"--B\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n"
+        b"\r\n"
+        b'<html><body><img src="cid:i1"> tail</body></html>\r\n'
+        b"--B\r\n"
+        b"Content-Type: image/png\r\n"
+        b"Content-ID: <i1>\r\n"
+        b"Content-Transfer-Encoding: base64\r\n"
+        b"\r\n" + _INLINE_PNG_B64 + b"\r\n"
+        b"--B--\r\n"
+    )
+
+
+# ---- Office path (LibreOffice stubbed out) ----
+
+
+@pytest.fixture
+def _stub_soffice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the LibreOffice binary lookup and conversion: the converted PDF is ``PDF_BYTES``."""
+
+    async def convert(content: bytes, extension: str, soffice: str) -> bytes:
+        return PDF_BYTES
+
+    monkeypatch.setattr(document, "_find_soffice", lambda: "soffice")
+    monkeypatch.setattr(document, "_convert_to_pdf_via_soffice", convert)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_stub_soffice")
+async def test_aparse_office_reads_the_converted_pdf() -> None:
+    fake = _make_fake("office text")
+    result = await document.aparse(RawFile(content=b"docx", extension="docx"), llm=fake)
+    assert result.modality is Modality.DOCUMENT
+    assert result.text == "office text"
+    assert result.metadata == {"intermediate_pdf_bytes": len(PDF_BYTES)}
+    call = fake.calls[0]
+    assert call.response_format is _TextReply
+    system, user = call.messages
+    assert (system.role, system.content) == ("system", PROMPT_FOR_FILE)
+    assert isinstance(user.content, list)
+    assert [part.type for part in user.content] == ["image_url"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_stub_soffice")
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+async def test_aparse_office_invalid_reply_raises_llm_output_error(bad_reply: str) -> None:
+    fake = FakeLLMClient(responses=[bad_reply])
+    with pytest.raises(LLMOutputError, match="parser office reply is not a valid _TextReply"):
+        await document.aparse(RawFile(content=b"docx", extension="docx"), llm=fake)

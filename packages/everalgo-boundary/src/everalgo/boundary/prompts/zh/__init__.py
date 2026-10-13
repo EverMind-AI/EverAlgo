@@ -1,1 +1,0 @@
-"""Chinese boundary extractor prompts."""

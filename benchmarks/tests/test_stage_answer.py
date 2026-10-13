@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
-from benchmarks.common.stages.answer import _extract_final_answer, run_answer_stage
+from benchmarks.common.metrics import estimate_tokens
+from benchmarks.common.stages.answer import _AnswerReply, _extract_final_answer, run_answer_stage
+from everalgo.llm import LLMOutputError
 
 
 def test_run_answer_stage_is_async() -> None:
@@ -75,17 +78,9 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
 
-    mock_usage = MagicMock(prompt_tokens=100, completion_tokens=20)
-    monkeypatch.setattr(
-        services.llm,
-        "chat",
-        AsyncMock(
-            return_value=MagicMock(
-                content="## FINAL ANSWER:\nAlice greeted Bob first.\n",
-                usage=mock_usage,
-            )
-        ),
-    )
+    raw = "## FINAL ANSWER:\nAlice greeted Bob first.\n"
+    chat_mock = AsyncMock(return_value=json.dumps({"text": raw}))
+    monkeypatch.setattr(services.llm, "achat", chat_mock)
 
     # Prepare stage1 output (entity-split: episodes file, not monolithic memcells)
     stage1_dir: Path = tmp_path / "stage3_enrich"
@@ -153,14 +148,36 @@ async def test_run_answer_stage_writes_answers_json(tmp_path: Path, monkeypatch:
     ):
         assert field in item
     assert item["answer"] == "Alice greeted Bob first."
-    assert "## FINAL ANSWER:" in item["raw_response"]
-    assert item["prompt_tokens"] == 100
-    assert item["completion_tokens"] == 20
+    assert item["raw_response"] == raw
+    assert chat_mock.call_args.kwargs["response_format"] is _AnswerReply
+    assert item["prompt_tokens"] == estimate_tokens(chat_mock.call_args.args[0][0].content) > 0
+    assert item["completion_tokens"] == estimate_tokens(raw) > 0
+    assert stats.prompt_tokens == item["prompt_tokens"]
+
+    # The answer prompt is rendered inside the stage, so this is the only place its call site is
+    # observable: a revert to `.format` would leave a literal `{context}` in what the model saw.
+    sent = chat_mock.call_args.args[0][0].content
+    assert re.search(r"\{\{?[A-Za-z_][A-Za-z0-9_]*\}\}?", sent) is None, sent
+    assert "Alice said hi to Bob first" in sent
 
 
 @pytest.mark.asyncio
-async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """Fail-loud: persistent LLM exceptions exhaust retries and abort the stage."""
+@pytest.mark.parametrize(
+    ("achat", "error", "match"),
+    [
+        pytest.param(AsyncMock(side_effect=RuntimeError("LLM down")), RuntimeError, "LLM down", id="client-failure"),
+        pytest.param(
+            AsyncMock(return_value="FINAL ANSWER: not wrapped in JSON"),
+            LLMOutputError,
+            "answer reply is not a valid _AnswerReply",
+            id="invalid-reply",
+        ),
+    ],
+)
+async def test_run_answer_stage_raises_when_llm_keeps_failing(
+    tmp_path: Path, monkeypatch: MonkeyPatch, achat: AsyncMock, error: type[Exception], match: str
+) -> None:
+    """Fail-loud: a persistent client failure or invalid reply exhausts retries and aborts the stage."""
     from benchmarks.common.config import BenchmarkConfig
     from benchmarks.common.services import Services
     from benchmarks.common.stages.types import StageContext
@@ -172,7 +189,7 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
 
     cfg = BenchmarkConfig()
     services = Services.from_config(cfg)
-    services.llm.chat = AsyncMock(side_effect=RuntimeError("LLM down"))  # type: ignore[method-assign]
+    services.llm.achat = achat  # type: ignore[method-assign]
 
     # Minimal stage 1 output (entity-split: episodes)
     stage1_dir: Path = tmp_path / "stage3_enrich"
@@ -225,6 +242,7 @@ async def test_run_answer_stage_raises_when_llm_keeps_failing(tmp_path: Path, mo
         input_dir=stage3_dir,
         output_dir=tmp_path / "stage6_answer",
     )
-    with pytest.raises(RuntimeError, match="LLM down"):
+    with pytest.raises(error, match=match):
         await run_answer_stage(ctx)
+    assert achat.await_count == cfg.llm_max_retries
     assert not (tmp_path / "stage6_answer" / "answers.json").exists()

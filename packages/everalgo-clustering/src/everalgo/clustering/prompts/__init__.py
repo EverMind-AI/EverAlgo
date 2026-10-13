@@ -1,5 +1,6 @@
 """Clustering prompts (en + zh).
 
-Each prompt is a module-level Python string constant per AGENTS.md §5 (Code Style). Algorithm authors customize via
-per-call ``prompt=`` argument or by monkey-patching the constant at startup.
+Each prompt is a module-level Python string constant per AGENTS.md §5 (Code Style). Callers add to the rules via the
+per-call ``custom_instructions=`` argument, appended as the system message's last block; the bundled rules themselves
+change only by monkey-patching the constant at startup.
 """

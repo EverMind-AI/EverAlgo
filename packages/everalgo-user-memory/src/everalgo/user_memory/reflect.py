@@ -6,10 +6,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
-from pydantic import BaseModel, Field
 
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
+from everalgo.llm import LLMMessage
 from everalgo.types import Episode
 from everalgo.user_memory._language import (
     EXISTING_NARRATIVE_LANGUAGE_RULE,
@@ -17,7 +15,19 @@ from everalgo.user_memory._language import (
     OutputLanguage,
     build_language_rule,
 )
-from everalgo.user_memory.prompts.en.reflect import REFLECT_EPISODE_PROMPT, REFLECT_EPISODE_UPDATE_PROMPT
+from everalgo.user_memory._render import nonblank
+from everalgo.user_memory._replies import _call_llm_for_reflect
+
+# Re-exported by name: hosts check their own prompt text against its fields through this module.
+from everalgo.user_memory._replies import _ReflectOutput as _ReflectOutput
+from everalgo.user_memory.prompts.en.reflect import (
+    REFLECT_EPISODE_SYSTEM_PROMPT,
+    REFLECT_EPISODE_UPDATE_SYSTEM_PROMPT,
+    REFLECT_EPISODE_UPDATE_USER_PROMPT,
+    REFLECT_EPISODE_USER_PROMPT,
+    assemble_system_prompt,
+)
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -56,20 +66,24 @@ def _render_timeline(episodes: list[Episode]) -> str:
     return "\n".join(lines)
 
 
-class _ReflectOutput(BaseModel):
-    """Structured Output schema for LLM response.
+def _render_messages(rules: str, *, custom_instructions: str | None, language_rule: str, user: str) -> list[LLMMessage]:
+    """The ``[system, user]`` pair: the mode's rules and the call-level blocks, then the data.
 
-    ``summary`` is declared after ``content`` deliberately: Structured Output generates fields in schema
-    order, so a ``summary`` declared first would be written before the narrative it previews.
+    Args:
+        rules: The mode's static system rules.
+        custom_instructions: The caller's instructions. Placed verbatim in ``<custom_instructions>``, never rendered as
+            a template; None or a blank string leaves the block out.
+        language_rule: The ``<output_language>`` text.
+        user: The rendered user message.
     """
-
-    content: str = Field(description="The merged narrative text")
-    summary: str = Field(description="Display preview of the merged narrative, under 50 words")
-    title: str = Field(default="", description="Brief topic title for the merged narrative")
+    system = assemble_system_prompt(
+        rules, custom_instructions=nonblank(custom_instructions), language_rule=language_rule
+    )
+    return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=user)]
 
 
 class EpisodeReflector:
-    """Merge N chronologically-ordered episodes into one accurate narrative.
+    """Merge N chronologically-ordered episodes into one accurate narrative: one LLM call, no retry.
 
     Two modes, mirroring ProfileExtractor:
       - INIT  (old_episode=None): full merge from all episodes.
@@ -87,17 +101,22 @@ class EpisodeReflector:
         episodes: Sequence[Episode],
         *,
         old_episode: Episode | None = None,
-        prompt: str | None = None,
+        custom_instructions: str | None = None,
         output_language: OutputLanguage | str | None = None,
     ) -> Episode:
         """Merge episodes into one narrative.
+
+        The model gets a system message of rules and a user message holding only the episodes (and, in UPDATE
+        mode, the narrative being updated). Exceptions raised by the LLM client propagate unchanged.
 
         Args:
             episodes: Source episodes sorted by timestamp ascending.
                 INIT mode: must contain >= 2 items.
                 UPDATE mode: must contain >= 1 item (new episodes only).
             old_episode: Existing merged episode. None -> INIT mode. Episode -> UPDATE mode.
-            prompt: Prompt override; None uses bundled default for the selected mode.
+            custom_instructions: The caller's instructions, placed verbatim in the selected mode's system message as a
+                ``<custom_instructions>`` block, closing the message after ``<output_language>``. Never
+                rendered as a template, so braces stay literal; None or a blank string leaves the block out.
             output_language: Language to write the merged narrative in, as an :class:`OutputLanguage` member
                 or equivalent string in any casing. ``None`` makes each mode inherit the language of its
                 input — the episodes being merged, or the narrative being updated. That inheritance is
@@ -107,16 +126,20 @@ class EpisodeReflector:
                 narrative already in the wrong one.
 
         Returns:
-            Merged Episode. owner_id=None, timestamp=episodes[-1].timestamp.
+            Merged Episode: ``episode`` from the reply's ``content``, ``summary`` from its ``summary``, ``subject``
+            from its ``title``; owner_id=None, timestamp=episodes[-1].timestamp.
 
         Raises:
-            ValueError: Too few episodes, unsorted, unparseable LLM output, or ``output_language`` names no
-                supported language.
-            LLMError: Network or provider failure.
+            ValueError: Too few episodes, unsorted, or ``output_language`` names no supported language.
+            LLMOutputError: If the reply is not a valid reflect output.
         """
         if old_episode is None:
-            return await self._init_merge(episodes, prompt=prompt, output_language=output_language)
-        return await self._update_merge(old_episode, episodes, prompt=prompt, output_language=output_language)
+            return await self._init_merge(
+                episodes, custom_instructions=custom_instructions, output_language=output_language
+            )
+        return await self._update_merge(
+            old_episode, episodes, custom_instructions=custom_instructions, output_language=output_language
+        )
 
     reflect = async_to_sync(areflect)
 
@@ -124,52 +147,51 @@ class EpisodeReflector:
         self,
         episodes: Sequence[Episode],
         *,
-        prompt: str | None,
+        custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
     ) -> Episode:
         materialized = list(episodes)
         _validate_inputs(materialized, min_count=2)
-        timeline = _render_timeline(materialized)
-        rendered = render_prompt(
-            REFLECT_EPISODE_PROMPT,
-            prompt,
-            timeline=timeline,
+        messages = _render_messages(
+            REFLECT_EPISODE_SYSTEM_PROMPT,
+            custom_instructions=custom_instructions,
             language_rule=build_language_rule(output_language, fallback=MERGED_EPISODES_LANGUAGE_RULE),
+            user=render_prompt(REFLECT_EPISODE_USER_PROMPT, None, timeline=_render_timeline(materialized)),
         )
-        return await self._call_llm(rendered, materialized)
+        reply = await _call_llm_for_reflect(self._llm, messages)
+        return _build_episode(reply, timestamp=materialized[-1].timestamp)
 
     async def _update_merge(
         self,
         old_episode: Episode,
         episodes: Sequence[Episode],
         *,
-        prompt: str | None,
+        custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
     ) -> Episode:
         materialized = list(episodes)
         _validate_inputs(materialized, min_count=1)
-        timeline = _render_timeline(materialized)
-        rendered = render_prompt(
-            REFLECT_EPISODE_UPDATE_PROMPT,
-            prompt,
-            old_episode=old_episode.episode,
-            new_episodes=timeline,
+        messages = _render_messages(
+            REFLECT_EPISODE_UPDATE_SYSTEM_PROMPT,
+            custom_instructions=custom_instructions,
             language_rule=build_language_rule(output_language, fallback=EXISTING_NARRATIVE_LANGUAGE_RULE),
+            user=render_prompt(
+                REFLECT_EPISODE_UPDATE_USER_PROMPT,
+                None,
+                old_episode=old_episode.episode,
+                new_episodes=_render_timeline(materialized),
+            ),
         )
-        return await self._call_llm(rendered, materialized)
+        reply = await _call_llm_for_reflect(self._llm, messages)
+        return _build_episode(reply, timestamp=materialized[-1].timestamp)
 
-    async def _call_llm(self, rendered: str, episodes: list[Episode]) -> Episode:
-        response = await self._llm.chat(
-            messages=[LLMChatMessage(role="user", content=rendered)],
-            response_format=_ReflectOutput,
-        )
-        if response.parsed is None:
-            raise ValueError("LLM returned no parsed structured output")
-        output: _ReflectOutput = response.parsed  # type: ignore[assignment]
-        return Episode(
-            owner_id=None,
-            episode=output.content,
-            subject=output.title,
-            summary=output.summary,
-            timestamp=episodes[-1].timestamp,
-        )
+
+def _build_episode(reply: _ReflectOutput, *, timestamp: int) -> Episode:
+    """The merged :class:`Episode`, bound to no owner, carrying the reply's three fields verbatim."""
+    return Episode(
+        owner_id=None,
+        episode=reply.content,
+        subject=reply.title,
+        summary=reply.summary,
+        timestamp=timestamp,
+    )

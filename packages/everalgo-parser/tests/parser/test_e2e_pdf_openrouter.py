@@ -14,8 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from everalgo.llm.config import LLMConfig
-from everalgo.llm.providers.openai_compat import OpenAICompatClient
+from everalgo.llm.openai_compat import OpenAICompatClient
 from everalgo.parser import document
 from everalgo.types import Modality, RawFile
 
@@ -41,13 +40,12 @@ async def test_pdf_e2e_against_real_openrouter() -> None:
     assert len(pdf_bytes) > 0
 
     client = OpenAICompatClient(
-        LLMConfig(
-            model=TEST_MODEL,
-            api_key=api_key,  # type: ignore[arg-type]  # pydantic coerces str → SecretStr
-            base_url=OPENROUTER_BASE_URL,
-            max_tokens=8000,
-            timeout=120.0,
-        )
+        model=TEST_MODEL,
+        api_key=api_key,
+        base_url=OPENROUTER_BASE_URL,
+        temperature=0.0,
+        max_tokens=8000,
+        timeout=120.0,
     )
 
     raw = RawFile(content=pdf_bytes, mime="application/pdf", extension="pdf")
@@ -56,7 +54,6 @@ async def test_pdf_e2e_against_real_openrouter() -> None:
     # Structural assertions on the contract.
     assert result.modality is Modality.PDF
     assert result.mime == "application/pdf"
-    assert result.metadata.get("model"), "metadata should carry the model name"
 
     # Content assertion: Gemini must have extracted *something* from the PDF.
     assert result.text, "ParsedContent.text was empty — real LLM call produced no content"

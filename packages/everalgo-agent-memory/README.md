@@ -1,6 +1,6 @@
 # everalgo-agent-memory
 
-Agent-side memory products for EverAlgo — `AgentCaseExtractor` distils an agent trajectory `MemCell` into one `AgentCase`; `AgentSkillExtractor` maintains a cluster's reusable skill set from accumulated cases; `AgentProfileExtractor` proposes precision-first section-level patches to the agent's injected config files (SOUL.md / AGENTS.md). `AgentBoundaryDetector` handles boundary detection over mixed `ConversationItem` trajectories (chat + tool calls).
+Agent-side memory products for EverAlgo — `AgentCaseExtractor` distils an agent trajectory `MemCell` into one `AgentCase`; `AgentSkillExtractor` maintains a cluster's reusable skill set from accumulated cases; `AgentProfileExtractor` proposes precision-first section-level patches to the agent's injected config files (SOUL.md / AGENTS.md). `BoundaryDetector`, re-exported unchanged from `everalgo-boundary`, cuts mixed `ConversationItem` trajectories (chat + tool calls) into `MemCell`s.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -15,9 +15,9 @@ pip install everalgo-agent-memory
 
 | Symbol | Role |
 |---|---|
-| `AgentBoundaryDetector` | Boundary detection on agent trajectories (filter → detect → remap for mixed `ConversationItem` lists) |
 | `AgentCaseExtractor` | Distils one agent-trajectory `MemCell` into `[] \| [AgentCase]` (11-step pipeline) |
 | `AgentSkillExtractor` | Aggregates one new `AgentCase` into incremental skill operations for a cluster; returns add / update / retire entries |
+| `BoundaryDetector` | `everalgo.boundary.BoundaryDetector`, re-exported: boundary detection on agent trajectories; only chat messages reach the model, tool items stay in the cells |
 | `AgentProfileExtractor` | Screens one trajectory `MemCell` for durable agent-config signals (four-gate, default noop) and returns validated section-level SOUL.md / AGENTS.md patches + unified diffs |
 
 ## Quick start
@@ -27,19 +27,20 @@ import asyncio
 import json
 
 from everalgo.agent_memory.case import AgentCaseExtractor
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import AgentCase, ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 
+# Every reply is the JSON object its call's reply model describes; the fake returns the text as scripted.
+_FILTER_JSON = json.dumps({"has_exploration": True, "has_user_correction": False, "reason": "Searched, then verified."})
 _CASE_JSON = json.dumps({
     "task_intent": "Search for Python async retry libraries",
     "approach": "1. Search. 2. Filter. 3. Summarise.",
-    "quality_score": 0.82,
     "key_insight": "Use tenacity AsyncRetrying for native async back-off.",
+    "quality_score": 0.82,
 })
 
 async def main() -> None:
-    fake = FakeLLMClient(responses=[ChatResponse(content=_CASE_JSON, model="fake")])
+    fake = FakeLLMClient(responses=[_FILTER_JSON, _CASE_JSON])
     mc = MemCell(
         items=[
             ChatMessage(id="u1", role="user", content="Best async retry libs?", timestamp=1_700_000_000_000, sender_id="user"),
@@ -52,7 +53,8 @@ async def main() -> None:
         timestamp=1_700_000_000_500,
     )
 
-    cases: list[AgentCase] = await AgentCaseExtractor(llm=fake).aextract(mc)
+    # Two tool rounds: lower the default min_tool_call_rounds gate (3) so the trajectory reaches the filter.
+    cases: list[AgentCase] = await AgentCaseExtractor(llm=fake, min_tool_call_rounds=2).aextract(mc)
     if cases:
         print(cases[0].task_intent)
 
@@ -64,20 +66,16 @@ See [`examples/04_agent_memory_case.py`](../../examples/04_agent_memory_case.py)
 ## API surface
 
 ```python
-class AgentBoundaryDetector:
+class BoundaryDetector:  # everalgo.boundary.BoundaryDetector, re-exported
     def __init__(self, *, llm: LLMClient) -> None: ...
     async def adetect(
-        self, items: list[ConversationItem], *, is_final: bool = False, prompt: str | None = None
+        self, items: Sequence[ConversationItem], *, is_final: bool = False, prompt: str | None = None,
+        hard_token_limit: int = 65_536, hard_msg_limit: int = 500,
     ) -> DetectionResult: ...
 
 class AgentCaseExtractor:
     def __init__(self, *, llm: LLMClient) -> None: ...
-    async def aextract(
-        self, memcell: MemCell, *,
-        prompt_filter: str | None = None,
-        prompt_compress: str | None = None,
-        prompt_tool_pre_compress: str | None = None,
-    ) -> list[AgentCase]: ...  # length 0 (filtered) or 1
+    async def aextract(self, memcell: MemCell) -> list[AgentCase]: ...  # length 0 (filtered) or 1
 
 class AgentSkillExtractor:
     def __init__(self, *, llm: LLMClient) -> None: ...
@@ -87,9 +85,6 @@ class AgentSkillExtractor:
         *,
         existing_relevant_skills: Sequence[AgentSkill],
         supporting_cases: Sequence[AgentCase],
-        prompt_success: str | None = None,
-        prompt_failure: str | None = None,
-        prompt_maturity: str | None = None,
         skip_quality_threshold: float = 0.2,
         skip_maturity_scoring: bool = True,
         maturity_threshold: float = 0.6,
@@ -114,11 +109,16 @@ class AgentProfileExtractor:
         soul_md: str,
         agents_md: str,
         pending_signals: Sequence[AgentProfileSignal] = (),
-        prompt: str | None = None,
     ) -> AgentProfileUpdate: ...
 ```
 
 All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`.
+
+Every LLM call follows the `LLMClient` contract of `everalgo-core` (`docs/concepts/llm-contract.md`): the operator
+sends a static system message of rules plus a user message holding only the call's data, passes a pydantic reply
+model as `response_format`, and validates the returned text against it. A reply that does not validate, or that
+fails a business check the operator cannot recover from (a pre-compressed chunk of the wrong length, a tool message
+with no `tool_call_id`), raises `LLMOutputError`; operators never retry.
 
 ### Diagnosing an empty result
 
@@ -144,7 +144,7 @@ The reasons are algorithmic: each names the gate that rejected the input. Attrib
 
 The two extractors differ in shape because the operations differ: a MemCell yields at most one case, so a single `reason` suffices; a skill extraction integrates one case against N existing skills and may add, update, or leave alone each of them, so outcomes are per operation. Note that `OpOutcome.op_index` is the operation's position in the LLM's `operations` list — not the `index` inside an update operation, which addresses `existing_relevant_skills`.
 
-Exceptions are not reasons: `LLMError` and malformed-response `ValueError` / `json.JSONDecodeError` still propagate. They mean the pipeline could not run, not that the input was judged unworthy.
+Exceptions are not reasons: whatever the LLM client raises, and `LLMOutputError` for a malformed reply, still propagate. They mean the pipeline could not run, not that the input was judged unworthy. A structurally malformed skill operation (an action outside add / update / none, a non-integer `index`) therefore fails the whole reply rather than producing a per-operation reason.
 
 ### AgentCaseExtractor pipeline
 
@@ -168,15 +168,19 @@ Every LLM proposal is re-validated in code: the evidence quote must appear verba
 
 ### Customising prompts
 
+Each prompt is a static system message of rules (`AGENT_*_SYSTEM_PROMPT`) and a user template of data that the
+operator always renders. To replace the rules for the whole process, patch the system constant on the operator module
+that re-exports it, at startup:
+
 ```python
-import everalgo.agent_memory.prompts.case_filter as _cf
-_cf.AGENT_CASE_FILTER_PROMPT = my_custom_filter_prompt   # global override
+import everalgo.agent_memory.case as _case
+_case.AGENT_CASE_FILTER_SYSTEM_PROMPT = my_custom_filter_rules   # global override
 ```
 
-Or per-call: pass `prompt_filter=` / `prompt_compress=` / `prompt_tool_pre_compress=` to `aextract`.
+There is no per-call prompt override.
 
 ## Related distributions
 
-- [`everalgo-boundary`](../everalgo-boundary/) — `detect_boundaries` primitive used by `AgentBoundaryDetector`
-- [`everalgo-clustering`](../everalgo-clustering/) — `cluster_by_llm` for skill-cluster assignment
+- [`everalgo-boundary`](../everalgo-boundary/) — defines `BoundaryDetector`
+- [`everalgo-clustering`](../everalgo-clustering/) — `acluster_by_llm` for skill-cluster assignment
 - [`everalgo-rank`](../everalgo-rank/) — `CaseRanker` / `SkillRanker` for read-time ranking

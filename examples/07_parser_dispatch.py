@@ -13,19 +13,23 @@ Run:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import json
+from typing import TYPE_CHECKING, Any
 
 import everalgo.parser as parser_pkg
-from everalgo.llm.types import ChatMessage, ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import RawFile
 
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
+
 
 def _make_fake(text: str) -> FakeLLMClient:
-    """LLM stub: every call returns the same scripted text."""
+    """LLM stub: every call replies ``{"text": text}``, the JSON shape every parser prompt asks for."""
+    reply = json.dumps({"text": text})
 
-    def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
-        return ChatResponse(content=text, model="fake", finish_reason="stop")
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        return reply
 
     return FakeLLMClient(handler=handler)
 

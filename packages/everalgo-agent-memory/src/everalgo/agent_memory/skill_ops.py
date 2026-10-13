@@ -9,16 +9,20 @@ import uuid
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
-from everalgo.agent_memory._text import json_default, truncate_text
-from everalgo.agent_memory.prompts.skill_maturity import AGENT_SKILL_MATURITY_SCORE_PROMPT
+from everalgo.agent_memory._replies import _call_llm_for_maturity
+from everalgo.agent_memory.prompts.skill_maturity import (
+    AGENT_SKILL_MATURITY_SCORE_SYSTEM_PROMPT,
+    AGENT_SKILL_MATURITY_SCORE_USER_PROMPT,
+)
 from everalgo.agent_memory.reasons import OpOutcome, SkillSkipReason
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
+from everalgo.llm import LLMMessage
 from everalgo.types import AgentCase, AgentSkill
+from everalgo.utils import json_default, render_prompt, truncate_text
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from everalgo.agent_memory._replies import _SkillAddData, _SkillUpdateOp
     from everalgo.agent_memory.skill import _SkillCfg
     from everalgo.llm.protocols import LLMClient
 
@@ -35,14 +39,6 @@ __all__ = [
     "_is_hypothesis_promotion",
     "_is_skill_content_sufficient",
 ]
-
-
-def _op_data(op: dict[str, Any]) -> dict[str, Any]:
-    """Pull the ``data`` field off an LLM-emitted op dict, defaulting to ``{}``."""
-    raw = op.get("data")
-    if isinstance(raw, dict):
-        return raw  # type: ignore[return-value]
-    return {}
 
 
 # ── Formatting helpers ──────────────────────────────────────────────────────────────────────────────
@@ -168,48 +164,7 @@ def _is_hypothesis_promotion(old_content: str, new_content: str) -> bool:
     return old_has_potential and new_has_steps and not new_has_potential
 
 
-# ── LLM callsite — brace-balanced JSON extraction + 5-retry ────────────────────────────────────────
-
-
-async def _call_llm_for_maturity(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM for maturity scoring and return validated dict with dimension scores.
-
-    MaturityScoreResponse is nominally flat (completeness/executability/evidence/clarity/reason),
-    but uses brace-balanced extraction for safety in case ``reason`` contains nested braces.
-
-    Raises:
-        ValueError: If no JSON found or required dimension keys are missing.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    data: dict[str, Any] = json.loads(json_str)
-    missing = [d for d in _MATURITY_DIMENSIONS if d not in data]
-    if missing:
-        raise ValueError(f"Maturity response missing dimension keys {missing!r}: {data!r}")
-    return data
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested/complex JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in maturity LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in maturity LLM response: {text[:200]!r}")
-
-
 # ── Maturity scoring ────────────────────────────────────────────────────────────────────────────────
-
-
-_MATURITY_DIMENSIONS = ("completeness", "executability", "evidence", "clarity")
 
 
 async def _evaluate_maturity(
@@ -220,7 +175,6 @@ async def _evaluate_maturity(
     confidence: float,
     client: LLMClient,
     cfg: _SkillCfg,
-    prompt_maturity: str | None = None,
 ) -> float:
     """4-dimension LLM scoring (completeness / executability / evidence / clarity) normalised to [0,1] via /20.
 
@@ -228,25 +182,28 @@ async def _evaluate_maturity(
     doesn't consult maturity_score; kept for forward compatibility).
 
     Raises:
-        LLMError: Propagated from the underlying LLM client call.
-        json.JSONDecodeError: If the LLM response is not valid JSON.
-        ValueError: If the response is not a dict or is missing required dimension fields, or if
-            dimension values cannot be converted to float.
+        LLMOutputError: If the reply is not a valid maturity output.
     """
     if cfg.skip_maturity_scoring:
         logger.info("maturity scoring skipped by config, returning 1.0")
         return 1.0
 
-    rendered = render_prompt(
-        AGENT_SKILL_MATURITY_SCORE_PROMPT,
-        prompt_maturity,
+    user = render_prompt(
+        AGENT_SKILL_MATURITY_SCORE_USER_PROMPT,
+        None,
         name=name or "",
         description=description or "",
         content=content or "",
         confidence=confidence,
     )
-    maturity_data = await _call_llm_for_maturity(client, rendered)
-    raw_total = sum(int(maturity_data.get(d, 0)) for d in _MATURITY_DIMENSIONS)
+    reply = await _call_llm_for_maturity(
+        client,
+        [
+            LLMMessage(role="system", content=AGENT_SKILL_MATURITY_SCORE_SYSTEM_PROMPT),
+            LLMMessage(role="user", content=user),
+        ],
+    )
+    raw_total = reply.completeness + reply.executability + reply.evidence + reply.clarity
     score: float = max(0.0, min(1.0, raw_total / 20.0))
     logger.info(
         "maturity evaluation: name=%r, raw=%.1f, score=%.2f, threshold=%.2f, ready=%s",
@@ -263,24 +220,25 @@ async def _evaluate_maturity(
 
 
 async def _apply_add(
-    op: dict[str, Any],
+    data: _SkillAddData,
     source_case_ids: Sequence[str],
     *,
     op_index: int,
     client: LLMClient,
     cfg: _SkillCfg,
-    prompt_maturity: str | None = None,
 ) -> OpOutcome:
     """Apply an ``add`` op: validate content / name / description, clamp confidence, run maturity scoring.
 
     Returns an :class:`OpOutcome` carrying either a fresh :class:`AgentSkill` or the
     :class:`SkillSkipReason` that rejected the op. cluster_id is left empty; caller stamps it after
     extraction.
+
+    Raises:
+        LLMOutputError: If maturity scoring runs and its reply is not valid.
     """
-    data = _op_data(op)
-    content = str(data.get("content") or "")
-    name = str(data.get("name") or "")
-    description = str(data.get("description") or "")
+    content = data.content
+    name = data.name
+    description = data.description
 
     if not content:
         logger.warning("add op empty content, skipping")
@@ -297,10 +255,7 @@ async def _apply_add(
         return OpOutcome(op_index, None, SkillSkipReason.ADD_NAME_AND_DESC_EMPTY, {})
 
     description = truncate_text(description, cfg.max_description_tokens, suffix="...")
-    try:
-        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
-    except (TypeError, ValueError):
-        confidence = 0.5
+    confidence = max(0.0, min(1.0, data.confidence))
 
     score = await _evaluate_maturity(
         name=name,
@@ -309,7 +264,6 @@ async def _apply_add(
         confidence=confidence,
         client=client,
         cfg=cfg,
-        prompt_maturity=prompt_maturity,
     )
 
     return OpOutcome(
@@ -329,7 +283,7 @@ async def _apply_add(
 
 
 async def _apply_update(  # noqa: C901
-    op: dict[str, Any],
+    op: _SkillUpdateOp,
     existing_list: Sequence[AgentSkill],
     source_case_ids: Sequence[str],
     source_quality: float,
@@ -338,22 +292,20 @@ async def _apply_update(  # noqa: C901
     client: LLMClient,
     cfg: _SkillCfg,
     processed_indices: set[int],
-    prompt_maturity: str | None = None,
 ) -> OpOutcome:
     """Apply an ``update`` op; return an :class:`OpOutcome` with the modified skill or a drop reason.
 
     ``confidence < cfg.retire_confidence`` signals retire; ``confidence >=`` signals upsert.
-    Drops on invalid / duplicate index, insufficient new content, or no changed fields.
+    Drops on out-of-range / duplicate index, insufficient new content, or no changed fields.
 
     Note the two distinct indices in play: ``op_index`` is the op's position in the LLM's
-    ``operations`` list, while ``op["index"]`` addresses ``existing_list``.
+    ``operations`` list, while ``op.index`` addresses ``existing_list``.
+
+    Raises:
+        LLMOutputError: If maturity is re-evaluated and its reply is not valid.
     """
-    # ── index parse + duplicate guard ─────────────────────────────────────────
-    try:
-        index = int(op.get("index", -1))
-    except (TypeError, ValueError):
-        logger.warning("update index not int: %r", op.get("index"))
-        return OpOutcome(op_index, None, SkillSkipReason.UPDATE_INDEX_INVALID, {"raw": repr(op.get("index"))})
+    # ── index range + duplicate guard ─────────────────────────────────────────
+    index = op.index
     if index < 0 or index >= len(existing_list):
         logger.warning("update index %d out of range [0, %d)", index, len(existing_list))
         return OpOutcome(
@@ -368,16 +320,15 @@ async def _apply_update(  # noqa: C901
     processed_indices.add(index)
 
     prior = existing_list[index]
-    data = _op_data(op)
+    data = op.data
 
-    # ── extract new field values ──────────────────────────────────────────────
-    new_name = str(data.get("name") or "")
-    raw_new_description = str(data.get("description") or "")
+    # ── extract new field values: null and "" both mean "unchanged" ───────────
+    new_name = data.name or ""
+    raw_new_description = data.description or ""
     new_description = (
         truncate_text(raw_new_description, cfg.max_description_tokens, suffix="...") if raw_new_description else ""
     )
-    new_content = str(data.get("content") or "")
-    new_confidence_raw = data.get("confidence")
+    new_content = data.content or ""
 
     if new_content and not _is_skill_content_sufficient(new_content):
         logger.warning(
@@ -387,22 +338,8 @@ async def _apply_update(  # noqa: C901
         )
         return OpOutcome(op_index, None, SkillSkipReason.UPDATE_CONTENT_INSUFFICIENT, _content_detail(new_content))
 
-    # ── confidence pre-parse: invalid input is treated as "no confidence change" ─
-    # Opensource :580-585 doesn't add to `updates` dict on parse failure, then the
-    # `if not updates` guard (:595-599) skips the op. We mirror that semantics here
-    # by folding the confidence parse into the no-fields-to-change guard below.
-    confidence_changed = False
-    parsed_confidence: float | None = None
-    if new_confidence_raw is not None:
-        try:
-            parsed_confidence = max(0.0, min(1.0, float(new_confidence_raw)))
-            confidence_changed = True
-        except (TypeError, ValueError):
-            logger.warning(
-                "update[%d] confidence parse failed (got %r), treating as no confidence change",
-                index,
-                new_confidence_raw,
-            )
+    parsed_confidence = None if data.confidence is None else max(0.0, min(1.0, data.confidence))
+    confidence_changed = parsed_confidence is not None
 
     # ── change flags ──────────────────────────────────────────────────────────
     name_changed = bool(new_name) and new_name != (prior.name or "")
@@ -417,8 +354,6 @@ async def _apply_update(  # noqa: C901
     eff_name = new_name if new_name else (prior.name or "")
     eff_description = new_description if new_description else (prior.description or "")
     eff_content = new_content if new_content else (prior.content or "")
-    # confidence_changed ⇔ parsed_confidence is not None; the explicit None-check below also narrows the
-    # type to float for pyright.
     eff_confidence: float = parsed_confidence if parsed_confidence is not None else prior.confidence
 
     # ── source_case_ids append (dedup) ────────────────────────────────────────
@@ -473,7 +408,6 @@ async def _apply_update(  # noqa: C901
                 confidence=eff_confidence,
                 client=client,
                 cfg=cfg,
-                prompt_maturity=prompt_maturity,
             )
         else:
             # moderate band 0.2 ~ 0.4
@@ -517,7 +451,6 @@ async def _apply_update(  # noqa: C901
                     confidence=eff_confidence,
                     client=client,
                     cfg=cfg,
-                    prompt_maturity=prompt_maturity,
                 )
 
     # ── update branch: emit AgentSkill (caller diffs name/description against prior to decide reembed) ──
@@ -538,6 +471,6 @@ async def _apply_update(  # noqa: C901
         name_changed,
         desc_changed,
         real_content_changed,
-        new_confidence_raw is not None,
+        confidence_changed,
     )
     return OpOutcome(op_index, updated, None, {})

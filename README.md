@@ -21,12 +21,12 @@ This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespac
 | Distribution | What it provides |
 |---|---|
 | [`everalgo-core`](packages/everalgo-core/) | Types, LLM client + providers, prompt helpers, testing utilities |
-| [`everalgo-boundary`](packages/everalgo-boundary/) | `detect_boundaries` + `DetectionResult` + token helpers |
-| [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `cluster_by_llm` operators |
+| [`everalgo-boundary`](packages/everalgo-boundary/) | `BoundaryDetector` + `adetect_boundaries` / `detect_boundaries` + `DetectionResult` |
+| [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `acluster_by_llm` operators |
 | [`everalgo-rank`](packages/everalgo-rank/) | 4 composable retrieval strategies + category-aware retrieval + 4 business rankers + fusion / weight / rerank toolkit |
 | [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (image, audio, PDF, HTML, email, office, URL; video deferred) |
-| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `BoundaryDetector` + `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors |
-| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentBoundaryDetector` + `AgentCaseExtractor` / `AgentSkillExtractor` / `AgentProfileExtractor` |
+| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors + `BoundaryDetector` (re-exported from boundary) |
+| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentCaseExtractor` / `AgentSkillExtractor` / `AgentProfileExtractor` + `BoundaryDetector` (re-exported from boundary) |
 | [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeExtractor` pipeline + `aclassify_category` (file-based knowledge extraction) |
 
 ## 60-second quickstart
@@ -59,7 +59,6 @@ import json
 import numpy as np
 
 from everalgo.clustering import Cluster, cluster_by_geometry
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
 from everalgo.user_memory import (
@@ -67,21 +66,16 @@ from everalgo.user_memory import (
     AtomicFactExtractor, ProfileExtractor,
 )
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "should_wait": False})
-_EPISODE_JSON  = json.dumps({"title": "Alice asks about async", "content": "Alice explored async patterns.", "summary": "Alice explored async patterns."})
+_BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "tail_complete": True})
+_EPISODE_JSON  = json.dumps({"content": "Alice explored async patterns.", "summary": "Alice explored async patterns.", "title": "Alice asks about async"})
 _FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
-_FACT_JSON     = json.dumps({"atomic_facts": {"time": "Nov 14 2023", "atomic_fact": ["Alice is learning Python async."]}})
-_PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"trait": "Pragmatic", "description": "Prefers minimal-ceremony tooling."}]})
+_FACT_JSON     = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning Python async."]}})
+_PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"basis": "Asked for the shortest path to retries.", "description": "Prefers minimal-ceremony tooling.", "trait": "Pragmatic"}]})
 
 
 async def main() -> None:
-    fake = FakeLLMClient(responses=[
-        ChatResponse(content=_BOUNDARY_JSON, model="fake"),
-        ChatResponse(content=_EPISODE_JSON,  model="fake"),
-        ChatResponse(content=_FORE_JSON,     model="fake"),
-        ChatResponse(content=_FACT_JSON,     model="fake"),
-        ChatResponse(content=_PROFILE_JSON,  model="fake"),
-    ])
+    # ``achat`` returns the reply text; each scripted reply is the JSON its operator's ``response_format`` expects.
+    fake = FakeLLMClient(responses=[_BOUNDARY_JSON, _EPISODE_JSON, _FORE_JSON, _FACT_JSON, _PROFILE_JSON])
 
     messages = [
         ChatMessage(id="m1", role="user",      content="I want to learn Python async retry patterns.", timestamp=1_700_000_000_000, sender_id="u_alice", sender_name="Alice"),

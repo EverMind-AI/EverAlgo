@@ -50,12 +50,10 @@ if TYPE_CHECKING:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _viz import render_html  # Local sibling — requires sys.path manipulation above.
-from pydantic import SecretStr
 
 from everalgo.knowledge import KnowledgeExtractor
 from everalgo.knowledge._block_split import preprocess_content, split_content_to_blocks
-from everalgo.llm import build_client
-from everalgo.llm.config import LLMConfig
+from everalgo.llm.openai_compat import OpenAICompatClient
 from everalgo.types import ParsedContent
 
 _REQUIRED_ENV_VARS = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
@@ -74,12 +72,11 @@ def _build_client_from_env() -> LLMClient:
             f"OpenAI-compatible endpoint (OpenRouter / OpenAI / vLLM / ...)\n",
         )
         sys.exit(2)
-    return build_client(
-        LLMConfig(
-            api_key=SecretStr(os.environ["LLM_API_KEY"]),
-            base_url=os.environ["LLM_BASE_URL"],
-            model=os.environ["LLM_MODEL"],
-        ),
+    return OpenAICompatClient(
+        model=os.environ["LLM_MODEL"],
+        api_key=os.environ["LLM_API_KEY"],
+        base_url=os.environ["LLM_BASE_URL"],
+        temperature=0.0,
     )
 
 

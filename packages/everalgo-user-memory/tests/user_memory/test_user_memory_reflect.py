@@ -1,18 +1,23 @@
-"""Tests for everalgo.user_memory.reflect — EpisodeReflector."""
+"""Tests for everalgo.user_memory.reflect — EpisodeReflector — and the reflect reply contract.
+
+The prompts' system / user split is pinned in ``test_reflect_prompt_split.py``.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import inspect
+from typing import Any
 
 import pytest
 
-from everalgo.llm.errors import LLMError
+from everalgo.llm import LLMMessage, LLMOutputError, StrictOutputModel, to_openai_response_format
 from everalgo.testing import FakeLLMClient
 from everalgo.types import Episode
+from everalgo.user_memory._replies import _ReflectOutput
 
-if TYPE_CHECKING:
-    from everalgo.llm.types import ChatMessage as LLMChatMessage
-    from everalgo.llm.types import ChatResponse
+
+class _ClientError(Exception):
+    """A host-side client failure the operator must not wrap or retype."""
 
 
 def _ep(ts: int, text: str = "some episode text") -> Episode:
@@ -100,18 +105,58 @@ class TestReflectInit:
         await EpisodeReflector(llm=fake).areflect([_ep(1000, "Event A"), _ep(2000, "Event B")])
 
         assert fake.call_count == 1
-        prompt_text = fake.calls[0].messages[0].content
+        prompt_text = fake.calls[0].messages[1].content
         assert "Event A" in prompt_text
         assert "Event B" in prompt_text
         assert "1. Event A" in prompt_text
 
-    async def test_init_uses_structured_output(self) -> None:
+    @pytest.mark.parametrize("old_episode", [None, _ep(500)])
+    async def test_both_modes_request_the_reply_model(self, old_episode: Episode | None) -> None:
         fake = FakeLLMClient(responses=['{"content": "merged", "summary": "Preview of merged", "title": "t"}'])
         from everalgo.user_memory.reflect import EpisodeReflector
 
-        await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)])
+        await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)], old_episode=old_episode)
 
-        assert fake.calls[0].response_format is not None
+        assert fake.call_count == 1
+        assert fake.calls[0].response_format is _ReflectOutput
+
+    async def test_the_merged_episode_is_deserialised_from_the_reply_content(self) -> None:
+        """The reply body is the only source: nothing else carries the merged narrative back."""
+        fake = FakeLLMClient(responses=['{"content": "merged body", "summary": "a preview", "title": "T"}'])
+        from everalgo.user_memory.reflect import EpisodeReflector
+
+        result = await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)])
+
+        assert (result.episode, result.summary, result.subject) == ("merged body", "a preview", "T")
+
+    @pytest.mark.parametrize(
+        ("reply", "location"),
+        [
+            pytest.param("not json at all", "<root>", id="not-json"),
+            pytest.param('{"content": "c", "summary": "s"}', "title", id="missing-title"),
+            pytest.param('{"content": "c", "summary": "s", "title": "t", "extra": 1}', "extra", id="extra-key"),
+            pytest.param('{"content": 1, "summary": "s", "title": "t"}', "content", id="content-not-a-string"),
+        ],
+    )
+    async def test_a_reply_that_does_not_match_the_schema_is_rejected(self, reply: str, location: str) -> None:
+        """Every invalid reply is an LLMOutputError naming the location; a missing title no longer defaults."""
+        fake = FakeLLMClient(responses=[reply])
+        from everalgo.user_memory.reflect import EpisodeReflector
+
+        with pytest.raises(LLMOutputError, match="reflect reply is not a valid _ReflectOutput") as excinfo:
+            await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)])
+
+        assert f"{location}:" in str(excinfo.value)
+        assert fake.call_count == 1
+
+    async def test_the_error_message_never_quotes_the_reply(self) -> None:
+        fake = FakeLLMClient(responses=['{"content": "SECRET-NARRATIVE", "summary": 7, "title": "t"}'])
+        from everalgo.user_memory.reflect import EpisodeReflector
+
+        with pytest.raises(LLMOutputError) as excinfo:
+            await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)])
+
+        assert "SECRET-NARRATIVE" not in str(excinfo.value)
 
     async def test_init_fewer_than_2_raises(self) -> None:
         fake = FakeLLMClient(responses=['{"content": "x", "summary": "Preview of x", "title": "t"}'])
@@ -156,7 +201,7 @@ class TestReflectUpdate:
         old = _ep(1000, "Original narrative about pets.")
         await EpisodeReflector(llm=fake).areflect([_ep(2000, "New info")], old_episode=old)
 
-        prompt_text = fake.calls[0].messages[0].content
+        prompt_text = fake.calls[0].messages[1].content
         assert "Original narrative about pets." in prompt_text
         assert "New info" in prompt_text
 
@@ -208,27 +253,18 @@ class TestReflectMergedTimestamp:
 
 
 class TestReflectErrors:
-    async def test_llm_error_propagates_init(self) -> None:
-        def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-            raise LLMError("upstream failure")
-
-        fake = FakeLLMClient(handler=handler)
+    @pytest.mark.parametrize("old_episode", [None, _ep(500)])
+    async def test_client_exception_propagates_unchanged(self, old_episode: Episode | None) -> None:
+        """The host recognises call failures by its own types, so the operator neither wraps nor retypes them."""
+        error = _ClientError("upstream down")
+        fake = FakeLLMClient(responses=[error])
         from everalgo.user_memory.reflect import EpisodeReflector
 
-        with pytest.raises(LLMError, match="upstream failure"):
-            await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)])
+        with pytest.raises(_ClientError) as excinfo:
+            await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)], old_episode=old_episode)
 
+        assert excinfo.value is error
         assert fake.call_count == 1
-
-    async def test_llm_error_propagates_update(self) -> None:
-        def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-            raise LLMError("network down")
-
-        fake = FakeLLMClient(handler=handler)
-        from everalgo.user_memory.reflect import EpisodeReflector
-
-        with pytest.raises(LLMError, match="network down"):
-            await EpisodeReflector(llm=fake).areflect([_ep(2000)], old_episode=_ep(1000))
 
 
 class TestReflectMisc:
@@ -239,32 +275,17 @@ class TestReflectMisc:
         result = EpisodeReflector(llm=fake).reflect([_ep(1000), _ep(2000)])
         assert result.episode.endswith("synced")
 
-    async def test_prompt_override_init(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "ok", "summary": "Preview of ok", "title": "t"}'])
+    def test_areflect_takes_no_prompt_override(self) -> None:
+        """The bundled rules are the only rules; a host adds to them through ``custom_instructions``."""
         from everalgo.user_memory.reflect import EpisodeReflector
 
-        custom = "Custom prompt: {timeline}"
-        await EpisodeReflector(llm=fake).areflect([_ep(1000), _ep(2000)], prompt=custom)
-
-        prompt_text = fake.calls[0].messages[0].content
-        assert isinstance(prompt_text, str)
-        assert prompt_text.startswith("Custom prompt:")
-        assert "memory consolidation" not in prompt_text
-
-    async def test_prompt_override_update(self) -> None:
-        fake = FakeLLMClient(responses=['{"content": "ok", "summary": "Preview of ok", "title": "t"}'])
-        from everalgo.user_memory.reflect import EpisodeReflector
-
-        custom = "Update: {old_episode} + {new_episodes}"
-        await EpisodeReflector(llm=fake).areflect(
-            [_ep(2000, "new stuff")], old_episode=_ep(1000, "old stuff"), prompt=custom
-        )
-
-        prompt_text = fake.calls[0].messages[0].content
-        assert isinstance(prompt_text, str)
-        assert "old stuff" in prompt_text
-        assert "new stuff" in prompt_text
-        assert "updating an existing" not in prompt_text.lower()
+        assert list(inspect.signature(EpisodeReflector.areflect).parameters) == [
+            "self",
+            "episodes",
+            "old_episode",
+            "custom_instructions",
+            "output_language",
+        ]
 
 
 # ==========================================================================
@@ -297,13 +318,19 @@ async def test_update_carries_the_models_summary_onto_the_merged_episode() -> No
 
 def test_summary_is_declared_after_content_in_the_structured_output_schema() -> None:
     """Structured Output generates fields in schema order, so a preview declared first previews nothing."""
-    from everalgo.user_memory.reflect import _ReflectOutput
-
     order = list(_ReflectOutput.model_fields)
     assert order.index("summary") > order.index("content")
 
 
-@pytest.mark.parametrize("name", ["REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"])
+def test_reflect_output_stays_importable_from_the_reflect_module() -> None:
+    """Hosts import it from ``everalgo.user_memory.reflect`` to check their own prompts against its fields."""
+    from everalgo.user_memory import reflect
+
+    assert reflect._ReflectOutput is _ReflectOutput
+    assert list(_ReflectOutput.model_fields) == ["content", "summary", "title"]
+
+
+@pytest.mark.parametrize("name", ["REFLECT_EPISODE_SYSTEM_PROMPT", "REFLECT_EPISODE_UPDATE_SYSTEM_PROMPT"])
 def test_both_reflect_prompts_bound_the_summary(name: str) -> None:
     """Same three rigid clauses as the extractor's spec, worded for a merged narrative."""
     import everalgo.user_memory.prompts.en.reflect as en_mod
@@ -314,11 +341,7 @@ def test_both_reflect_prompts_bound_the_summary(name: str) -> None:
     assert "do not refer to the record itself" in prompt
 
 
-_LANGUAGE_PROMPTS = ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT")
-
-
-class _PromptCapturedError(Exception):
-    """Ends the call once the prompt has been captured — no LLM response is needed."""
+_SYSTEM_PROMPTS = ("REFLECT_EPISODE_SYSTEM_PROMPT", "REFLECT_EPISODE_UPDATE_SYSTEM_PROMPT")
 
 
 async def _render_reflect_prompt(
@@ -326,57 +349,61 @@ async def _render_reflect_prompt(
     old_episode: Episode | None = None,
     output_language: str | None = None,
 ) -> str:
-    """Return the prompt ``areflect`` actually sends, so the language rule is checked after splicing."""
+    """Return the system message ``areflect`` actually sends, so the language rule is checked after splicing."""
     from everalgo.user_memory.reflect import EpisodeReflector
 
-    captured: list[str] = []
+    captured: list[LLMMessage] = []
 
-    class _Capture:
-        async def chat(self, *, messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-            content = messages[0].content
-            assert isinstance(content, str)  # narrow for test
-            captured.append(content)
-            raise _PromptCapturedError
+    def handler(messages: list[LLMMessage], **_: Any) -> str:
+        captured.extend(messages)
+        return '{"content": "c", "summary": "s", "title": "t"}'
 
-    kwargs: dict[str, Any] = {"old_episode": old_episode}
-    if output_language is not None:
-        kwargs["output_language"] = output_language
-
-    with pytest.raises(_PromptCapturedError):
-        await EpisodeReflector(llm=_Capture()).areflect([_ep(1000), _ep(2000)], **kwargs)  # type: ignore[arg-type]
-    return captured[0]
+    await EpisodeReflector(llm=FakeLLMClient(handler=handler)).areflect(
+        [_ep(1000), _ep(2000)], old_episode=old_episode, output_language=output_language
+    )
+    system, user = captured
+    assert "LANGUAGE RULE" not in str(user.content)
+    return str(system.content)
 
 
-@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
-def test_reflect_prompts_carry_the_language_placeholder_at_both_ends(name: str) -> None:
-    """Long prompts lose middle instructions, so the rule is spliced at head and tail."""
-    import everalgo.user_memory.prompts.en.reflect as en_mod
+@pytest.mark.parametrize("old_episode", [None, _ep(500, "existing narrative")])
+async def test_the_language_rule_closes_the_system_message_once(old_episode: Episode | None) -> None:
+    """With no caller instructions the rule sits in ``<output_language>``, the last block, once."""
+    rendered = await _render_reflect_prompt(old_episode=old_episode)
 
-    assert getattr(en_mod, name).count("{language_rule}") == 2
+    assert rendered.count("<output_language>") == 1
+    assert rendered.endswith("\n</output_language>")
+    assert rendered.split("<output_language>\n", 1)[1].count("CRITICAL LANGUAGE RULE") == 1
 
 
 async def test_init_inherits_the_merged_episodes_language_when_none_is_named() -> None:
     rendered = await _render_reflect_prompt()
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 1
     assert "as the episodes you are merging" in rendered
-    assert "{language_rule}" not in rendered
+    assert "{{language_rule}}" not in rendered
 
 
 async def test_update_inherits_the_existing_narratives_language_when_none_is_named() -> None:
     rendered = await _render_reflect_prompt(old_episode=_ep(500, "existing narrative"))
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
+    assert rendered.count("CRITICAL LANGUAGE RULE") == 1
     assert "as the existing narrative you are updating" in rendered
-    assert "{language_rule}" not in rendered
+    assert "{{language_rule}}" not in rendered
 
 
 @pytest.mark.parametrize("old_episode", [None, _ep(500, "existing narrative")])
 async def test_both_modes_honour_a_named_language(old_episode: Episode | None) -> None:
     rendered = await _render_reflect_prompt(old_episode=old_episode, output_language="German")
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
-    assert "Write ALL output fields in German." in rendered
+    assert (
+        rendered.count(
+            "Write every output field in German, whatever language the input is in, including anything already stored."
+        )
+        == 1
+    )
+    assert "German, whatever language the input is in." not in rendered
+    assert "CRITICAL LANGUAGE RULE" not in rendered
     assert "as the episodes you are merging" not in rendered
     assert "as the existing narrative you are updating" not in rendered
 
@@ -386,14 +413,14 @@ async def test_an_unsupported_language_is_rejected_before_the_llm_is_called(old_
     """The value is interpolated into prompt text, so it must never reach the model unvalidated."""
     from everalgo.user_memory.reflect import EpisodeReflector
 
-    class _NeverCalled:
-        async def chat(self, **kwargs: Any) -> ChatResponse:
-            raise AssertionError("LLM must not be called")
+    fake = FakeLLMClient(responses=['{"content": "c", "summary": "s", "title": "t"}'])
 
     with pytest.raises(ValueError, match="unsupported output_language"):
-        await EpisodeReflector(llm=_NeverCalled()).areflect(  # type: ignore[arg-type]
+        await EpisodeReflector(llm=fake).areflect(
             [_ep(1000), _ep(2000)], old_episode=old_episode, output_language="Klingon"
         )
+
+    assert fake.call_count == 0
 
 
 @pytest.mark.parametrize(
@@ -425,5 +452,41 @@ def test_reflect_prompts_pin_the_utc_label_on_carried_over_times() -> None:
     """
     import everalgo.user_memory.prompts.en.reflect as en_mod
 
-    for name in ("REFLECT_EPISODE_PROMPT", "REFLECT_EPISODE_UPDATE_PROMPT"):
+    for name in _SYSTEM_PROMPTS:
         assert "MUST carry the UTC zone label" in getattr(en_mod, name), name
+
+
+def test_reflect_prompts_ask_for_a_bare_json_object() -> None:
+    """The schema constrains the reply upstream, but only when the server honours it.
+
+    OpenRouter treats ``response_format`` as a routing preference, so the prompt has to carry the same
+    instruction the other operators' prompts carry rather than relying on the schema alone.
+    """
+    import everalgo.user_memory.prompts.en.reflect as en_mod
+
+    for name in _SYSTEM_PROMPTS:
+        assert "Reply with one JSON object, nothing else." in getattr(en_mod, name), name
+
+
+# ===========================================================================
+# LLM contract — the operator-side obligations of docs/concepts/llm-contract.md §4.3
+# ===========================================================================
+
+
+def test_reply_model_is_strict_one_level_and_default_free() -> None:
+    """``_ReflectOutput`` inherits StrictOutputModel directly, requires every field and carries no validators."""
+    assert _ReflectOutput.__bases__ == (StrictOutputModel,)
+    assert _ReflectOutput.model_config.get("strict") is True
+    assert _ReflectOutput.model_config.get("extra") == "forbid"
+    for name, field in _ReflectOutput.model_fields.items():
+        assert field.is_required(), f"_ReflectOutput.{name} has a default"
+    assert not _ReflectOutput.__pydantic_decorators__.field_validators
+    assert not _ReflectOutput.__pydantic_decorators__.model_validators
+
+
+def test_reply_model_fits_the_strict_subset() -> None:
+    """The request builders raise on anything outside the strict subset or a non-object top level (§8.3)."""
+    response_format = to_openai_response_format(_ReflectOutput)
+
+    assert response_format is not None
+    assert response_format["json_schema"]["schema"]["type"] == "object"

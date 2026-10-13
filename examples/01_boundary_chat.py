@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, ConversationItem
 from everalgo.user_memory import BoundaryDetector
+
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
 
 # ---------------------------------------------------------------------------
 # Scripted LLM response — mirrors the JSON shape BoundaryDetector parses.
@@ -29,7 +30,7 @@ _BOUNDARY_JSON = json.dumps(
     {
         "reasoning": "Three messages form a single coherent topic about Python async.",
         "boundaries": [],
-        "should_wait": False,
+        "tail_complete": True,
     }
 )
 
@@ -37,8 +38,8 @@ _BOUNDARY_JSON = json.dumps(
 def _make_fake() -> FakeLLMClient:
     """Single scripted response: LLM says the 3 messages form one continuous topic."""
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
-        return ChatResponse(content=_BOUNDARY_JSON, model="fake")
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        return _BOUNDARY_JSON
 
     return FakeLLMClient(handler=handler)
 
@@ -82,8 +83,8 @@ async def main() -> None:
     print(f"cells produced : {len(result.cells)}")
     print(f"tail (held back): {len(result.tail)} messages")
     # The LLM's verdict on the tail, not a restatement of its length: True means the trailing segment
-    # is too thin to place in an episode yet. None means no path judged it.
-    print(f"should_wait    : {result.should_wait}")
+    # already forms a complete episode and can be closed now. None means no path judged it.
+    print(f"tail_complete  : {result.tail_complete}")
 
     if result.cells:
         first_cell = result.cells[0]

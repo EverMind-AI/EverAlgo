@@ -1,5 +1,8 @@
 """Tests for everalgo.user_memory package-level public API."""
 
+import ast
+from pathlib import Path
+
 import everalgo.user_memory
 from everalgo.testing.fake_llm import FakeLLMClient
 
@@ -57,3 +60,27 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
     assert EpisodeReflector(llm=fake).__class__.__name__ == "EpisodeReflector"
     assert ForesightExtractor(llm=fake).__class__.__name__ == "ForesightExtractor"
     assert ProfileExtractor(llm=fake).__class__.__name__ == "ProfileExtractor"
+
+
+def test_boundary_detector_is_the_boundary_package_class() -> None:
+    """The product package re-exports ``everalgo.boundary.BoundaryDetector`` itself, not a wrapper or subclass."""
+    import everalgo.boundary
+
+    assert everalgo.user_memory.BoundaryDetector is everalgo.boundary.BoundaryDetector
+
+
+def test_boundary_module_holds_nothing_but_the_re_export() -> None:
+    """``boundary.py`` is a docstring, ``__all__`` and one import: no logic of its own to drift from the class."""
+    tree = ast.parse((Path(everalgo.user_memory.__file__).parent / "boundary.py").read_text(encoding="utf-8"))
+    statements = [ast.unparse(node) for node in tree.body[1:]]
+
+    assert statements == [
+        "from __future__ import annotations",
+        "__all__ = ['BoundaryDetector']",
+        "from everalgo.boundary import BoundaryDetector",
+    ]
+
+
+def test_agent_boundary_detector_is_gone() -> None:
+    assert "AgentBoundaryDetector" not in everalgo.user_memory.__all__
+    assert not hasattr(everalgo.user_memory, "AgentBoundaryDetector")

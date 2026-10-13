@@ -8,6 +8,8 @@ Contract differences vs a repo-coupled extractor:
   ``id ∈ existing_relevant_skills`` + ``confidence < retire_confidence``
 - :class:`everalgo.testing.fake_llm.FakeLLMClient` for deterministic LLM replays
 - :class:`_SkillCfg` policy thresholds (no per-call prompt kwargs, no internal top-K)
+- Operations reach ``_apply_add`` / ``_apply_update`` already validated against ``_SkillExtractReply``; a reply
+  that does not validate raises ``LLMOutputError`` before any operation is applied
 - Caller pre-filters skills externally before passing in as ``existing_relevant_skills`` —
   ``query_vector`` is absent from the signature
 
@@ -22,6 +24,17 @@ from typing import Any
 
 import pytest
 
+from everalgo.agent_memory._replies import (
+    _MaturityReply,
+    _SkillAddData,
+    _SkillExtractReply,
+    _SkillUpdateData,
+    _SkillUpdateOp,
+)
+from everalgo.agent_memory.prompts.skill_failure import AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT
+from everalgo.agent_memory.prompts.skill_maturity import AGENT_SKILL_MATURITY_SCORE_SYSTEM_PROMPT
+from everalgo.agent_memory.prompts.skill_success import AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT
+from everalgo.agent_memory.reasons import SkillSkipReason
 from everalgo.agent_memory.skill import AgentSkillExtractor, _SkillCfg
 from everalgo.agent_memory.skill_ops import (
     _apply_add,
@@ -32,7 +45,7 @@ from everalgo.agent_memory.skill_ops import (
     _is_hypothesis_promotion,
     _is_skill_content_sufficient,
 )
-from everalgo.llm.types import ChatResponse
+from everalgo.llm import LLMOutputError
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import AgentCase, AgentSkill
 
@@ -82,6 +95,17 @@ def _make_skill(
         maturity_score=maturity_score,
         source_case_ids=source_case_ids or [],
     )
+
+
+def _add_data(
+    *, name: str = "X", description: str = "Y", content: str = _DEFAULT_CONTENT, confidence: float = 0.5
+) -> _SkillAddData:
+    return _SkillAddData(name=name, description=description, content=content, confidence=confidence)
+
+
+def _update_op(op: dict[str, Any]) -> _SkillUpdateOp:
+    """An ``update`` operation as the reply parser hands it over: ``{"index", "data"}`` with ``action`` implied."""
+    return _SkillUpdateOp.model_validate({"action": "update", **op})
 
 
 # ── _format_cases ───────────────────────────────────────────────────────────────────────────────────
@@ -261,7 +285,13 @@ class TestApplyAdd:
             },
         }
         cfg = _SkillCfg()  # skip_maturity_scoring=True by default → no LLM call needed
-        outcome = await _apply_add(op, ["case_x"], op_index=0, client=FakeLLMClient(responses=[]), cfg=cfg)
+        outcome = await _apply_add(
+            _SkillAddData.model_validate(op["data"]),
+            ["case_x"],
+            op_index=0,
+            client=FakeLLMClient(responses=[]),
+            cfg=cfg,
+        )
         added = outcome.skill
         assert added is not None
         assert added.name == "New Skill"
@@ -273,94 +303,81 @@ class TestApplyAdd:
         assert added.maturity_score == 1.0
 
     async def test_empty_content_skipped(self) -> None:
-        op = {"action": "add", "data": {"name": "X", "description": "Y", "content": ""}}
-        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(
+            _add_data(content=""), [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg()
+        )
         result = outcome.skill
         assert result is None
 
     async def test_insufficient_content_skipped(self) -> None:
-        op = {"action": "add", "data": {"name": "X", "description": "Y", "content": "too short"}}
-        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(
+            _add_data(content="too short"), [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg()
+        )
         result = outcome.skill
         assert result is None
 
     async def test_no_name_and_no_description_skipped(self) -> None:
-        op = {"action": "add", "data": {"name": "", "description": "", "content": _DEFAULT_CONTENT}}
-        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+        outcome = await _apply_add(
+            _add_data(name="", description=""), [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg()
+        )
         result = outcome.skill
         assert result is None
 
-    async def test_invalid_confidence_defaults_to_half(self) -> None:
-        op = {
-            "action": "add",
-            "data": {
-                "name": "X",
-                "description": "Y",
-                "content": _DEFAULT_CONTENT,
-                "confidence": "not-a-number",
-            },
-        }
-        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
+    async def test_out_of_range_confidence_is_clamped(self) -> None:
+        outcome = await _apply_add(
+            _add_data(confidence=1.7), [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg()
+        )
         result = outcome.skill
         assert result is not None
-        assert result.confidence == 0.5
+        assert result.confidence == 1.0
 
     async def test_maturity_evaluation_invoked_when_opted_in(self) -> None:
         """When skip_maturity_scoring=False, the LLM is called once for maturity scoring."""
         maturity_json = json.dumps({"completeness": 4, "executability": 4, "evidence": 3, "clarity": 4, "reason": ""})
-        fake = FakeLLMClient(responses=[ChatResponse(content=maturity_json, model="fake")])
-        op = {
-            "action": "add",
-            "data": {
-                "name": "X",
-                "description": "Y",
-                "content": _DEFAULT_CONTENT,
-                "confidence": 0.5,
-            },
-        }
-        outcome = await _apply_add(op, [], op_index=0, client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
+        fake = FakeLLMClient(responses=[maturity_json])
+        outcome = await _apply_add(_add_data(), [], op_index=0, client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
         result = outcome.skill
         assert result is not None
         assert fake.call_count == 1
         # raw_total = 15 / 20 = 0.75
         assert abs(result.maturity_score - 0.75) < 1e-6
+        call = fake.calls[0]
+        assert call.response_format is _MaturityReply
+        assert [m.role for m in call.messages] == ["system", "user"]
+        assert call.messages[0].content == AGENT_SKILL_MATURITY_SCORE_SYSTEM_PROMPT
+        assert isinstance(call.messages[1].content, str)
+        assert call.messages[1].content.startswith("<skill>\n<name>\nX\n</name>")
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "not json {{",
+            '{"completeness": 4, "executability": 4, "evidence": 3, "reason": ""}',
+            '{"completeness": 4, "executability": 4, "evidence": 3, "clarity": 4, "reason": "", "extra": 1}',
+            '{"completeness": "4", "executability": 4, "evidence": 3, "clarity": 4, "reason": ""}',
+        ],
+        ids=["not-json", "missing-dimension", "extra-field", "string-score"],
+    )
+    async def test_invalid_maturity_reply_raises_llm_output_error(self, reply: str) -> None:
+        fake = FakeLLMClient(responses=[reply])
+        with pytest.raises(LLMOutputError, match="agent skill maturity reply is not a valid _MaturityReply"):
+            await _apply_add(_add_data(), [], op_index=0, client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
 
     async def test_maturity_llm_exception_propagates(self) -> None:
         """LLM raises → exception propagates from _evaluate_maturity (no swallow)."""
 
-        def raise_llm_error(*_args: object, **_kwargs: object) -> ChatResponse:
+        def raise_llm_error(*_args: object, **_kwargs: object) -> str:
             raise RuntimeError("simulated LLM provider failure (e.g. network timeout)")
 
         fake = FakeLLMClient(handler=raise_llm_error)
-        op = {
-            "action": "add",
-            "data": {
-                "name": "X",
-                "description": "Y",
-                "content": _DEFAULT_CONTENT,
-                "confidence": 0.7,
-            },
-        }
         with pytest.raises(RuntimeError, match="simulated LLM provider failure"):
-            await _apply_add(op, [], op_index=0, client=fake, cfg=_SkillCfg(skip_maturity_scoring=False))
-
-    async def test_invalid_index_type_returns_none(self) -> None:
-        outcome = await _apply_update(
-            {"index": "abc", "data": {"name": "X"}},
-            [_make_skill()],
-            source_case_ids=[],
-            source_quality=0.5,
-            op_index=0,
-            client=FakeLLMClient(responses=[]),
-            cfg=_SkillCfg(),
-            processed_indices=set(),
-        )
-        result = outcome.skill
-        assert result is None
+            await _apply_add(
+                _add_data(confidence=0.7), [], op_index=0, client=fake, cfg=_SkillCfg(skip_maturity_scoring=False)
+            )
 
     async def test_out_of_range_index_returns_none(self) -> None:
         outcome = await _apply_update(
-            {"index": 5, "data": {"name": "X"}},
+            _update_op({"index": 5, "data": {"name": "X"}}),
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
@@ -374,7 +391,7 @@ class TestApplyAdd:
 
     async def test_negative_index_returns_none(self) -> None:
         outcome = await _apply_update(
-            {"index": -1, "data": {"name": "X"}},
+            _update_op({"index": -1, "data": {"name": "X"}}),
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
@@ -389,7 +406,7 @@ class TestApplyAdd:
     async def test_duplicate_index_returns_none(self) -> None:
         processed: set[int] = {0}
         outcome = await _apply_update(
-            {"index": 0, "data": {"name": "X"}},
+            _update_op({"index": 0, "data": {"name": "X"}}),
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
@@ -403,7 +420,7 @@ class TestApplyAdd:
 
     async def test_no_fields_to_change_returns_none(self) -> None:
         outcome = await _apply_update(
-            {"index": 0, "data": {}},
+            _update_op({"index": 0, "data": {}}),
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
@@ -417,7 +434,7 @@ class TestApplyAdd:
 
     async def test_insufficient_new_content_returns_none(self) -> None:
         outcome = await _apply_update(
-            {"index": 0, "data": {"content": "too short"}},
+            _update_op({"index": 0, "data": {"content": "too short"}}),
             [_make_skill()],
             source_case_ids=[],
             source_quality=0.5,
@@ -434,7 +451,7 @@ class TestApplyAdd:
         prior = _make_skill(confidence=0.7)
         cfg = _SkillCfg()
         outcome = await _apply_update(
-            {"index": 0, "data": {"confidence": 0.05}},
+            _update_op({"index": 0, "data": {"confidence": 0.05}}),
             [prior],
             source_case_ids=["case_x"],
             source_quality=0.4,
@@ -453,7 +470,7 @@ class TestApplyAdd:
         prior = _make_skill(name="Old", description="Old desc")
         cfg = _SkillCfg()
         outcome = await _apply_update(
-            {"index": 0, "data": {"name": "New Name", "description": "New description text content"}},
+            _update_op({"index": 0, "data": {"name": "New Name", "description": "New description text content"}}),
             [prior],
             source_case_ids=[],
             source_quality=0.5,
@@ -473,7 +490,7 @@ class TestApplyAdd:
         new_content = "## Steps\n1. New step 1\n2. New step 2\n3. Step 3\n4. Step 4\n5. Step 5"
         cfg = _SkillCfg()
         outcome = await _apply_update(
-            {"index": 0, "data": {"content": new_content}},
+            _update_op({"index": 0, "data": {"content": new_content}}),
             [prior],
             source_case_ids=[],
             source_quality=0.5,
@@ -490,7 +507,7 @@ class TestApplyAdd:
         prior = _make_skill(source_case_ids=["case_a"])
         cfg = _SkillCfg()
         outcome = await _apply_update(
-            {"index": 0, "data": {"confidence": 0.8}},
+            _update_op({"index": 0, "data": {"confidence": 0.8}}),
             [prior],
             source_case_ids=["case_a", "case_b"],
             source_quality=0.5,
@@ -503,15 +520,11 @@ class TestApplyAdd:
         assert result is not None
         assert result.source_case_ids == ["case_a", "case_b"]
 
-    async def test_invalid_confidence_string_no_other_fields_returns_none(self) -> None:
-        """Bug 2 fix: op with only an invalid ``confidence`` (no name/desc/content change) returns None.
-
-        Invalid confidence is treated as "no confidence change" → no-fields-to-change guard fires →
-        returns None instead of emitting a no-op update.
-        """
+    async def test_null_confidence_is_no_confidence_change(self) -> None:
+        """A schema-constrained reply writes ``"confidence": null`` for an unchanged confidence; null alone is a no-op."""
         prior = _make_skill(confidence=0.7)
         outcome = await _apply_update(
-            {"index": 0, "data": {"confidence": "not-a-number"}},  # only field, and it's invalid
+            _update_op({"index": 0, "data": {"confidence": None}}),
             [prior],
             source_case_ids=[],
             source_quality=0.5,
@@ -520,17 +533,16 @@ class TestApplyAdd:
             cfg=_SkillCfg(),
             processed_indices=set(),
         )
-        result = outcome.skill
-        assert result is None  # before the fix: would have emitted a no-op update with prior.confidence
+        assert outcome.skill is None
+        assert outcome.reason is SkillSkipReason.UPDATE_NO_FIELD_CHANGED
 
-    async def test_invalid_confidence_with_real_name_change_still_updates(self) -> None:
-        """Bug 2 fix: invalid confidence + real name change still emits an update.
-
-        Confidence stays at prior.confidence, but the name change is what triggers the update path.
-        """
-        prior = _make_skill(name="Old", confidence=0.7)
+    async def test_explicit_nulls_mean_unchanged_fields(self) -> None:
+        """Every unchanged field written as ``null`` leaves the prior value in place."""
+        prior = _make_skill(name="Old", description="Old desc", confidence=0.7)
         outcome = await _apply_update(
-            {"index": 0, "data": {"name": "New Name", "confidence": "garbage"}},
+            _update_op(
+                {"index": 0, "data": {"name": "New Name", "description": None, "content": None, "confidence": None}}
+            ),
             [prior],
             source_case_ids=[],
             source_quality=0.5,
@@ -541,30 +553,7 @@ class TestApplyAdd:
         )
         result = outcome.skill
         assert result is not None
-        assert result.name == "New Name"
-        assert result.confidence == 0.7  # invalid confidence ignored, prior preserved
-
-    async def test_invalid_confidence_none_type_also_treated_as_no_change(self) -> None:
-        """Bug 2 fix coverage: a None-typed confidence is treated as no confidence change.
-
-        Sloppy LLMs may emit ``{"confidence": None}`` literally; this branch triggers the TypeError
-        path and is treated as no confidence change.
-        """
-        prior = _make_skill(confidence=0.7)
-        outcome = await _apply_update(
-            {"index": 0, "data": {"confidence": None}},
-            [prior],
-            source_case_ids=[],
-            source_quality=0.5,
-            op_index=0,
-            client=FakeLLMClient(responses=[]),
-            cfg=_SkillCfg(),
-            processed_indices=set(),
-        )
-        result = outcome.skill
-        # data.get("confidence") returns None, and `new_confidence_raw is not None` is False → the
-        # pre-parse branch never runs → confidence_changed=False → no-fields guard fires
-        assert result is None
+        assert (result.name, result.description, result.confidence) == ("New Name", "Old desc", 0.7)
 
     async def test_maturity_llm_exception_in_update_propagates(self) -> None:
         """Maturity re-eval LLM raises → exception propagates from _apply_update.
@@ -572,7 +561,7 @@ class TestApplyAdd:
         Major content change triggers re-eval; LLM raises; error propagates up.
         """
 
-        def raise_llm_error(*_args: object, **_kwargs: object) -> ChatResponse:
+        def raise_llm_error(*_args: object, **_kwargs: object) -> str:
             raise RuntimeError("simulated LLM provider failure")
 
         # Prior has substantive content + maturity_score; we force a "major content change" (>= 0.4
@@ -589,7 +578,7 @@ class TestApplyAdd:
         fake = FakeLLMClient(handler=raise_llm_error)
         with pytest.raises(RuntimeError, match="simulated LLM provider failure"):
             await _apply_update(
-                {"index": 0, "data": {"content": new_content}},
+                _update_op({"index": 0, "data": {"content": new_content}}),
                 [prior],
                 source_case_ids=[],
                 source_quality=0.8,
@@ -605,7 +594,7 @@ class TestApplyAdd:
 
 class TestAgentSkillExtractorAExtract:
     async def test_no_operations_returns_empty(self) -> None:
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": [], "update_note": ""}', model="fake")])
+        fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
         result = await AgentSkillExtractor(llm=fake).aextract(
             _make_case(),
             existing_relevant_skills=[],
@@ -630,7 +619,7 @@ class TestAgentSkillExtractorAExtract:
                 "update_note": "",
             }
         )
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops_response, model="fake")])
+        fake = FakeLLMClient(responses=[ops_response])
         raw_result = await AgentSkillExtractor(llm=fake).aextract(
             _make_case(),
             existing_relevant_skills=[],
@@ -645,46 +634,88 @@ class TestAgentSkillExtractorAExtract:
         assert skill.source_case_ids == ["case_001"]
 
     async def test_quality_score_routes_to_failure_prompt(self) -> None:
-        """case.quality_score=0.3 (< failure_quality_threshold=0.5) → failure prompt used."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": []}', model="fake")])
+        """case.quality_score=0.3 (< failure_quality_threshold=0.5) → failure system prompt used."""
+        fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
         await AgentSkillExtractor(llm=fake).aextract(
             _make_case(quality_score=0.3),
             existing_relevant_skills=[],
             supporting_cases=[],
-            prompt_failure="FAILURE_PROMPT_MARKER_{new_case_json}{existing_skills_json}",
-            prompt_success="SUCCESS_PROMPT_MARKER_{new_case_json}{existing_skills_json}",
         )
-        assert "FAILURE_PROMPT_MARKER_" in fake.calls[0].messages[0].content
-        assert "SUCCESS_PROMPT_MARKER_" not in fake.calls[0].messages[0].content
+        assert fake.calls[0].messages[0].content == AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT
+        assert fake.calls[0].response_format is _SkillExtractReply
 
     async def test_quality_score_routes_to_success_prompt_at_threshold(self) -> None:
-        """case.quality_score=0.5 (= threshold) → success prompt used."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": []}', model="fake")])
+        """case.quality_score=0.5 (= threshold) → success system prompt used."""
+        fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
         await AgentSkillExtractor(llm=fake).aextract(
             _make_case(quality_score=0.5),
             existing_relevant_skills=[],
             supporting_cases=[],
-            prompt_failure="FAILURE_PROMPT_MARKER_{new_case_json}{existing_skills_json}",
-            prompt_success="SUCCESS_PROMPT_MARKER_{new_case_json}{existing_skills_json}",
         )
-        assert "SUCCESS_PROMPT_MARKER_" in fake.calls[0].messages[0].content
+        assert fake.calls[0].messages[0].content == AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT
+        assert fake.calls[0].response_format is _SkillExtractReply
 
-    async def test_monkey_patch_prompt_override_still_works(self) -> None:
-        """Module-constant monkey-patch is an alternative to per-call kwargs (startup-time override)."""
+    async def test_both_paths_send_the_same_data_only_user_message(self) -> None:
+        users = []
+        for quality in (0.3, 0.8):
+            fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
+            await AgentSkillExtractor(llm=fake).aextract(
+                _make_case(quality_score=quality, case_id="c"), existing_relevant_skills=[], supporting_cases=[]
+            )
+            system, user = fake.calls[0].messages
+            assert (system.role, user.role) == ("system", "user")
+            assert isinstance(user.content, str)
+            users.append(user.content.replace("0.3", "Q").replace("0.8", "Q"))
+        assert users[0] == users[1]
+        assert users[0].startswith("<new_cases>\n[")
+        assert "<existing_skills>\n(empty — no existing skills)\n</existing_skills>" in users[0]
+
+    async def test_monkey_patch_system_prompt_override_still_works(self) -> None:
+        """Module-constant monkey-patch replaces the rules at startup."""
         import everalgo.agent_memory.skill as skill_mod
 
-        original = skill_mod.AGENT_SKILL_SUCCESS_EXTRACT_PROMPT
-        skill_mod.AGENT_SKILL_SUCCESS_EXTRACT_PROMPT = "MONKEY_SUCCESS_{new_case_json}{existing_skills_json}"
+        original = skill_mod.AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT
+        skill_mod.AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT = "MONKEY_SUCCESS_RULES"
         try:
-            fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": []}', model="fake")])
+            fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
             await AgentSkillExtractor(llm=fake).aextract(
                 _make_case(),  # quality_score=0.8 → success path
                 existing_relevant_skills=[],
                 supporting_cases=[],
             )
-            assert "MONKEY_SUCCESS_" in fake.calls[0].messages[0].content
+            assert fake.calls[0].messages[0].content == "MONKEY_SUCCESS_RULES"
         finally:
-            skill_mod.AGENT_SKILL_SUCCESS_EXTRACT_PROMPT = original
+            skill_mod.AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT = original
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "not json {{",
+            '{"operations": []}',
+            '{"operations": [{"action": "delete", "index": 0}], "update_note": ""}',
+            '{"operations": [{"action": "update", "index": "0", "data": {}}], "update_note": ""}',
+            '{"operations": ["none"], "update_note": ""}',
+            '{"operations": [{"action": "add", "data": {"name": "n", "description": "d", "content": "c"}}],'
+            ' "update_note": ""}',
+            '{"operations": [{"action": "update", "index": 0, "data": {"confidence": "high"}}], "update_note": ""}',
+        ],
+        ids=[
+            "not-json",
+            "missing-update-note",
+            "unknown-action",
+            "string-index",
+            "non-object-op",
+            "add-without-confidence",
+            "string-confidence",
+        ],
+    )
+    async def test_invalid_reply_raises_llm_output_error(self, reply: str) -> None:
+        """What used to be dropped per operation (unknown action, non-object op, bad index) now fails the reply."""
+        fake = FakeLLMClient(responses=[reply])
+        with pytest.raises(LLMOutputError, match="agent skill extract reply is not a valid _SkillExtractReply"):
+            await AgentSkillExtractor(llm=fake).aextract(
+                _make_case(), existing_relevant_skills=[_make_skill()], supporting_cases=[]
+            )
 
     async def test_update_retire_encoded_in_returned_list(self) -> None:
         """End-to-end: LLM emits one update with low confidence → retire encoding in returned skill."""
@@ -695,7 +726,7 @@ class TestAgentSkillExtractorAExtract:
                 "update_note": "",
             }
         )
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops_response, model="fake")])
+        fake = FakeLLMClient(responses=[ops_response])
         result = await AgentSkillExtractor(llm=fake).aextract(
             _make_case(),
             existing_relevant_skills=[prior],
@@ -710,13 +741,13 @@ class TestAgentSkillExtractorAExtract:
     async def test_existing_relevant_skills_all_passed_through(self) -> None:
         """All caller-supplied skills appear in the prompt — algorithm no longer caps them internally."""
         existing = [_make_skill(skill_id=f"sk_{i}", name=f"NAME_MARKER_{i}") for i in range(5)]
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": []}', model="fake")])
+        fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
         await AgentSkillExtractor(llm=fake).aextract(
             _make_case(),
             existing_relevant_skills=existing,
             supporting_cases=[],
         )
-        prompt_content = fake.calls[0].messages[0].content
+        prompt_content = fake.calls[0].messages[1].content
         # All 5 skills' names should appear — algorithm doesn't filter
         for i in range(5):
             assert f"NAME_MARKER_{i}" in prompt_content
@@ -729,7 +760,7 @@ class TestAgentSkillExtractorAExtract:
                 "update_note": "explanation of the decision",
             }
         )
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops_response, model="fake")])
+        fake = FakeLLMClient(responses=[ops_response])
         # Just exercise the path; logger.debug fires but doesn't change the return value
         result = await AgentSkillExtractor(llm=fake).aextract(
             _make_case(),
@@ -738,12 +769,11 @@ class TestAgentSkillExtractorAExtract:
         )
         assert result == []
 
-    async def test_apply_add_with_non_dict_data_skipped(self) -> None:
-        """Non-dict ``op["data"]`` falls back to ``{}`` -> empty content -> ``_apply_add`` skips."""
-        op = {"action": "add", "data": "not a dict"}  # ← non-dict data
-        outcome = await _apply_add(op, [], op_index=0, client=FakeLLMClient(responses=[]), cfg=_SkillCfg())
-        result = outcome.skill
-        assert result is None  # empty content from the {} fallback → skip
+    async def test_update_data_may_omit_unchanged_fields(self) -> None:
+        """A prompt-only reply restates only what it changes, as both skill prompts show."""
+        assert _SkillUpdateData.model_validate({"confidence": 0.65}) == _SkillUpdateData(
+            name=None, description=None, content=None, confidence=0.65
+        )
 
 
 class TestSummariseCaseForPrompt:
@@ -832,7 +862,7 @@ class TestApplyUpdateModerateMaturityBand:
         op = self._build_moderate_change_op()
         fake = FakeLLMClient(responses=[])  # must NOT be called — reeval is skipped
         outcome = await _apply_update(
-            op,
+            _update_op(op),
             [prior],
             source_case_ids=["c1"],
             source_quality=0.8,
@@ -858,7 +888,7 @@ class TestApplyUpdateModerateMaturityBand:
         op = self._build_moderate_change_op()
         fake = FakeLLMClient(responses=[])
         outcome = await _apply_update(
-            op,
+            _update_op(op),
             [prior],
             source_case_ids=["c1"],
             source_quality=0.2,  # < 0.3 → skip re-eval
@@ -881,9 +911,9 @@ class TestApplyUpdateModerateMaturityBand:
         )
         op = self._build_moderate_change_op()
         maturity_json = json.dumps({"completeness": 5, "executability": 5, "evidence": 5, "clarity": 5, "reason": "ok"})
-        fake = FakeLLMClient(responses=[ChatResponse(content=maturity_json, model="fake")])
+        fake = FakeLLMClient(responses=[maturity_json])
         outcome = await _apply_update(
-            op,
+            _update_op(op),
             [prior],
             source_case_ids=["c1"],
             source_quality=0.6,  # ≥ 0.3 → does NOT skip; immature → re-eval fires
@@ -910,9 +940,9 @@ class TestApplyUpdateModerateMaturityBand:
         op = self._build_moderate_change_op()
         op["data"]["confidence"] = 0.3
         maturity_json = json.dumps({"completeness": 3, "executability": 3, "evidence": 3, "clarity": 3, "reason": "ok"})
-        fake = FakeLLMClient(responses=[ChatResponse(content=maturity_json, model="fake")])
+        fake = FakeLLMClient(responses=[maturity_json])
         outcome = await _apply_update(
-            op,
+            _update_op(op),
             [prior],
             source_case_ids=["c1"],
             source_quality=0.6,  # ≥ 0.3 → does NOT short-circuit via the low-quality branch
@@ -947,7 +977,7 @@ class TestSkipQualityThreshold:
 
     async def test_no_skip_when_quality_equals_threshold(self) -> None:
         """case.quality_score == 0.2 does not short-circuit (strict ``<`` comparison)."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": [], "update_note": ""}', model="fake")])
+        fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
         case = _make_case(quality_score=0.2)
         await AgentSkillExtractor(llm=fake).aextract(
             case,
@@ -958,7 +988,7 @@ class TestSkipQualityThreshold:
 
     async def test_caller_override_skip_threshold(self) -> None:
         """Passing skip_quality_threshold=0.0 prevents short-circuit for low-quality cases."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": [], "update_note": ""}', model="fake")])
+        fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
         case = _make_case(quality_score=0.1)
         await AgentSkillExtractor(llm=fake).aextract(
             case,

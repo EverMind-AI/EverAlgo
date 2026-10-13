@@ -1,343 +1,233 @@
-"""Tests for everalgo.testing.fake_llm — CallRecord."""
+"""Tests for everalgo.testing.fake_llm — FakeLLMClient and CallRecord."""
 
-from typing import Any, cast
+from typing import Any
 
 import pytest
-from pydantic import BaseModel
 
-from everalgo.llm.types import ChatMessage, ChatResponse
+from everalgo.llm import StrictOutputModel
+from everalgo.llm.types import LLMMessage
 from everalgo.testing.fake_llm import CallRecord, FakeLLMClient
 
 
+class _Label(StrictOutputModel):
+    label: str
+
+
+class _HostError(Exception):
+    """Stands in for an implementation's own error type, which the contract leaves to the implementation."""
+
+
+def _msgs(content: str = "hi") -> list[LLMMessage]:
+    return [LLMMessage(role="user", content=content)]
+
+
 def test_call_record_minimum_fields() -> None:
-    """Messages is the only required field."""
-    record = CallRecord(messages=[ChatMessage(role="user", content="hi")])
-    assert record.messages == [ChatMessage(role="user", content="hi")]
-    assert record.model is None
+    record = CallRecord(messages=_msgs(), response_format=_Label)
+    assert record.messages == _msgs()
+    assert record.response_format is _Label
     assert record.temperature is None
     assert record.max_tokens is None
-    assert record.response_format is None
     assert record.extra == {}
 
 
 def test_call_record_extra_field_is_independent_per_instance() -> None:
-    """Each instance must own its own extra dict (not shared across instances)."""
-    a = CallRecord(messages=[ChatMessage(role="user", content="a")])
-    b = CallRecord(messages=[ChatMessage(role="user", content="b")])
+    a = CallRecord(messages=_msgs("a"), response_format=_Label)
+    b = CallRecord(messages=_msgs("b"), response_format=_Label)
     a.extra["key"] = "value"
     assert b.extra == {}
 
 
-# ---- FakeLLMClient construction (Task 2) ----------------------------------
+# ---- FakeLLMClient construction ------------------------------------------
 
 
 def test_fake_llm_client_constructed_with_responses_only() -> None:
-    """Scripted list mode is one valid construction path."""
     client = FakeLLMClient(responses=["hello"])
     assert client.call_count == 0
 
 
 def test_fake_llm_client_constructed_with_handler_only() -> None:
-    """Callable handler mode is the other valid construction path."""
-
-    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
-        return ChatResponse(content="ok", model="fake")
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
+        return "ok"
 
     client = FakeLLMClient(handler=handler)
     assert client.call_count == 0
 
 
 def test_fake_llm_client_both_responses_and_handler_raises() -> None:
-    """Mutual exclusion: passing both is a ValueError."""
-
-    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
-        return ChatResponse(content="ok", model="fake")
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
+        return "ok"
 
     with pytest.raises(ValueError, match="exactly one of"):
         FakeLLMClient(responses=["hi"], handler=handler)
 
 
 def test_fake_llm_client_neither_responses_nor_handler_raises() -> None:
-    """Mutual exclusion: passing neither is a ValueError."""
     with pytest.raises(ValueError, match="exactly one of"):
         FakeLLMClient()
 
 
 def test_fake_llm_client_responses_invalid_element_type_raises() -> None:
-    """Each responses element must be str or ChatResponse."""
-    with pytest.raises(TypeError, match="must contain str or ChatResponse"):
-        FakeLLMClient(responses=[123])  # type: ignore[list-item]
+    with pytest.raises(TypeError, match="must contain str or Exception"):
+        FakeLLMClient(responses=[123])  # type: ignore[list-item]  # invalid element on purpose
 
 
-# ---- FakeLLMClient.chat scripted-list mode (Task 3) -----------------------
+# ---- FakeLLMClient.achat scripted-list mode -------------------------------
 
 
-async def test_chat_str_element_wrapped_to_default_chat_response() -> None:
-    """Str element gets auto-wrapped: model='fake', finish_reason='stop'."""
-    client = FakeLLMClient(responses=["hello"])
-    response = await client.chat(messages=[ChatMessage(role="user", content="hi")])
-    assert response.content == "hello"
-    assert response.model == "fake"
-    assert response.usage is None
-    assert response.finish_reason == "stop"
-    assert response.raw is None
+async def test_achat_returns_the_scripted_text() -> None:
+    client = FakeLLMClient(responses=['{"label": "news"}'])
+    reply = await client.achat(messages=_msgs(), response_format=_Label)
+    assert reply == '{"label": "news"}'
 
 
-async def test_chat_chat_response_element_passed_through_unchanged() -> None:
-    """ChatResponse instance returned as-is, preserving usage/finish_reason."""
-    from everalgo.llm.types import Usage
-
-    canned = ChatResponse(
-        content="canned",
-        model="custom-model",
-        usage=Usage(prompt_tokens=10, completion_tokens=5),
-        finish_reason="length",
-    )
-    client = FakeLLMClient(responses=[canned])
-    response = await client.chat(messages=[ChatMessage(role="user", content="hi")])
-    assert response is canned
+async def test_achat_returns_text_even_when_it_does_not_match_the_model() -> None:
+    """The double honours no response_format, so an operator test can script a malformed reply."""
+    client = FakeLLMClient(responses=["not json"])
+    assert await client.achat(messages=_msgs(), response_format=_Label) == "not json"
 
 
-async def test_chat_responses_popped_in_call_order() -> None:
-    """Multiple responses returned in FIFO order."""
+async def test_achat_responses_popped_in_call_order() -> None:
     client = FakeLLMClient(responses=["first", "second", "third"])
-    msgs = [ChatMessage(role="user", content="hi")]
-    r1 = await client.chat(messages=msgs)
-    r2 = await client.chat(messages=msgs)
-    r3 = await client.chat(messages=msgs)
-    assert (r1.content, r2.content, r3.content) == ("first", "second", "third")
+    r1 = await client.achat(messages=_msgs(), response_format=_Label)
+    r2 = await client.achat(messages=_msgs(), response_format=_Label)
+    r3 = await client.achat(messages=_msgs(), response_format=_Label)
+    assert (r1, r2, r3) == ("first", "second", "third")
 
 
-async def test_chat_exhausted_script_raises_runtime_error() -> None:
-    """N+1th call raises RuntimeError with `(used N of N)` message."""
+async def test_achat_exhausted_script_raises_runtime_error() -> None:
     client = FakeLLMClient(responses=["only"])
-    msgs = [ChatMessage(role="user", content="hi")]
-    await client.chat(messages=msgs)  # exhaust the script
+    await client.achat(messages=_msgs(), response_format=_Label)
     with pytest.raises(RuntimeError, match=r"script exhausted.*used 1 of 1"):
-        await client.chat(messages=msgs)
+        await client.achat(messages=_msgs(), response_format=_Label)
 
 
-# ---- FakeLLMClient.chat callable handler mode (Task 4) --------------------
+async def test_achat_without_response_format_raises_type_error() -> None:
+    """The double enforces the mandatory parameter exactly as the real provider does."""
+    client = FakeLLMClient(responses=["only"])
+    with pytest.raises(TypeError, match="response_format"):
+        await client.achat(messages=_msgs())  # type: ignore[call-arg]  # response_format omitted on purpose
 
 
-async def test_chat_sync_handler_invoked_correctly() -> None:
-    """Sync handler returning ChatResponse is dispatched normally."""
+async def test_scripted_exception_is_raised_unchanged() -> None:
+    """An implementation-defined error must reach the operator as the very object, so its type survives."""
+    error = _HostError("upstream refused")
+    client = FakeLLMClient(responses=[error])
 
-    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
-        return ChatResponse(content="sync-out", model="fake-sync")
+    with pytest.raises(_HostError) as caught:
+        await client.achat(messages=_msgs(), response_format=_Label)
+
+    assert caught.value is error
+
+
+async def test_scripted_exception_is_recorded_like_any_other_call() -> None:
+    """The failing call is still recorded, so a test can assert what was sent before the failure."""
+    client = FakeLLMClient(responses=[_HostError("nope"), "second"])
+
+    with pytest.raises(_HostError):
+        await client.achat(messages=_msgs("first"), response_format=_Label)
+    reply = await client.achat(messages=_msgs("second"), response_format=_Label)
+
+    assert client.call_count == 2
+    assert client.calls[0].messages == _msgs("first")
+    assert reply == "second"
+
+
+# ---- FakeLLMClient.achat callable handler mode ----------------------------
+
+
+async def test_achat_sync_handler_invoked_correctly() -> None:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
+        return "sync-out"
 
     client = FakeLLMClient(handler=handler)
-    response = await client.chat(messages=[ChatMessage(role="user", content="hi")])
-    assert response.content == "sync-out"
-    assert response.model == "fake-sync"
+    assert await client.achat(messages=_msgs(), response_format=_Label) == "sync-out"
 
 
-async def test_chat_async_handler_awaited_correctly() -> None:
-    """Async handler is awaited; result is the resolved ChatResponse."""
-
-    async def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
-        return ChatResponse(content="async-out", model="fake-async")
+async def test_achat_async_handler_awaited_correctly() -> None:
+    async def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
+        return "async-out"
 
     client = FakeLLMClient(handler=handler)
-    response = await client.chat(messages=[ChatMessage(role="user", content="hi")])
-    assert response.content == "async-out"
-    assert response.model == "fake-async"
+    assert await client.achat(messages=_msgs(), response_format=_Label) == "async-out"
 
 
-async def test_chat_handler_receives_messages_and_kwargs() -> None:
-    """Handler sees messages + model + temperature + max_tokens + extras."""
+async def test_achat_handler_receives_messages_and_kwargs() -> None:
     captured: dict[str, Any] = {}
 
-    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
         captured["messages"] = messages
         captured["kwargs"] = kwargs
-        return ChatResponse(content="x", model="fake")
+        return "x"
 
     client = FakeLLMClient(handler=handler)
-    msgs = [ChatMessage(role="user", content="hi")]
-    await client.chat(
-        messages=msgs,
-        model="gpt-4o-mini",
-        temperature=0.5,
-        max_tokens=64,
-        seed=42,
-    )
+    msgs = _msgs()
+    await client.achat(messages=msgs, response_format=_Label, temperature=0.5, max_tokens=64, seed=42)
     assert captured["messages"] == msgs
-    assert captured["kwargs"]["model"] == "gpt-4o-mini"
+    assert captured["kwargs"]["response_format"] is _Label
     assert captured["kwargs"]["temperature"] == 0.5
     assert captured["kwargs"]["max_tokens"] == 64
     assert captured["kwargs"]["seed"] == 42
 
 
-async def test_chat_handler_wrong_return_type_raises() -> None:
-    """Handler returning non-ChatResponse, non-Awaitable raises TypeError."""
-
-    def handler(messages: list[ChatMessage], **kwargs: Any) -> Any:
-        return {"content": "wrong"}  # not ChatResponse
+async def test_achat_handler_wrong_return_type_raises() -> None:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> Any:
+        return {"content": "wrong"}
 
     client = FakeLLMClient(handler=handler)
-    with pytest.raises(TypeError, match=r"must return ChatResponse.*got dict"):
-        await client.chat(messages=[ChatMessage(role="user", content="hi")])
+    with pytest.raises(TypeError, match=r"must return str.*got dict"):
+        await client.achat(messages=_msgs(), response_format=_Label)
 
 
-# ---- FakeLLMClient call recording + Protocol (Task 5) ---------------------
-
-from everalgo.llm.protocols import LLMClient  # noqa: E402
+# ---- FakeLLMClient call recording ----------------------------------------
 
 
 async def test_call_count_increments_per_invocation() -> None:
-    """Call count tracks every chat() invocation, regardless of mode."""
     client = FakeLLMClient(responses=["a", "b"])
     assert client.call_count == 0
-    msgs = [ChatMessage(role="user", content="hi")]
-    await client.chat(messages=msgs)
+    await client.achat(messages=_msgs(), response_format=_Label)
     assert client.call_count == 1
-    await client.chat(messages=msgs)
+    await client.achat(messages=_msgs(), response_format=_Label)
     assert client.call_count == 2
 
 
 async def test_calls_property_records_messages_and_kwargs() -> None:
-    """Calls property captures messages + each kwarg + extras into CallRecord."""
     client = FakeLLMClient(responses=["a"])
-    msgs = [ChatMessage(role="user", content="hi")]
-    await client.chat(
-        messages=msgs,
-        model="gpt-4o-mini",
-        temperature=0.7,
-        max_tokens=128,
-        seed=99,
-    )
+    msgs = _msgs()
+    await client.achat(messages=msgs, response_format=_Label, temperature=0.7, max_tokens=128, seed=99)
     assert len(client.calls) == 1
     record = client.calls[0]
     assert isinstance(record, CallRecord)
     assert record.messages == msgs
-    assert record.model == "gpt-4o-mini"
+    assert record.response_format is _Label
     assert record.temperature == 0.7
     assert record.max_tokens == 128
-    assert record.response_format is None
     assert record.extra == {"seed": 99}
 
 
-async def test_calls_property_returns_defensive_copy() -> None:
-    """Mutating the returned list must not affect internal state."""
+async def test_handler_path_records_the_call_too() -> None:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
+        return '{"label": "handler-tag"}'
+
+    client = FakeLLMClient(handler=handler)
+    await client.achat(messages=_msgs(), response_format=_Label, max_tokens=32)
+
+    assert client.calls[0].response_format is _Label
+    assert client.calls[0].max_tokens == 32
+
+
+async def test_a_model_override_lands_in_extra() -> None:
+    """``model`` is not a formal parameter, so it is recorded as the escape-hatch key it is."""
     client = FakeLLMClient(responses=["a"])
-    msgs = [ChatMessage(role="user", content="hi")]
-    await client.chat(messages=msgs)
+
+    await client.achat(messages=_msgs(), response_format=_Label, model="gpt-4o-mini")
+
+    assert client.calls[0].extra == {"model": "gpt-4o-mini"}
+
+
+async def test_calls_property_returns_defensive_copy() -> None:
+    client = FakeLLMClient(responses=["a"])
+    await client.achat(messages=_msgs(), response_format=_Label)
     snapshot = client.calls
     snapshot.clear()
     assert client.call_count == 1
     assert len(client.calls) == 1
-
-
-def test_fake_llm_client_satisfies_llm_client_protocol() -> None:
-    """Isinstance check works thanks to @runtime_checkable on LLMClient."""
-    client = FakeLLMClient(responses=["a"])
-    assert isinstance(client, LLMClient)
-
-
-# ---- FakeLLMClient BaseModel response_format (T4 — parse parity) ----------
-
-
-class _Tag(BaseModel):
-    """Minimal schema for BaseModel response_format tests."""
-
-    label: str
-
-
-async def test_basemodel_response_format_constructs_parsed_from_content() -> None:
-    """When response_format is a BaseModel subclass, parsed is populated from content JSON."""
-    client = FakeLLMClient(responses=['{"label": "news"}'])
-    resp = await client.chat(
-        messages=[ChatMessage(role="user", content="hi")],
-        response_format=_Tag,
-    )
-    assert resp.parsed is not None
-    assert isinstance(resp.parsed, _Tag)
-    assert resp.parsed.label == "news"
-    assert resp.content == '{"label": "news"}'
-
-
-async def test_basemodel_response_format_records_schema_class_in_call_record() -> None:
-    """CallRecord.response_format stores the BaseModel class itself (not a dict)."""
-    client = FakeLLMClient(responses=['{"label": "x"}'])
-    await client.chat(
-        messages=[ChatMessage(role="user", content="hi")],
-        response_format=_Tag,
-    )
-    record = client.calls[0]
-    assert record.response_format is _Tag
-
-
-async def test_basemodel_response_format_invalid_json_raises_llm_error() -> None:
-    """Content that is not valid JSON for the schema must raise LLMError."""
-    from everalgo.llm.errors import LLMError
-
-    client = FakeLLMClient(responses=["not-valid-json"])
-    with pytest.raises(LLMError):
-        await client.chat(
-            messages=[ChatMessage(role="user", content="hi")],
-            response_format=_Tag,
-        )
-
-
-async def test_basemodel_response_format_wrong_schema_raises_llm_error() -> None:
-    """Valid JSON that does not match the schema must raise LLMError."""
-    from everalgo.llm.errors import LLMError
-
-    client = FakeLLMClient(responses=['{"wrong_field": 123}'])
-    with pytest.raises(LLMError):
-        await client.chat(
-            messages=[ChatMessage(role="user", content="hi")],
-            response_format=_Tag,
-        )
-
-
-# ---- FakeLLMClient handler path BaseModel parity (fix for missing _attach_parsed) ----
-
-
-async def test_fake_llm_handler_path_attaches_parsed_for_basemodel_response_format() -> None:
-    """Handler mode + BaseModel response_format must auto-populate ChatResponse.parsed.
-
-    T4 only wired _attach_parsed for the scripted-list path.  The handler path was
-    left without it, causing response.parsed to remain None for any caller that used
-    FakeLLMClient(handler=...) with response_format=SomeModel.  This test pins the
-    corrected behaviour: if the handler returns a ChatResponse whose .parsed is None,
-    FakeLLMClient must derive parsed by deserialising .content against the schema.
-    """
-    from typing import Any
-
-    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
-        return ChatResponse(content='{"label": "handler-tag"}', model="fake")
-
-    client = FakeLLMClient(handler=handler)
-    resp = await client.chat(
-        messages=[ChatMessage(role="user", content="hi")],
-        response_format=_Tag,
-    )
-    assert resp.parsed is not None
-    assert isinstance(resp.parsed, _Tag)
-    assert resp.parsed.label == "handler-tag"
-    assert resp.content == '{"label": "handler-tag"}'
-
-
-async def test_fake_llm_handler_path_preserves_explicit_parsed_override() -> None:
-    """Handler that already sets parsed must not be overwritten by _attach_parsed.
-
-    This validates the skip-if-already-set contract: if the handler explicitly
-    returns ChatResponse(parsed=X), FakeLLMClient must honour that and not
-    re-derive parsed from content.
-    """
-    from typing import Any
-
-    explicit_tag = _Tag(label="explicit")
-
-    def handler(messages: list[ChatMessage], **kwargs: Any) -> ChatResponse:
-        return ChatResponse(content='{"label": "content-tag"}', model="fake", parsed=explicit_tag)
-
-    client = FakeLLMClient(handler=handler)
-    resp = await client.chat(
-        messages=[ChatMessage(role="user", content="hi")],
-        response_format=_Tag,
-    )
-    assert resp.parsed is explicit_tag
-    assert cast("_Tag", resp.parsed).label == "explicit"  # type: ignore[redundant-cast]

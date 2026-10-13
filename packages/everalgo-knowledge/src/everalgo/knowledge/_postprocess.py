@@ -2,35 +2,36 @@
 
 Stage 4 of the KnowledgeExtractor pipeline — *two* conditional LLM passes:
 
-1. ``asplit_unsplit_leaves`` (uses ``TOPIC_SPLIT_PROMPT_EN``): leaves with
+1. ``asplit_unsplit_leaves`` (uses the ``topic_split`` prompt): leaves with
    multiple sub-headings that the initial extraction left intact get
    inspected by the LLM, which may decide to re-split them into a
    parent / children hierarchy.
 
-2. ``aassign_uncovered_blocks`` (uses ``UNCOVERED_ASSIGN_PROMPT_EN``):
+2. ``aassign_uncovered_blocks`` (uses the ``uncovered_assign`` prompt):
    non-separator, non-empty atoms that no topic claimed are attached to
    the most relevant existing topic.
 
 Each pass is a no-op when its detector returns empty (short / fully-
 covered documents bypass the LLM entirely). Detectors are pure compute;
-appliers are async.
+appliers are async. A reply that fails its reply model raises ``LLMOutputError``;
+decisions that name an unknown topic or an out-of-range index are skipped.
 
 NOT exposed in the package ``__all__`` — internal to the knowledge extractor.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from everalgo.knowledge._llm_json import parse_llm_json
+from everalgo.knowledge._render import append_custom_instructions
+from everalgo.knowledge._replies import TopicSplitReply, UncoveredAssignReply, ask_llm
 from everalgo.knowledge._topic_build import collect_all_block_refs, parse_segment_ranges
-from everalgo.knowledge.prompts.en.topic_split import TOPIC_SPLIT_PROMPT_EN
-from everalgo.knowledge.prompts.en.uncovered_assign import UNCOVERED_ASSIGN_PROMPT_EN
-from everalgo.llm.types import ChatMessage
+from everalgo.knowledge.prompts.en.topic_split import TOPIC_SPLIT_SYSTEM_PROMPT, TOPIC_SPLIT_USER_PROMPT
+from everalgo.knowledge.prompts.en.uncovered_assign import UNCOVERED_ASSIGN_SYSTEM_PROMPT, UNCOVERED_ASSIGN_USER_PROMPT
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -47,8 +48,6 @@ __all__ = [
     "postprocess_topics",
     "split_unsplit_leaves",
 ]
-
-logger = logging.getLogger(__name__)
 
 # Minimum char thresholds for triggering a split pass on a leaf.
 POSTPROCESS_MIN_TOTAL_CHARS = 2000
@@ -194,12 +193,6 @@ def _flatten_topics_for_assign(
 # ── LLM passes ───────────────────────────────────────────────────────
 
 
-async def _llm_text(llm: LLMClient, prompt: str) -> str:
-    """Single-user-message chat shorthand returning the assistant text."""
-    response = await llm.chat([ChatMessage(role="user", content=prompt)])
-    return response.content
-
-
 def _render_split_sections(
     unsplit: list[dict[str, Any]],
     atom_map: dict[int, str],
@@ -224,20 +217,41 @@ async def asplit_unsplit_leaves(
     unsplit: list[dict[str, Any]],
     atom_map: dict[int, str],
     *,
-    prompt: str = TOPIC_SPLIT_PROMPT_EN,
+    custom_instructions: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Ask the LLM whether to split each leaf and apply the decisions in place."""
-    rendered = prompt.format(title=title, topics_section=_render_split_sections(unsplit, atom_map))
-    text = await _llm_text(llm, rendered)
-    data = parse_llm_json(text)
-    if data is None or "results" not in data:
-        logger.warning("post-process split: unparsable LLM response")
-        return topics_data
+    """Ask the LLM whether to split each leaf and apply the decisions in place.
 
-    split_map: dict[str, dict[str, Any]] = {}
-    for r in data["results"]:
-        if isinstance(r, dict) and r.get("should_split") and r.get("children"):
-            split_map[r.get("original_topic", "")] = r
+    Args:
+        llm: The client the call goes through.
+        title: Document title.
+        topics_data: The topic forest, mutated in place.
+        unsplit: The leaves :func:`detect_unsplit_leaves` found.
+        atom_map: Atom text by block id.
+        custom_instructions: The caller's instructions, appended to the rules as a ``<custom_instructions>`` block,
+            always the system message's last. Placed verbatim, never rendered as a template; None or a blank string
+            adds nothing.
+
+    Returns:
+        ``topics_data``, each leaf the model split replaced by its parent / children shape.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid topic-split output.
+    """
+    user = render_prompt(
+        TOPIC_SPLIT_USER_PROMPT,
+        None,
+        title=title,
+        count=len(unsplit),
+        topics_section=_render_split_sections(unsplit, atom_map),
+    )
+    reply = await ask_llm(
+        llm,
+        system=append_custom_instructions(TOPIC_SPLIT_SYSTEM_PROMPT, custom_instructions),
+        user=user,
+        reply_model=TopicSplitReply,
+        operator="knowledge topic_split",
+    )
+    split_map = {r.original_topic: r.model_dump() for r in reply.results if r.should_split and r.children}
 
     for u in unsplit:
         replacement = split_map.get(u["topic_name"])
@@ -258,38 +272,55 @@ async def aassign_uncovered_blocks(
     uncovered: list[dict[str, Any]],
     atom_map: dict[int, str],
     *,
-    prompt: str = UNCOVERED_ASSIGN_PROMPT_EN,
+    custom_instructions: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Ask the LLM to attach orphan atoms to existing topics; append to ``block_refs``."""
+    """Ask the LLM to attach orphan atoms to existing topics; append to ``block_refs``.
+
+    Args:
+        llm: The client the call goes through.
+        title: Document title.
+        topics_data: The topic forest, mutated in place.
+        uncovered: The atoms :func:`detect_uncovered_blocks` found.
+        atom_map: Atom text by block id.
+        custom_instructions: The caller's instructions, appended to the rules as a ``<custom_instructions>`` block,
+            always the system message's last. Placed verbatim, never rendered as a template; None or a blank string
+            adds nothing.
+
+    Returns:
+        ``topics_data`` with each assigned block appended to its topic's ``block_refs``.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid uncovered-assign output.
+    """
     flat_topics: list[dict[str, Any]] = []
     _flatten_topics_for_assign(topics_data, [], flat_topics)
 
-    topics_text = "\n".join(f"  {i}: {t['display']}" for i, t in enumerate(flat_topics))
-    uncovered_text = "\n".join(f"  block {u['block_id']}: {u['text'][:300]}" for u in uncovered)
-
-    rendered = prompt.format(title=title, topics_text=topics_text, uncovered_text=uncovered_text)
-    text = await _llm_text(llm, rendered)
-    data = parse_llm_json(text)
-    if data is None or "assignments" not in data:
-        logger.warning("post-process assign: unparsable LLM response")
-        return topics_data
-
-    for assignment in data["assignments"]:
-        if not isinstance(assignment, dict):
+    user = render_prompt(
+        UNCOVERED_ASSIGN_USER_PROMPT,
+        None,
+        title=title,
+        topic_count=len(flat_topics),
+        topics_text="\n".join(f"{i}: {t['display']}" for i, t in enumerate(flat_topics)),
+        block_count=len(uncovered),
+        uncovered_text="\n".join(f"block {u['block_id']}: {u['text'][:300]}" for u in uncovered),
+    )
+    reply = await ask_llm(
+        llm,
+        system=append_custom_instructions(UNCOVERED_ASSIGN_SYSTEM_PROMPT, custom_instructions),
+        user=user,
+        reply_model=UncoveredAssignReply,
+        operator="knowledge uncovered_assign",
+    )
+    for assignment in reply.assignments:
+        if not 0 <= assignment.topic_index < len(flat_topics):
             continue
-        block_id = assignment.get("block_id")
-        topic_idx = assignment.get("topic_index")
-        if not isinstance(block_id, int) or not isinstance(topic_idx, int):
-            continue
-        if topic_idx < 0 or topic_idx >= len(flat_topics):
-            continue
 
-        target = _get_topic_at_path(topics_data, flat_topics[topic_idx]["path"])
+        target = _get_topic_at_path(topics_data, flat_topics[assignment.topic_index]["path"])
         if target is None:
             continue
 
         existing = target.get("block_refs", "")
-        target["block_refs"] = f"{existing},{block_id}" if existing else str(block_id)
+        target["block_refs"] = f"{existing},{assignment.block_id}" if existing else str(assignment.block_id)
 
     return topics_data
 
@@ -304,13 +335,16 @@ async def apostprocess_topics(
     topics_data: list[dict[str, Any]],
     atoms: list[tuple[int, str]],
     *,
-    split_prompt: str = TOPIC_SPLIT_PROMPT_EN,
-    assign_prompt: str = UNCOVERED_ASSIGN_PROMPT_EN,
+    custom_instructions: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run both LLM passes if their detectors find anything to fix.
 
     Returns ``topics_data`` (possibly mutated in place). Each pass is
-    skipped when its detector returns empty.
+    skipped when its detector returns empty; ``custom_instructions`` closes
+    the system message of each pass that runs.
+
+    Raises:
+        LLMOutputError: If a pass's reply fails its reply model.
     """
     atom_map = dict(atoms)
 
@@ -322,7 +356,7 @@ async def apostprocess_topics(
             topics_data,
             unsplit,
             atom_map,
-            prompt=split_prompt,
+            custom_instructions=custom_instructions,
         )
 
     uncovered = detect_uncovered_blocks(topics_data, atom_map)
@@ -333,7 +367,7 @@ async def apostprocess_topics(
             topics_data,
             uncovered,
             atom_map,
-            prompt=assign_prompt,
+            custom_instructions=custom_instructions,
         )
 
     return topics_data

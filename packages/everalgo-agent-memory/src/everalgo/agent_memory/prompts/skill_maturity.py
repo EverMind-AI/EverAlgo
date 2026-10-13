@@ -1,6 +1,29 @@
-"""Prompt for AgentSkillExtractor maturity scoring (4-dimension /20 normalized)."""
+"""Prompts for AgentSkillExtractor maturity scoring (4-dimension /20 normalized).
 
-AGENT_SKILL_MATURITY_SCORE_PROMPT = """You are a quality evaluator for agent skill documents (SOPs).
+The SYSTEM message holds the rubric and the reply skeleton, with no placeholder, so every call shares it. The USER
+message carries only the skill, its four fields each in its own element inside ``<skill>``.
+
+Every rule sentence is the single-message prompt's, unchanged: only the ``Skill to evaluate:`` list and its data moved
+to the user message, each ``- Name:`` style label becoming an element name, and the skeleton's ``1-5`` ranges became
+``3`` so that the sample parses (the rubric states the range).
+
+Constants:
+    - ``AGENT_SKILL_MATURITY_SCORE_SYSTEM_PROMPT`` — the static rubric.
+    - ``AGENT_SKILL_MATURITY_SCORE_USER_PROMPT`` — the data. Placeholders: ``{{name}}``, ``{{description}}``,
+      ``{{content}}`` and ``{{confidence}}``.
+
+Output schema: ``{"completeness": int, "executability": int, "evidence": int, "clarity": int, "reason": str}``, held to
+``agent_memory._replies._MaturityReply``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["AGENT_SKILL_MATURITY_SCORE_SYSTEM_PROMPT", "AGENT_SKILL_MATURITY_SCORE_USER_PROMPT"]
+
+from everalgo.utils import tagged
+
+AGENT_SKILL_MATURITY_SCORE_SYSTEM_PROMPT = """\
+You are a quality evaluator for agent skill documents (SOPs).
 
 Skills come in two forms — detect which type before scoring:
 - **Verified skill** (`## Steps`): Extracted from successful cases (quality_score >= 0.5). Evaluated as a full SOP.
@@ -40,13 +63,17 @@ Score the skill across 4 quality dimensions (each 1-5):
    - 3: Has some structure but inconsistent formatting or verbose
    - 5: Clean Markdown with appropriate `##` headings, numbered steps, consistent sub-items, concise and scannable
 
-Skill to evaluate:
-- Name: {name}
-- Description: {description}
-- Content:
-{content}
-- Confidence: {confidence}
-
 Return ONLY valid JSON (no markdown fences):
-{{"completeness": 1-5, "executability": 1-5, "evidence": 1-5, "clarity": 1-5, "reason": "brief justification for the scores"}}
-"""
+{"completeness": 3, "executability": 3, "evidence": 3, "clarity": 3, "reason": "brief justification for the scores"}"""
+
+AGENT_SKILL_MATURITY_SCORE_USER_PROMPT = tagged(
+    "skill",
+    "\n".join(
+        [
+            tagged("name", "{{name}}"),
+            tagged("description", "{{description}}"),
+            tagged("content", "{{content}}"),
+            tagged("confidence", "{{confidence}}"),
+        ]
+    ),
+)

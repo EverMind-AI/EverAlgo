@@ -1,6 +1,8 @@
-"""In-memory LLMClient double for unit tests."""
+"""In-memory ``LLMClient`` double for unit tests."""
 
 from __future__ import annotations
+
+__all__ = ["CallRecord", "FakeLLMClient"]
 
 import inspect
 from collections.abc import Awaitable, Callable, Sequence
@@ -8,46 +10,53 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from everalgo.llm.errors import LLMError
-from everalgo.llm.types import ChatMessage, ChatResponse
+# Kept out of a type-checking block (TC001): pydantic resolves CallRecord's field annotations at runtime.
+from everalgo.llm.types import LLMMessage  # noqa: TC001
 
 
 class CallRecord(BaseModel):
-    """Single recorded ``FakeLLMClient.chat`` invocation; public so tests can assert on captured arguments."""
+    """The arguments of one ``FakeLLMClient.achat`` call, with ``**extra`` collected in ``extra``."""
 
-    messages: list[ChatMessage]
-    model: str | None = None
+    messages: list[LLMMessage]
+    response_format: type[BaseModel]
     temperature: float | None = None
     max_tokens: int | None = None
-    response_format: type[BaseModel] | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
+    model_config = ConfigDict(extra="ignore")
 
 
-# ---- FakeLLMClient (Task 2: constructor only) ----------------------------
-
-_HandlerReturn = ChatResponse | Awaitable[ChatResponse]
+_HandlerReturn = str | Awaitable[str]
 _Handler = Callable[..., _HandlerReturn]
 
 
 class FakeLLMClient:
-    """In-memory ``LLMClient`` for unit tests.
+    """In-memory ``LLMClient`` for unit tests, driven by a script or by a handler.
 
-    Pass ``responses=[...]`` (popped in order; exhaustion raises ``RuntimeError``) or ``handler=callable``
-    (sync or async). Exactly one must be supplied.
+    It ignores ``response_format`` and returns the reply text as is, so a test can script a malformed reply; to
+    check which model was requested, assert on ``calls``.
+
+    Args:
+        responses: Reply texts and exceptions, consumed one per call. An exception is raised rather than returned,
+            which is how a test scripts a client failure. A call after the last one raises ``RuntimeError``.
+        handler: Called as ``handler(messages, **kwargs)`` with every keyword ``achat`` received; sync or async,
+            it returns the reply text.
+
+    Raises:
+        ValueError: Unless exactly one of ``responses`` and ``handler`` is given.
+        TypeError: If ``responses`` holds anything other than ``str`` and ``Exception`` instances.
     """
 
     def __init__(
         self,
-        responses: Sequence[str | ChatResponse] | None = None,
+        responses: Sequence[str | Exception] | None = None,
         *,
         handler: _Handler | None = None,
     ) -> None:
         if (responses is None) == (handler is None):
             raise ValueError("Provide exactly one of `responses` or `handler`")
-        self._responses: list[ChatResponse] | None = (
-            [_coerce_response(r) for r in responses] if responses is not None else None
+        self._responses: list[str | Exception] | None = (
+            [_check_scripted(r) for r in responses] if responses is not None else None
         )
         self._initial_response_count: int = len(self._responses) if self._responses is not None else 0
         self._handler: _Handler | None = handler
@@ -55,106 +64,76 @@ class FakeLLMClient:
 
     @property
     def call_count(self) -> int:
-        """Number of times ``chat`` has been invoked."""
+        """Number of ``achat`` calls so far."""
         return len(self._calls)
 
     @property
     def calls(self) -> list[CallRecord]:
-        """Return all recorded ``chat`` invocations in call order (defensive copy)."""
+        """A copy of the recorded ``achat`` calls, oldest first."""
         return list(self._calls)
 
-    async def chat(
+    async def achat(
         self,
-        messages: list[ChatMessage],
+        messages: list[LLMMessage],
         *,
-        model: str | None = None,
+        response_format: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
-        response_format: type[BaseModel] | None = None,
         **extra: Any,
-    ) -> ChatResponse:
-        """Match ``LLMClient.chat`` Protocol; record + dispatch by mode."""
+    ) -> str:
+        """Record the call, then return the next scripted reply or the handler's result.
+
+        Raises:
+            Exception: The scripted exception, when the script reaches one.
+            RuntimeError: If the script is exhausted.
+            TypeError: If the handler returns something other than ``str``.
+        """
         self._calls.append(
             CallRecord(
                 messages=messages,
-                model=model,
+                response_format=response_format,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                response_format=response_format,
                 extra=dict(extra),
             )
         )
         if self._handler is not None:
-            base_response = await _invoke_handler(
+            return await _invoke_handler(
                 self._handler,
                 messages,
-                model=model,
+                response_format=response_format,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                response_format=response_format,
                 **extra,
             )
-            if inspect.isclass(response_format) and base_response.parsed is None:
-                return _attach_parsed(base_response, response_format)
-            return base_response
-        # scripted-list mode
         assert self._responses is not None  # narrowed by __init__ invariant
         if not self._responses:
             raise RuntimeError(
-                f"FakeLLMClient script exhausted "
-                f"(used {self._initial_response_count} of "
+                f"FakeLLMClient script exhausted (used {self._initial_response_count} of "
                 f"{self._initial_response_count} responses)"
             )
-        base_response = self._responses.pop(0)
-        if inspect.isclass(response_format):
-            return _attach_parsed(base_response, response_format)
-        return base_response
+        scripted = self._responses.pop(0)
+        if isinstance(scripted, Exception):
+            raise scripted
+        return scripted
 
 
-def _coerce_response(value: str | ChatResponse) -> ChatResponse:
-    """Wrap raw str into a default ChatResponse; pass ChatResponse through."""
-    if isinstance(value, ChatResponse):
+def _check_scripted(value: str | Exception) -> str | Exception:
+    """Pass a scripted reply text or exception through; reject anything else at construction time."""
+    if isinstance(value, str | Exception):  # pyright: ignore[reportUnnecessaryIsInstance] — guards untyped callers
         return value
-    if isinstance(value, str):  # pyright: ignore[reportUnnecessaryIsInstance]
-        return ChatResponse(
-            content=value,
-            model="fake",
-            usage=None,
-            finish_reason="stop",
-            raw=None,
-        )
-    raise TypeError(f"FakeLLMClient `responses` must contain str or ChatResponse, got {type(value).__name__}")
+    raise TypeError(f"FakeLLMClient `responses` must contain str or Exception, got {type(value).__name__}")
 
 
 async def _invoke_handler(
     handler: _Handler,
-    messages: list[ChatMessage],
+    messages: list[LLMMessage],
     **kwargs: Any,
-) -> ChatResponse:
-    """Call handler; await if it returned a coroutine; type-check result."""
+) -> str:
+    """Call ``handler``, awaiting its result if needed; reject a result that is not ``str``."""
     result = handler(messages, **kwargs)
     if inspect.isawaitable(result):
         result = await result
-    if not isinstance(result, ChatResponse):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"FakeLLMClient handler must return ChatResponse or Awaitable[ChatResponse], got {type(result).__name__}"
-        )
+    if not isinstance(result, str):  # pyright: ignore[reportUnnecessaryIsInstance] — guards untyped handlers
+        raise TypeError(f"FakeLLMClient handler must return str or Awaitable[str], got {type(result).__name__}")
     return result
-
-
-def _attach_parsed(response: ChatResponse, schema: type[BaseModel]) -> ChatResponse:
-    """Construct a ``parsed`` instance from ``response.content`` and attach it.
-
-    Mirrors ``OpenAICompatClient``'s parse-branch behaviour so tests written against
-    ``FakeLLMClient`` see the same ``ChatResponse.parsed`` field as production code.
-
-    Raises:
-        LLMError: If ``response.content`` is not valid JSON or does not conform to ``schema``.
-    """
-    try:
-        parsed = schema.model_validate_json(response.content)
-    except Exception as exc:
-        raise LLMError(
-            f"FakeLLMClient: content {response.content!r} is not valid for schema {schema.__name__}: {exc}"
-        ) from exc
-    return response.model_copy(update={"parsed": parsed})

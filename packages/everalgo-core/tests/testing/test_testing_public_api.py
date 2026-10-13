@@ -1,28 +1,35 @@
-"""Tests for everalgo.testing package-level public API.
-
-Verifies the documented public symbols (per AGENTS.md §7 step 6 and §9 plus spec §3) are exported at the
-top-level package.
-"""
+"""Tests for the ``everalgo.testing`` public API."""
 
 import everalgo.testing
+from everalgo.llm import StrictOutputModel
 
 
 def test_public_symbols_exposed_at_top_level() -> None:
-    """Public symbols accessible via attribute access on the package."""
     assert hasattr(everalgo.testing, "FakeLLMClient")
     assert hasattr(everalgo.testing, "CallRecord")
     assert hasattr(everalgo.testing, "assert_episode_shape")
     assert hasattr(everalgo.testing, "assert_foresight_shape")
     assert hasattr(everalgo.testing, "assert_atomic_fact_shape")
     assert hasattr(everalgo.testing, "assert_profile_shape")
+    assert hasattr(everalgo.testing, "LLMClientTestHarness")
+    assert hasattr(everalgo.testing, "EffectiveRequest")
+    assert hasattr(everalgo.testing, "UpstreamStub")
+    assert hasattr(everalgo.testing, "NOT_SENT")
+    assert hasattr(everalgo.testing, "REQUIRED_CHECKS")
+    assert hasattr(everalgo.testing, "OPTIONAL_CHECKS")
 
 
 def test_dunder_all_lists_exact_public_surface() -> None:
-    """__all__ enumerates the public surface — grows by one assert per memory type added."""
     assert sorted(everalgo.testing.__all__) == sorted(
         [
             "CallRecord",
+            "EffectiveRequest",
             "FakeLLMClient",
+            "LLMClientTestHarness",
+            "NOT_SENT",
+            "OPTIONAL_CHECKS",
+            "REQUIRED_CHECKS",
+            "UpstreamStub",
             "assert_atomic_fact_shape",
             "assert_episode_shape",
             "assert_foresight_shape",
@@ -32,7 +39,6 @@ def test_dunder_all_lists_exact_public_surface() -> None:
 
 
 def test_top_level_import_works() -> None:
-    """Star-friendly import from the package root."""
     from everalgo.testing import (
         CallRecord,
         FakeLLMClient,
@@ -44,7 +50,7 @@ def test_top_level_import_works() -> None:
 
     client = FakeLLMClient(responses=["x"])
     assert client.call_count == 0
-    record = CallRecord(messages=[])
+    record = CallRecord(messages=[], response_format=StrictOutputModel)
     assert record.messages == []
     assert callable(assert_episode_shape)
     assert callable(assert_foresight_shape)

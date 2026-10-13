@@ -1,28 +1,30 @@
 """Cluster operators — geometry and LLM-refined paths over a list[Cluster] state.
 
-``cluster_by_geometry`` is sync pure-compute (cosine + time-window, no I/O); ``cluster_by_llm`` is
-async (it calls an LLM). Both are stateless: accept a new_cluster + existing_clusters list, return
-a merged Cluster or None without mutating any input. The caller owns persistence and concurrency control.
+``cluster_by_geometry`` is sync pure-compute (cosine + time-window, no I/O). ``acluster_by_llm`` is native
+async (it calls an LLM); ``cluster_by_llm`` is its blocking sync bridge. Both are stateless: accept a
+new_cluster + existing_clusters list, return a merged Cluster or None without mutating any input. The caller
+owns persistence and concurrency control.
 """
 
 from __future__ import annotations
 
+__all__ = ["acluster_by_llm", "cluster_by_geometry", "cluster_by_llm"]
+
 import json
 import logging
-import re
 from typing import TYPE_CHECKING
 
 import numpy as np
+from asgiref.sync import async_to_sync
 
-from everalgo.clustering.prompts.en.cluster import CLUSTER_LLM_ASSIGN_PROMPT
+from everalgo.clustering._replies import _call_llm_for_cluster_assignment
+from everalgo.clustering.prompts.en.cluster import CLUSTER_LLM_ASSIGN_USER_PROMPT, assemble_system_prompt
 from everalgo.clustering.state import Cluster
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
+from everalgo.llm import LLMMessage
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
-
-__all__ = ["cluster_by_geometry", "cluster_by_llm"]
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +65,14 @@ def cluster_by_geometry(
     return _merge(existing_clusters[idx], new_cluster, preview_cap=preview_cap)
 
 
-async def cluster_by_llm(
+async def acluster_by_llm(
     new_cluster: Cluster,
     existing_clusters: list[Cluster],
     *,
     llm: LLMClient,
     k_candidates: int = 30,
     llm_skip_threshold: float = 0.85,
-    prompt: str | None = None,
+    custom_instructions: str | None = None,
     preview_cap: int = 5,
 ) -> Cluster | None:
     """LLM-refined assignment: top-K recall → fast path → LLM ranking by idx.
@@ -83,7 +85,10 @@ async def cluster_by_llm(
         llm: LLM client for the Stage-2 ranking call.
         k_candidates: Number of nearest clusters fetched before LLM ranking. Default 30.
         llm_skip_threshold: Skip LLM and assign to top-1 when its similarity meets this. Default 0.85.
-        prompt: Optional override of the built-in LLM ranking prompt template.
+        custom_instructions: The caller's instructions, appended verbatim after the bundled rules as the system
+            message's last block, ``<custom_instructions>``. They add to the rules, never replace them, and are never
+            rendered as a template, so ``{{`` stays literal. ``None`` or a blank string leaves the system message
+            unchanged. The user message always carries the data.
         preview_cap: Maximum preview length on the merged snapshot. Default 5.
 
     Returns:
@@ -92,8 +97,7 @@ async def cluster_by_llm(
         LLM internally uses idx; idx -> existing_clusters[idx].id transparent to caller.
 
     Raises:
-        LLMError: Propagated from the underlying LLM client call.
-        ValueError: If the LLM response cannot be parsed or is missing the 'idx' field.
+        LLMOutputError: If the LLM reply is not a valid ``{"idx", "reason"}`` object.
     """
     if not existing_clusters:
         return None
@@ -110,39 +114,32 @@ async def cluster_by_llm(
     query_text = new_cluster.preview[0] if new_cluster.preview else ""
     candidate_indices = [idx for idx, _ in candidates]
     clusters_json = _build_clusters_json(existing_clusters, candidate_indices)
-    rendered = render_prompt(
-        CLUSTER_LLM_ASSIGN_PROMPT,
-        prompt,
-        memcell_text=query_text,
-        clusters_json=clusters_json,
-    )
-    chosen_idx = await _call_llm_for_cluster_assignment(llm, rendered)
+    messages = _assignment_request(query_text, clusters_json, custom_instructions)
+    chosen_idx = (await _call_llm_for_cluster_assignment(llm, messages)).idx
     if 0 <= chosen_idx < len(existing_clusters):
         return _merge(existing_clusters[chosen_idx], new_cluster, preview_cap=preview_cap)
     return None
 
 
-async def _call_llm_for_cluster_assignment(llm: LLMClient, rendered: str) -> int:
-    """Inner async function decorated with retry; separated so the decorator applies at definition time.
-
-    Matches flat JSON only (no nested objects). ``idx`` is int and ``reason`` is str — flat fields.
-    Returns the chosen cluster index, or -1 for a new cluster.
-
-    Raises:
-        ValueError: If no JSON object found or 'idx' field is missing.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON object found in cluster LLM response: {text[:200]!r}")
-    data = json.loads(match.group())
-    if "idx" not in data:
-        raise ValueError(f"Missing 'idx' field in cluster LLM response: {data!r}")
-    return int(data["idx"])
+cluster_by_llm = async_to_sync(acluster_by_llm)
+"""Sync bridge — only callable from non-event-loop contexts."""
 
 
 # --- private helpers --------------------------------------------------------
+
+
+def _assignment_request(query_text: str, clusters_json: str, custom_instructions: str | None) -> list[LLMMessage]:
+    """The assignment call's ``[system, user]`` pair: the rules, then the candidate clusters and the new intent."""
+    user = render_prompt(
+        CLUSTER_LLM_ASSIGN_USER_PROMPT,
+        None,
+        clusters_json=clusters_json,
+        memcell_text=query_text,
+    )
+    return [
+        LLMMessage(role="system", content=assemble_system_prompt(custom_instructions=custom_instructions)),
+        LLMMessage(role="user", content=user),
+    ]
 
 
 def _merge(existing: Cluster, new: Cluster, *, preview_cap: int) -> Cluster:
@@ -208,7 +205,7 @@ def _find_top_k_clusters(
 
 
 def _build_clusters_json(clusters: list[Cluster], candidate_indices: list[int]) -> str:
-    """Serialise candidate clusters to JSON for the {clusters_json} prompt placeholder."""
+    """Serialise candidate clusters to JSON for the ``{{clusters_json}}`` user-prompt placeholder."""
     if not candidate_indices:
         return "(No existing clusters)"
 

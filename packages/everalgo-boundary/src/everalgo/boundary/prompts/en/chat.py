@@ -1,166 +1,230 @@
-"""Chat-level boundary detection prompt.
+"""English boundary detection prompts: each path sends a system message of rules and a user message of data.
 
-Used by ``everalgo.boundary.detect_boundaries``, which is invoked by both
-``everalgo.user_memory.BoundaryDetector`` and ``everalgo.agent_memory.AgentBoundaryDetector``
-(agent variant filters tool items before passing chat-only items to this primitive).
+The SYSTEM message holds the rules: the role sentence, which also says where the input is, then XML-style blocks,
+closing with ``<reply_format>`` (one sentence plus a bare JSON skeleton). It names no request data, so it is the
+same text on every call and a prompt cache can share all of it. :func:`assemble_system_prompt` appends a caller's
+``custom_instructions`` after it, as the system message's last block, ``<custom_instructions>``.
+The USER message carries only the data, each input in its own tag, and is always rendered by the operator.
 
-Placeholder: ``{messages}`` — rendered as ``[N] [YYYY-MM-DDTHH:MM:SSZ] sender_name: content``.
-Output schema: ``{"reasoning": str, "boundaries": list[int], "should_wait": bool}``.
+Every rule sentence comes from the single-message prompts these two pairs replace, except the two rewrites below.
+Otherwise only the structure changed: Markdown headings and emphasis became tags, the data moved from the middle of
+the rules to the user message, the reply skeleton became parseable JSON, and the example times took the shape the
+renderer writes. The output-language rule was dropped: ``boundaries``, ``tail_complete`` and ``should_end`` carry
+no language, and ``reasoning`` is never read.
+
+Two parts were rewritten on purpose. Batch ``<tail_complete>`` says whether the trailing segment already forms a
+complete episode, since the host closes that segment into a MemCell when it is true. A segment that only opens a
+topic is not complete; one that ends with an acknowledgement or farewell closing its own topic is. The third
+example shows both. The batch ``reasoning`` definition and every worked example's ``reasoning`` first name the
+topics in order, then say where they change.
+
+Placeholders, user templates only:
+- batch: ``{{count}}``, the number of chat messages in the window, and ``{{messages}}``, rendered as
+  ``[N] [YYYY-MM-DD HH:MM UTC (Weekday)] speaker: text`` lines.
+- step: ``{{conversation_history}}``, ``{{time_gap_info}}`` and ``{{new_messages}}``, the same lines without ``[N]``.
+
+Reply shapes: batch ``{"reasoning": str, "boundaries": list[int], "tail_complete": bool}``; step
+``{"reasoning": str, "should_end": bool, "confidence": float, "topic_summary": str}``.
 """
 
-BATCH_BOUNDARY_DETECT_PROMPT_EN = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+from __future__ import annotations
 
-You are an episodic memory boundary detection expert. Your task is to find all natural "episode boundaries" in a continuous conversation and split it into meaningful, independently memorable segments (MemCells). Your core principle is **"default to merging, split cautiously"**.
+__all__ = [
+    "BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT",
+    "BATCH_BOUNDARY_DETECT_USER_PROMPT",
+    "STEP_BOUNDARY_DETECT_SYSTEM_PROMPT",
+    "STEP_BOUNDARY_DETECT_USER_PROMPT",
+    "assemble_system_prompt",
+]
 
-### Input Format
-The following is a complete chronological conversation log. Each message is prefixed with a 1-based index and timestamp:
+from everalgo.utils import paragraphs, tagged
 
-```
-{messages}
-```
+# --------------------------------------------------------------------------------------------------
+# Batch
+# --------------------------------------------------------------------------------------------------
 
-### When to split
+_BATCH_ROLE = (
+    'You are an episodic memory boundary detection expert. Your task is to find all natural "episode boundaries" '
+    "in a continuous conversation and split it into meaningful, independently memorable segments (MemCells). The "
+    "conversation is in <messages>: a complete chronological conversation log, each message prefixed with a 1-based "
+    'index and timestamp. Your core principle is "default to merging, split cautiously".'
+)
 
-Add a boundary (by message number) only when **clear signals** appear:
-- **Cross-day split (highest priority):** Adjacent messages have different calendar dates — MUST split at the date boundary.
-- **Substantive topic change:** Conversation shifts from one concrete topic to a completely unrelated one (e.g., project architecture → weekend plans).
-- **Task completion + new topic:** A closing message ("migration done") belongs to its task's episode; split only when the **next** message opens a genuinely unrelated topic.
-- **Long gap + new topic:** Time gap > 4 hours AND new messages have no clear connection to prior conversation.
+_WHEN_TO_SPLIT = """\
+Add a boundary (by message number) only when clear signals appear:
+- Cross-day split (highest priority): Adjacent messages have different calendar dates — MUST split at the date boundary.
+- Substantive topic change: Conversation shifts from one concrete topic to a completely unrelated one (e.g., project architecture → weekend plans).
+- Task completion + new topic: A closing message ("migration done") belongs to its task's episode; split only when the next message opens a genuinely unrelated topic.
+- Long gap + new topic: Time gap > 4 hours AND new messages have no clear connection to prior conversation."""
 
-**Do NOT split for:**
+_DO_NOT_SPLIT_FOR = """\
 - Greetings, farewells ("bye", "thanks") — keep with the main episode
 - Transition phrases ("by the way", "oh also") — usually continue the current episode
-- Brief pauses (< 4 hours) followed by the same topic
+- Brief pauses (< 4 hours) followed by the same topic"""
 
-### `should_wait`
-Set to `true` when the **last segment** has insufficient information to determine its episode context:
-- **Non-text messages:** Only media placeholders (`[image]`, `[video]`, `[file]`) with no accompanying text
-- **Intent-free short replies:** Minimal responses like "ok", "sure", "got it", "😂"
-- **System or non-conversational messages:** System notifications (join/leave group, payment reminders, etc.) cannot themselves determine episode boundaries — wait for the next human message to decide
-- **Ambiguous intermediate state:** Gap of 30 min–4 hours with content that is neither clearly continuing nor clearly starting a new topic
+_TAIL_COMPLETE = """\
+tail_complete says whether the messages after the last boundary (all of them when there is no boundary) already form a complete episode. An episode is complete when what it is about has been said and the messages that follow will not belong to it. Set it to false when that trailing segment:
+- Only opens a topic that the next messages will continue, however clear the opening is
+- Is only media placeholders ([image], [video], [file]) with no accompanying text
+- Is only intent-free short replies ("ok", "sure", "got it", "😂") with nothing before them in the segment that they answer
+- Is only system or non-conversational messages (join/leave group, payment reminders, etc.) — wait for the next human message to decide
+- Follows a gap of 30 min–4 hours with content that is neither clearly continuing nor clearly starting a new topic
+A segment that ends with an acknowledgement or farewell closing its own topic is complete: set it to true."""
 
-### Decision Principles
-- **Merge by default:** When in doubt, do not split; only split on clear signals
-- **Content over form:** Greetings and farewells belong to the episode they serve, not their own
-- **Process continuity:** Consecutive actions toward the same goal (e.g., create group → post first instruction) form one episode
-- **System messages don't trigger splits:** System messages (e.g., `"[User X] joined the group"`) have their episode context determined by the next human message that follows them
+_BATCH_DECISION_PRINCIPLES = """\
+- Merge by default: When in doubt, do not split; only split on clear signals
+- Content over form: Greetings and farewells belong to the episode they serve, not their own
+- Process continuity: Consecutive actions toward the same goal (e.g., create group → post first instruction) form one episode
+- System messages don't trigger splits: System messages (e.g., "[User X] joined the group") have their episode context determined by the next human message that follows them"""
 
-### Examples
+_EXAMPLE_ONE_BOUNDARY = """\
+<messages count="6">
+[1] [2024-03-10 09:00 UTC (Sunday)] Alice: Can you help me debug the login issue?
+[2] [2024-03-10 09:01 UTC (Sunday)] Bob: Sure, let me check the logs.
+[3] [2024-03-10 09:05 UTC (Sunday)] Bob: Found it — a null pointer in AuthService line 42.
+[4] [2024-03-10 09:06 UTC (Sunday)] Alice: Fixed, thanks!
+[5] [2024-03-11 10:00 UTC (Monday)] Alice: Hey, are you free for lunch today?
+[6] [2024-03-11 10:01 UTC (Monday)] Bob: Sure, 12:30?
+</messages>
+<reply>
+{"reasoning": "Topics in order: the login bug (1-4), then lunch plans (5-6); the topic changes after message 4, on a new day.", "boundaries": [4], "tail_complete": true}
+</reply>"""
 
-**Example 1 — one boundary:**
-Input messages:
-```
-[1] [2024-03-10T09:00:00Z] Alice: Can you help me debug the login issue?
-[2] [2024-03-10T09:01:00Z] Bob: Sure, let me check the logs.
-[3] [2024-03-10T09:05:00Z] Bob: Found it — a null pointer in AuthService line 42.
-[4] [2024-03-10T09:06:00Z] Alice: Fixed, thanks!
-[5] [2024-03-11T10:00:00Z] Alice: Hey, are you free for lunch today?
-[6] [2024-03-11T10:01:00Z] Bob: Sure, 12:30?
-```
-Output:
-```json
-{{
-    "reasoning": "Messages 1-4 are a complete bug-fix episode; message 5 starts a new day with an unrelated lunch topic.",
-    "boundaries": [4],
-    "should_wait": false
-}}
-```
+_EXAMPLE_NO_BOUNDARY = """\
+<messages count="3">
+[1] [2024-03-10 06:00 UTC (Sunday)] Alice: What's the status of the Q2 roadmap?
+[2] [2024-03-10 06:02 UTC (Sunday)] Bob: About 60% done. Need to finalize the API specs.
+[3] [2024-03-10 06:10 UTC (Sunday)] Alice: OK, let's review the specs tomorrow.
+</messages>
+<reply>
+{"reasoning": "Topics in order: the Q2 roadmap status (1-3) only; nothing changes.", "boundaries": [], "tail_complete": true}
+</reply>"""
 
-**Example 2 — no boundary:**
-Input messages:
-```
-[1] [2024-03-10T06:00:00Z] Alice: What's the status of the Q2 roadmap?
-[2] [2024-03-10T06:02:00Z] Bob: About 60% done. Need to finalize the API specs.
-[3] [2024-03-10T06:10:00Z] Alice: OK, let's review the specs tomorrow.
-```
-Output:
-```json
-{{
-    "reasoning": "All messages are part of the same Q2 roadmap discussion with no topic change.",
-    "boundaries": [],
-    "should_wait": false
-}}
-```
+_EXAMPLE_CLOSED_THEN_OPENING = """\
+<messages count="4">
+[1] [2024-05-02 14:00 UTC (Thursday)] Noor: Did the invoice for April go out?
+[2] [2024-05-02 14:03 UTC (Thursday)] Ilya: Yes, sent this morning, due in 30 days.
+[3] [2024-05-02 14:04 UTC (Thursday)] Noor: Great, thanks.
+[4] [2024-05-02 18:30 UTC (Thursday)] Noor: Hey, are you around for a quick call tomorrow?
+</messages>
+<reply>
+{"reasoning": "Topics in order: the April invoice (1-3), then a new request for a call (4); the topic changes after message 3 and the new request has only just begun.", "boundaries": [3], "tail_complete": false}
+</reply>"""
 
-### Output Format
-Return strictly in the following JSON format:
-```json
-{{
-    "reasoning": "<one sentence explaining all boundary decisions>",
-    "boundaries": [<1-indexed message numbers after which to split>],
-    "should_wait": <boolean, whether the last segment has insufficient information>
-}}
-```
+_BATCH_EXAMPLES = "\n".join(
+    (
+        "Three worked examples.",
+        tagged("example", _EXAMPLE_ONE_BOUNDARY),
+        tagged("example", _EXAMPLE_NO_BOUNDARY),
+        tagged("example", _EXAMPLE_CLOSED_THEN_OPENING),
+    )
+)
 
-**`boundaries: []` means all messages belong to the same episode — no split.**
+_BATCH_REPLY_FORMAT = """\
+Reply with one JSON object, nothing else. reasoning first names the topics the conversation goes through, in order, then states where they change; boundaries lists the 1-indexed message numbers after which to split; tail_complete says whether the trailing segment is already a complete episode. boundaries: [] means all messages belong to the same episode — no split.
+{"reasoning": "...", "boundaries": [4], "tail_complete": true}"""
 
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
-"""
+BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT = paragraphs(
+    _BATCH_ROLE,
+    tagged("when_to_split", _WHEN_TO_SPLIT),
+    tagged("do_not_split_for", _DO_NOT_SPLIT_FOR),
+    tagged("tail_complete", _TAIL_COMPLETE),
+    tagged("decision_principles", _BATCH_DECISION_PRINCIPLES),
+    tagged("examples", _BATCH_EXAMPLES),
+    tagged("reply_format", _BATCH_REPLY_FORMAT),
+)
 
-# Three template placeholders: {conversation_history} / {new_messages} / {time_gap_info}.
-STEP_BOUNDARY_DETECT_PROMPT_EN = """
-You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue should end the current episode and start a new one.
+BATCH_BOUNDARY_DETECT_USER_PROMPT = tagged("messages", "{{messages}}", count="{{count}}")
 
-Current conversation history:
-{conversation_history}
+# --------------------------------------------------------------------------------------------------
+# Step
+# --------------------------------------------------------------------------------------------------
 
-Time gap information:
-{time_gap_info}
+_STEP_ROLE = (
+    "You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue should "
+    "end the current episode and start a new one. The conversation so far is in <conversation_history>, the time "
+    "gap between it and the new messages in <time_gap>, and the newly added messages in <new_messages>."
+)
 
-Newly added messages:
-{new_messages}
-
+_ANALYSIS_ASPECTS = """\
 Please carefully analyze the following aspects to determine if a new episode should begin:
-
-1. **Substantive Topic Change** (Highest Priority):
+1. Substantive Topic Change (Highest Priority):
    - Do the new messages introduce a completely different substantive topic with meaningful content?
    - Is there a shift from one specific event/experience to another distinct event/experience?
    - Has the conversation moved from one meaningful question to an unrelated new question?
-
-2. **Intent and Purpose Transition**:
+2. Intent and Purpose Transition:
    - Has the fundamental purpose of the conversation changed significantly?
    - Has the core question or issue of the current topic been fully resolved and a new substantial topic begun?
-
-3. **Meaningful Content Assessment**:
-   - **IMPORTANT**: Ignore pure greetings, small talk, transition phrases, and social pleasantries
+3. Meaningful Content Assessment:
+   - IMPORTANT: Ignore pure greetings, small talk, transition phrases, and social pleasantries
    - Focus only on content that would be memorable and worth recalling later
    - Consider: Would a person remember this as part of the main conversation topic or as a separate discussion?
-
-4. **Structural and Temporal Signals**:
+4. Structural and Temporal Signals:
    - Are there explicit topic transition phrases introducing substantial new content?
    - Are there clear concluding statements followed by genuinely new topics?
    - Is there a significant time gap between messages?
-
-5. **Content Relevance and Independence**:
+5. Content Relevance and Independence:
    - How related is the new substantive content to the previous meaningful discussion?
-   - Does it involve completely different events, experiences, or substantial topics?
+   - Does it involve completely different events, experiences, or substantial topics?"""
 
-**Special Rules for Common Patterns**:
-- **Greetings + Topic**: "Hey!" followed by actual content should be ONE episode
-- **Transition Phrases**: "By the way", "Oh, also", "Speaking of which" usually continue the same episode unless introducing major topic shifts
-- **Social Closures and Farewells**: "Thanks!", "Take care!", "Talk to you soon!", "I'm off to go...", "See you later!" should continue the current episode as natural conversation endings
-- **Supportive Responses**: Brief encouragement or acknowledgment should usually continue the current episode
+_SPECIAL_RULES_FOR_COMMON_PATTERNS = """\
+- Greetings + Topic: "Hey!" followed by actual content should be ONE episode
+- Transition Phrases: "By the way", "Oh, also", "Speaking of which" usually continue the same episode unless introducing major topic shifts
+- Social Closures and Farewells: "Thanks!", "Take care!", "Talk to you soon!", "I'm off to go...", "See you later!" should continue the current episode as natural conversation endings
+- Supportive Responses: Brief encouragement or acknowledgment should usually continue the current episode"""
 
-Decision Principles:
-- **Prioritize meaningful content**: Each episode should contain substantive, memorable content
-- **Ignore social formalities**: Don't split on greetings, pleasantries, brief transitions, or conversation closures
-- **Treat closures as episode endings**: Messages that announce departure ("I'm off to go...", "Talk to you soon!") or provide closure ("Thanks!", "Take care!") should stay with the current episode as natural endings
-- **Consider time gaps**: Long time gaps (hours or days) strongly suggest new episodes, while short gaps (minutes) usually indicate continuing conversation
-- **Episodic memory focus**: Think about what a person would naturally group together when recalling this conversation
-- **Reasonable episode length**: Aim for episodes with 3-20 meaningful exchanges
-- **When in doubt, consider context**: If unsure, keep related content together rather than over-splitting
+_STEP_DECISION_PRINCIPLES = """\
+- Prioritize meaningful content: Each episode should contain substantive, memorable content
+- Ignore social formalities: Don't split on greetings, pleasantries, brief transitions, or conversation closures
+- Treat closures as episode endings: Messages that announce departure ("I'm off to go...", "Talk to you soon!") or provide closure ("Thanks!", "Take care!") should stay with the current episode as natural endings
+- Consider time gaps: Long time gaps (hours or days) strongly suggest new episodes, while short gaps (minutes) usually indicate continuing conversation
+- Episodic memory focus: Think about what a person would naturally group together when recalling this conversation
+- Reasonable episode length: Aim for episodes with 3-20 meaningful exchanges
+- When in doubt, consider context: If unsure, keep related content together rather than over-splitting"""
 
-Please return your judgment in JSON format:
-{{
-    "reasoning": "One sentence summary of your reasoning process",
-    "should_end": true/false,
-    "confidence": 0.0-1.0,
-    "topic_summary": "If should_end = true, summarize the core meaningful topic of the current episode, otherwise leave it blank"
-}}
-
-Note:
+_NOTES = """\
 - If conversation history is empty, this is the first message, return false
 - Focus on episodic memory principles: what would people naturally remember as distinct experiences?
-- Each episode should contain substantive content that stands alone as a meaningful memory unit
-"""
+- Each episode should contain substantive content that stands alone as a meaningful memory unit"""
+
+_STEP_REPLY_FORMAT = """\
+Reply with one JSON object, nothing else. reasoning is a one sentence summary of your reasoning process; should_end is true or false; confidence is 0.0-1.0; topic_summary summarizes the core meaningful topic of the current episode if should_end = true, otherwise is left blank.
+{"reasoning": "...", "should_end": false, "confidence": 0.9, "topic_summary": ""}"""
+
+STEP_BOUNDARY_DETECT_SYSTEM_PROMPT = paragraphs(
+    _STEP_ROLE,
+    tagged("analysis_aspects", _ANALYSIS_ASPECTS),
+    tagged("special_rules_for_common_patterns", _SPECIAL_RULES_FOR_COMMON_PATTERNS),
+    tagged("decision_principles", _STEP_DECISION_PRINCIPLES),
+    tagged("notes", _NOTES),
+    tagged("reply_format", _STEP_REPLY_FORMAT),
+)
+
+STEP_BOUNDARY_DETECT_USER_PROMPT = paragraphs(
+    tagged("conversation_history", "{{conversation_history}}"),
+    tagged("time_gap", "{{time_gap_info}}"),
+    tagged("new_messages", "{{new_messages}}"),
+)
+
+# --------------------------------------------------------------------------------------------------
+# Both paths
+# --------------------------------------------------------------------------------------------------
+
+
+def assemble_system_prompt(rules: str, /, *, custom_instructions: str | None) -> str:
+    """Build a path's system message: its static rules, then the caller's instructions if any.
+
+    The instructions are placed verbatim and are never scanned for placeholders, so braces in them stay literal.
+
+    Args:
+        rules: The path's static rules, :data:`BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT` or
+            :data:`STEP_BOUNDARY_DETECT_SYSTEM_PROMPT`.
+        custom_instructions: The caller's instructions for the ``<custom_instructions>`` block, the message's last;
+            ``None`` or a blank string leaves the block out, so the message is ``rules`` unchanged.
+
+    Returns:
+        The system message.
+    """
+    if custom_instructions is None or not custom_instructions.strip():
+        return rules
+    return paragraphs(rules, tagged("custom_instructions", custom_instructions))

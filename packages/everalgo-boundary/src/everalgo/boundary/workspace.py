@@ -20,7 +20,7 @@ class WorkspaceMemCellExtractor:
         raw_data: RawData,
         *,
         llm: LLMClient | None = None,
-        prompt: str | None = None,
+        custom_instructions: str | None = None,
     ) -> list[MemCell]:
         """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
 
@@ -33,7 +33,7 @@ class WorkspaceMemCellExtractor:
         raw_data: RawData,
         *,
         llm: LLMClient | None = None,
-        prompt: str | None = None,
+        custom_instructions: str | None = None,
     ) -> list[MemCell]:
         """EXPERIMENTAL: NOT YET IMPLEMENTED — raises NotImplementedError.
 

@@ -1,15 +1,21 @@
-"""Behaviour tests for :func:`everalgo.clustering.cluster_by_llm`."""
+"""Behaviour tests for :func:`everalgo.clustering.acluster_by_llm`."""
 
 from __future__ import annotations
 
-from typing import Any
+import inspect
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 
-from everalgo.clustering import Cluster, cluster_by_llm
-from everalgo.llm.types import ChatMessage, ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.clustering import Cluster, acluster_by_llm, cluster_by_llm
+from everalgo.clustering._replies import _ClusterAssignmentReply
+from everalgo.clustering.prompts.en.cluster import CLUSTER_LLM_ASSIGN_SYSTEM_PROMPT
+from everalgo.llm import LLMOutputError
+from everalgo.testing import FakeLLMClient
+
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
 
 _BASE_TS_MS = 1_700_000_000_000
 
@@ -29,7 +35,7 @@ async def test_empty_existing_skips_llm_and_returns_none() -> None:
     new_c = _c([1.0, 0.0])
     llm = FakeLLMClient(responses=[])
 
-    result = await cluster_by_llm(new_c, [], llm=llm)
+    result = await acluster_by_llm(new_c, [], llm=llm)
 
     assert result is None
     assert llm.call_count == 0
@@ -41,7 +47,7 @@ async def test_fast_path_top1_above_skip_threshold_skips_llm() -> None:
     new_c = _c([0.999, 0.001])
     llm = FakeLLMClient(responses=[])
 
-    result = await cluster_by_llm(new_c, existing, llm=llm)
+    result = await acluster_by_llm(new_c, existing, llm=llm)
 
     assert result is not None
     assert result.count == 4
@@ -54,11 +60,19 @@ async def test_llm_called_when_top1_below_skip_threshold() -> None:
     new_c = _c([0.7, 0.7], preview=["ambiguous task"])
     llm = FakeLLMClient(responses=['{"idx": 1, "reason": "matches case bucket"}'])
 
-    result = await cluster_by_llm(new_c, existing, llm=llm)
+    result = await acluster_by_llm(new_c, existing, llm=llm)
 
     assert llm.call_count == 1
     assert result is not None
     assert result.count == 3  # LLM's choice (existing[1], count=2) + new
+
+
+async def test_the_call_asks_for_the_assignment_reply_model() -> None:
+    llm = FakeLLMClient(responses=['{"idx": -1, "reason": "new domain"}'])
+
+    await acluster_by_llm(_c([0.7, 0.7]), _two_clusters(), llm=llm)
+
+    assert llm.calls[0].response_format is _ClusterAssignmentReply
 
 
 async def test_llm_returns_minus_one_creates_new() -> None:
@@ -66,7 +80,7 @@ async def test_llm_returns_minus_one_creates_new() -> None:
     new_c = _c([0.7, 0.7], preview=["novel task"])
     llm = FakeLLMClient(responses=['{"idx": -1, "reason": "new domain"}'])
 
-    result = await cluster_by_llm(new_c, existing, llm=llm)
+    result = await acluster_by_llm(new_c, existing, llm=llm)
 
     assert result is None
 
@@ -76,31 +90,38 @@ async def test_llm_returns_out_of_range_idx_creates_new() -> None:
     new_c = _c([0.7, 0.7])
     llm = FakeLLMClient(responses=['{"idx": 999, "reason": "new domain"}'])
 
-    result = await cluster_by_llm(new_c, existing, llm=llm)
+    result = await acluster_by_llm(new_c, existing, llm=llm)
 
     assert result is None
 
 
-async def test_bad_llm_response_raises_value_error() -> None:
-    """Non-JSON response from LLM → ValueError immediately (fail-loud, no retry)."""
-    existing = _two_clusters()
-    new_c = _c([0.7, 0.7])
-    llm = FakeLLMClient(responses=["not json"])
+@pytest.mark.parametrize(
+    ("reply", "fault"),
+    [
+        ("not json", "<root>"),
+        ('{"reason": "x"}', "idx: Field required"),
+        ('{"idx": 0}', "reason: Field required"),
+        ('{"idx": 0, "reason": "x", "confidence": 0.9}', "confidence: Extra inputs are not permitted"),
+        ('{"idx": "0", "reason": "x"}', "idx"),
+        ('```json\n{"idx": 0, "reason": "x"}\n```', "<root>"),
+    ],
+)
+async def test_a_bad_reply_raises_llm_output_error_without_retry(reply: str, fault: str) -> None:
+    llm = FakeLLMClient(responses=[reply])
 
-    with pytest.raises(ValueError, match="No JSON object found"):
-        await cluster_by_llm(new_c, existing, llm=llm)
+    with pytest.raises(LLMOutputError, match="cluster assignment reply is not a valid _ClusterAssignmentReply") as exc:
+        await acluster_by_llm(_c([0.7, 0.7]), _two_clusters(), llm=llm)
 
+    assert fault in str(exc.value)
+    assert reply not in str(exc.value)
     assert llm.call_count == 1
 
 
-async def test_llm_missing_idx_field_raises_value_error() -> None:
-    """Valid JSON but missing 'idx' field → ValueError immediately (fail-loud, no retry)."""
-    existing = _two_clusters()
-    new_c = _c([0.7, 0.7])
-    llm = FakeLLMClient(responses=['{"reason": "x"}'])
+async def test_a_client_failure_propagates_unchanged() -> None:
+    llm = FakeLLMClient(responses=[ConnectionError("upstream down")])
 
-    with pytest.raises(ValueError, match="Missing 'idx' field"):
-        await cluster_by_llm(new_c, existing, llm=llm)
+    with pytest.raises(ConnectionError, match="upstream down"):
+        await acluster_by_llm(_c([0.7, 0.7]), _two_clusters(), llm=llm)
 
     assert llm.call_count == 1
 
@@ -111,72 +132,94 @@ async def test_llm_clusters_json_contains_idx_count_preview() -> None:
         _c([0.0, 1.0], count=2, preview=["refactor auth"]),
     ]
     new_c = _c([0.7, 0.7], preview=["investigate token leak"])
-    captured: dict[str, str] = {}
+    captured: dict[str, list[LLMMessage]] = {}
 
-    def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
-        assert isinstance(messages[0].content, str)  # narrow for test
-        captured["prompt"] = messages[0].content
-        return ChatResponse(
-            content='{"idx": 0, "reason": "test"}',
-            model="fake",
-            usage=None,
-            finish_reason="stop",
-            raw=None,
-        )
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        captured["messages"] = messages
+        return '{"idx": 0, "reason": "test"}'
 
     llm = FakeLLMClient(handler=handler)
 
-    await cluster_by_llm(new_c, existing, llm=llm)
+    await acluster_by_llm(new_c, existing, llm=llm)
 
-    rendered = captured["prompt"]
-    assert "investigate token leak" in rendered
-    assert "fix login bug" in rendered
-    assert "refactor auth" in rendered
-    assert '"count": 3' in rendered
-    assert '"idx": 0' in rendered
+    user = captured["messages"][1].content
+    assert isinstance(user, str)
+    assert "investigate token leak" in user
+    assert "fix login bug" in user
+    assert "refactor auth" in user
+    assert '"count": 3' in user
+    assert '"idx": 0' in user
 
 
-async def test_caller_supplied_prompt_overrides_default() -> None:
-    existing = _two_clusters()
-    new_c = _c([0.7, 0.7], preview=["hello"])
-    custom = "OVERRIDE memcell={memcell_text} clusters={clusters_json}"
-    captured: dict[str, str] = {}
+async def _sent(**kwargs: Any) -> tuple[str, str]:
+    """The system and user messages one LLM-path call sends."""
+    llm = FakeLLMClient(responses=['{"idx": 0, "reason": "ok"}'])
+    await acluster_by_llm(_c([0.7, 0.7], preview=["hello"]), _two_clusters(), llm=llm, **kwargs)
+    system, user = llm.calls[0].messages
+    assert (system.role, user.role) == ("system", "user")
+    return str(system.content), str(user.content)
 
-    def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
-        assert isinstance(messages[0].content, str)  # narrow for test
-        captured["prompt"] = messages[0].content
-        return ChatResponse(
-            content='{"idx": 0, "reason": "ok"}',
-            model="fake",
-            usage=None,
-            finish_reason="stop",
-            raw=None,
-        )
 
-    llm = FakeLLMClient(handler=handler)
+async def test_custom_instructions_close_the_system_message_verbatim() -> None:
+    """The last block, after ``<reply_format>``; never rendered as a template, so a slot name stays literal."""
+    custom = "Keep {{memcell_text}} literal.\nGroup  billing tasks together."
 
-    await cluster_by_llm(new_c, existing, llm=llm, prompt=custom)
+    system, user = await _sent(custom_instructions=custom)
+    _, default_user = await _sent()
 
-    assert captured["prompt"].startswith("OVERRIDE memcell=hello")
+    assert system == f"{CLUSTER_LLM_ASSIGN_SYSTEM_PROMPT}\n\n<custom_instructions>\n{custom}\n</custom_instructions>"
+    assert system.endswith("\n</custom_instructions>")
+    assert system.index("</reply_format>") < system.index("<custom_instructions>")
+    assert user == default_user
+    assert user.endswith("<new_task_intent>\nhello\n</new_task_intent>")
+
+
+@pytest.mark.parametrize("custom_instructions", [None, "", "  \n\t"], ids=["none", "empty", "blank"])
+async def test_no_or_blank_custom_instructions_send_the_bundled_rules_byte_for_byte(
+    custom_instructions: str | None,
+) -> None:
+    system, _ = await _sent(custom_instructions=custom_instructions)
+
+    assert system == CLUSTER_LLM_ASSIGN_SYSTEM_PROMPT
+    assert "<custom_instructions>" not in system
+
+
+def test_custom_instructions_is_keyword_only_and_prompt_is_gone() -> None:
+    parameters = inspect.signature(acluster_by_llm).parameters
+
+    assert "prompt" not in parameters
+    assert parameters["custom_instructions"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameters["custom_instructions"].default is None
+
+
+async def test_passing_prompt_raises_type_error() -> None:
+    with pytest.raises(TypeError, match="prompt"):
+        await _sent(prompt="OVERRIDE rules: pick the closest cluster.")
+
+
+def test_sync_bridge_forwards_custom_instructions_and_rejects_prompt() -> None:
+    llm = FakeLLMClient(responses=['{"idx": 0, "reason": "ok"}'])
+
+    cluster_by_llm(_c([0.7, 0.7]), _two_clusters(), llm=llm, custom_instructions="Group billing tasks together.")
+
+    system = str(llm.calls[0].messages[0].content)
+    assert system.endswith("<custom_instructions>\nGroup billing tasks together.\n</custom_instructions>")
+    with pytest.raises(TypeError, match="prompt"):
+        # The removed keyword, on purpose: a type checker rejects it too.
+        cluster_by_llm(_c([0.7, 0.7]), _two_clusters(), llm=llm, prompt="rules")  # type: ignore[call-arg]
 
 
 async def test_preview_empty_when_new_cluster_has_no_preview() -> None:
-    """When new_cluster.preview is empty, query_text is '' and prompt still renders."""
+    """When new_cluster.preview is empty, query_text is '' and the prompt still renders."""
     existing = _two_clusters()
     new_c = _c([0.7, 0.7])  # no preview
-    captured: dict[str, str] = {}
+    llm = FakeLLMClient(responses=['{"idx": 0, "reason": "ok"}'])
 
-    def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
-        assert isinstance(messages[0].content, str)  # narrow for test
-        captured["prompt"] = messages[0].content
-        return ChatResponse(
-            content='{"idx": 0, "reason": "ok"}', model="fake", usage=None, finish_reason="stop", raw=None
-        )
+    await acluster_by_llm(new_c, existing, llm=llm)
 
-    llm = FakeLLMClient(handler=handler)
-    await cluster_by_llm(new_c, existing, llm=llm)
-
-    assert "idx" in captured["prompt"]  # prompt rendered without error
+    user = llm.calls[0].messages[1].content
+    assert isinstance(user, str)
+    assert '"idx": 0' in user  # prompt rendered without error
 
 
 async def test_merge_appends_members_via_llm_path() -> None:
@@ -196,7 +239,7 @@ async def test_merge_appends_members_via_llm_path() -> None:
     # cosine ~0.9999 >= 0.85 skip threshold → fast-path merge, no LLM call.
     llm = FakeLLMClient(responses=[])
 
-    result = await cluster_by_llm(new_c, existing, llm=llm)
+    result = await acluster_by_llm(new_c, existing, llm=llm)
 
     assert result is not None
     assert result.members == ["a", "b", "c"]
@@ -212,7 +255,7 @@ async def test_none_path_preserves_new_members_llm() -> None:
     )
     llm = FakeLLMClient(responses=[])
 
-    result = await cluster_by_llm(new_c, [], llm=llm)
+    result = await acluster_by_llm(new_c, [], llm=llm)
 
     assert result is None
     assert new_c.members == ["entity_y"]

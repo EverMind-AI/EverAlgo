@@ -13,15 +13,17 @@ memories = await KnowledgeExtractor(llm=client).aextract(parsed, doc_id="doc1", 
 # memories[0] = synthetic doc root; rest = DFS-ordered topic nodes.
 ```
 
-`llm`: any `everalgo.llm.LLMClient` (OpenAI-compatible), passed at construction. Sync bridge: `extract(...)`.
+`llm`: any `everalgo.llm.LLMClient`, passed at construction. Every call sends a system message of rules and a user message of data, requests a strict reply model as `response_format`, and raises `everalgo.llm.LLMOutputError` when the reply does not validate (no retry; the host decides). Sync bridge: `extract(...)`.
+
+`custom_instructions=` (on `aextract` and `aclassify_category`) adds the host's text to the bundled rules, never replacing them: it goes, verbatim and never rendered as a template, in a `<custom_instructions>` block closing the system message of every LLM call the extraction makes; `None` or a blank string adds nothing.
 
 ## Pipeline at a glance
 
 ```
 ParsedContent
   → preprocess + atomize           (_block_split)
-  → topic-tree LLM (per batch)     (TOPIC_TREE_EXTRACT_PROMPT_EN)
-  → cross-batch merge (>1 batch)   (CONTENT_MERGE + TOPIC_MERGE)
+  → topic-tree LLM (per batch)     (prompts.en.topic_tree_extract)
+  → cross-batch merge (>1 batch)   (prompts.en.content_merge + topic_merge)
   → postprocess: split unsplit leaves + assign uncovered blocks
   → tree assembly + DFS flatten    → list[KnowledgeMemory]
 ```

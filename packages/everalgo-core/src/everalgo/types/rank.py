@@ -1,14 +1,12 @@
-"""Rank I/O contracts — Candidate / FactCandidate / RankInput / ScoredItem / RankOutput.
+"""Rank I/O contracts: Candidate, RankInput, ScoredItem and RankOutput.
 
-Spec: ``docs/superpowers/specs/2026-05-11-everalgo-rank-design.md`` §4.1.
-
-Design contract: ``Rank`` performs **no storage I/O**. The caller's upstream
-recall layer pre-fetches multi-route candidates plus cross-memory linkage
-(e.g. Episode → AtomicFact) and passes them in via ``RankInput``. The ranker
-reads only the dataclass; it never talks to a database.
+A ranker performs no storage I/O: the caller's recall layer fetches the candidates and passes them in a
+``RankInput``, and the ranker reads nothing else.
 """
 
 from __future__ import annotations
+
+__all__ = ["Candidate", "RankInput", "RankOutput", "ScoredItem"]
 
 from typing import Any, Literal
 
@@ -31,31 +29,11 @@ class Candidate(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class FactCandidate(BaseModel):
-    """AtomicFact candidate used by the episodic facade for ep→fact expansion.
-
-    ``score`` is cosine similarity from a vector store, pre-fetched by the caller's recall layer.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    parent_episode_id: str
-    score: float
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class RankInput(BaseModel):
     """Recall-stage input passed to a ranker facade.
 
-    Three groups of fields:
-
-    1. Multi-route recall candidates (sparse + dense). Profile uses dense only;
-       the other three facades use both.
-    2. Pre-fetched cross-memory linkage (currently only Episode → AtomicFact
-       for episodic). Other facades leave it empty.
-    3. Business parameters (``top_k`` / ``radius``). The ranker does not read
-       environment variables; the caller passes everything explicitly.
+    The multi-route recall candidates (sparse and dense; profile reads dense only) and the business parameters
+    (``top_k``, ``radius``). The ranker reads no environment variable: the caller passes everything explicitly.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -63,10 +41,8 @@ class RankInput(BaseModel):
     query: str
     memory_type: Literal["episodic", "profile", "case", "skill"]
 
-    sparse_candidates: list[Candidate] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
-    dense_candidates: list[Candidate] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
-
-    episode_to_facts: dict[str, list[FactCandidate]] = Field(default_factory=dict)
+    sparse_candidates: list[Candidate] = []
+    dense_candidates: list[Candidate] = []
 
     top_k: int = 10
     radius: float | None = None
@@ -94,5 +70,5 @@ class RankOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[ScoredItem] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    items: list[ScoredItem] = []
     metadata: dict[str, Any] = Field(default_factory=dict)

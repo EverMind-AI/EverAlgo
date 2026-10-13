@@ -10,25 +10,29 @@ real-OpenRouter ``packages/everalgo-parser/tests/parser/test_e2e_*.py`` suite.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 import everalgo.parser as parser_pkg
-from everalgo.llm.types import ChatMessage, ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Modality, RawFile
+
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
 
 FIXTURES = Path(__file__).resolve().parents[2] / "packages" / "everalgo-parser" / "tests" / "fixtures"
 
 
 def _fake_handler(text: str) -> FakeLLMClient:
-    """Multi-call deterministic LLM stub: every call returns ``text``."""
+    """Multi-call deterministic LLM stub: every call replies ``{"text": text}``, the parser's reply shape."""
+    reply = json.dumps({"text": text})
 
-    def handler(messages: list[ChatMessage], **_kwargs: Any) -> ChatResponse:
-        return ChatResponse(content=text, model="fake", finish_reason="stop")
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        return reply
 
     return FakeLLMClient(handler=handler)
 

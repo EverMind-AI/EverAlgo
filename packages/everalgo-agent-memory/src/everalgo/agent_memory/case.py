@@ -10,19 +10,38 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from everalgo.agent_memory._text import count_tokens, json_default, truncate_text
-from everalgo.agent_memory.prompts.case_compress import AGENT_CASE_COMPRESS_PROMPT
-from everalgo.agent_memory.prompts.case_filter import AGENT_CASE_FILTER_PROMPT
-from everalgo.agent_memory.prompts.tool_pre_compress import AGENT_TOOL_PRE_COMPRESS_PROMPT
+from everalgo.agent_memory._replies import (
+    _call_llm_for_case_compress,
+    _call_llm_for_case_filter,
+    _call_llm_for_tool_pre_compress,
+    _CaseCompressReply,
+    _CompressedMessage,
+)
+from everalgo.agent_memory.prompts.case_compress import (
+    AGENT_CASE_COMPRESS_SYSTEM_PROMPT,
+    AGENT_CASE_COMPRESS_USER_PROMPT,
+)
+from everalgo.agent_memory.prompts.case_filter import AGENT_CASE_FILTER_SYSTEM_PROMPT, AGENT_CASE_FILTER_USER_PROMPT
+from everalgo.agent_memory.prompts.tool_pre_compress import (
+    AGENT_TOOL_PRE_COMPRESS_SYSTEM_PROMPT,
+    AGENT_TOOL_PRE_COMPRESS_USER_PROMPT,
+)
 from everalgo.agent_memory.reasons import CaseExtractionResult, CaseSkipReason
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
-from everalgo.types import AgentCase, ChatMessage, ConversationItem, MemCell, ToolCall, ToolCallRequest, ToolCallResult
-from everalgo.types._render import render_content
+from everalgo.llm import LLMMessage, LLMOutputError
+from everalgo.types import (
+    AgentCase,
+    ChatMessage,
+    ConversationItem,
+    MemCell,
+    ToolCall,
+    ToolCallRequest,
+    ToolCallResult,
+)
+from everalgo.utils import count_tokens, json_default, render_prompt, truncate_text
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -33,10 +52,10 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    # Re-exported prompt constants — monkey-patch at startup to override the LLM prompts
-    "AGENT_CASE_COMPRESS_PROMPT",
-    "AGENT_CASE_FILTER_PROMPT",
-    "AGENT_TOOL_PRE_COMPRESS_PROMPT",
+    # Re-exported system prompts — monkey-patch at startup to override the rules the LLM is given
+    "AGENT_CASE_COMPRESS_SYSTEM_PROMPT",
+    "AGENT_CASE_FILTER_SYSTEM_PROMPT",
+    "AGENT_TOOL_PRE_COMPRESS_SYSTEM_PROMPT",
     "AgentCaseExtractor",
 ]
 
@@ -90,28 +109,17 @@ class AgentCaseExtractor:
         self._min_tool_call_rounds = min_tool_call_rounds
         self._complex_task_round_threshold = complex_task_tool_call_round_threshold
 
-    async def aextract(
-        self,
-        memcell: MemCell,
-        *,
-        prompt_filter: str | None = None,
-        prompt_compress: str | None = None,
-        prompt_tool_pre_compress: str | None = None,
-    ) -> list[AgentCase]:
+    async def aextract(self, memcell: MemCell) -> list[AgentCase]:
         """Run the 11-step pipeline on one MemCell; return ``[]`` (filtered) or ``[AgentCase]``.
 
         Thin wrapper over :meth:`aextract_with_reason` — use that one when an empty result needs to
         be explained rather than merely observed.
 
         Raises:
-            LLMError: From any provider-side LLM call (no internal retry).
+            LLMOutputError: If a pre-compress, filter or compress reply is not valid for its call (no
+                internal retry).
         """
-        result = await self.aextract_with_reason(
-            memcell,
-            prompt_filter=prompt_filter,
-            prompt_compress=prompt_compress,
-            prompt_tool_pre_compress=prompt_tool_pre_compress,
-        )
+        result = await self.aextract_with_reason(memcell)
         return result.cases
 
     extract = async_to_sync(aextract)
@@ -119,10 +127,6 @@ class AgentCaseExtractor:
     async def aextract_with_reason(  # noqa: C901  — one branch per pipeline gate, all algorithm-intrinsic
         self,
         memcell: MemCell,
-        *,
-        prompt_filter: str | None = None,
-        prompt_compress: str | None = None,
-        prompt_tool_pre_compress: str | None = None,
     ) -> CaseExtractionResult:
         """Run the 11-step pipeline on one MemCell, reporting which gate rejected it when none passes.
 
@@ -130,7 +134,8 @@ class AgentCaseExtractor:
         :class:`CaseSkipReason` plus structured ``detail`` instead of only reaching the log.
 
         Raises:
-            LLMError: From any provider-side LLM call (no internal retry).
+            LLMOutputError: If a pre-compress, filter or compress reply is not valid for its call (no
+                internal retry).
         """
         if not memcell.items:
             logger.info("no items on memcell (n_items=0), skipping")
@@ -186,7 +191,7 @@ class AgentCaseExtractor:
                 )
 
         # Step 6: selective LLM pre-compression of largest tool-call groups
-        msgs = await _pre_compress_to_list(msgs, client, prompt=prompt_tool_pre_compress)
+        msgs = await _pre_compress_to_list(msgs, client)
         messages_json = _dump_messages(msgs)
 
         # Step 7: LLM filter — many tool-call rounds auto-passes as complex task; else judge signals
@@ -194,19 +199,19 @@ class AgentCaseExtractor:
         # the slim view is built only when the trajectory actually reaches the LLM filter.
         if _count_tool_call_rounds(msgs) <= self._complex_task_round_threshold:
             worth, llm_reason = await _is_worth_extracting(
-                _dump_messages_for_filter(msgs), _count_user_messages(msgs), client, prompt=prompt_filter
+                _dump_messages_for_filter(msgs), _count_user_messages(msgs), client
             )
             if not worth:
                 return CaseExtractionResult([], CaseSkipReason.FILTER_REJECTED, {"llm_reason": llm_reason})
 
         # Step 8: single LLM compress (no retry)
-        exp, compress_reason = await _compress_experience(messages_json, client, prompt=prompt_compress)
+        exp, compress_reason = await _compress_experience(messages_json, client)
         if exp is None:
             # compress_reason is always set when exp is None; the assert-free narrowing keeps mypy happy.
             return CaseExtractionResult([], compress_reason or CaseSkipReason.COMPRESS_EMPTY_INTENT, {})
 
         # Step 9: hard truncate task_intent (head-only)
-        original_intent = exp.get("task_intent", "")
+        original_intent = exp.task_intent
         intent = truncate_text(original_intent, MAX_TASK_INTENT_TOKENS, head_ratio=1.0)
         if intent != original_intent:
             logger.info(
@@ -218,9 +223,9 @@ class AgentCaseExtractor:
             id=uuid.uuid4().hex,
             timestamp=memcell.timestamp,
             task_intent=intent,
-            approach=exp.get("approach", "") or "",
-            quality_score=_clamp_quality_score(exp.get("quality_score", 0.5)),
-            key_insight=exp.get("key_insight", "") or "",
+            approach=exp.approach,
+            quality_score=_clamp_quality_score(exp.quality_score),
+            key_insight=exp.key_insight,
         )
         return CaseExtractionResult([case], None, {})
 
@@ -233,7 +238,7 @@ class AgentCaseExtractor:
 def _to_openai_dict(msg: ConversationItem) -> dict[str, Any]:
     """Convert a ConversationItem to OpenAI Chat Completions wire-format, stripping EverAlgo-private fields."""
     if isinstance(msg, ChatMessage):
-        d: dict[str, Any] = {"role": msg.role, "content": render_content(msg.content)}
+        d: dict[str, Any] = {"role": msg.role, "content": msg.content}
     elif isinstance(msg, ToolCallRequest):
         d = {"role": "assistant"}
         if msg.content is not None:
@@ -337,7 +342,7 @@ def _should_skip(messages: Sequence[ConversationItem]) -> tuple[CaseSkipReason, 
             )
 
         assistant_content = " ".join(
-            render_content(msg.content) for msg in messages if isinstance(msg, ChatMessage) and msg.role == "assistant"
+            msg.content for msg in messages if isinstance(msg, ChatMessage) and msg.role == "assistant"
         )
         assistant_tokens = count_tokens(assistant_content)
         if assistant_tokens < FILTER_NO_TOOL_MIN_ASSISTANT_TOKENS:
@@ -456,20 +461,16 @@ def _calc_group_size(items: Sequence[ConversationItem], group: list[int]) -> int
     return sum(_calc_tool_content_size(items[idx]) for idx in group)
 
 
-async def _pre_compress_to_list(  # noqa: C901  — algorithm-intrinsic branches
+async def _pre_compress_to_list(
     original_data: Sequence[ConversationItem],
     client: LLMClient,
-    *,
-    prompt: str | None = None,
 ) -> list[ConversationItem]:
     """Selectively compress the largest tool-call groups via parallel LLM calls.
 
     Targets the largest groups until estimated total drops below ``PRE_COMPRESS_CHUNK_SIZE``.
 
     Raises:
-        LLMError: Propagated from a chunk compression LLM call.
-        json.JSONDecodeError: If a chunk LLM response is not valid JSON.
-        ValueError: If a chunk returns None (shape mismatch) or the total compressed count mismatches.
+        LLMOutputError: If a chunk's reply is not a valid compression of that chunk.
     """
     items = [m.model_copy(deep=True) for m in original_data]
 
@@ -527,94 +528,77 @@ async def _pre_compress_to_list(  # noqa: C901  — algorithm-intrinsic branches
         chunk_msg_lists.append([items[idx] for idx in chunk_indices])
 
     # Compress all chunks in parallel.
-    results = await asyncio.gather(
-        *(_compress_tool_chunk(chunk_msgs, client, prompt=prompt) for chunk_msgs in chunk_msg_lists),
-    )
-    all_compressed: list[ConversationItem] = []
-    for round_idx, result in enumerate(results):
-        if result is None:
-            raise ValueError(f"chunk {round_idx + 1} compression returned None (shape mismatch or invalid message)")
-        all_compressed.extend(result)
-
+    # Each chunk comes back the length it went in, so the results line up with the selected indices.
+    results = await asyncio.gather(*(_compress_tool_chunk(chunk_msgs, client) for chunk_msgs in chunk_msg_lists))
+    all_compressed = [item for result in results for item in result]
     selected_indices = sorted(idx for group in groups_to_compress for idx in group)
-    if len(all_compressed) == len(selected_indices):
-        for i, idx in enumerate(selected_indices):
-            items[idx] = all_compressed[i]
-    else:
-        raise ValueError(f"compressed count {len(all_compressed)} != selected count {len(selected_indices)}")
+    for idx, compressed in zip(selected_indices, all_compressed, strict=True):
+        items[idx] = compressed
     return items
 
 
 async def _compress_tool_chunk(
     messages: Sequence[ConversationItem],
     client: LLMClient,
-    *,
-    prompt: str | None = None,
-) -> list[ConversationItem] | None:
-    """LLM-compress one chunk of tool messages; preserves original timestamps.
-
-    Returns ``None`` for structural validation failures (wrong shape, non-dict messages) — those are
-    business validation signals, not parse errors. Parse and LLM errors propagate as exceptions.
+) -> list[ConversationItem]:
+    """LLM-compress one chunk of tool messages, message for message; preserves original timestamps.
 
     Raises:
-        LLMError: Propagated from the underlying LLM client call.
-        json.JSONDecodeError: If the LLM response is not valid JSON.
+        LLMOutputError: If the reply is not a valid tool pre-compress output, holds a different number of messages
+            than the chunk, or holds a tool message with no ``tool_call_id``.
     """
-    rendered = render_prompt(
-        AGENT_TOOL_PRE_COMPRESS_PROMPT,
-        prompt,
+    user = render_prompt(
+        AGENT_TOOL_PRE_COMPRESS_USER_PROMPT,
+        None,
         messages_json=_dump_messages(messages),
         new_count=len(messages),
     )
-    compressed_list = await _call_llm_for_tool_pre_compress(client, rendered)
-
-    if len(compressed_list) != len(messages):
-        logger.warning("tool pre-compress invalid shape (got %d, want %d)", len(compressed_list), len(messages))
-        return None
-
-    rebuilt: list[ConversationItem] = []
-    for orig, comp in zip(messages, compressed_list, strict=True):
-        if not isinstance(comp, dict):
-            logger.warning("tool pre-compress non-dict message in compressed list")
-            return None
-        # isinstance(comp, dict) is asserted above; cast to restore key/value types for dict spread.
-        # LLM-compressed messages carry no timestamp; preserve the original message's timestamp so the
-        # rebuilt ConversationItem validates and downstream ordering / logging stays meaningful.
-        merged: dict[str, Any] = {**cast("dict[str, Any]", comp), "timestamp": orig.timestamp}
-        try:
-            rebuilt.append(_openai_dict_to_agent_item(merged, orig.timestamp))
-        except (ValueError, KeyError) as exc:
-            logger.warning("tool pre-compress message validation failed: %s", exc, exc_info=True)
-            return None
-    return rebuilt
+    reply = await _call_llm_for_tool_pre_compress(
+        client,
+        [
+            LLMMessage(role="system", content=AGENT_TOOL_PRE_COMPRESS_SYSTEM_PROMPT),
+            LLMMessage(role="user", content=user),
+        ],
+    )
+    compressed = reply.compressed_messages
+    if len(compressed) != len(messages):
+        raise LLMOutputError(
+            f"agent tool pre-compress reply holds {len(compressed)} messages for a chunk of {len(messages)}"
+        )
+    # Compressed messages carry no timestamp; each keeps its original's, so downstream ordering stays meaningful.
+    return [_compressed_to_item(comp, orig.timestamp) for orig, comp in zip(messages, compressed, strict=True)]
 
 
-def _openai_dict_to_agent_item(d: dict[str, Any], timestamp: int) -> ConversationItem:
-    """Convert OpenAI-shaped dict back to ConversationItem, inferring discriminator from role / tool_calls."""
-    role = d.get("role")
-    if role == "tool":
+def _compressed_to_item(message: _CompressedMessage, timestamp: int) -> ConversationItem:
+    """Convert a compressed message back to a ConversationItem, inferring its kind from role / tool_calls.
+
+    Raises:
+        LLMOutputError: If a tool message carries no ``tool_call_id``, so it no longer answers any tool call.
+    """
+    if message.role == "tool":
+        if message.tool_call_id is None:
+            raise LLMOutputError("agent tool pre-compress reply holds a tool message with no tool_call_id")
         return ToolCallResult(
             kind="tool_result",
-            tool_call_id=d["tool_call_id"],
-            content=d.get("content", "") or "",
+            tool_call_id=message.tool_call_id,
+            content=message.content or "",
             timestamp=timestamp,
         )
-    if role == "assistant" and d.get("tool_calls"):
+    if message.role == "assistant" and message.tool_calls:
         return ToolCallRequest(
             kind="tool_call",
-            tool_calls=[ToolCall.model_validate(tc) for tc in d["tool_calls"]],
-            content=d.get("content"),
+            tool_calls=[ToolCall.model_validate(call.model_dump()) for call in message.tool_calls],
+            content=message.content,
             timestamp=timestamp,
-            sender_id=d.get("sender_id") or "assistant",
+            sender_id="assistant",
         )
-    # else: ChatMessage (user / assistant final response)
     return ChatMessage(
         kind="text",
-        id=d.get("id") or "",
-        role=role if role in ("user", "assistant") else "assistant",  # type: ignore[arg-type]
-        content=d.get("content") or "",
+        id="",
+        role=message.role,
+        content=message.content or "",
         timestamp=timestamp,
-        sender_id=d.get("sender_id") or role or "",
+        sender_id=message.role,
     )
 
 
@@ -622,14 +606,11 @@ async def _is_worth_extracting(
     messages_json: str,
     user_message_count: int,
     client: LLMClient,
-    *,
-    prompt: str | None = None,
 ) -> tuple[bool, str]:
     """LLM filter: ``True`` only if at least one signal (exploration / user correction) is True.
 
     Used only when the tool-call round count is at or below the extractor's configured threshold;
     higher-volume trajectories pass automatically as complex tasks (handled upstream, not here).
-    Missing or None signal fields are treated as False — precision over recall, skip when uncertain.
 
     ``has_user_correction`` is additionally validated against ``user_message_count``: a real
     correction requires at least two user messages (initial request + corrective follow-up). If the
@@ -642,15 +623,19 @@ async def _is_worth_extracting(
         vary between runs; display it, do not branch on it.
 
     Raises:
-        LLMError: Propagated from the underlying LLM client call.
-        json.JSONDecodeError: If the LLM response is not valid JSON.
+        LLMOutputError: If the reply is not a valid case filter output.
     """
-    rendered = render_prompt(AGENT_CASE_FILTER_PROMPT, prompt, messages=messages_json)
-    filter_data = await _call_llm_for_case_filter(client, rendered)
-    llm_reason = str(filter_data.get("reason", "") or "")
-    has_exploration = filter_data.get("has_exploration") is True
-    has_user_correction = filter_data.get("has_user_correction") is True and user_message_count >= 2
-    if filter_data.get("has_user_correction") is True and user_message_count < 2:
+    reply = await _call_llm_for_case_filter(
+        client,
+        [
+            LLMMessage(role="system", content=AGENT_CASE_FILTER_SYSTEM_PROMPT),
+            LLMMessage(role="user", content=render_prompt(AGENT_CASE_FILTER_USER_PROMPT, None, messages=messages_json)),
+        ],
+    )
+    llm_reason = reply.reason
+    has_exploration = reply.has_exploration
+    has_user_correction = reply.has_user_correction and user_message_count >= 2
+    if reply.has_user_correction and user_message_count < 2:
         logger.info(
             "rejecting has_user_correction=True on single-user-message trajectory (likely hallucination): %s",
             llm_reason,
@@ -664,9 +649,7 @@ async def _is_worth_extracting(
 async def _compress_experience(
     messages_json: str,
     client: LLMClient,
-    *,
-    prompt: str | None = None,
-) -> tuple[dict[str, Any] | None, CaseSkipReason | None]:
+) -> tuple[_CaseCompressReply | None, CaseSkipReason | None]:
     """Extract task_intent / approach / quality_score / key_insight via one LLM call (no retry).
 
     Returns ``(None, reason)`` when the LLM emits an empty ``task_intent`` or ``approach`` — those are
@@ -675,91 +658,26 @@ async def _compress_experience(
     could not name the task at all, an empty approach that it found no method worth recording.
 
     Raises:
-        LLMError: Propagated from the underlying LLM client call.
-        json.JSONDecodeError: If the LLM response is not valid JSON.
+        LLMOutputError: If the reply is not a valid case compress output.
     """
-    rendered = render_prompt(AGENT_CASE_COMPRESS_PROMPT, prompt, messages=messages_json)
-    compress_data = await _call_llm_for_case_compress(client, rendered)
-    if not compress_data.get("task_intent"):
+    reply = await _call_llm_for_case_compress(
+        client,
+        [
+            LLMMessage(role="system", content=AGENT_CASE_COMPRESS_SYSTEM_PROMPT),
+            LLMMessage(
+                role="user", content=render_prompt(AGENT_CASE_COMPRESS_USER_PROMPT, None, messages=messages_json)
+            ),
+        ],
+    )
+    if not reply.task_intent:
         logger.info("LLM returned empty 'task_intent', skipping")
         return None, CaseSkipReason.COMPRESS_EMPTY_INTENT
-    if not compress_data.get("approach"):
+    if not reply.approach:
         logger.warning("LLM returned empty 'approach', skipping")
         return None, CaseSkipReason.COMPRESS_EMPTY_APPROACH
-    return compress_data, None
+    return reply, None
 
 
-# ---------------------------------------------------------------------------
-# LLM callsites — brace-balanced JSON extraction + 5-retry (mirror b150b32).
-# ---------------------------------------------------------------------------
-
-
-async def _call_llm_for_tool_pre_compress(llm: LLMClient, rendered: str) -> list[Any]:
-    """Call LLM for tool pre-compression and return validated compressed_messages list.
-
-    Uses brace-balanced extraction because ``compressed_messages`` is nested (list of dicts).
-
-    Raises:
-        ValueError: If no JSON found or ``compressed_messages`` key missing / not a list.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    data = json.loads(json_str)
-    if "compressed_messages" not in data:
-        raise ValueError(f"Tool pre-compress response missing 'compressed_messages': {list(data.keys())!r}")
-    compressed = data["compressed_messages"]
-    if not isinstance(compressed, list):
-        raise ValueError(f"compressed_messages must be a list, got {type(compressed).__name__}: {compressed!r}")  # noqa: TRY004
-    return cast("list[Any]", compressed)  # type: ignore[redundant-cast]
-
-
-async def _call_llm_for_case_filter(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM for case filtering and return the parsed dict (has_exploration / has_user_correction / reason).
-
-    The response is nominally flat but uses brace-balanced extraction for safety.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    result: dict[str, Any] = json.loads(json_str)
-    return result
-
-
-async def _call_llm_for_case_compress(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM for case compression and return validated dict with task_intent + approach + quality_score.
-
-    Raises:
-        ValueError: If no JSON found.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    result: dict[str, Any] = json.loads(json_str)
-    return result
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in case LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in case LLM response: {text[:200]!r}")
-
-
-def _clamp_quality_score(value: Any) -> float:
-    """Clamp to [0.0, 1.0]; non-numeric defaults to ``0.5``."""
-    if value is None:
-        return 0.5
-    try:
-        return max(0.0, min(1.0, float(value)))
-    except (TypeError, ValueError):
-        return 0.5
+def _clamp_quality_score(value: float) -> float:
+    """Clamp a model-written score to [0.0, 1.0], the range the compress rubric asks for."""
+    return max(0.0, min(1.0, value))
