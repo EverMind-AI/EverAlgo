@@ -443,17 +443,21 @@ def test_reflect_fallbacks_inherit_rather_than_judge(rule_name: str) -> None:
     assert "do not translate" in rule
 
 
-def test_reflect_prompts_pin_the_utc_label_on_carried_over_times() -> None:
-    """Reflection is the one path that can reintroduce time drift, so its prompts must pin the format.
+def test_reflect_prompts_keep_times_as_written_without_touching_zone_labels() -> None:
+    """Reflection must carry every time over as the episodes wrote it, zone label included or not.
 
     It rewrites the narrative wholesale, and ``Episode.timestamp`` never reaches answer context, so a
-    time that reflection drops or reformats is not recoverable from anywhere else. Both variants must
-    require the ``UTC`` label and forbid dropping a time the input already carried.
+    time that reflection drops or reformats is not recoverable from anywhere else. Episode extraction
+    (v2.2) labels only the clock times it derives itself and leaves speaker-quoted ones unlabelled,
+    because their timezone is unknown; a reflect rule demanding a UTC label on every clock time would
+    invent one for exactly those times.
     """
     import everalgo.user_memory.prompts.en.reflect as en_mod
 
     for name in _SYSTEM_PROMPTS:
-        assert "MUST carry the UTC zone label" in getattr(en_mod, name), name
+        prompt = getattr(en_mod, name)
+        assert "do not add or drop a zone label" in prompt, name
+        assert "MUST carry the UTC zone label" not in prompt, name
 
 
 def test_reflect_prompts_ask_for_a_bare_json_object() -> None:

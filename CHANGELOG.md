@@ -17,10 +17,20 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.4.0rc3 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc3 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.9.0rc3 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc2 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Release candidate — 2026-10-13 (user-memory 0.9.0rc4)
+
+One distribution moves to the next release candidate for one fix: reflection keeps every time as the episodes wrote it. Both reflect modes used to demand a UTC label on every clock time, which contradicted episode v2.2: extraction labels only the clock times it derives itself and leaves the ones speakers quoted unlabelled, because their timezone is unknown, so merging invented a zone for exactly those times ("at 4" became "4:00 UTC"). The two time rules now add or drop no zone label. No dependency floor moves; the other seven distributions have no change and keep their rc3 or rc2 versions.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-user-memory` | 0.9.0rc4 | reflect time rules keep clock times as written, adding no UTC label |
+
+Detail in [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md).
 
 ## Coordinated release — 2026-10-13 (rc3)
 
