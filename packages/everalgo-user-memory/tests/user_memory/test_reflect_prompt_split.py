@@ -4,9 +4,11 @@ The two single-message prompts the split replaced (HEAD ``4a6f5ea``) are pinned 
 of them is a line of its mode's new system prompt once the backticks around ``summary`` are dropped, or listed in
 ``_RESTRUCTURED`` under the structural change that removed it: F1 the data and the label in front of it moved to the
 user message, F3 the INIT line naming "the following episode summaries" now points at ``<episodes>``, F4 the language
-rule spliced in twice is kept once. No line was rewritten for its content, so there is no C class. One line was
-added, the ``<reply_format>`` skeleton: the old prompts named no field, which reached the model only through the
-schema, and the contract asks every prompt for a parseable sample (``docs/concepts/llm-contract.md`` §4.3).
+rule spliced in twice is kept once. One line was added, the ``<reply_format>`` skeleton: the old prompts named no
+field, which reached the model only through the schema, and the contract asks every prompt for a parseable sample
+(``docs/concepts/llm-contract.md`` §4.3). One line per mode was later rewritten for its content, C1: the time rule
+follows episode v2.2 and keeps every time as written, adding or dropping no zone label, where the old rule demanded a
+UTC label on every clock time and so invented one for the clock times speakers quoted.
 """
 
 from __future__ import annotations
@@ -106,7 +108,24 @@ _RESTRUCTURED: dict[str, dict[str, str]] = {
     },
 }
 _STRUCTURAL_CHANGES = {"F1", "F3", "F4"}
-_ADDED = {"init": {_NEW_POINTER, _SKELETON}, "update": {_SKELETON}}
+# C1: the one old line per mode rewritten for its content, found by the phrase it dropped, and the line replacing it.
+_C1_DROPPED_PHRASE = "MUST carry the UTC zone label"
+_C1_TIME_RULE = {
+    "init": (
+        "- Keeps every time exactly as the episodes wrote it: do not reformat or convert it, and do not add or drop a "
+        'zone label — a time written with "UTC" keeps it, a clock time written without one ("at 4", "6:40") stays '
+        "without, because its timezone is unknown. No episode may lose its time in the merge"
+    ),
+    "update": (
+        "- Keep every time exactly as the narrative and the new episodes wrote it: do not reformat or convert it, and "
+        'do not add or drop a zone label — a time written with "UTC" keeps it, a clock time written without one ("at '
+        '4", "6:40") stays without, because its timezone is unknown. Never drop a time that is already there'
+    ),
+}
+_ADDED = {
+    "init": {_NEW_POINTER, _SKELETON, _C1_TIME_RULE["init"]},
+    "update": {_SKELETON, _C1_TIME_RULE["update"]},
+}
 
 _STATIC_BLOCK_ORDER = ["narrative_rules", "summary_rules", "reply_format"]
 _LANGUAGE_RULE = "LANGUAGE RULE SENTINEL"
@@ -123,6 +142,11 @@ _MODES = pytest.mark.parametrize("mode", ["init", "update"])
 
 def _old_lines(mode: str) -> list[str]:
     return [line.strip().replace("`", "") for line in _OLD[mode].splitlines() if line.strip()]
+
+
+def _c1_old_line(mode: str) -> str:
+    (line,) = [line for line in _old_lines(mode) if _C1_DROPPED_PHRASE in line]
+    return line
 
 
 def _new_lines(text: str) -> list[str]:
@@ -143,10 +167,10 @@ def _ep(ts: int, text: str) -> Episode:
 @_MODES
 def test_every_kept_old_line_is_a_line_of_the_system_prompt(mode: str) -> None:
     system_lines = set(_new_lines(_SYSTEM[mode]))
-    kept = [line for line in _old_lines(mode) if line not in _RESTRUCTURED[mode]]
+    kept = [line for line in _old_lines(mode) if line not in _RESTRUCTURED[mode] and line != _c1_old_line(mode)]
     missing = [line for line in kept if line not in system_lines]
 
-    assert len(kept) >= 10, "the pinned old prompt yielded too few lines, so little was checked"
+    assert len(kept) >= 9, "the pinned old prompt yielded too few lines, so little was checked"
     assert not missing
 
 
@@ -162,11 +186,20 @@ def test_every_removal_is_structural(mode: str) -> None:
 
 
 @_MODES
-def test_the_system_prompt_adds_only_the_pointer_and_the_skeleton(mode: str) -> None:
+def test_the_system_prompt_adds_only_the_pointer_the_skeleton_and_the_c1_time_rule(mode: str) -> None:
     old = set(_old_lines(mode))
     added = {line for line in _new_lines(_SYSTEM[mode]) if not _TAG_LINE.match(line) and line not in old}
 
     assert added == _ADDED[mode]
+
+
+@_MODES
+def test_c1_replaces_the_utc_label_rule_with_the_as_written_rule(mode: str) -> None:
+    system_lines = set(_new_lines(_SYSTEM[mode]))
+
+    assert _c1_old_line(mode) not in system_lines
+    assert _C1_TIME_RULE[mode] in system_lines
+    assert _C1_DROPPED_PHRASE not in _SYSTEM[mode]
 
 
 def test_init_pointer_names_the_user_element() -> None:

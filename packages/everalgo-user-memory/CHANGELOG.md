@@ -6,6 +6,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0rc4] - 2026-10-13
+
+### Fixed
+
+- Reflect no longer stamps a UTC label on clock times the episodes wrote without one; its time rule now matches episode v2.2.
+
 ## [0.9.0rc3] - 2026-10-13
 
 ### Changed
@@ -339,7 +345,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc3...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc4...HEAD
+[0.9.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc3...everalgo-user-memory/v0.9.0rc4
 [0.9.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc2...everalgo-user-memory/v0.9.0rc3
 [0.9.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc1...everalgo-user-memory/v0.9.0rc2
 [0.9.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc9...everalgo-user-memory/v0.9.0rc1
