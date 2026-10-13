@@ -29,5 +29,5 @@ def test_a_message_without_text_is_skipped_unread() -> None:
 
 
 def test_a_message_with_text_but_no_timestamp_is_rejected() -> None:
-    with pytest.raises(ValueError, match=r"^chat message 'm1' has no timestamp$"):
+    with pytest.raises(ValueError, match=r"^chat message 'm1' has no timestamp: "):
         _render_conversation(_cell(_message("hi", timestamp=0)))

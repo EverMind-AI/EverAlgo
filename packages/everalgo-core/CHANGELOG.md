@@ -6,6 +6,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0rc2] - 2026-10-13
+
+### Added
+
+- `everalgo.utils.InvalidInputError` (a `ValueError` subclass): the one error for data a caller passed that does not meet a precondition, the counterpart of `LLMOutputError`. The same input fails the same way on every run, so a host reads it as a terminal outcome (fix the data or the call, do not retry) instead of guessing from a bare `ValueError` whether it was its own bug. `render_chat_line` (a message with no timestamp), `format_utc_date` (a naive datetime) and `fetch_uri` (an empty uri or a scheme other than http / https) now raise it; their messages read `<whose field> <what is wrong>: <what to do>`, name the offender and never quote user content. Existing `except ValueError` handlers keep working. A repository test fails on any distribution source that raises a bare `ValueError` outside `llm/schema.py`, `llm/openai_compat.py`, `utils/templates.py` and `testing/`.
+
 ## [0.6.0rc1] - 2026-10-13
 
 ### Added
@@ -121,7 +127,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - LLM binding simplified to instance-only injection: `build_client` / constructor `llm=` parameter is the sole binding path. The prior 4-layer resolution (configure / use / current / resolve) was removed in favour of the pattern used by `openai-python`, `anthropic-sdk-python`, LangChain, and Instructor.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0rc2...HEAD
+[0.6.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0rc1...everalgo-core/v0.6.0rc2
 [0.6.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.1...everalgo-core/v0.6.0rc1
 [0.5.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.5.0...everalgo-core/v0.5.1
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.4.0...everalgo-core/v0.5.0

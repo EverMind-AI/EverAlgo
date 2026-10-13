@@ -13,7 +13,7 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 | `everalgo-clustering` | [`packages/everalgo-clustering/README.md`](../../packages/everalgo-clustering/README.md) | `Cluster`, `cluster_by_geometry`, `acluster_by_llm`, `cluster_by_llm` |
 | `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `hybrid`, `agentic`, `cluster`, `maxsim`, `category`, business rankers, `fusion`, `weight`, `rerank` |
 | `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `parse`, `ParsedContent`, `Modality`, `RawFile`; image / audio / document / URL parsers (video deferred) |
-| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `EpisodeReflector`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `OutputLanguage` |
+| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `EpisodeReflector`, `EpisodeSummarizer`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `OutputLanguage` |
 | `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `BoundaryDetector` (re-exported from `everalgo-boundary`), three extractors, extraction result / skip reason types, `OpOutcome` |
 | `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `aclassify_category`, `classify_category`; `KnowledgeMemory` / `CategorySpec` live in `everalgo.types` |
 

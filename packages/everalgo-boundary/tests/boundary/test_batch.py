@@ -29,6 +29,7 @@ from everalgo.boundary.prompts.en.chat import BATCH_BOUNDARY_DETECT_SYSTEM_PROMP
 from everalgo.llm import LLMMessage, LLMOutputError, StrictOutputModel, to_openai_response_format
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
+from everalgo.utils import InvalidInputError
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -558,7 +559,7 @@ def test_format_messages_skips_a_text_less_message_before_reading_its_timestamp(
 
 
 def test_format_messages_rejects_a_message_with_text_but_no_timestamp() -> None:
-    with pytest.raises(ValueError, match=r"^chat message 'msg_0' has no timestamp$"):
+    with pytest.raises(InvalidInputError, match=r"^chat message 'msg_0' has no timestamp: "):
         _format_messages_with_indices([_msg("user", "hi", 0)])
 
 

@@ -23,7 +23,7 @@ def _format_messages_with_indices(messages: Sequence[ChatMessage]) -> str:
     A dropped message keeps its number, so the indices the model answers with still address ``messages``.
 
     Raises:
-        ValueError: If a message with text has no timestamp (0).
+        InvalidInputError: If a message with text has no timestamp (0).
     """
     return "\n".join(
         f"[{index}] {render_chat_line(message)}" for index, message in enumerate(messages, start=1) if message.content
@@ -34,7 +34,7 @@ def _format_messages_step(messages: Sequence[ChatMessage]) -> str:
     """Render one line per message with text, unnumbered: the step prompt answers a single ``should_end``.
 
     Raises:
-        ValueError: If a message with text has no timestamp (0).
+        InvalidInputError: If a message with text has no timestamp (0).
     """
     return "\n".join(render_chat_line(message) for message in messages if message.content)
 

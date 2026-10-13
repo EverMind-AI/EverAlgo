@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-parser"
-version = "0.3.0rc1"
+version = "0.3.0rc2"
 description = "EverAlgo parser: image, audio, document, and URL parsing into ParsedContent."
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -20,7 +20,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-  "everalgo-core>=0.6.0rc1,<2.0.0",
+  "everalgo-core>=0.6.0rc2,<2.0.0",
   "asgiref>=3.8.0",
   "pillow>=10.0.0",
   "beautifulsoup4>=4.12.0",

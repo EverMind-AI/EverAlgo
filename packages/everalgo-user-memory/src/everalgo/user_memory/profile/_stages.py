@@ -74,7 +74,7 @@ class _StagePrompts[ReplyT: StrictOutputModel]:
         """The output-language rule for ``output_language``: the caller-chosen rule, else this stage's fallback.
 
         Raises:
-            ValueError: If ``output_language`` names no known language.
+            InvalidInputError: If ``output_language`` names no known language.
         """
         return build_language_rule(output_language, fallback=self.language_fallback)
 

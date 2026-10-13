@@ -22,7 +22,7 @@ def _fake(text: str = "transcribed") -> FakeLLMClient:
 
 async def test_aparse_unsupported_extension_raises_value_error() -> None:
     """Extension not in _MIME_MAP → ValueError mentioning 'unsupported audio extension'."""
-    with pytest.raises(ValueError, match="unsupported audio extension"):
+    with pytest.raises(ValueError, match="not a supported audio extension"):
         await audio.aparse(RawFile(content=b"x", extension="xyz"), llm=_fake())
 
 

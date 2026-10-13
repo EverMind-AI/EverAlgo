@@ -47,7 +47,7 @@ async def test_aparse_direct_replaces_invalid_utf8() -> None:
 @pytest.mark.asyncio
 async def test_aparse_unknown_extension_raises() -> None:
     rf = RawFile(content=b"x", extension="zzz")
-    with pytest.raises(ValueError, match="not map"):
+    with pytest.raises(ValueError, match="no known modality"):
         await parser_pkg.aparse(rf, llm=_fake())
 
 
@@ -123,7 +123,7 @@ async def test_aparse_extension_overrides_mime_when_both_set() -> None:
 @pytest.mark.asyncio
 async def test_aparse_empty_content_no_uri_raises() -> None:
     """No content and no http uri → cannot dispatch."""
-    with pytest.raises(ValueError, match="no content"):
+    with pytest.raises(ValueError, match="neither content nor"):
         await parser_pkg.aparse(RawFile(), llm=_fake())
 
 
@@ -248,7 +248,7 @@ async def test_aparse_raises_for_unsupported_modality(monkeypatch: pytest.Monkey
 
     # Modality.URL is valid but not handled by the dispatch switch (IMAGE/AUDIO/PDF/etc.)
     monkeypatch.setattr(pkg, "get_modality", lambda _ext: Modality.URL)  # type: ignore[misc]
-    with pytest.raises(ValueError, match="Unsupported modality"):
+    with pytest.raises(ValueError, match="is not parseable"):
         await parser_pkg.aparse(RawFile(content=b"x", extension="mp4"), llm=_fake())
 
 

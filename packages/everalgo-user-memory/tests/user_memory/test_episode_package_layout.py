@@ -1,7 +1,7 @@
 """Checks that the ``everalgo.user_memory.episode`` package keeps the layout its docstring describes.
 
-- Its modules import one another in one direction only: ``_extractor`` over ``_render``, ``_replies`` and ``_summary``,
-  which import no sibling.
+- Its modules import one another in one direction only: ``_extractor`` and ``_summarizer`` each over ``_render``,
+  ``_replies`` and ``_summary``, which import no sibling.
 - Every logger in the package is the package's own, the name hosts collect the log contract under.
 
 Imports are read from the source with ``ast``, so a check needs nothing importable beyond the package's location.
@@ -17,10 +17,11 @@ import everalgo.user_memory.episode as episode_package
 _PACKAGE = "everalgo.user_memory.episode"
 _PACKAGE_DIR = Path(episode_package.__file__).parent
 
-#: The sibling modules each module may import; ``__init__`` re-exports from ``_extractor`` only.
+#: The sibling modules each module may import; ``__init__`` re-exports from the two operator modules only.
 _ALLOWED_SIBLINGS: dict[str, frozenset[str]] = {
-    "__init__": frozenset({"_extractor"}),
+    "__init__": frozenset({"_extractor", "_summarizer"}),
     "_extractor": frozenset({"_render", "_replies", "_summary"}),
+    "_summarizer": frozenset({"_render", "_replies", "_summary"}),
     "_render": frozenset(),
     "_replies": frozenset(),
     "_summary": frozenset(),

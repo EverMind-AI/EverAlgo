@@ -16,7 +16,7 @@ pip install everalgo-core
 |---|---|
 | `everalgo.types` | Key shared data types: `MemCell`, `ChatMessage`, `ConversationItem`, user / agent / knowledge memories, ranking contracts, parsed / raw content, modality helpers, tool-call types |
 | `everalgo.llm` | `LLMClient` Protocol, `LLMMessage` + content parts, `LLMOutputError`, `StrictOutputModel`, `parse_reply` / `describe_errors`, the request builders `to_openai_response_format` / `to_anthropic_response_format` / `to_gemini_response_format` / `to_ollama_response_format` |
-| `everalgo.utils` | General-purpose tools, one kind per module: `templates` (`render_prompt`), `markup` (`tagged`, `paragraphs`), `chat_lines` (`render_chat_line`, `speaker`), `timestamps` (`format_utc_time`, `format_utc_date`, `parse_utc_date`), `tokens` (`encode`, `count_tokens`, `truncate_text`), `text` (`ascii_width`, `decode_bytes`), `json` (`json_default`), `http` (`fetch_uri`) |
+| `everalgo.utils` | General-purpose tools, one kind per module: `templates` (`render_prompt`), `markup` (`tagged`, `paragraphs`), `chat_lines` (`render_chat_line`, `speaker`), `timestamps` (`format_utc_time`, `format_utc_date`, `parse_utc_date`), `tokens` (`encode`, `count_tokens`, `truncate_text`), `text` (`ascii_width`, `decode_bytes`), `json` (`json_default`), `http` (`fetch_uri`), `errors` (`InvalidInputError`) |
 | `everalgo.llm.schema` | The `to_<api>_response_format` request builders — a `response_format` model to each API's structured-output request value, refusing structures outside the strict subset |
 | `everalgo.llm.openai_compat` | `OpenAICompatClient` — reference `LLMClient`, OpenAI Chat Completions over httpx with no provider SDK; `LLMError`, the error it raises (not part of the contract) |
 | `everalgo.testing` | `FakeLLMClient`, `CallRecord`, `assert_*_shape` structural assertion helpers, and the `LLMClient` conformance suite (`everalgo.testing.conformance`) |
@@ -36,7 +36,7 @@ testing ──→ llm, types          llm, types and utils import none of each o
 |---|---|---|
 | `llm` | `LLMClient` and its request types, `LLMOutputError`, `StrictOutputModel` and `parse_reply`, the `to_<api>_response_format` builders, and reference implementations, one flat module per API (`openai_compat`) | Anything a prompt or an operator needs besides the contract |
 | `types` | Data structures only: pydantic models, enums, and their constants | Helper functions; logic bound to one type is a method of that type |
-| `utils` | Tools that are general-purpose, whatever the number of callers today; one kind per module (`templates`, `markup`, `chat_lines`, `timestamps`, `tokens`, `text`, `json`, `http`) | Tools with domain meaning, which stay next to the domain they serve, and prompt strings, which live in each package's `prompts/{en,zh}/` |
+| `utils` | Tools that are general-purpose, whatever the number of callers today; one kind per module (`templates`, `markup`, `chat_lines`, `timestamps`, `tokens`, `text`, `json`, `http`, `errors`) | Tools with domain meaning, which stay next to the domain they serve, and prompt strings, which live in each package's `prompts/{en,zh}/` |
 | `testing` | `FakeLLMClient`, the `assert_*_shape` helpers and the conformance suite | Production code |
 
 Two rules hold across the workspace. Anything another distribution imports from core is public: the operator packages are released separately, so a private `_name` they depended on could change under them without a version bump. And core depends only on `httpx`, `pydantic` and `tiktoken`: a tool that needs a heavier library, such as Pillow or BeautifulSoup, stays in the package that needs it. `tests/test_core_layering.py` at the repository root enforces the import direction and both rules.
@@ -117,6 +117,7 @@ truncate_text(long_text, max_tokens=500)  # head and tail around a "[... trimmed
 | `LLMClient` | `everalgo.llm` | Protocol — `achat(messages, *, response_format, temperature=None, max_tokens=None, **extra) → str` |
 | `LLMMessage` | `everalgo.llm` | One request message: `role` (system / user / assistant) and `content` (`str` or content parts) |
 | `LLMOutputError` | `everalgo.llm` | Raised by operators when the reply fails to parse or fails business validation |
+| `InvalidInputError` | `everalgo.utils` | Raised when the data a caller passed does not meet an operator's (or a core tool's) precondition; a `ValueError` subclass |
 | `StrictOutputModel` | `everalgo.llm` | Configuration-only base (`strict=True, extra="forbid"`) for every `response_format` model |
 | `parse_reply` / `describe_errors` | `everalgo.llm` | Validate a reply against its `response_format` model, raising `LLMOutputError` that names each failing location, never the reply |
 | `OpenAICompatClient` | `everalgo.llm.openai_compat` | Reference client, built from keyword arguments (`model`, `api_key`, `base_url`, `temperature`, `max_tokens`, `timeout`, `response_format_mode`, `invalid_reply_retries`, `transport_retries`) and released with `aclose()`; raises `LLMError` on refusal, absent content, `length` or `content_filter`; validates each reply against `response_format`, retries an invalid reply up to `invalid_reply_retries` times; resends a transport error, HTTP 408 / 409 / 429 / 5xx, a reply with no choice or an aborted generation (`abort`, `error`) up to `transport_retries` times |
@@ -145,6 +146,15 @@ truncate_text(long_text, max_tokens=500)  # head and tail around a "[... trimmed
 | `assert_foresight_shape` | `everalgo.testing` | Structural assertion for `Foresight` |
 | `assert_atomic_fact_shape` | `everalgo.testing` | Structural assertion for `AtomicFact` |
 | `assert_profile_shape` | `everalgo.testing` | Structural assertion for `Profile` |
+
+## Two error types, and what a host does with each
+
+| Error | Meaning | Host action |
+|---|---|---|
+| `everalgo.llm.LLMOutputError` | The model's reply was unusable (parse failure or failed business check). A fresh generation may succeed. | The host decides by its own budget whether to retry (see `docs/concepts/llm-contract.md` §5) |
+| `everalgo.utils.InvalidInputError` | The data the caller passed does not meet a precondition: a message without a timestamp, an unknown `output_language`, an unsorted episode list, an empty `RawFile`. The same input fails the same way every run. | Terminal: treat it as a caller error (HTTP 422, dead-letter), fix the data or the call; do not retry |
+
+It derives from `ValueError`, so an `except ValueError` written before it existed still catches it. Its message reads `<whose field> <what is wrong>: <what to do>` and names the offender (a message id, an owner id, an index), never the content of the user's data, so it is safe to log and to show to an operator. Anything else (an unexpected `ValueError` from a prompt template, a `TypeError`) is an EverAlgo bug or a misuse of the API and is not covered by this promise. A repository test (`tests/test_input_errors.py`) fails on any operator source that raises a bare `ValueError`.
 
 ## Related distributions
 

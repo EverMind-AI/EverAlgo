@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from asgiref.sync import async_to_sync
 from bs4 import BeautifulSoup
@@ -40,7 +40,7 @@ from everalgo.types import (
     get_extension_from_mime,
     get_modality_from_mime,
 )
-from everalgo.utils import decode_bytes, fetch_uri
+from everalgo.utils import InvalidInputError, decode_bytes, fetch_uri
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -76,11 +76,17 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
         fetched_mime = raw_file.mime
     else:
         if not raw_file.uri:
-            raise ValueError("url.aparse: RawFile must have either content or uri")
+            raise InvalidInputError(
+                "RawFile has neither content nor uri, so url.aparse has nothing to read: "
+                "pass the page bytes in content, or the uri to fetch"
+            )
         body, fetched_mime = await fetch_uri(raw_file.uri)
 
     if not body:
-        raise ValueError(f"url.aparse: fetched empty body from {raw_file.uri!r}")
+        raise InvalidInputError(
+            f"uri {_locate(raw_file.uri)!r} returned an empty body, there is nothing to parse: "
+            "check that the uri points at a real document, or pass its bytes in content"
+        )
 
     inner_modality = get_modality_from_mime(fetched_mime)
     if inner_modality is Modality.UNKNOWN:
@@ -88,7 +94,7 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
         logger.warning(
             "url.aparse: unknown Content-Type %r from %s; falling back to HTML handler",
             fetched_mime,
-            raw_file.uri,
+            _locate(raw_file.uri),
         )
         inner_modality = Modality.HTML
 
@@ -163,10 +169,21 @@ async def _dispatch_inner(
             modality=Modality.DIRECT,
             mime=fetched_mime,
         )
-    raise ValueError(f"url.aparse: cannot dispatch fetched body for modality={modality.value!r}")
+    raise InvalidInputError(
+        f"uri {_locate(uri)!r} served modality {modality.value!r} (content type {fetched_mime!r}), which the parser cannot read: "
+        "point the uri at an image, audio, document or web page"
+    )
 
 
 # ---- metadata extraction (port from upstream internal URL extractor) ----
+
+
+def _locate(uri: str) -> str:
+    """``scheme://host[:port]/path`` of ``uri``, for an error message: a signed URL's query, fragment and userinfo stay out of logs."""
+    parts = urlsplit(uri)
+    host = parts.hostname or ""
+    port = f":{parts.port}" if parts.port else ""
+    return f"{parts.scheme}://{host}{port}{parts.path}"
 
 
 def _extract_metadata(html_text: str, *, base_url: str) -> dict[str, object]:

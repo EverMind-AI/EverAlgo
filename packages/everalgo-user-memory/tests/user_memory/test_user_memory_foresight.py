@@ -115,7 +115,7 @@ async def test_the_language_rule_closes_the_system_message_inside_its_tag() -> N
 async def test_an_unknown_language_raises_before_any_call() -> None:
     fake = FakeLLMClient(responses=[_reply()])
 
-    with pytest.raises(ValueError, match="unsupported output_language"):
+    with pytest.raises(ValueError, match="names no supported language"):
         await ForesightExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice", output_language="Klingon")
 
     assert fake.call_count == 0

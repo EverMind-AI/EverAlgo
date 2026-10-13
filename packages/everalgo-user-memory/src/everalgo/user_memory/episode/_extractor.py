@@ -67,7 +67,7 @@ class EpisodeExtractor:
             from the text.
 
         Raises:
-            ValueError: If ``output_language`` names no supported language, or a message in ``memcell`` has text but
+            InvalidInputError: If ``output_language`` names no supported language, or a message in ``memcell`` has text but
                 no timestamp.
             LLMOutputError: If the reply is not a valid episode output, or leaves ``content``, ``summary`` or
                 ``title`` blank.

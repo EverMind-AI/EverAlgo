@@ -16,6 +16,7 @@ from everalgo.llm import image_url_part_from_bytes
 from everalgo.parser._replies import _call_llm_for_text
 from everalgo.parser.prompts.en import PROMPT_FOR_AUDIO
 from everalgo.types import Modality, ParsedContent
+from everalgo.utils import InvalidInputError
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -42,17 +43,20 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     """Parse an audio ``RawFile`` into ``ParsedContent`` (transcription).
 
     Raises:
-        ValueError: If ``raw_file`` has no content or an unsupported extension.
+        InvalidInputError: If ``raw_file`` has no content or an unsupported extension.
         LLMOutputError: If the reply is not a valid ``{"text": "..."}`` object.
     """
     if not raw_file.content:
-        raise ValueError("RawFile.content is empty; cannot parse audio")
+        raise InvalidInputError(
+            "RawFile.content is empty, there is nothing to transcribe: pass the audio bytes in content"
+        )
 
     extension = raw_file.extension.lower().lstrip(".")
     mime = _MIME_MAP.get(extension)
     if mime is None:
-        raise ValueError(
-            f"audio.aparse: unsupported audio extension {raw_file.extension!r}. Supported: {sorted(_MIME_MAP)}"
+        raise InvalidInputError(
+            f"RawFile.extension {raw_file.extension!r} is not a supported audio extension: "
+            f"set it to one of {sorted(_MIME_MAP)}"
         )
 
     logger.debug("parsing audio extension=%s bytes=%d", extension, len(raw_file.content))

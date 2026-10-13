@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- git-cliff-unreleased-end -->
 
+## [0.3.0rc2] - 2026-10-13
+
+### Changed
+
+- Invalid caller input now raises `everalgo.utils.InvalidInputError` (a `ValueError` subclass, so existing handlers keep working) instead of a bare `ValueError`: a `RawFile` with neither content nor uri, with empty content, with an unsupported extension or modality, a uri that returns an empty body or a content type the parser cannot read. Each message names the field and what to set instead; a uri it quotes is cut to `scheme://host[:port]/path`, so a signed URL's query string, fragment and credentials never reach the message.
+- Requires `everalgo-core>=0.6.0rc2` (the floor was `0.6.0rc1`): the package imports `everalgo.utils.InvalidInputError`, which `0.6.0rc1` does not define.
+
 ## [0.3.0rc1] - 2026-10-13
 
 ### Changed
@@ -92,7 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `cairosvg >= 2.7.0` via `[svg]` extra.
 - System: LibreOffice (`soffice` on PATH) for Office document parsing.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.3.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.3.0rc2...HEAD
+[0.3.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.3.0rc1...everalgo-parser/v0.3.0rc2
 [0.3.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.1...everalgo-parser/v0.3.0rc1
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-parser/v0.2.0...everalgo-parser/v0.2.1
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-parser/v0.2.0

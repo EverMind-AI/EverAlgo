@@ -16,6 +16,8 @@ __all__ = [
 import re
 from datetime import UTC, datetime
 
+from everalgo.utils.errors import InvalidInputError
+
 _DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
 
 
@@ -48,11 +50,14 @@ def format_utc_date(value: int | datetime) -> str:
         The date of ``value`` in UTC.
 
     Raises:
-        ValueError: If ``value`` is a naive datetime, which names no date in UTC.
+        InvalidInputError: If ``value`` is a naive datetime, which names no date in UTC.
     """
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            raise ValueError(f"naive datetime has no UTC date: {value!r}")
+            raise InvalidInputError(
+                "format_utc_date got a naive datetime, which names no date in UTC: "
+                "attach a timezone (for example tzinfo=UTC) before calling"
+            )
         instant = value.astimezone(UTC)
     else:
         instant = datetime.fromtimestamp(value / 1000, tz=UTC)

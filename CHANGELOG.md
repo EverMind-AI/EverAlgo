@@ -13,16 +13,31 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.6.0rc1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.4.0rc1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-core` | 0.6.0rc2 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.4.0rc2 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.5.0rc1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.9.0rc1 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.6.0rc1 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
-| `everalgo-parser` | 0.3.0rc1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
+| `everalgo-rank` | 0.5.0rc2 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.9.0rc2 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.6.0rc2 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
 
-## Coordinated release — 2026-10-13
+## Coordinated release — 2026-10-13 (rc2)
+
+Six distributions move to `rc2` for two changes; `everalgo-knowledge` and `everalgo-clustering` are unchanged and stay at `0.3.0rc1`. First, `everalgo.utils.InvalidInputError` (a `ValueError` subclass, defined in `everalgo-core` 0.6.0rc2) is now what every operator and core tool raises for data a caller passed that does not meet a precondition, the counterpart of `LLMOutputError`: a host reads it as terminal by type (fix the data or the call, do not retry) instead of guessing from a bare `ValueError`, and existing `except ValueError` handlers keep working. Second, `everalgo-user-memory` 0.9.0rc2 adds `EpisodeSummarizer`, which writes the display preview of an episode text already stored, from the same one-place summary description the extractor's prompt uses. Because the packages below now raise or import a class that only `everalgo-core` 0.6.0rc2 defines, their core floor becomes `>=0.6.0rc2`; the other floors do not move.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.6.0rc2 | `InvalidInputError`; `render_chat_line`, `format_utc_date` and `fetch_uri` raise it |
+| `everalgo-boundary` | 0.4.0rc2 | raises `InvalidInputError` for a message with no timestamp; core floor `>=0.6.0rc2` |
+| `everalgo-rank` | 0.5.0rc2 | raises `InvalidInputError` for the missing `llm`, an unsupported `fusion_mode` and an empty candidate; core floor `>=0.6.0rc2` |
+| `everalgo-user-memory` | 0.9.0rc2 | raises `InvalidInputError` for every caller precondition; new `EpisodeSummarizer` and `EPISODE_SUMMARY_FIELD_RULE`; core floor `>=0.6.0rc2` |
+| `everalgo-agent-memory` | 0.6.0rc2 | raises `InvalidInputError` for a message with no timestamp; core floor `>=0.6.0rc2` |
+| `everalgo-parser` | 0.3.0rc2 | raises `InvalidInputError` for an unusable `RawFile` or uri, and quotes a uri without its query, fragment or credentials; core floor `>=0.6.0rc2` |
+
+Detail in each `packages/everalgo-<dist>/CHANGELOG.md`.
+
+## Coordinated release — 2026-10-13 (rc1)
 
 All eight distributions move to one LLM contract at once, so a host upgrades them together. `everalgo-core` 0.6.0rc1 defines it: an operator passes the pydantic model it will validate the reply against as `response_format`, calls `LLMClient.achat`, gets the reply back as `str`, and validates it with `everalgo.llm.parse_reply`; a reply that does not validate raises `everalgo.llm.LLMOutputError`, with no repair and no retry. Every operator also sends a static system message of rules and a user message holding only the data, and every time a prompt shows a model is `YYYY-MM-DD HH:MM UTC`. Every package that depends on `everalgo-core` raises its floor to `>=0.6.0rc1`, `everalgo-user-memory` and `everalgo-agent-memory` require `everalgo-boundary>=0.4.0rc1`, `everalgo-agent-memory` requires `everalgo-clustering>=0.3.0rc1`, and `everalgo-knowledge` requires `everalgo-parser>=0.3.0rc1`; the floors name `rc1` because a PEP 440 specifier such as `>=0.6.0` does not match `0.6.0rc1`, so the release candidates would not resolve against each other. All eight ship first as `rc1`, which a host installs with `--pre` or an exact pin. Pre-1.0, so every breaking change takes a minor bump (Invariant 6 of `docs/releasing.md`).
 

@@ -40,7 +40,7 @@ from everalgo.parser._replies import _call_llm_for_text
 from everalgo.parser._utils import clean_html_content, clean_html_for_llm
 from everalgo.parser.prompts.en import HTML_USER_PROMPT, PROMPT_FOR_FILE, PROMPT_FOR_HTML, PROMPT_FOR_PICTURE
 from everalgo.types import Modality, ParsedContent, RawFile, get_modality
-from everalgo.utils import decode_bytes, render_prompt
+from everalgo.utils import InvalidInputError, decode_bytes, render_prompt
 
 if TYPE_CHECKING:
     from email.message import EmailMessage
@@ -85,12 +85,14 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     """Parse a document-shaped ``RawFile`` into ``ParsedContent``.
 
     Raises:
-        ValueError: If ``raw_file`` has no content or is not a document modality.
+        InvalidInputError: If ``raw_file`` has no content or is not a document modality.
         LLMOutputError: If a PDF, HTML or Office reply is not a valid ``{"text": "..."}`` object. An email's
             inline-image OCR never raises it: a failed image gets a placeholder instead.
     """
     if not raw_file.content:
-        raise ValueError("RawFile.content is empty; cannot parse document")
+        raise InvalidInputError(
+            "RawFile.content is empty, there is nothing to parse as a document: pass the file bytes in content"
+        )
 
     modality = get_modality(raw_file.extension)
     if modality is Modality.PDF:
@@ -101,7 +103,10 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
         return await _aparse_email(raw_file, llm=llm)
     if modality is Modality.DOCUMENT:
         return await _aparse_office(raw_file, llm=llm)
-    raise ValueError(f"document.aparse does not handle modality {modality.value!r} (extension={raw_file.extension!r})")
+    raise InvalidInputError(
+        f"document.aparse got modality {modality.value!r} (extension={raw_file.extension!r}), which is not a document: "
+        "route images, audio and URLs through the parser facade or their own module"
+    )
 
 
 parse = async_to_sync(aparse)
@@ -393,7 +398,10 @@ async def _convert_to_pdf_via_soffice(
     # caller cannot escape the tempdir via e.g. ``extension="../../etc/passwd"``.
     # `extension` is expected to be a short ASCII suffix (docx / xlsx / ...).
     if not extension or not extension.isalnum() or len(extension) > 8:
-        raise ValueError(f"invalid extension for soffice conversion: {extension!r}")
+        raise InvalidInputError(
+            f"extension {extension!r} is not a short alphanumeric suffix, refusing the soffice conversion: "
+            "set RawFile.extension to the file's real suffix, for example docx"
+        )
     with tempfile.TemporaryDirectory() as tmpdir:  # pragma: no cover
         in_path = Path(tmpdir) / f"input.{extension}"  # pragma: no cover
         in_path.write_bytes(content)  # pragma: no cover

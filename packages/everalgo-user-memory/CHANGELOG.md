@@ -6,6 +6,17 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0rc2] - 2026-10-13
+
+### Added
+
+- `EpisodeSummarizer.asummarize(episode_text, *, output_language=None, custom_instructions=None) -> str` (sync bridge `summarize`), exported from `everalgo.user_memory` and `everalgo.user_memory.episode`: one LLM call that writes the display preview of an episode text already stored — a body a user edited, or a record from before the extractor produced summaries. The summary is described in one place, `prompts.en.episode.EPISODE_SUMMARY_FIELD_RULE`, which both `EPISODE_SYSTEM_PROMPT` (rendered byte-for-byte as before) and the new `EPISODE_SUMMARY_SYSTEM_PROMPT` are built from, and the result goes through the extraction path's 400-unit sentence-boundary guard, so the two paths store interchangeable previews. A host that keeps its own copy of the summary prompt for these paths, such as the cloud engine's episode-summary service, can call this instead and drop the copy. The reply is held to `{"summary"}`; an invalid or blank one raises `LLMOutputError`, and a blank `episode_text` raises `InvalidInputError` before any call.
+
+### Changed
+
+- Invalid caller input now raises `everalgo.utils.InvalidInputError` (a `ValueError` subclass, so existing handlers keep working) instead of a bare `ValueError`, so a host can treat it as terminal by type: an unknown `output_language`, a message with no timestamp, unsorted or too few episodes for reflection, empty `memcells`, a `sender_id` that is not a user speaker, an `old_profile` of another owner, a blank `owner_id`, an empty or blank-narrative `episodes`, or no episode naming the owner. Each message names the offender (an index, a `sender_id`, an owner id) and what to do about it.
+- Requires `everalgo-core>=0.6.0rc2` (the floor was `0.6.0rc1`): the package imports `everalgo.utils.InvalidInputError`, which `0.6.0rc1` does not define.
+
 ## [0.9.0rc1] - 2026-10-13
 
 The first release candidate of 0.9.0, and the first release since the 0.8.0 release candidates below (`rc1`-`rc9`); it carries that line onto the new LLM contract of `everalgo-core` 0.6.0rc1. Being a pre-release, it installs only with `--pre` or an explicit `==0.9.0rc1` pin. Every operator now requests its reply as a strict pydantic model, sends a static system message of rules and a user message holding only the data, and renders every time the same way. A host upgrading from `0.8.0rc9` will typically need to implement `LLMClient.achat`, replace `prompt=` with `custom_instructions=` (or nothing), catch `everalgo.llm.LLMOutputError` where it caught `ValueError` or `json.JSONDecodeError` from a reply, and stop reading `Episode.user_language`.
@@ -321,7 +332,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc2...HEAD
+[0.9.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc1...everalgo-user-memory/v0.9.0rc2
 [0.9.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc9...everalgo-user-memory/v0.9.0rc1
 [0.8.0rc9]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc8...everalgo-user-memory/v0.8.0rc9
 [0.8.0rc8]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc7...everalgo-user-memory/v0.8.0rc8

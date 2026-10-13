@@ -27,7 +27,7 @@ from everalgo.user_memory.prompts.en.reflect import (
     REFLECT_EPISODE_USER_PROMPT,
     assemble_system_prompt,
 )
-from everalgo.utils import render_prompt
+from everalgo.utils import InvalidInputError, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -40,16 +40,17 @@ logger = logging.getLogger(__name__)
 def _validate_inputs(episodes: list[Episode], *, min_count: int) -> None:
     """Fail fast: >= *min_count* episodes, sorted by timestamp ascending."""
     if len(episodes) < min_count:
-        msg = f"areflect requires at least {min_count} episode(s), got {len(episodes)}"
-        raise ValueError(msg)
+        raise InvalidInputError(
+            f"episodes has {len(episodes)} item(s), reflection needs at least {min_count}: "
+            "call it only once enough episodes have accumulated"
+        )
     for i in range(1, len(episodes)):
         if episodes[i].timestamp < episodes[i - 1].timestamp:
-            msg = (
-                f"episodes must be sorted by timestamp ascending, "
-                f"but episode[{i - 1}].timestamp={episodes[i - 1].timestamp} "
-                f"> episode[{i}].timestamp={episodes[i].timestamp}"
+            raise InvalidInputError(
+                f"episodes[{i - 1}].timestamp={episodes[i - 1].timestamp} is later than "
+                f"episodes[{i}].timestamp={episodes[i].timestamp}: "
+                "episodes must be sorted by timestamp ascending, pass them oldest first"
             )
-            raise ValueError(msg)
 
 
 def _render_timeline(episodes: list[Episode]) -> str:
@@ -130,7 +131,7 @@ class EpisodeReflector:
             from its ``title``; owner_id=None, timestamp=episodes[-1].timestamp.
 
         Raises:
-            ValueError: Too few episodes, unsorted, or ``output_language`` names no supported language.
+            InvalidInputError: Too few episodes, unsorted, or ``output_language`` names no supported language.
             LLMOutputError: If the reply is not a valid reflect output.
         """
         if old_episode is None:

@@ -25,6 +25,7 @@ from everalgo.types import (
     get_modality,
     get_modality_from_mime,
 )
+from everalgo.utils import InvalidInputError
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -63,7 +64,7 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
        - ``AUDIO`` → ``audio.aparse``
        - ``PDF`` / ``DOCUMENT`` / ``HTML`` / ``EMAIL`` → ``document.aparse``
        - ``DIRECT`` → no LLM; bytes are UTF-8-decoded inline.
-       - Anything else → ``ValueError``.
+       - Anything else → ``InvalidInputError``.
 
     When dispatch resolves a modality via ``mime`` but the submodule
     internally requires ``extension`` (image / audio / document all do for
@@ -87,10 +88,9 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
         return await url.aparse(raw_file, llm=llm)
 
     if not raw_file.content:
-        raise ValueError(
-            "Cannot dispatch: RawFile has no content. "
-            "Provide either an http(s) uri (the URL parser fetches) or "
-            "hydrated bytes."
+        raise InvalidInputError(
+            "RawFile has neither content nor an http(s) uri, so there is nothing to parse: "
+            "pass the file bytes in content, or an http(s) uri for the URL parser to fetch"
         )
 
     # Resolve modality: extension wins; fall back to mime.
@@ -98,8 +98,9 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     if modality is Modality.UNKNOWN and raw_file.mime:
         modality = get_modality_from_mime(raw_file.mime)
     if modality is Modality.UNKNOWN:
-        raise ValueError(
-            f"Cannot dispatch: extension={raw_file.extension!r} mime={raw_file.mime!r} do not map to a known Modality."
+        raise InvalidInputError(
+            f"RawFile extension={raw_file.extension!r} mime={raw_file.mime!r} map to no known modality: "
+            "set a supported extension or a matching mime before calling"
         )
 
     # Ensure ``extension`` is populated for downstream submodules that key
@@ -118,8 +119,9 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
             modality=Modality.DIRECT,
             mime=routed.mime,
         )
-    raise ValueError(
-        f"Unsupported modality {modality.value!r} (extension={raw_file.extension!r}, mime={raw_file.mime!r})"
+    raise InvalidInputError(
+        f"RawFile modality {modality.value!r} (extension={raw_file.extension!r}, mime={raw_file.mime!r}) "
+        "is not parseable: this parser handles image, audio, document and plain-text files only"
     )
 
 

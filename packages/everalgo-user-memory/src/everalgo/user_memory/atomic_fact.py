@@ -63,7 +63,7 @@ class AtomicFactExtractor:
 
         Raises:
             LLMOutputError: If the reply is not a valid atomic-fact output.
-            ValueError: If ``output_language`` names no supported language, or a ChatMessage with text has no
+            InvalidInputError: If ``output_language`` names no supported language, or a ChatMessage with text has no
                 timestamp (0).
         """
         rendered = render_prompt(
@@ -114,7 +114,7 @@ class AtomicFactExtractor:
 
         Raises:
             LLMOutputError: If the reply is not a valid atomic-fact output.
-            ValueError: If ``output_language`` names no supported language.
+            InvalidInputError: If ``output_language`` names no supported language.
         """
         messages = _render_from_text_messages(
             text,
@@ -155,7 +155,7 @@ def _render_input_text(memcell: MemCell) -> str:
     extraction can preserve when each event happened. Text-less messages are dropped.
 
     Raises:
-        ValueError: If a message with text carries no timestamp (0).
+        InvalidInputError: If a message with text carries no timestamp (0).
     """
     return "\n".join(render_chat_line(message) for message in chat_messages(memcell) if message.content)
 

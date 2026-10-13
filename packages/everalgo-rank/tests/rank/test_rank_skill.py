@@ -92,7 +92,7 @@ async def test_arank_enable_rerank_without_llm_raises(
     """Module-level ``arank`` needs an LLM client when ``enable_rerank=True``."""
     import pytest as _pytest
 
-    with _pytest.raises(ValueError, match="enable_rerank=True requires llm"):
+    with _pytest.raises(ValueError, match="enable_rerank=True was passed without an llm"):
         await skill.arank(
             _mk(sparse=[], dense=skill_candidates, top_k=3),
             config=RankConfig(fusion_mode="rrf"),

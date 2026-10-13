@@ -15,7 +15,7 @@ from typing import Any, cast
 from everalgo.types import ChatMessage, Episode, MemCell, Profile
 from everalgo.user_memory._render import chat_messages
 from everalgo.user_memory.profile._items import _OBSERVED_AT, _dated_buckets, _Item, _item_label, _normalize
-from everalgo.utils import format_utc_time, render_chat_line, speaker
+from everalgo.utils import InvalidInputError, format_utc_time, render_chat_line, speaker
 
 # The fields an item shows the model, in this order: the declared order of both output item models, merged, then
 # the date. A host's own keys are not among them.
@@ -30,14 +30,20 @@ _FULLWIDTH_LESS_THAN = "\uff1c"
 def _resolve_episode_target(owner_id: str, owner_name: str | None) -> str:
     """Resolve the one literal owner reference used to select Episode narratives."""
     if not owner_id.strip():
-        raise ValueError("owner_id must be a non-blank string")
+        raise InvalidInputError(
+            "owner_id is blank: pass the owner's non-blank id, the literal the episodes name the owner by "
+            "when no owner_name is given"
+        )
     return owner_name.strip() if owner_name and owner_name.strip() else owner_id.strip()
 
 
 def _select_episodes(episodes: Sequence[object], *, target_user: str) -> tuple[Episode, ...]:
     """Validate the batch, keep the Episodes whose narrative references the target user, order them by date."""
     if isinstance(episodes, (str, bytes)) or not episodes:
-        raise ValueError("episodes must be a non-empty sequence of Episode")
+        raise InvalidInputError(
+            "episodes must be a non-empty sequence of Episode, got an empty one or a bare str/bytes: "
+            "pass a list of Episode, or skip the call when there are none"
+        )
 
     normalized_target = _normalize(target_user)
     selected: list[Episode] = []
@@ -45,12 +51,18 @@ def _select_episodes(episodes: Sequence[object], *, target_user: str) -> tuple[E
         if not isinstance(episode, Episode):
             raise TypeError(f"episodes[{index}] must be an Episode")
         if not episode.episode.strip():
-            raise ValueError(f"episodes[{index}].episode must be a non-blank string")
+            raise InvalidInputError(
+                f"episodes[{index}].episode is blank: every Episode needs its narrative text; "
+                "drop or fill the Episode before calling"
+            )
         if normalized_target in _normalize(episode.episode):
             selected.append(episode)
 
     if not selected:
-        raise ValueError(f"no episodes reference target user {target_user!r}")
+        raise InvalidInputError(
+            f"no episode narrative mentions target user {target_user!r}: the narratives must name the owner "
+            "by owner_name (or owner_id when there is none); pass the matching name or episodes that mention the owner"
+        )
     return tuple(sorted(selected, key=lambda episode: episode.timestamp))
 
 
@@ -112,7 +124,7 @@ def _render_conversation(memcells: Sequence[MemCell]) -> str:
     lines by that tag. Text-less messages and tool items are skipped.
 
     Raises:
-        ValueError: If a message with text carries no timestamp (0).
+        InvalidInputError: If a message with text carries no timestamp (0).
     """
     lines = [
         render_chat_line(_tag_speaker_with_user_id(message))
