@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0rc3] - 2026-10-13
+
+### Changed
+
+- Every system message (rerank, sufficiency check, multi-query, refined query) closes its `<custom_instructions>` block with core's `everalgo.utils.append_custom_instructions`; the package's private `_render.append_custom_instructions` is removed. The rendered system message is byte-for-byte unchanged.
+- Requires `everalgo-core>=0.6.0rc3` (the floor was `0.6.0rc2`): the package imports `everalgo.utils.append_custom_instructions`, which `0.6.0rc2` does not define.
+
 ## [0.5.0rc2] - 2026-10-13
 
 ### Changed
@@ -110,7 +117,8 @@ result = await SkillRanker(llm=...).arank(
 
 - `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as EverOS's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc3...HEAD
+[0.5.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc2...everalgo-rank/v0.5.0rc3
 [0.5.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc1...everalgo-rank/v0.5.0rc2
 [0.5.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.4.1...everalgo-rank/v0.5.0rc1
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.4.0...everalgo-rank/v0.4.1

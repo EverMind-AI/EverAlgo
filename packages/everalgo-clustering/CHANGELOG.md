@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0rc2] - 2026-10-13
+
+### Changed
+
+- `prompts.en.cluster.assemble_system_prompt` builds the `<custom_instructions>` block with core's `everalgo.utils.append_custom_instructions` instead of its own copy of the logic. The rendered system message is byte-for-byte unchanged.
+- Requires `everalgo-core>=0.6.0rc3` (the floor was `0.6.0rc1`): the package imports `everalgo.utils.append_custom_instructions`, which `0.6.0rc1` does not define.
+
 ## [0.3.0rc1] - 2026-10-13
 
 ### Changed
@@ -44,7 +51,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - Geometric fallback path inside `cluster_by_llm`: the function raises on LLM failure rather than silently falling back to geometry.
 - 3-retry loop in `cluster_by_llm`: the function raises `ValueError` immediately on bad LLM JSON.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.3.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.3.0rc2...HEAD
+[0.3.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.3.0rc1...everalgo-clustering/v0.3.0rc2
 [0.3.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.2.1...everalgo-clustering/v0.3.0rc1
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.2.0...everalgo-clustering/v0.2.1
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-clustering/v0.2.0

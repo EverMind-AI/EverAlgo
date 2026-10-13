@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from everalgo.utils import paragraphs, tagged
+import pytest
+
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 
 def test_tagged_puts_each_tag_alone_on_its_line_and_the_body_verbatim() -> None:
@@ -26,3 +28,21 @@ def test_paragraphs_puts_one_blank_line_between_blocks() -> None:
 
 def test_paragraphs_of_one_block_is_that_block() -> None:
     assert paragraphs("only") == "only"
+
+
+def test_append_custom_instructions_closes_the_system_message_with_the_tagged_block() -> None:
+    assert append_custom_instructions("rules", "Be brief.") == (
+        "rules\n\n<custom_instructions>\nBe brief.\n</custom_instructions>"
+    )
+
+
+@pytest.mark.parametrize("blank", [None, "", " ", "\n\t  \n"])
+def test_append_custom_instructions_leaves_the_system_message_unchanged_for_none_or_blank(blank: str | None) -> None:
+    assert append_custom_instructions("rules", blank) == "rules"
+
+
+def test_append_custom_instructions_places_the_text_verbatim_and_never_renders_it() -> None:
+    text = "  keep {{top_k}} and {x}  \n"
+    assert (
+        append_custom_instructions("rules", text) == f"rules\n\n<custom_instructions>\n{text}\n</custom_instructions>"
+    )

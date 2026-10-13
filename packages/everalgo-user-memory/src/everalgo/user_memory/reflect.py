@@ -15,7 +15,6 @@ from everalgo.user_memory._language import (
     OutputLanguage,
     build_language_rule,
 )
-from everalgo.user_memory._render import nonblank
 from everalgo.user_memory._replies import _call_llm_for_reflect
 
 # Re-exported by name: hosts check their own prompt text against its fields through this module.
@@ -77,9 +76,7 @@ def _render_messages(rules: str, *, custom_instructions: str | None, language_ru
         language_rule: The ``<output_language>`` text.
         user: The rendered user message.
     """
-    system = assemble_system_prompt(
-        rules, custom_instructions=nonblank(custom_instructions), language_rule=language_rule
-    )
+    system = assemble_system_prompt(rules, custom_instructions=custom_instructions, language_rule=language_rule)
     return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=user)]
 
 

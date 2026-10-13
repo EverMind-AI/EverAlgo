@@ -16,7 +16,7 @@ pip install everalgo-core
 |---|---|
 | `everalgo.types` | Key shared data types: `MemCell`, `ChatMessage`, `ConversationItem`, user / agent / knowledge memories, ranking contracts, parsed / raw content, modality helpers, tool-call types |
 | `everalgo.llm` | `LLMClient` Protocol, `LLMMessage` + content parts, `LLMOutputError`, `StrictOutputModel`, `parse_reply` / `describe_errors`, the request builders `to_openai_response_format` / `to_anthropic_response_format` / `to_gemini_response_format` / `to_ollama_response_format` |
-| `everalgo.utils` | General-purpose tools, one kind per module: `templates` (`render_prompt`), `markup` (`tagged`, `paragraphs`), `chat_lines` (`render_chat_line`, `speaker`), `timestamps` (`format_utc_time`, `format_utc_date`, `parse_utc_date`), `tokens` (`encode`, `count_tokens`, `truncate_text`), `text` (`ascii_width`, `decode_bytes`), `json` (`json_default`), `http` (`fetch_uri`), `errors` (`InvalidInputError`) |
+| `everalgo.utils` | General-purpose tools, one kind per module: `templates` (`render_prompt`), `markup` (`tagged`, `paragraphs`, `append_custom_instructions`), `chat_lines` (`render_chat_line`, `speaker`), `timestamps` (`format_utc_time`, `format_utc_date`, `parse_utc_date`), `tokens` (`encode`, `count_tokens`, `truncate_text`), `text` (`ascii_width`, `decode_bytes`), `json` (`json_default`), `http` (`fetch_uri`), `errors` (`InvalidInputError`) |
 | `everalgo.llm.schema` | The `to_<api>_response_format` request builders — a `response_format` model to each API's structured-output request value, refusing structures outside the strict subset |
 | `everalgo.llm.openai_compat` | `OpenAICompatClient` — reference `LLMClient`, OpenAI Chat Completions over httpx with no provider SDK; `LLMError`, the error it raises (not part of the contract) |
 | `everalgo.testing` | `FakeLLMClient`, `CallRecord`, `assert_*_shape` structural assertion helpers, and the `LLMClient` conformance suite (`everalgo.testing.conformance`) |
@@ -131,6 +131,7 @@ truncate_text(long_text, max_tokens=500)  # head and tail around a "[... trimmed
 | `parse_utc_date` | `everalgo.utils` | Strict `YYYY-MM-DD` → aware UTC midnight, or `None` when not that shape or not a real date |
 | `render_prompt` | `everalgo.utils` | Template substitution for `{{name}}` placeholders |
 | `tagged` / `paragraphs` | `everalgo.utils` | An XML-style prompt block, open and close tag each alone on its line / blocks joined by one blank line |
+| `append_custom_instructions` | `everalgo.utils` | Close a system message with the caller's `<custom_instructions>` block, verbatim; `None` or a blank string leaves it unchanged |
 | `render_chat_line` / `speaker` | `everalgo.utils` | One `ChatMessage` as `[YYYY-MM-DD HH:MM UTC (Wednesday)] speaker: text`, the line every operator shows a model / `sender_name`, else `sender_id` |
 | `encode` / `count_tokens` | `everalgo.utils` | Token ids / token count under `o200k_base`; special-token literals count as ordinary text |
 | `truncate_text` | `everalgo.utils` | Cut text to a token budget, keeping head and tail around a trim marker, or the head plus a suffix |

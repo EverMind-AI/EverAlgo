@@ -76,7 +76,7 @@ __all__ = [
     "assemble_system_prompt",
 ]
 
-from everalgo.utils import paragraphs, tagged
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 
 def _example(conversation: str, reply: str) -> str:
@@ -195,11 +195,11 @@ def assemble_system_prompt(*, custom_instructions: str | None, language_rule: st
 
     Args:
         custom_instructions: The caller's instructions for the ``<custom_instructions>`` block, the message's last;
-            ``None`` leaves the block out.
+            ``None`` or a blank string leaves the block out.
         language_rule: The ``<output_language>`` text, as ``user_memory._language.build_language_rule`` returns it.
 
     Returns:
         The system message.
     """
-    custom = () if custom_instructions is None else (tagged("custom_instructions", custom_instructions),)
-    return paragraphs(EPISODE_SYSTEM_PROMPT, tagged("output_language", language_rule), *custom)
+    system = paragraphs(EPISODE_SYSTEM_PROMPT, tagged("output_language", language_rule))
+    return append_custom_instructions(system, custom_instructions)

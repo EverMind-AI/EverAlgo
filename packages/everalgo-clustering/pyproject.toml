@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-clustering"
-version = "0.3.0rc1"
+version = "0.3.0rc2"
 description = "EverAlgo clustering: cluster_by_geometry / acluster_by_llm (sync bridge cluster_by_llm) functional operators with Cluster value object."
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
   "asgiref>=3.0",
-  "everalgo-core>=0.6.0rc1,<2.0.0",
+  "everalgo-core>=0.6.0rc3,<2.0.0",
   # Reply models and typed inputs import pydantic directly; declare it explicitly
   # rather than relying on the transitive pull-in via everalgo-core.
   "pydantic>=2.7",

@@ -9,7 +9,7 @@ from everalgo.types.chat import ChatMessage
 if TYPE_CHECKING:
     from everalgo.types.conversation import MemCell
 
-__all__ = ["chat_messages", "nonblank"]
+__all__ = ["chat_messages"]
 
 
 def chat_messages(memcell: MemCell) -> list[ChatMessage]:
@@ -20,8 +20,3 @@ def chat_messages(memcell: MemCell) -> list[ChatMessage]:
     caller need not pre-filter; an AgentMemCell-shaped ``MemCell`` is acceptable input.
     """
     return [item for item in memcell.items if isinstance(item, ChatMessage)]
-
-
-def nonblank(text: str | None) -> str | None:
-    """``text``, or None when it is None or only whitespace."""
-    return text if text is not None and text.strip() else None

@@ -13,14 +13,29 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.6.0rc2 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.4.0rc2 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
-| `everalgo-clustering` | 0.3.0rc1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.5.0rc2 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.9.0rc2 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-core` | 0.6.0rc3 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.4.0rc3 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
+| `everalgo-rank` | 0.5.0rc3 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.9.0rc3 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc2 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.3.0rc1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Coordinated release — 2026-10-13 (rc3)
+
+Six distributions move to the next release candidate for one refactor: the `<custom_instructions>` block that closes a system message is now built in one place, `everalgo.utils.append_custom_instructions` in `everalgo-core` 0.6.0rc3. Five packages that take `custom_instructions` each kept their own copy of that logic; they call the core function instead, and a repository test fails on a copy. The rendered system message is byte-for-byte unchanged through every public entry point. One edge differs: a direct call of an `everalgo-user-memory` prompt module's `assemble_system_prompt` with an empty or blank `custom_instructions` now leaves the block out, as `None` does, where it used to emit an empty block. Because the five packages import a function that only `everalgo-core` 0.6.0rc3 defines, their core floor becomes `>=0.6.0rc3`; `everalgo-agent-memory` and `everalgo-parser` have no change and stay at `0.6.0rc2` and `0.3.0rc2`.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.6.0rc3 | new `everalgo.utils.append_custom_instructions` |
+| `everalgo-boundary` | 0.4.0rc3 | calls the core function; core floor `>=0.6.0rc3` |
+| `everalgo-rank` | 0.5.0rc3 | calls the core function, private `_render.py` removed; core floor `>=0.6.0rc3` |
+| `everalgo-user-memory` | 0.9.0rc3 | calls the core function, private `nonblank` removed; core floor `>=0.6.0rc3` |
+| `everalgo-knowledge` | 0.3.0rc2 | calls the core function, private `_render.py` removed; core floor `>=0.6.0rc3` |
+| `everalgo-clustering` | 0.3.0rc2 | calls the core function; core floor `>=0.6.0rc3` |
+
+Detail in each `packages/everalgo-<dist>/CHANGELOG.md`.
 
 ## Coordinated release — 2026-10-13 (rc2)
 

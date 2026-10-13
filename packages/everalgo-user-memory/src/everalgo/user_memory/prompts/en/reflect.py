@@ -50,7 +50,7 @@ __all__ = [
     "assemble_system_prompt",
 ]
 
-from everalgo.utils import paragraphs, tagged
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 _SUMMARY_RULES = (
     "Also return a summary: a faithful preview of the merged narrative, readable on its own without it. Name the "
@@ -135,12 +135,12 @@ def assemble_system_prompt(rules: str, /, *, custom_instructions: str | None, la
     Args:
         rules: The mode's static rules, :data:`REFLECT_EPISODE_SYSTEM_PROMPT` or
             :data:`REFLECT_EPISODE_UPDATE_SYSTEM_PROMPT`.
-        custom_instructions: The caller's instructions for the ``<custom_instructions>`` block; ``None`` leaves the
-            block out.
+        custom_instructions: The caller's instructions for the ``<custom_instructions>`` block; ``None`` or a blank string
+            leaves the block out.
         language_rule: The ``<output_language>`` text, as ``user_memory._language.build_language_rule`` returns it.
 
     Returns:
         The system message.
     """
-    custom = () if custom_instructions is None else (tagged("custom_instructions", custom_instructions),)
-    return paragraphs(rules, tagged("output_language", language_rule), *custom)
+    system = paragraphs(rules, tagged("output_language", language_rule))
+    return append_custom_instructions(system, custom_instructions)

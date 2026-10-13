@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0rc2] - 2026-10-13
+
+### Changed
+
+- Every system message (topic-tree extraction, content merge, topic split, uncovered-block assignment, classification) closes its `<custom_instructions>` block with core's `everalgo.utils.append_custom_instructions`; the package's private `_render.append_custom_instructions` is removed. The rendered system message is byte-for-byte unchanged.
+- Requires `everalgo-core>=0.6.0rc3` (the floor was `0.6.0rc1`): the package imports `everalgo.utils.append_custom_instructions`, which `0.6.0rc1` does not define.
+
 ## [0.3.0rc1] - 2026-10-13
 
 ### Changed
@@ -58,6 +65,7 @@ Previously a reserved namespace with `Private :: Do Not Upload`.
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0
 [0.2.0rc1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0rc1
 [0.1.1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.1.1
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0rc2...HEAD
+[0.3.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0rc1...everalgo-knowledge/v0.3.0rc2
 [0.3.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.1...everalgo-knowledge/v0.3.0rc1
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.0...everalgo-knowledge/v0.2.1

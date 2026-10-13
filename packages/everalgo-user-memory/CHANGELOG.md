@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0rc3] - 2026-10-13
+
+### Changed
+
+- The episode, episode-summary, atomic-fact-from-text and reflect system messages close their `<custom_instructions>` block with core's `everalgo.utils.append_custom_instructions`; the private `_render.nonblank` and the callers' guard around it are removed, since the helper skips a blank string itself. Through `EpisodeExtractor`, `EpisodeSummarizer`, `AtomicFactExtractor.aextract_from_text` and `EpisodeReflector` the rendered system message is byte-for-byte unchanged. Only a direct call of a prompt module's `assemble_system_prompt` with an empty or blank `custom_instructions` now leaves the block out (it used to emit an empty block), the same as `None`.
+- Requires `everalgo-core>=0.6.0rc3` (the floor was `0.6.0rc2`): the package imports `everalgo.utils.append_custom_instructions`, which `0.6.0rc2` does not define.
+
 ## [0.9.0rc2] - 2026-10-13
 
 ### Added
@@ -332,7 +339,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc3...HEAD
+[0.9.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc2...everalgo-user-memory/v0.9.0rc3
 [0.9.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc1...everalgo-user-memory/v0.9.0rc2
 [0.9.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc9...everalgo-user-memory/v0.9.0rc1
 [0.8.0rc9]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.8.0rc8...everalgo-user-memory/v0.8.0rc9

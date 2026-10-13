@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-rank"
-version = "0.5.0rc2"
+version = "0.5.0rc3"
 description = "EverAlgo rank: composable retrieval strategies and four business rankers over shared fusion, weight, and rerank tools."
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
   "asgiref>=3.0",
-  "everalgo-core>=0.6.0rc2,<2.0.0",
+  "everalgo-core>=0.6.0rc3,<2.0.0",
   # Reply models and typed inputs import pydantic directly; declare it explicitly
   # rather than relying on the transitive pull-in via everalgo-core.
   "pydantic>=2.7",

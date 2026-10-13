@@ -26,12 +26,11 @@ from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from everalgo.knowledge._render import append_custom_instructions
 from everalgo.knowledge._replies import TopicSplitReply, UncoveredAssignReply, ask_llm
 from everalgo.knowledge._topic_build import collect_all_block_refs, parse_segment_ranges
 from everalgo.knowledge.prompts.en.topic_split import TOPIC_SPLIT_SYSTEM_PROMPT, TOPIC_SPLIT_USER_PROMPT
 from everalgo.knowledge.prompts.en.uncovered_assign import UNCOVERED_ASSIGN_SYSTEM_PROMPT, UNCOVERED_ASSIGN_USER_PROMPT
-from everalgo.utils import render_prompt
+from everalgo.utils import append_custom_instructions, render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient

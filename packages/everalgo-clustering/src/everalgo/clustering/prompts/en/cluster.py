@@ -27,7 +27,7 @@ from __future__ import annotations
 
 __all__ = ["CLUSTER_LLM_ASSIGN_SYSTEM_PROMPT", "CLUSTER_LLM_ASSIGN_USER_PROMPT", "assemble_system_prompt"]
 
-from everalgo.utils import paragraphs, tagged
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 _ROLE = (
     "You are a clustering expert. Your goal is to group similar and related tasks together so that patterns and "
@@ -86,6 +86,4 @@ def assemble_system_prompt(*, custom_instructions: str | None) -> str:
     Returns:
         The system message.
     """
-    if custom_instructions is None or not custom_instructions.strip():
-        return CLUSTER_LLM_ASSIGN_SYSTEM_PROMPT
-    return paragraphs(CLUSTER_LLM_ASSIGN_SYSTEM_PROMPT, tagged("custom_instructions", custom_instructions))
+    return append_custom_instructions(CLUSTER_LLM_ASSIGN_SYSTEM_PROMPT, custom_instructions)

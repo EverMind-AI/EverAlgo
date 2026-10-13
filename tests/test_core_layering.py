@@ -5,8 +5,11 @@
 - No distribution imports a private name from another distribution: they are released separately, so a private name
   could change under a dependent without a version bump.
 - Only ``everalgo.utils.timestamps`` renders or parses a time, so every prompt shows a model one shape.
-- Prompt markup (``tagged`` / ``paragraphs``), the chat line (``speaker`` / ``render_chat_line``) and reply parsing
-  (``parse_reply`` / ``describe_errors``) come from core: no distribution defines a private copy of its own.
+- Prompt markup (``tagged`` / ``paragraphs`` / ``append_custom_instructions``), the chat line (``speaker`` /
+  ``render_chat_line``) and reply parsing (``parse_reply`` / ``describe_errors``) come from core: no distribution
+  defines a copy of its own.
+- Only ``everalgo.utils.markup`` builds the ``<custom_instructions>`` block, so every system message closes with the
+  same block, built the same way.
 
 The imports are read from the source with ``ast``, so a check needs no package to be importable. Lives at the
 repo-root ``tests/`` because the last rule spans every distribution, like ``test_logging_conventions.py``.
@@ -36,10 +39,21 @@ _TIME_CODECS = frozenset({"fromtimestamp", "strftime", "strptime", "utcfromtimes
 #: A strftime directive such as ``%Y``; a bare ``%`` (``{ratio:.1%}``) is the percent format, not a time.
 _STRFTIME_DIRECTIVE = re.compile(r"%[A-Za-z]")
 
-#: The private names the core helpers had while each package kept its own copy.
+#: The names the core helpers had, or would have, in a package that kept its own copy.
 _CORE_HELPER_COPIES = frozenset(
-    {"_tagged", "_paragraphs", "_open_tag_body", "_speaker", "_parse_reply", "_describe_errors"}
+    {
+        "_tagged",
+        "_paragraphs",
+        "_open_tag_body",
+        "_speaker",
+        "_parse_reply",
+        "_describe_errors",
+        "append_custom_instructions",
+        "nonblank",
+    }
 )
+_MARKUP_MODULE = _REPO_ROOT / "packages/everalgo-core/src/everalgo/utils/markup.py"
+_CUSTOM_INSTRUCTIONS_TAG = "custom_instructions"
 #: Files that held such a copy; each must still be scanned, so a moved or renamed file cannot pass vacuously.
 _FORMER_COPY_HOLDERS = frozenset(
     _REPO_ROOT / f"packages/{relative}"
@@ -47,11 +61,15 @@ _FORMER_COPY_HOLDERS = frozenset(
         "everalgo-boundary/src/everalgo/boundary/_render.py",
         "everalgo-boundary/src/everalgo/boundary/_replies.py",
         "everalgo-boundary/src/everalgo/boundary/prompts/en/chat.py",
+        "everalgo-clustering/src/everalgo/clustering/prompts/en/cluster.py",
+        "everalgo-knowledge/src/everalgo/knowledge/prompts/en/category_classify.py",
+        "everalgo-user-memory/src/everalgo/user_memory/_render.py",
         "everalgo-user-memory/src/everalgo/user_memory/_replies.py",
         "everalgo-user-memory/src/everalgo/user_memory/episode/_replies.py",
         "everalgo-user-memory/src/everalgo/user_memory/profile/_replies.py",
         "everalgo-user-memory/src/everalgo/user_memory/prompts/en/atomic_fact_from_text.py",
         "everalgo-user-memory/src/everalgo/user_memory/prompts/en/episode.py",
+        "everalgo-user-memory/src/everalgo/user_memory/prompts/en/episode_summary.py",
         "everalgo-user-memory/src/everalgo/user_memory/prompts/en/profile_from_episode_texts.py",
         "everalgo-user-memory/src/everalgo/user_memory/prompts/en/reflect.py",
     )
@@ -155,8 +173,48 @@ def test_no_distribution_defines_its_own_copy_of_a_core_prompt_helper() -> None:
     offenders = [
         f"{path.relative_to(_REPO_ROOT)}:{node.lineno}: def {node.name}"
         for path in sources
+        if path != _MARKUP_MODULE
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name in _CORE_HELPER_COPIES
     ]
     assert _FORMER_COPY_HOLDERS.issubset(sources)
     assert offenders == [], offenders
+
+
+def test_only_the_markup_module_builds_the_custom_instructions_block() -> None:
+    sources = sorted(_REPO_ROOT.glob("packages/*/src/**/*.py"))
+    offenders = [
+        f"{path.relative_to(_REPO_ROOT)}:{line}"
+        for path in sources
+        if path != _MARKUP_MODULE
+        for line in _custom_instructions_tag_lines(path)
+    ]
+    assert _MARKUP_MODULE in sources
+    assert offenders == [], offenders
+
+
+def test_a_tagged_custom_instructions_call_is_found_wherever_it_is_spelled(tmp_path: Path) -> None:
+    source = tmp_path / "copy.py"
+    source.write_text(
+        'a = tagged("custom_instructions", text)\n'
+        'b = markup.tagged("custom_instructions", text)\n'
+        'c = tagged("output_language", text)\n',
+        encoding="utf-8",
+    )
+    assert _custom_instructions_tag_lines(source) == [1, 2]
+
+
+def _custom_instructions_tag_lines(path: Path) -> list[int]:
+    """The lines calling ``tagged("custom_instructions", ...)``, bare or through a module."""
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "tagged")
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "tagged")
+        )
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == _CUSTOM_INSTRUCTIONS_TAG
+    ]
