@@ -2,7 +2,7 @@
 
 Two-stage:
 
-1. **Fetch** ``raw_file.uri`` via ``_utils.fetch_uri``. ``http`` / ``https``
+1. **Fetch** ``raw_file.uri`` via ``everalgo.utils.fetch_uri``. ``http`` / ``https``
    only; ``file://`` and other local-filesystem schemes are rejected so the
    library stays stateless re: the host filesystem (AGENTS.md §1).
 2. **Dispatch by the fetched Content-Type**:
@@ -33,7 +33,6 @@ from urllib.parse import urljoin
 from asgiref.sync import async_to_sync
 from bs4 import BeautifulSoup
 
-from everalgo.parser._utils import decode_bytes, fetch_uri
 from everalgo.types import (
     Modality,
     ParsedContent,
@@ -41,6 +40,7 @@ from everalgo.types import (
     get_extension_from_mime,
     get_modality_from_mime,
 )
+from everalgo.utils import decode_bytes, fetch_uri
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient

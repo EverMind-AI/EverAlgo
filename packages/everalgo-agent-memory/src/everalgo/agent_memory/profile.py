@@ -36,15 +36,16 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from asgiref.sync import async_to_sync
 
-from everalgo.agent_memory._text import count_tokens
-from everalgo.agent_memory.prompts.profile_update import AGENT_PROFILE_UPDATE_PROMPT
-from everalgo.llm.format import format_message_timestamp
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
+from everalgo.agent_memory._replies import _call_llm_for_profile_update
+from everalgo.agent_memory.prompts.profile_update import (
+    AGENT_PROFILE_UPDATE_SYSTEM_PROMPT,
+    AGENT_PROFILE_UPDATE_USER_PROMPT,
+)
+from everalgo.llm import LLMMessage
 from everalgo.types import (
     AgentProfilePatch,
     AgentProfileSignal,
@@ -52,19 +53,20 @@ from everalgo.types import (
     ChatMessage,
     MemCell,
 )
-from everalgo.types._render import render_content
+from everalgo.utils import count_tokens, render_chat_line, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from everalgo.agent_memory._replies import _ProfileCandidate, _ProfilePatch
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    # Re-exported prompt constant — monkey-patch at startup to override the LLM prompt
-    "AGENT_PROFILE_UPDATE_PROMPT",
+    # Re-exported system prompt — monkey-patch at startup to override the rules the LLM is given
+    "AGENT_PROFILE_UPDATE_SYSTEM_PROMPT",
     "AgentProfileExtractor",
 ]
 
@@ -83,7 +85,7 @@ class _Candidate:
     evidence: str
     reason: str
     is_conflict: bool  # True when novelty == "conflict" (overrides an existing rule)
-    patch: dict[str, Any] | None
+    patch: _ProfilePatch | None
 
 
 class AgentProfileExtractor:
@@ -123,7 +125,6 @@ class AgentProfileExtractor:
         soul_md: str,
         agents_md: str,
         pending_signals: Sequence[AgentProfileSignal] = (),
-        prompt: str | None = None,
     ) -> AgentProfileUpdate:
         """Screen ``memcell``'s conversation for durable config signals; return validated patches + diffs.
 
@@ -135,7 +136,6 @@ class AgentProfileExtractor:
             agents_md: Current full text of AGENTS.md.
             pending_signals: Implicit signals persisted by the caller from previous runs; matched
                 recurrences accumulate toward the ``min_recurrence`` strength gate.
-            prompt: Prompt override; None uses the bundled default.
 
         Returns:
             An :class:`AgentProfileUpdate`. ``patches`` holds every applied patch — those with
@@ -145,9 +145,9 @@ class AgentProfileExtractor:
             Most runs return a noop (empty patches, empty diffs).
 
         Raises:
-            LLMError: Propagated from the underlying LLM client call.
-            json.JSONDecodeError: If the LLM response is not valid JSON.
-            ValueError: If the LLM response is missing the required top-level key.
+            LLMOutputError: If the reply is not a valid profile update output.
+            ValueError: If a user or assistant message with text carries no timestamp (0). The error names the
+                message's id only, never its text.
         """
         noop = AgentProfileUpdate(new_soul_md=soul_md, new_agents_md=agents_md)
         if not memcell.items:
@@ -162,16 +162,22 @@ class AgentProfileExtractor:
         # Single LLM call: route + four gate verdicts + patch proposal per candidate. The prompt sees
         # the full chat view (assistant text turns included as context, tool traffic excluded); config
         # authority stays user-only — the evidence check below runs against user messages alone.
-        rendered = render_prompt(
-            AGENT_PROFILE_UPDATE_PROMPT,
-            prompt,
+        user = render_prompt(
+            AGENT_PROFILE_UPDATE_USER_PROMPT,
+            None,
             soul_md=soul_md or "(empty)",
             agents_md=agents_md or "(empty)",
             pending_signals=_format_pending_signals(pending_signals),
             conversation=_render_chat(memcell, roles=("user", "assistant")),
         )
-        data = await _call_llm_for_profile_update(self._llm, rendered)
-        raw_candidates = cast("list[Any]", data["candidates"])
+        reply = await _call_llm_for_profile_update(
+            self._llm,
+            [
+                LLMMessage(role="system", content=AGENT_PROFILE_UPDATE_SYSTEM_PROMPT),
+                LLMMessage(role="user", content=user),
+            ],
+        )
+        raw_candidates = reply.candidates
 
         # Code-enforced gates — the LLM reports, the code decides.
         survivors, below_gate_signals = _apply_gates(
@@ -216,7 +222,7 @@ class AgentProfileExtractor:
 
 
 def _apply_gates(  # noqa: C901  — one branch per gate, algorithm-intrinsic
-    raw_candidates: Sequence[Any],
+    raw_candidates: Sequence[_ProfileCandidate],
     *,
     user_messages: str,
     pending_signals: Sequence[AgentProfileSignal],
@@ -233,46 +239,42 @@ def _apply_gates(  # noqa: C901  — one branch per gate, algorithm-intrinsic
     signals: list[AgentProfileSignal] = []
 
     for cand in raw_candidates:
-        if not isinstance(cand, dict):
-            logger.warning("candidate is not a dict, skipping: %r", cand)
-            continue
-        cand = cast("dict[str, Any]", cand)
-        signal_text = str(cand.get("signal") or "")
+        signal_text = cand.signal
 
         # Gate 0 — speech act: only a directive (the user instructing the agent in their own voice)
         # may produce config. Questions / venting / withdrawn ideas / deferrals / denials / pasted
         # material / shared information are dropped wholesale, however config-shaped their content.
-        if cand.get("speech_act") != "directive":
-            logger.info("dropping candidate (gate 0 speech_act=%r): %s", cand.get("speech_act"), signal_text)
+        if cand.speech_act != "directive":
+            logger.info("dropping candidate (gate 0 speech_act=%r): %s", cand.speech_act, signal_text)
             continue
-        target = cand.get("target")
-        if target not in ("soul", "agents"):
+        target = cand.target
+        if target == "none":
             logger.info("dropping candidate (routing target=%r): %s", target, signal_text)
             continue
-        if cand.get("directed_at") != "agent":
-            logger.info("dropping candidate (gate 2 directed_at=%r): %s", cand.get("directed_at"), signal_text)
+        if cand.directed_at != "agent":
+            logger.info("dropping candidate (gate 2 directed_at=%r): %s", cand.directed_at, signal_text)
             continue
-        persistence = cand.get("persistence")
-        if persistence not in ("explicit", "implicit"):
+        persistence = cand.persistence
+        if persistence == "one_off":
             logger.info("dropping candidate (gate 1 persistence=%r): %s", persistence, signal_text)
             continue
-        novelty = cand.get("novelty")
+        novelty = cand.novelty
         if novelty == "redundant":
             logger.info("dropping candidate (gate 4 redundant): %s", signal_text)
             continue
 
         # Anti-hallucination guard: the evidence quote must literally appear in the user messages.
-        evidence = str(cand.get("evidence") or "")
+        evidence = cand.evidence
         if not evidence or _normalize(evidence) not in _normalize(user_messages):
             logger.info("dropping candidate (evidence not found verbatim in user messages): %s", signal_text)
             continue
 
         if persistence == "implicit":
-            matched_key = cand.get("matched_pending_key")
-            prior = pending_by_key.get(matched_key) if isinstance(matched_key, str) else None
+            matched_key = cand.matched_pending_key
+            prior = pending_by_key.get(matched_key) if matched_key is not None else None
             occurrences = (prior.occurrences if prior is not None else 0) + 1
             if occurrences < min_recurrence:
-                key = prior.key if prior is not None else str(cand.get("key") or "")
+                key = prior.key if prior is not None else cand.key
                 if key:
                     signals.append(
                         AgentProfileSignal(
@@ -295,15 +297,14 @@ def _apply_gates(  # noqa: C901  — one branch per gate, algorithm-intrinsic
                 "implicit signal passed gate 3 (occurrences=%d >= %d): %s", occurrences, min_recurrence, signal_text
             )
 
-        patch = cand.get("patch")
         survivors.append(
             _Candidate(
                 target=target,
                 signal=signal_text,
                 evidence=evidence,
-                reason=str(cand.get("reason") or ""),
+                reason=cand.reason,
                 is_conflict=novelty == "conflict",
-                patch=cast("dict[str, Any]", patch) if isinstance(patch, dict) else None,
+                patch=cand.patch,
             )
         )
     return survivors, signals
@@ -328,13 +329,10 @@ def _validate_patches(
             logger.info("survivor carries no patch, skipping: %s", candidate.signal)
             continue
 
-        action = op.get("action")
-        if action not in ("add", "modify"):
-            logger.warning("patch action %r invalid, skipping", action)
-            continue
-        section = str(op.get("section") or "").strip()
-        new_text = str(op.get("new_text") or "")
-        old_text = str(op.get("old_text") or "")
+        action = op.action
+        section = op.section.strip()
+        new_text = op.new_text
+        old_text = op.old_text
         if not section or not new_text.strip():
             logger.warning("patch missing section or new_text, skipping: %r", op)
             continue
@@ -454,22 +452,22 @@ def _unified_diff(old: str, new: str, filename: str) -> str:
 
 
 def _render_chat(memcell: MemCell, *, roles: tuple[str, ...]) -> str:
-    """Render ChatMessage items with the given roles as ``[ts] role(sender): content`` lines.
+    """Render ChatMessage items with the given roles as ``(role) [time (weekday)] speaker: content`` lines.
 
-    Tool traffic (``ToolCallRequest`` / ``ToolCallResult``) is always skipped. Called with
-    ``("user", "assistant")`` to build the prompt's conversation view and with ``("user",)`` to build
-    the user-only text that the evidence anti-hallucination check runs against.
+    Each line is :func:`~everalgo.utils.render_chat_line`'s, prefixed with the message's role: the prompt grants
+    config authority to user turns only, and a speaker label alone does not say which side spoke. Tool traffic
+    (``ToolCallRequest`` / ``ToolCallResult``) and messages with no text are skipped. Called with
+    ``("user", "assistant")`` to build the prompt's conversation view and with ``("user",)`` to build the user-only
+    text that the evidence anti-hallucination check runs against.
+
+    Raises:
+        ValueError: If a message with text carries no timestamp (0).
     """
-    lines: list[str] = []
-    for item in memcell.items:
-        if not isinstance(item, ChatMessage) or item.role not in roles:
-            continue
-        text = render_content(item.content)
-        if not text:
-            continue
-        speaker = item.sender_name or item.sender_id or item.role
-        lines.append(f"[{format_message_timestamp(item.timestamp)}] {item.role}({speaker}): {text}")
-    return "\n".join(lines)
+    return "\n".join(
+        f"({item.role}) {render_chat_line(item)}"
+        for item in memcell.items
+        if isinstance(item, ChatMessage) and item.role in roles and item.content
+    )
 
 
 def _format_pending_signals(pending_signals: Sequence[AgentProfileSignal]) -> str:
@@ -491,39 +489,3 @@ def _format_pending_signals(pending_signals: Sequence[AgentProfileSignal]) -> st
 def _normalize(text: str) -> str:
     """Collapse all whitespace runs to single spaces for tolerant substring containment checks."""
     return " ".join(text.split())
-
-
-# ---------------------------------------------------------------------------
-# LLM callsite — brace-balanced JSON extraction (mirror case.py / skill.py).
-# ---------------------------------------------------------------------------
-
-
-async def _call_llm_for_profile_update(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM for the gate + patch step and return a validated dict with a ``candidates`` list.
-
-    Raises:
-        ValueError: If no JSON found or ``candidates`` key missing / not a list.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    data: dict[str, Any] = json.loads(_extract_json_object(response.content))
-    if "candidates" not in data:
-        raise ValueError(f"Profile update response missing 'candidates' key: {list(data.keys())!r}")
-    if not isinstance(data["candidates"], list):
-        raise ValueError(f"candidates must be a list, got {type(data['candidates']).__name__}")  # noqa: TRY004
-    return data
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in profile LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in profile LLM response: {text[:200]!r}")

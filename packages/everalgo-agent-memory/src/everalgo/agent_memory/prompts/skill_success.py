@@ -1,6 +1,32 @@
-"""Prompt for AgentSkillExtractor success path (max(quality_score) >= 0.5 cases)."""
+"""Prompts for the AgentSkillExtractor success path (``quality_score >= failure_quality_threshold`` cases).
 
-AGENT_SKILL_SUCCESS_EXTRACT_PROMPT = """You are an expert at extracting reusable problem-solving strategies from concrete agent task cases.
+The SYSTEM message holds the rules and the reply skeleton, with no placeholder, so every call shares it. The USER
+message carries only the data: the new case in ``<new_cases>``, then the existing skills, each with its index, in
+``<existing_skills>``. Both are JSON, rendered by ``skill_ops``.
+
+Every rule sentence is the single-message prompt's, unchanged. The two bracketed labels and their data moved to the
+user message, the label's ``(Each item has an index number)`` note with them, since the opening list already says each
+existing skill carries one; and the ```` ```json ```` fence around the skeleton gave way to the sentence ``Reply
+with one JSON object, nothing else.``, because the reply is parsed as a bare JSON object, a fenced sample invites a
+fenced reply, and the fence was the prompt's only mention of JSON.
+
+Constants:
+    - ``AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT`` — the static rules.
+    - ``SKILL_EXTRACT_USER_PROMPT`` (``prompts.skill_failure`` shares it) — the data. Placeholders:
+      ``{{new_case_json}}`` and ``{{existing_skills_json}}``.
+
+Output schema: ``{"operations": [operation, ...], "update_note": str}``, held to
+``agent_memory._replies._SkillExtractReply``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT", "SKILL_EXTRACT_USER_PROMPT"]
+
+from everalgo.utils import paragraphs, tagged
+
+AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT = """\
+You are an expert at extracting reusable problem-solving strategies from concrete agent task cases.
 
 You will receive:
 1. **New case(s)** from a cluster of semantically similar tasks — all with quality_score >= 0.5.
@@ -47,12 +73,6 @@ Your job: distill **actionable strategies** into reusable **Skills** via increme
   - **Max 4 pitfalls.** When adding a new one beyond 4, replace the most generic existing pitfall.
   - **No parenthetical catalogs**: FORBIDDEN to stuff dozens of case-specific terms (names, dates, compounds, institutions, etc.) inside a single parenthetical `(e.g., X, Y, Z, ...)`. Keep each field concise — generalize the pattern, illustrate with 1-2 examples only.
 
-[New AgentCase(s) to integrate]
-{new_case_json}
-
-[Existing skills for this cluster](Each item has an index number)
-{existing_skills_json}
-
 [Task]
 Analyze the new case(s) and output a list of operations (add / update / none).
 
@@ -92,15 +112,18 @@ For each new case, compare against each existing skill:
 **CRITICAL LANGUAGE RULE**: Output in the SAME language as the input conversation content.
 
 [Output Format]
-```json
-{{
+Reply with one JSON object, nothing else.
+{
   "operations": [
-    {{"action": "add", "data": {{"name": "Short descriptive name (max 10 words)", "description": "...", "content": "## Steps\\n1. ...", "confidence": 0.5}}}},
-    {{"action": "update", "index": 0, "data": {{"content": "...", "confidence": 0.7}}}},
-    {{"action": "update", "index": 1, "data": {{"confidence": 0.65}}}},
-    {{"action": "none"}}
+    {"action": "add", "data": {"name": "Short descriptive name (max 10 words)", "description": "...", "content": "## Steps\\n1. ...", "confidence": 0.5}},
+    {"action": "update", "index": 0, "data": {"content": "...", "confidence": 0.7}},
+    {"action": "update", "index": 1, "data": {"confidence": 0.65}},
+    {"action": "none"}
   ],
   "update_note": "Overlap check: new case core steps=[X, Y, Z]. skill[0] covers X and Y (67% overlap) → update. ..."
-}}
-```
-"""
+}"""
+
+SKILL_EXTRACT_USER_PROMPT = paragraphs(
+    tagged("new_cases", "{{new_case_json}}"),
+    tagged("existing_skills", "{{existing_skills_json}}"),
+)

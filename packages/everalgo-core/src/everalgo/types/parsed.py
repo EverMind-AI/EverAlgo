@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+__all__ = ["ParsedContent"]
+
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field

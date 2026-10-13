@@ -66,17 +66,11 @@ Swap the real `LLMClient` for `FakeLLMClient`, pass a `MemCell`, check the retur
 
 ```python
 import json
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory import EpisodeExtractor
 
 fake = FakeLLMClient(
-    responses=[
-        ChatResponse(
-            content=json.dumps({"title": "Test", "content": "Summary.", "summary": "Preview."}),
-            model="fake",
-        )
-    ]
+    responses=[json.dumps({"content": "Summary.", "summary": "Preview.", "title": "Test"})]
 )
 episode = await EpisodeExtractor(llm=fake).aextract(memcell, sender_id="u_alice")
 assert episode.subject == "Test"
@@ -95,5 +89,5 @@ episode, foresights, facts = await asyncio.gather(
 
 **Prompt customisation does not require a framework.**
 Prompts are plain Python string constants.
-Override a prompt for a single call with the `prompt=` argument; override globally with a one-time monkey-patch at startup.
+Add per-call instructions with the `custom_instructions=` argument, which lands verbatim as the closing block of the system message; override a prompt globally with a one-time monkey-patch at startup.
 No plugin system, no configuration DSL needed.

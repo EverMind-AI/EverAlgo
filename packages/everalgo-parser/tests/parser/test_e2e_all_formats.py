@@ -12,13 +12,16 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from everalgo.llm.config import LLMConfig
-from everalgo.llm.providers.openai_compat import OpenAICompatClient
+from everalgo.llm.openai_compat import OpenAICompatClient
 from everalgo.parser import aparse
 from everalgo.types import Modality, RawFile
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
@@ -27,20 +30,24 @@ TEST_MODEL = "google/gemini-3-flash-preview"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
-@pytest.fixture(scope="module")
-def llm_client() -> OpenAICompatClient:
+@pytest.fixture
+async def llm_client() -> AsyncIterator[OpenAICompatClient]:
+    # Function-scoped: the client owns an httpx pool bound to the running loop, and every test gets its own loop.
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         pytest.skip("OPENROUTER_API_KEY not set; skipping all real-LLM e2e tests")
-    return OpenAICompatClient(
-        LLMConfig(
-            model=TEST_MODEL,
-            api_key=api_key,  # type: ignore[arg-type]
-            base_url=OPENROUTER_BASE_URL,
-            max_tokens=8000,
-            timeout=180.0,
-        )
+    client = OpenAICompatClient(
+        model=TEST_MODEL,
+        api_key=api_key,
+        base_url=OPENROUTER_BASE_URL,
+        temperature=0.0,
+        max_tokens=8000,
+        timeout=180.0,
     )
+    try:
+        yield client
+    finally:
+        await client.aclose()
 
 
 # ============================================================
@@ -73,6 +80,8 @@ async def test_e2e_llm_backed_modalities(
     fixture = FIXTURES_DIR / fixture_name
     assert fixture.exists(), f"Fixture missing: {fixture}"
     extension = fixture.suffix.lstrip(".")
+    if extension == "svg":
+        pytest.importorskip("cairosvg", reason="SVG rasterisation needs the optional [svg] extra")
     rf = RawFile(content=fixture.read_bytes(), extension=extension)
 
     result = await aparse(rf, llm=llm_client)
@@ -82,7 +91,7 @@ async def test_e2e_llm_backed_modalities(
     assert len(result.text) >= 5, f"Suspiciously short extraction for {fixture_name}: {result.text!r}"
 
     print(f"\n=== {fixture_name} ({expected_modality.value}) ===")
-    print(f"chars={len(result.text)} model={result.metadata.get('model')}")
+    print(f"chars={len(result.text)}")
     print(result.text[:300])
 
 

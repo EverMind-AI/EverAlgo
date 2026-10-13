@@ -74,8 +74,8 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 [4] Clustering             ← cluster_by_geometry，基于 episode embedding + 时间窗
 ```
 
-1. **`BoundaryDetector`**（everalgo-user-memory）：把消息序列切成多个 MemCell，每个是 1~N 条消息的语义连续块。**逐消息增量检测**：调 `adetect_step` 一条条喂（`extract.py:_detect_all_boundaries`），caller 侧只负责 front-2-buffer（前 2 条不触发 LLM）和流末把残余 `tail` flush 成最后一个 cell；smart-mask 阈值门控、masking、force-split（`hard_token_limit=8192` / `hard_message_limit=50`）与 cut-and-bridge 状态转移都封装在 `adetect_step` 内。注意 50 是内部 force-split 的硬上限，**不是「每批 50 条」的批大小**。
-2. **`EpisodeExtractor`**：对每个 MemCell 生成叙述 —— `subject`（短标题）+ `episode`（长叙述正文）。
+1. **`BoundaryDetector`**（everalgo-user-memory）：把消息序列切成多个 MemCell，每个是 1~N 条消息的语义连续块。**逐消息增量检测**：调 `adetect_step` 一条条喂（`extract.py:_detect_all_boundaries`），caller 侧只负责 front-2-buffer（前 2 条不触发 LLM）和流末把残余 `tail` flush 成最后一个 cell；smart-mask 阈值门控、masking、force-split（`hard_token_limit=65536` / `hard_message_limit=500`，everalgo.boundary 默认值）与 cut-and-bridge 状态转移都封装在 `adetect_step` 内。注意 500 是内部 force-split 的硬上限，**不是批大小**。
+2. **`EpisodeExtractor`**：对每个 MemCell 生成叙述 —— `subject`（短标题）+ `episode`（长叙述正文）+ `summary`（展示摘要）。模型回复按 `{language, content, summary, title}` 四字段严格校验，不合格或 `content` / `summary` / `title` 为空即抛 `LLMOutputError`，算子内不重试；`summary` 超 400 宽度按句截断，不再发第二次调用。
 3. **Embedding**：对 episode text 和 subject 分别做 embedding，结果存入 `episodes_conv_<i>.json`。
 4. **Clustering**：对每个 Episode 用其 embedding 增量调 `everalgo.clustering.cluster_by_geometry`（cosine + 时间窗，`cluster_similarity_threshold=0.70` / `cluster_max_time_gap_days=7.0`）分簇，落 `clusters_conv_<i>.json`。
 
@@ -119,7 +119,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
     "owner_id": null,
     "memcell_ids": ["0"],
     "subject": "Caroline reconnects with Melanie",
-    "episode": "2023-05-08 03:56 UTC — Caroline and Melanie reconnected after years apart and caught up on each other's lives...",
+    "episode": "Caroline and Melanie reconnected after years apart and caught up on each other's lives...",
     "summary": "Caroline and Melanie reconnected after years apart.",
     "timestamp": 1683525360000,
     "embeddings": {
@@ -130,7 +130,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 ]
 ```
 
-字段名是 **`episode`**（算法命名），不是 `content`；`summary` 是必填展示摘要。正文和摘要均来自 LLM，代码不拼接时间文本（`everalgo.user_memory.episode._build_episode`）。`timestamp` 字段（ms epoch）另行保存该切片的关闭时间，但**不进答题上下文**——答题阶段只取 `subject` 与 `episode` 两个字段（见 `common/stages/answer.py`），所以正文中的时间线索必须由模型生成。
+字段名是 **`episode`**（算法命名），不是 `content`；`summary` 是必填展示摘要。正文和摘要均来自 LLM，代码不拼接时间文本（`everalgo.user_memory.episode._extractor._build_episode`）。`timestamp` 字段（ms epoch）另行保存该切片的关闭时间，但**不进答题上下文**——答题阶段只取 `subject` 与 `episode` 两个字段（见 `common/stages/answer.py`），所以正文中的时间线索必须由模型生成。
 
 #### `clusters_conv_<i>.json` —— 簇信息
 
@@ -395,7 +395,7 @@ top_episodes = [episodes_map[conv_id][ep_id] for ep_id in ep_ids[:10] if ep_id i
 # 2. 拼 context（每条 doc 间用 "\n---\n\n" 明确分块）
 context = f"""Episodes memories for conversation between Caroline and Melanie:
 
-Caroline reconnects with Melanie: 2023-05-08 03:56 UTC — Caroline and Melanie reconnected after years apart...
+Caroline reconnects with Melanie: Caroline and Melanie reconnected after years apart...
 ---
 
 Discussion about LGBTQ support: Caroline shared that...
@@ -409,9 +409,10 @@ prompt = ANSWER_PROMPT.format(context=context, question=question)
 
 # 4. LLM 输出长 CoT，STEP 7 节是 "## STEP 7: FINAL ANSWER"
 #    空结果 / 异常都重试：_ANSWER_RETRIES=5 次，退避 1.0 * 2**attempt
+#    LLM 契约没有自由文本档，CoT 整段装在 {"text": ...} 里（_AnswerReply），parse_reply 校验后再抠答案
 for attempt in range(5):
-    response = await llm.chat([...], temperature=0.0, max_tokens=32768)
-    answer = _extract_final_answer(response.content)
+    reply = await llm.achat([...], response_format=_AnswerReply, temperature=0.0, max_tokens=32768)
+    answer = _extract_final_answer(parse_reply(_AnswerReply, reply, operator="answer").text)
     if answer:
         break
 
@@ -446,6 +447,8 @@ Stage 5 的 `aagentic_retrieve` 以 `top_n=response_top_k=10` 返回，`members`
 ]
 ```
 
+`prompt_tokens` / `completion_tokens`（这里与阶段 5 的 `retrieval_metadata`、阶段 7 的 judge 同理）是 tiktoken `o200k_base` 对请求消息与回复文本的估算（`metrics.estimate_chat_tokens`），不是账单用量：`LLMClient.achat` 只返回回复文本。
+
 ---
 
 ## 阶段 7 —— 评估（Evaluate）
@@ -464,7 +467,7 @@ result = await allm_judge(
     judge_prompt=JUDGE_PROMPT, judge_system_prompt=JUDGE_SYSTEM_PROMPT,
     llm=services.llm, num_runs=3, judge_model="gpt-4o-mini", judge_temperature=0.0,
 )
-# JUDGE_PROMPT 要求 LLM 输出 {"label": "CORRECT" | "WRONG"}
+# JUDGE_PROMPT 要求先写一句理由、再给 label；response_format=_JudgeVerdict 即 {"reasoning": str, "label": "CORRECT" | "WRONG"}
 # per-question is_correct = 多数投票 sum(runs) > num_runs/2，存入 detailed_results
 
 # 3. headline accuracy = mean-of-runs（不是 per-question 多数投票后再算比例）：

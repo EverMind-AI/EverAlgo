@@ -35,13 +35,13 @@ everalgo/                              # monorepo, uv virtual workspace
 │   └── api/                            # API reference (per-distribution)
 ├── examples/                          # runnable quickstart scripts (01–07, use FakeLLMClient)
 ├── packages/
-│   ├── everalgo-core/                 # types, llm (+ providers), prompts, testing
-│   ├── everalgo-boundary/             # detect_boundaries + DetectionResult + workspace stub
-│   ├── everalgo-clustering/           # cluster_by_geometry / cluster_by_llm over list[Cluster]
+│   ├── everalgo-core/                 # llm (contract), types, utils, testing
+│   ├── everalgo-boundary/             # BoundaryDetector + adetect_boundaries / detect_boundaries + DetectionResult + workspace stub
+│   ├── everalgo-clustering/           # cluster_by_geometry / acluster_by_llm over list[Cluster]
 │   ├── everalgo-rank/                 # retrieval strategies + business rankers + ranking toolkit
 │   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (video deferred)
-│   ├── everalgo-user-memory/          # BoundaryDetector + Episode / Foresight / AtomicFact / Profile
-│   ├── everalgo-agent-memory/         # AgentBoundaryDetector + AgentCase / AgentSkill / AgentProfileUpdate
+│   ├── everalgo-user-memory/          # Episode / Foresight / AtomicFact / Profile + BoundaryDetector re-export
+│   ├── everalgo-agent-memory/         # AgentCase / AgentSkill / AgentProfileUpdate + BoundaryDetector re-export
 │   └── everalgo-knowledge/            # KnowledgeExtractor + aclassify_category (file-based knowledge extraction)
 ├── benchmarks/                        # internal LoCoMo benchmark suite ([tool.uv] package = false, not published)
 └── tests/
@@ -183,15 +183,16 @@ Reference: [uv workspace documentation](https://docs.astral.sh/uv/concepts/proje
 
 The full rationale lives in `docs/concepts/architecture.md`. Hard rules:
 
-- **Naming contract — an `a` prefix always means async.** Methods named `aextract` / `arank` / `adetect` / `aparse` are **native async**; call them with `await`. Most names without the prefix are synchronous: `count_tokens` / `rrf` / `cluster_by_geometry` are pure compute, while `extract` / `rank` / `detect` / `parse` may be blocking `async_to_sync` bridges over I/O. Three established interfaces are native async despite lacking the prefix: `LLMClient.chat`, low-level `detect_boundaries`, and `cluster_by_llm`; all must be awaited. Never call a sync bridge from a running event loop.
-- **I/O operators: async-first; sync bridge where exposed.** Native async implementations use `asyncio`. Most high-level class operators and retrieval functions derive a sync convenience method through `asgiref.async_to_sync`; low-level `detect_boundaries` and `cluster_by_llm` currently expose async only. Never call a sync bridge from inside a running event loop.
-- **Pure-compute operators: sync only.** No async wrapper for `fusion.rrf`, `_tokenize.count_tokens`, clustering distances, etc. Mirrors numpy / scipy / sklearn / pandas conventions.
-- **Prompts as Python string modules.** Concrete prompt strings live in `<subpkg>/prompts/{en,zh}/<name>.py` as module-level constants. Editing a prompt = editing a `.py` file. No external `.md` / `.yaml` / `.toml` prompt stores. Caller customisation: per-call `prompt=` argument (fine-grained) or monkey-patching the module constant at startup (coarse-grained).
+- **Naming contract — an `a` prefix always means async.** Methods named `aextract` / `arank` / `adetect` / `aparse` are **native async**; call them with `await`. Most names without the prefix are synchronous: `count_tokens` / `rrf` / `cluster_by_geometry` are pure compute, while `extract` / `rank` / `detect` / `parse` may be blocking `async_to_sync` bridges over I/O. `LLMClient.achat`, `adetect_boundaries` and `acluster_by_llm` follow the rule like every operator. Never call a sync bridge from a running event loop.
+- **I/O operators: async-first; sync bridge where exposed.** Native async implementations use `asyncio`. Most high-level class operators and retrieval functions derive a sync convenience method through `asgiref.async_to_sync`, and low-level `adetect_boundaries` / `acluster_by_llm` have `detect_boundaries` / `cluster_by_llm` bridges. The `LLMClient` protocol has only `achat`: hosts implement it, and operators call it from async code. Never call a sync bridge from inside a running event loop.
+- **Pure-compute operators: sync only.** No async wrapper for `fusion.rrf`, `everalgo.utils.count_tokens`, clustering distances, etc. Mirrors numpy / scipy / sklearn / pandas conventions.
+- **Prompts as Python string modules.** Concrete prompt strings live in `<subpkg>/prompts/{en,zh}/<name>.py` as module-level constants. Editing a prompt = editing a `.py` file. No external `.md` / `.yaml` / `.toml` prompt stores. Caller customisation: per-call `custom_instructions=` (fine-grained; the text is sent verbatim as a `<custom_instructions>` block that closes the system message, appended to the bundled rules, never rendered as a template) or monkey-patching the module constant at startup (coarse-grained). No operator takes a `prompt=` that replaces the bundled rules, because a replacement would also drop the reply shape the operator parses; the one `prompt=` left is `arerank`'s, a required rules template with no bundled default. The operator always renders the data into the user message.
+- **Core layout.** `everalgo.llm` holds the LLM contract, `everalgo.types` data structures only, `everalgo.utils` general-purpose tools one kind per module, `everalgo.testing` test doubles; `llm`, `types` and `utils` import none of each other. Another distribution never imports a private core name, and core depends only on `httpx`, `pydantic` and `tiktoken`. See the "Layout and responsibilities" section of `packages/everalgo-core/README.md`; `tests/test_core_layering.py` enforces it.
 - **`Protocol` for typing, not `ABC`.** EverAlgo operators are stateless; implementations do not need to subclass anything.
 - **No dependency-injection framework or container.** Pass collaborators explicitly through constructors, function arguments, and retrieval / rerank callables; use module-level functions and targeted monkeypatching where appropriate. Do not introduce framework ceremony or hidden service locators.
 - **Sync bridge for I/O operators: write `extract = async_to_sync(aextract)` one-liner; do not introduce a `DualInterface` mixin.** This keeps type inference predictable, avoids metaclass magic. The `async_to_sync` helper comes from `asgiref.sync`.
 - **Lint configuration.** Workspace-wide ruff is configured in the root `pyproject.toml` (`line-length = 120`, target version inferred from `requires-python = ">=3.12"`, rule set derived from the pytorch + pydantic-ai intersection). Google-style docstrings — aligns with Google Python Style Guide. `Args:` / `Returns:` / `Raises:` sections, no type repetition in the body (type annotations in the signature are authoritative).
-- **Logging discipline.** On the LLM / I/O path use `logger = logging.getLogger(__name__)` with lazy `%`-format (`logger.debug("count=%d", n)` — never f-strings inside log calls) and `logger.exception(...)` inside `except` blocks. For user-behaviour problems and deprecations use `warnings.warn(..., stacklevel=2)`; for pure-algorithm errors `raise ValueError(...)` with a detailed message (numpy style — `shapes (3,4) and (5,6) not aligned`, etc.). Every public subpackage `__init__.py` already attaches a `NullHandler`; `everalgo.llm` carries a default-on `SensitiveHeadersFilter`. **Forbidden in library code**: `logging.basicConfig`, `addHandler` (anything but `NullHandler`), `setLevel`, explicit `propagate = True/False`, and any module-level `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()` (no-arg) / `logging.root.*` — these all target the root logger and are an application's job. **Forbidden in DEBUG logs**: request / response bodies, prompt text, model outputs (the Filter only redacts headers; bodies leak PII the Filter cannot see). Performance timing is the user's job (`cProfile` / `line_profiler` / `%timeit`); the library does not log durations. ruff rule sets `G` + `LOG` + `TRY` enforce these at lint time.
+- **Logging discipline.** On the LLM / I/O path use `logger = logging.getLogger(__name__)` with lazy `%`-format (`logger.debug("count=%d", n)` — never f-strings inside log calls) and `logger.exception(...)` inside `except` blocks. For user-behaviour problems and deprecations use `warnings.warn(..., stacklevel=2)`; for pure-algorithm errors `raise ValueError(...)` with a detailed message (numpy style — `shapes (3,4) and (5,6) not aligned`, etc.). Every public subpackage `__init__.py` already attaches a `NullHandler`, and nothing else: the library never writes a credential into a log record, so it has nothing to redact. **Forbidden in library code**: `logging.basicConfig`, `addHandler` (anything but `NullHandler`), `setLevel`, explicit `propagate = True/False`, and any module-level `logging.warning(...)` / `logging.error(...)` / `logging.getLogger()` (no-arg) / `logging.root.*` — these all target the root logger and are an application's job. **Forbidden in any log record**: credentials, request / response bodies (upstream error bodies included), prompt text, model outputs — they may carry secrets or PII, and the only safe redaction is never logging them. Performance timing is the user's job (`cProfile` / `line_profiler` / `%timeit`); the library does not log durations. ruff rule sets `G` + `LOG` + `TRY` enforce these at lint time.
 - **Use the full `line-length = 120` budget when hand-wrapping.** For Python comments / docstrings and TOML/YAML comments, fill each line to roughly 100–115 characters before wrapping — do not pre-wrap at 70 / 79 / 80 / 88 / 100 out of habit. `E501` is in the ignore list, and ruff never flags lines that are *too short*, so this is a writer's discipline rather than a lint check. A 3-line comment that collapses cleanly into 2 lines at 120 should be 2 lines. Exceptions: bullet lists, code blocks, and any line where a natural break aids comprehension. Markdown files in this repo deliberately use the **one-paragraph-per-line** (no hard-wrap) style — the same convention Prettier emits by default and GitHub renders cleanly — so `.md` prose is exempt from the 100–115 rule entirely; rely on editor soft-wrap.
 - **English only in code, config, and commit messages.** All Python code, comments, identifiers, `pyproject.toml` comments, CI files, and commit messages must be English. The same rule that EverOS enforces with a pre-commit hook applies here. Content under `docs/` must be English as well.
 
@@ -209,7 +210,7 @@ The full rationale lives in `docs/concepts/architecture.md`. Hard rules:
 **Commit messages: Gitmoji + Conventional Commits.** Format: `<emoji> <type>(<scope>): <description>`.
 
 ```text
-✨ feat(clustering): add cluster_by_llm decision prompt zh variant
+✨ feat(clustering): add acluster_by_llm decision prompt zh variant
 🐛 fix(boundary): correct token count for emoji-only chat segments
 ♻️ refactor(rank): extract shared fusion helper from case / skill rankers
 ✅ test(user-memory): cover EpisodeExtractor tail-merge edge case
@@ -246,18 +247,16 @@ Follow this checklist when introducing a new extractor / ranker / clusterer:
 
 ---
 
-## 8. Adding a New LLM Provider
+## 8. Adding an `LLMClient` Implementation
 
-Providers live inside `everalgo-core`'s `everalgo/llm/providers/<provider>/` (per ADR 004 — providers are *nested* in `llm`, not a separate distribution; the convention follows litellm / instructor / dspy / llama-index).
+Hosts normally implement `LLMClient` themselves; `everalgo-core` ships reference implementations as flat modules of `everalgo.llm`, one per API, named after the API they speak (`everalgo/llm/openai_compat.py` is the one today).
 
-1. Create `everalgo/llm/providers/<provider>.py`.
-2. Implement the `LLMClient` Protocol from `everalgo.llm.protocols` — a single `async def chat(...) -> ChatResponse` method (no sync variant, no streaming).
-3. Wire the provider into `everalgo/llm/factory.py::build_client` (it currently constructs `OpenAICompatClient` directly; add provider selection there — there is no separate `routing.py`).
-4. Map provider-native exceptions onto `LLMError` (chain via `raise LLMError(...) from original`).
-5. Add per-provider prompts only if the provider needs special formatting (rare — most providers are OpenAI-compatible).
-6. Add tests under `packages/everalgo-core/tests/llm/providers/test_<provider>.py`. **No mocks at the HTTP layer** when a real key is available in CI; otherwise use `respx` to record fixtures.
-7. **Update the CHANGELOG.** Add an entry under `## [Unreleased]` in `packages/everalgo-core/CHANGELOG.md` (subsection `### Added`). See `docs/releasing.md` for format.
-8. Update `docs/concepts/architecture.md` and `AGENTS.md` if the public surface changes.
+1. Create `everalgo/llm/<api>.py` implementing the `LLMClient` Protocol from `everalgo.llm.protocols`, following the recommended steps in `docs/concepts/llm-contract.md` §7.
+2. Build the reply-format parameter with the matching `to_<api>_response_format` from `everalgo.llm.schema`; if the API has none, add it there first (§8.4).
+3. Raise the implementation's own exception type for a failed call; the contract defines only `LLMOutputError` (§2.5).
+4. Add tests under `packages/everalgo-core/tests/llm/test_<api>.py`, with the transport mocked through `respx`, and run the conformance suite against the implementation: every check in `REQUIRED_CHECKS` must pass (§9).
+5. **Update the CHANGELOG.** Add an entry under `## [Unreleased]` in `packages/everalgo-core/CHANGELOG.md` (subsection `### Added`). See `docs/releasing.md` for format.
+6. Update `docs/concepts/architecture.md` and `AGENTS.md` if the public surface changes.
 
 ---
 

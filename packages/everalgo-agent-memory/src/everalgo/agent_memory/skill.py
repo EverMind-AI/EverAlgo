@@ -10,15 +10,18 @@ The caller pre-filters ``existing_relevant_skills`` to the relevant subset befor
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
-from everalgo.agent_memory.prompts.skill_failure import AGENT_SKILL_FAILURE_EXTRACT_PROMPT
-from everalgo.agent_memory.prompts.skill_success import AGENT_SKILL_SUCCESS_EXTRACT_PROMPT
+from everalgo.agent_memory._replies import _call_llm_for_skill_extract, _SkillAddOp, _SkillUpdateOp
+from everalgo.agent_memory.prompts.skill_failure import AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT
+from everalgo.agent_memory.prompts.skill_success import (
+    AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT,
+    SKILL_EXTRACT_USER_PROMPT,
+)
 from everalgo.agent_memory.reasons import OpOutcome, SkillExtractionResult, SkillSkipReason
 from everalgo.agent_memory.skill_ops import (
     _apply_add,
@@ -26,8 +29,8 @@ from everalgo.agent_memory.skill_ops import (
     _format_cases,
     _format_existing_skills,
 )
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
+from everalgo.llm import LLMMessage
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,9 +42,9 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    # Re-exported prompt constants — monkey-patch at startup to override the LLM prompts
-    "AGENT_SKILL_FAILURE_EXTRACT_PROMPT",
-    "AGENT_SKILL_SUCCESS_EXTRACT_PROMPT",
+    # Re-exported system prompts — monkey-patch at startup to override the rules the LLM is given
+    "AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT",
+    "AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT",
     "AgentSkillExtractor",
 ]
 
@@ -80,9 +83,6 @@ class AgentSkillExtractor:
         *,
         existing_relevant_skills: Sequence[AgentSkill],
         supporting_cases: Sequence[AgentCase],
-        prompt_success: str | None = None,
-        prompt_failure: str | None = None,
-        prompt_maturity: str | None = None,
         skip_quality_threshold: float = 0.2,
         skip_maturity_scoring: bool = True,
         maturity_threshold: float = 0.6,
@@ -101,17 +101,13 @@ class AgentSkillExtractor:
         See :meth:`aextract_with_reason` for the full argument reference.
 
         Raises:
-            LLMError: Propagated from the underlying LLM client call.
-            json.JSONDecodeError: If the LLM response is not valid JSON.
-            TypeError: If the LLM response is not a dict, or ``operations`` is not a list.
+            LLMOutputError: If the skill extract reply, or a maturity reply when maturity scoring runs, is not valid
+                for its call.
         """
         result = await self.aextract_with_reason(
             case,
             existing_relevant_skills=existing_relevant_skills,
             supporting_cases=supporting_cases,
-            prompt_success=prompt_success,
-            prompt_failure=prompt_failure,
-            prompt_maturity=prompt_maturity,
             skip_quality_threshold=skip_quality_threshold,
             skip_maturity_scoring=skip_maturity_scoring,
             maturity_threshold=maturity_threshold,
@@ -132,9 +128,6 @@ class AgentSkillExtractor:
         *,
         existing_relevant_skills: Sequence[AgentSkill],
         supporting_cases: Sequence[AgentCase],
-        prompt_success: str | None = None,
-        prompt_failure: str | None = None,
-        prompt_maturity: str | None = None,
         skip_quality_threshold: float = 0.2,
         skip_maturity_scoring: bool = True,
         maturity_threshold: float = 0.6,
@@ -159,9 +152,6 @@ class AgentSkillExtractor:
             supporting_cases: AgentCase records referenced by ``existing_relevant_skills[*].source_case_ids``;
                 the algorithm builds an ``id → AgentCase`` dict and renders matched cases under each skill in
                 the prompt. Pass ``[]`` when no supporting cases are available.
-            prompt_success: Prompt override for successful-case path.
-            prompt_failure: Prompt override for failed-case path.
-            prompt_maturity: Prompt override for maturity-evaluation step.
             skip_quality_threshold: Cases with ``quality_score < this`` short-circuit to ``[]`` without LLM call. Default 0.2.
             skip_maturity_scoring: Skip LLM maturity scoring (default True); set False to enable.
             maturity_threshold: Minimum score to mark a skill as mature (consulted when not skipping).
@@ -173,9 +163,8 @@ class AgentSkillExtractor:
             maturity_reeval_change_ratio: Change ratio above which maturity is reset and re-evaluated.
 
         Raises:
-            LLMError: Propagated from the underlying LLM client call.
-            json.JSONDecodeError: If the LLM response is not valid JSON.
-            TypeError: If the LLM response is not a dict, or ``operations`` is not a list.
+            LLMOutputError: If the skill extract reply, or a maturity reply when maturity scoring runs, is not valid
+                for its call.
         """
         cfg = _SkillCfg(
             skip_quality_threshold=skip_quality_threshold,
@@ -216,18 +205,16 @@ class AgentSkillExtractor:
         # Success-vs-failure prompt selection based on case.quality_score
         max_quality = case.quality_score
         if max_quality < cfg.failure_quality_threshold:
-            template = AGENT_SKILL_FAILURE_EXTRACT_PROMPT
-            override = prompt_failure
+            system = AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT
             logger.debug("using failure prompt (max_quality=%.2f < %.2f)", max_quality, cfg.failure_quality_threshold)
         else:
-            template = AGENT_SKILL_SUCCESS_EXTRACT_PROMPT
-            override = prompt_success
+            system = AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT
             logger.debug("using success prompt (max_quality=%.2f >= %.2f)", max_quality, cfg.failure_quality_threshold)
 
         # Single LLM call (no retry per ADR 012)
-        rendered = render_prompt(
-            template,
-            override,
+        user = render_prompt(
+            SKILL_EXTRACT_USER_PROMPT,
+            None,
             new_case_json=new_case_json,
             existing_skills_json=existing_skills_json,
         )
@@ -236,36 +223,21 @@ class AgentSkillExtractor:
             case.id,
             len(existing_list),
         )
-        llm_data = await _call_llm_for_skill_extract(client, rendered)
-        operations = llm_data["operations"]
-        note = llm_data.get("update_note", "")
-        if note:
-            logger.debug("LLM update_note: %s", note)
+        reply = await _call_llm_for_skill_extract(
+            client, [LLMMessage(role="system", content=system), LLMMessage(role="user", content=user)]
+        )
+        if reply.update_note:
+            logger.debug("LLM update_note: %s", reply.update_note)
 
         # Apply ops in-memory — one OpOutcome per proposed op, so len(outcomes) == len(operations)
         outcomes: list[OpOutcome] = []
         processed_indices: set[int] = set()
         source_case_ids = [case.id] if case.id else []
 
-        for op_index, op in enumerate(cast("list[dict[str, Any]]", operations)):
-            if not isinstance(op, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-                logger.warning("skill op is not a dict, skipping: %r", op)
-                outcomes.append(OpOutcome(op_index, None, SkillSkipReason.OP_NOT_DICT, {}))
-                continue
-            action: str | None = op.get("action")
-
-            if action == "add":
-                outcomes.append(
-                    await _apply_add(
-                        op,
-                        source_case_ids,
-                        op_index=op_index,
-                        client=client,
-                        cfg=cfg,
-                        prompt_maturity=prompt_maturity,
-                    )
-                )
-            elif action == "update":
+        for op_index, op in enumerate(reply.operations):
+            if isinstance(op, _SkillAddOp):
+                outcomes.append(await _apply_add(op.data, source_case_ids, op_index=op_index, client=client, cfg=cfg))
+            elif isinstance(op, _SkillUpdateOp):
                 outcomes.append(
                     await _apply_update(
                         op,
@@ -274,16 +246,12 @@ class AgentSkillExtractor:
                         source_quality=max_quality,
                         op_index=op_index,
                         client=client,
-                        prompt_maturity=prompt_maturity,
                         cfg=cfg,
                         processed_indices=processed_indices,
                     )
                 )
-            elif action == "none":
-                outcomes.append(OpOutcome(op_index, None, SkillSkipReason.OP_ACTION_NONE, {}))
             else:
-                logger.warning("unknown action %r, skipping", action)
-                outcomes.append(OpOutcome(op_index, None, SkillSkipReason.OP_UNKNOWN_ACTION, {"action": action}))
+                outcomes.append(OpOutcome(op_index, None, SkillSkipReason.OP_ACTION_NONE, {}))
 
         applied = sum(1 for o in outcomes if o.skill is not None)
         logger.info(
@@ -295,44 +263,3 @@ class AgentSkillExtractor:
         return SkillExtractionResult(None, {}, outcomes)
 
     extract_with_reason = async_to_sync(aextract_with_reason)
-
-
-# ---------------------------------------------------------------------------
-# LLM callsite — brace-balanced JSON extraction + 5-retry.
-# ---------------------------------------------------------------------------
-
-
-async def _call_llm_for_skill_extract(llm: LLMClient, rendered: str) -> dict[str, Any]:
-    """Call LLM for skill extraction and return validated dict with operations list.
-
-    Uses brace-balanced extraction because the response is nested:
-    ``{"operations": [{"action": "...", "data": {...}}, ...], "update_note": "..."}``.
-
-    Raises:
-        ValueError: If no JSON found or ``operations`` key missing / not a list.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    data: dict[str, Any] = json.loads(json_str)
-    if "operations" not in data:
-        raise ValueError(f"Skill extract response missing 'operations' key: {list(data.keys())!r}")
-    if not isinstance(data["operations"], list):
-        raise ValueError(f"operations must be a list, got {type(data['operations']).__name__}: {data!r}")  # noqa: TRY004
-    return data
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in skill LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in skill LLM response: {text[:200]!r}")

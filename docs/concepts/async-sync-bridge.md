@@ -22,16 +22,16 @@ episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alic
 # ✅ Correct — sync pure-compute method, no await
 merged  = cluster_by_geometry(new_cluster, existing_clusters)
 fused   = rank.fusion.rrf(vec_hits, keyword_hits)
-n       = boundary._tokenize.count_tokens(text)
+n       = everalgo.utils.count_tokens(text)
 
 # ✅ Correct — blocking sync bridge, only outside a running event loop
 episode = EpisodeExtractor(llm=client).extract(memcell, sender_id="u_alice")
 ```
 
-An `a` prefix always tells you to use `await`; absence of the prefix is not a complete test because of the historical exceptions below. For synchronous names, the name alone also does not tell you whether the implementation is pure compute or a blocking bridge.
+An `a` prefix always tells you to use `await`; operators and the `LLMClient` contract have no prefix-less async names. For synchronous names, the name alone does not tell you whether the implementation is pure compute or a blocking bridge.
 This is the same convention used by `dspy.acall` / `dspy.aforward`, `litellm.acompletion`, and `instructor.AsyncInstructor`.
 
-**Historical exceptions.** Three native-async interfaces lack the prefix and must still be awaited: `LLMClient.chat`, low-level `detect_boundaries`, and `cluster_by_llm`. The client method mirrors the OpenAI SDK surface; the two function names predate the otherwise consistent operator convention. Neither function currently exposes a synchronous bridge.
+**No historical exceptions.** `LLMClient.achat`, `adetect_boundaries` and `acluster_by_llm` once lacked the prefix (`chat`, `detect_boundaries`, `cluster_by_llm`); all three now carry it. The two functions keep their old names as sync bridges. The protocol method gets no bridge: `LLMClient` is what a host implements, a sync twin would double that work, and operators only ever call it from async code.
 
 ---
 
@@ -53,7 +53,7 @@ Most high-level I/O operators provide synchronous wrappers as a convenience for 
 The wrapper is derived from the async implementation using `asgiref.sync.async_to_sync`, which means there is exactly one implementation to maintain.
 
 ```python
-# In everalgo/user_memory/episode.py (simplified)
+# In everalgo/user_memory/episode/_extractor.py (simplified)
 from asgiref.sync import async_to_sync
 
 class EpisodeExtractor:
@@ -82,9 +82,14 @@ Calling the sync bridge from within a running event loop will raise a `RuntimeEr
 | `EpisodeExtractor` | `extract` | sync bridge | `extractor.extract(mc, sender_id=...)` — non-event-loop only |
 | `BoundaryDetector` | `adetect` | async I/O | `await detector.adetect(messages, is_final=True)` |
 | `BoundaryDetector` | `detect` | sync bridge | `detector.detect(messages, is_final=True)` — non-event-loop only |
-| `detect_boundaries` | `detect_boundaries` | async I/O exception | `await detect_boundaries(messages, llm=..., is_final=True)` |
+| `BoundaryDetector` | `adetect_step` | async I/O | `await detector.adetect_step(history, new)` |
+| `BoundaryDetector` | `detect_step` | sync bridge | `detector.detect_step(history, new)` — non-event-loop only |
+| `adetect_boundaries` | `adetect_boundaries` | async I/O | `await adetect_boundaries(messages, llm=..., is_final=True)` |
+| `detect_boundaries` | `detect_boundaries` | sync bridge | `detect_boundaries(messages, llm=..., is_final=True)` — non-event-loop only |
 | `cluster_by_geometry` | `cluster_by_geometry` | sync pure-compute | `cluster_by_geometry(new_cluster, existing_clusters)` |
-| `cluster_by_llm` | `cluster_by_llm` | async I/O exception | `await cluster_by_llm(new_cluster, existing_clusters, llm=...)` |
+| `acluster_by_llm` | `acluster_by_llm` | async I/O | `await acluster_by_llm(new_cluster, existing_clusters, llm=...)` |
+| `cluster_by_llm` | `cluster_by_llm` | sync bridge | `cluster_by_llm(new_cluster, existing_clusters, llm=...)` — non-event-loop only |
+| `LLMClient` | `achat` | async I/O, no bridge | `await llm.achat(messages, response_format=Model)` |
 | `rank.episodic.arank` | `arank` | async I/O | `await rank.episodic.arank(rank_input)` |
 | `rank.profile.rank` | `rank` | sync pure-compute | `rank.profile.rank(rank_input)` |
 | `rank.fusion.rrf` | `rrf` | sync pure-compute | `rank.fusion.rrf(hits_a, hits_b)` |
@@ -106,7 +111,7 @@ episode  = await EpisodeExtractor(llm=llm).aextract(mc, sender_id="u_alice")
 # Pure-compute — no await
 merged   = cluster_by_geometry(new_cluster, existing_clusters)
 fused    = rank.fusion.rrf(vec_hits, keyword_hits)
-n_tokens = boundary._tokenize.count_tokens(text)
+n_tokens = everalgo.utils.count_tokens(text)
 ```
 
 The convention covers the current high-level APIs; consult the quick-reference exceptions for the two legacy function names.

@@ -57,7 +57,7 @@ class SkillRanker:
         rank_input: RankInput,
         *,
         config: RankConfig = DEFAULT_RANK_CONFIG,
-        prompt: str | None = None,
+        custom_instructions: str | None = None,
         enable_rerank: bool = False,
         rerank_top_k: int | None = None,
         min_rerank_score: float = 0.4,
@@ -67,7 +67,10 @@ class SkillRanker:
         Args:
             rank_input: Query + candidate sets for skill memory ranking.
             config: Fusion mode and hyperparameters.
-            prompt: Per-call rerank prompt override; ``None`` uses the built-in default.
+            custom_instructions: The caller's instructions for the rerank call, appended to the built-in rerank
+                rules as a ``<custom_instructions>`` block, always the system message's last; it adds to the rules,
+                never replaces them. Placed verbatim, never rendered as a template. None or a blank string adds
+                nothing; no effect unless ``enable_rerank`` runs.
             enable_rerank: When ``True``, run the LLM rerank stage after fusion. The rerank prompt
                 both reorders and quality-grades candidates (see ``SKILL_RERANK_PROMPT_EN``).
             rerank_top_k: When set, Phase-5 LLM rerank truncates to this count instead of
@@ -84,7 +87,7 @@ class SkillRanker:
             rank_input,
             config=config,
             llm=self._llm,
-            prompt=prompt,
+            custom_instructions=custom_instructions,
             enable_rerank=enable_rerank,
             rerank_top_k=rerank_top_k,
         )
@@ -99,7 +102,7 @@ async def arank(
     *,
     config: RankConfig = DEFAULT_RANK_CONFIG,
     llm: LLMClient | None = None,
-    prompt: str | None = None,
+    custom_instructions: str | None = None,
     enable_rerank: bool = False,
     rerank_top_k: int | None = None,
     min_rerank_score: float = 0.4,
@@ -109,7 +112,7 @@ async def arank(
         rank_input,
         config=config,
         llm=llm,
-        prompt=prompt,
+        custom_instructions=custom_instructions,
         enable_rerank=enable_rerank,
         rerank_top_k=rerank_top_k,
     )

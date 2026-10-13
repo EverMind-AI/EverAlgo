@@ -12,7 +12,8 @@ GitHub 默认渲染下面的 Mermaid 图。
 packages/everalgo-parser/
 ├── src/everalgo/parser/
 │   ├── __init__.py        ← 顶层 facade:dispatch + re-export 公开类型
-│   ├── _utils.py          ← 私有助手:fetch_uri / decode_bytes / aspect-ratio / html-clean
+│   ├── _utils.py          ← 私有助手:aspect-ratio / html-clean
+│   ├── _replies.py        ← 回复模型 `_TextReply{text}` + 唯一 LLM 调用点 `_call_llm_for_text`
 │   ├── image.py           ← IMAGE modality 算子(含长图分块 + BMP/TIFF 转码 + SVG 栅格化)
 │   ├── audio.py           ← AUDIO modality 算子
 │   ├── document.py        ← PDF / HTML / EMAIL / Office(LibreOffice)四合一
@@ -20,8 +21,9 @@ packages/everalgo-parser/
 │   ├── video.py           ← stub,等 ADR
 │   └── prompts/
 │       ├── __init__.py
-│       ├── en/{image,audio,document}.py    ← PROMPT_FOR_{PICTURE,MERGE,AUDIO,FILE,HTML}
-│       └── zh/{image,audio,document}.py    ← 中文对偶
+│       ├── _reply_format.py                ← 所有 system prompt 末尾共用的 `<reply_format>` 块
+│       ├── en/{image,audio,document}.py    ← system:PROMPT_FOR_{PICTURE,MERGE,AUDIO,FILE,HTML};user:MERGE_USER_PROMPT / HTML_USER_PROMPT
+│       └── zh/{image,audio,document}.py    ← 中文对偶(同名常量、同样拆分)
 ├── tests/
 │   ├── fixtures/          ← 17 个真实 sample.* 文件
 │   └── parser/
@@ -31,6 +33,8 @@ packages/everalgo-parser/
 │       ├── test_e2e_all_formats.py
 │       ├── test_e2e_pdf_openrouter.py
 │       ├── test_image.py
+│       ├── test_prompt_rendering.py
+│       ├── test_prompt_split.py
 │       ├── test_public_api.py
 │       ├── test_url.py
 │       ├── test_utils.py
@@ -86,7 +90,7 @@ flowchart TD
 - `uri=http(s)://` + `content=b""` → 走 `url.aparse`(内部抓取 + 按 Content-Type 再分派)。
 - 已经有 `content`:**extension 优先**,extension 解析不到时**用 mime 兜底**(`get_modality_from_mime`)。这样 design.md §2.1 的 `RawFile(uri=..., mime="application/pdf")` 走 URL 抓取后能再走到 PDF handler。
 - 子模块内部派发用 extension(`_MIME_MAP[ext]` 查 mime)。当顶层用 mime 解出 modality 时,自动 `model_copy(extension=get_extension_from_mime(mime))` 给子模块。
-- `file://` 在 `_utils.fetch_uri` 里直接拒绝(AGENTS.md §1)。
+- `file://` 在 `everalgo.utils.fetch_uri` 里直接拒绝(AGENTS.md §1)。
 - `Modality.URL` 是顶层 dispatch 产生的"来源标签",不出现在 extension 派发表里。
 
 ---
@@ -149,7 +153,7 @@ graph LR
 | `text` | `str` | 提取后的主文本(Markdown / 纯文本) |
 | `modality` | `Modality` | 来源分类 |
 | `mime` | `str` | 源 MIME(无则空串) |
-| `metadata` | `dict[str, Any]` | 按模态填:`model` / `finish_reason` / `tall_image_parts` / `inline_image_ocr` / `og_tags` / `intermediate_pdf_bytes` 等 |
+| `metadata` | `dict[str, Any]` | 按模态填:`tall_image_parts` / `merge_fallback` / `inline_image_ocr` / `og_tags` / `intermediate_pdf_bytes` 等。不含 `model` / `finish_reason`:`achat` 只返回文本,实际服务的模型由宿主记录(core `docs/concepts/llm-contract.md` §6.4) |
 
 ### `Modality` 枚举(StrEnum,9 值)
 
@@ -162,6 +166,8 @@ IMAGE  PDF  AUDIO  DOCUMENT  HTML  EMAIL  URL  DIRECT  UNKNOWN
 ---
 
 ## 6. 各 modality 调用链
+
+所有 LLM 调用同一形态:system = 规则 + `<reply_format>`(要求回复 `{"text": "..."}`),user = 文件 part(图片 / PDF / 音频)或带标签的文本(`<html_content>` / `<ocr_parts>`);回复经 `parse_reply(_TextReply, ...)` 校验后取 `text`,坏回复抛 `LLMOutputError`。例外:长图 merge 与邮件内嵌图 OCR 失败(含坏回复)走算法层兜底(拼接 / 占位符),不抛。
 
 ### 6.1 IMAGE(`image.aparse`)
 
@@ -181,7 +187,7 @@ flowchart LR
   J --> K[per-part OCR<br/>N x LLM calls]
   K --> L{N > 1?}
   L -- no --> M[return part]
-  L -- yes --> N[LLM merge<br/>PROMPT_FOR_MERGE]
+  L -- yes --> N[LLM merge<br/>PROMPT_FOR_MERGE + ocr_parts<br/>失败 / 空 → 确定性拼接]
   I --> R[ParsedContent]
   M --> R
   N --> R
@@ -193,7 +199,7 @@ flowchart LR
 flowchart TD
   A[bytes + ext] --> M{Modality from ext}
   M -- PDF --> P[image_url part + PROMPT_FOR_FILE → 1 LLM call]
-  M -- HTML --> H[decode_bytes → clean_html_for_llm bs4 → text part + PROMPT_FOR_HTML → 1 LLM call]
+  M -- HTML --> H[decode_bytes → clean_html_for_llm bs4 → html_content + PROMPT_FOR_HTML → 1 LLM call]
   M -- EMAIL --> E[stdlib email parse → headers + body]
   E --> EI{inline images?}
   EI -- yes --> EOCR[per-image OCR via LLM<br/>PROMPT_FOR_PICTURE]

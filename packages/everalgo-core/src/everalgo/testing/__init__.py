@@ -1,17 +1,22 @@
-"""Public testing helpers for EverAlgo — assertions + fake_llm.
+"""Testing helpers for EverAlgo: shape assertions, ``FakeLLMClient`` and the ``LLMClient`` conformance suite."""
 
-Mirrors ``numpy.testing`` / ``torch.testing``: testing helpers live inside
-``everalgo-core`` rather than as a separate distribution.
+from __future__ import annotations
 
-Public symbols (per AGENTS.md §7 step 6 + §9 + spec §3):
+__all__ = [
+    "NOT_SENT",
+    "OPTIONAL_CHECKS",
+    "REQUIRED_CHECKS",
+    "CallRecord",
+    "EffectiveRequest",
+    "FakeLLMClient",
+    "LLMClientTestHarness",
+    "UpstreamStub",
+    "assert_atomic_fact_shape",
+    "assert_episode_shape",
+    "assert_foresight_shape",
+    "assert_profile_shape",
+]
 
-- ``FakeLLMClient`` — in-memory ``LLMClient`` Protocol implementation
-- ``CallRecord``   — recorded chat() invocation type (for assertions)
-- ``assert_episode_shape`` — Episode structural assertion helper
-- ``assert_foresight_shape`` — Foresight structural assertion helper
-- ``assert_atomic_fact_shape`` — AtomicFact structural assertion helper
-- ``assert_profile_shape`` — Profile structural assertion helper
-"""
 
 import logging
 
@@ -21,16 +26,15 @@ from everalgo.testing.assertions import (
     assert_foresight_shape,
     assert_profile_shape,
 )
+from everalgo.testing.conformance import (
+    NOT_SENT,
+    OPTIONAL_CHECKS,
+    REQUIRED_CHECKS,
+    EffectiveRequest,
+    LLMClientTestHarness,
+    UpstreamStub,
+)
 from everalgo.testing.fake_llm import CallRecord, FakeLLMClient
-
-__all__ = [
-    "CallRecord",
-    "FakeLLMClient",
-    "assert_atomic_fact_shape",
-    "assert_episode_shape",
-    "assert_foresight_shape",
-    "assert_profile_shape",
-]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.
 logging.getLogger(__name__).addHandler(logging.NullHandler())

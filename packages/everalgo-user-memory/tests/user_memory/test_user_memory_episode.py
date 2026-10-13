@@ -1,43 +1,59 @@
-"""Tests for everalgo.user_memory.episode — EpisodeExtractor (single owner_id, no fan-out)."""
+"""Tests for everalgo.user_memory.episode — EpisodeExtractor: one call, a strict reply, no retry.
+
+Coverage layers:
+- Contract  — the call requests ``_EpisodeReply``; the model obeys docs/concepts/llm-contract.md §2.2; field order
+- Error path — an invalid reply or a blank stored field raises LLMOutputError; client exceptions propagate unchanged
+- Signature — ``prompt=`` is gone; ``custom_instructions`` fills its own block; ``sender_id`` only sets ``owner_id``
+- Language  — ``<output_language>`` holds the named language or the participants'; the Episode reports none
+- Prompt    — skeleton and examples parse and validate; rules the stored record depends on
+- Rendering — the conversation as ``[time] speaker: text`` lines in the user message's ``<conversation>``
+- Summary   — the width guard truncates in place, with no second call
+"""
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
+from everalgo.llm import LLMOutputError, StrictOutputModel, to_openai_response_format
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
-from everalgo.user_memory import OutputLanguage
-from everalgo.user_memory.episode import (
-    _SUMMARY_WIDTH_CAP,
-    EpisodeExtractor,
-    _format_prompt_time,
-    _normalize_declared_language,
-    _render_conversation,
-    _resolve_user_name,
-    _truncate_at_sentence_boundary,
-)
+from everalgo.user_memory import EpisodeExtractor, OutputLanguage
+from everalgo.user_memory._language import PARTICIPANT_LANGUAGE_RULE, build_language_rule
+from everalgo.user_memory.episode._render import _render_conversation
+from everalgo.user_memory.episode._replies import _EpisodeReply
+from everalgo.user_memory.episode._summary import _SUMMARY_WIDTH_CAP, _truncate_at_sentence_boundary
+from everalgo.user_memory.prompts.en import episode as prompts
 from everalgo.user_memory.prompts.en.episode import (
-    EPISODE_DECLARE_LANGUAGE_ADDITION,
-    EPISODE_GENERATION_PROMPT,
-    SUMMARY_COMPRESS_PROMPT,
+    EPISODE_SYSTEM_PROMPT,
+    EPISODE_USER_PROMPT,
+    assemble_system_prompt,
 )
+from everalgo.utils import ascii_width
+
+_LOGGER = "everalgo.user_memory.episode"
+_FIELD_ORDER = ["content", "summary", "title"]
+_SECRET = "EPISODE-SECRET-7d2a"
+_TS_MS = 1_700_000_000_000
+
+# 2026-05-29 12:25:10 UTC, a Friday.
+_TS_FRIDAY_MS = 1780057510000
 
 
 def _memcell() -> MemCell:
-    """Helper: minimal MemCell with a 2-message dialogue (single sender u_alice)."""
+    """A 2-message dialogue: a named user and an unnamed assistant."""
     return MemCell(
         items=[
             ChatMessage(
                 id="m1",
                 role="user",
                 content="Schedule a meeting with Alice at 3pm",
-                timestamp=1700000000000,
+                timestamp=_TS_MS,
                 sender_id="u_alice",
                 sender_name="Alice",
             ),
@@ -45,683 +61,12 @@ def _memcell() -> MemCell:
                 id="m2",
                 role="assistant",
                 content="Done. Sent invite for 3pm.",
-                timestamp=1700000001000,
+                timestamp=_TS_MS + 1000,
                 sender_id="assistant",
             ),
         ],
-        timestamp=1700000001000,
+        timestamp=_TS_MS + 1000,
     )
-
-
-# ==========================================================================
-# Language rules — both variants, both languages, mixed-input clauses
-# ==========================================================================
-
-_LANGUAGE_PROMPTS = ("EPISODE_GENERATION_PROMPT", "USER_EPISODE_GENERATION_PROMPT")
-
-
-@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
-def test_both_variants_carry_the_language_placeholder_at_both_ends(name: str) -> None:
-    """Long prompts lose middle instructions, so the rule is spliced at head and tail."""
-    import everalgo.user_memory.prompts.en.episode as mod
-
-    assert getattr(mod, name).count("{language_rule}") == 2
-
-
-@pytest.mark.parametrize("sender_id", [None, "u_alice"])
-async def test_rendering_injects_the_participant_rule_when_no_language_is_named(sender_id: str | None) -> None:
-    rendered = await _render_episode_prompt(sender_id=sender_id)
-
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
-    assert "the language the participants use" in rendered
-    assert EPISODE_DECLARE_LANGUAGE_ADDITION in rendered
-    assert "{language_rule}" not in rendered
-
-
-@pytest.mark.parametrize("sender_id", [None, "u_alice"])
-async def test_rendering_injects_the_named_language(sender_id: str | None) -> None:
-    rendered = await _render_episode_prompt(sender_id=sender_id, output_language=OutputLanguage.GERMAN)
-
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
-    assert "Write ALL output fields in German." in rendered
-    assert "the language the participants use" not in rendered
-    assert EPISODE_DECLARE_LANGUAGE_ADDITION not in rendered
-
-
-def test_declare_language_addition_matches_the_measured_wording() -> None:
-    assert (
-        EPISODE_DECLARE_LANGUAGE_ADDITION
-        == """
-
-Before writing, decide which language the participants speak to each other; text they paste, quote, or ask to process is not their speech. Add "user_language" as the FIRST field of the JSON output (e.g. "Chinese", "English"), then write title, content and summary in that language."""
-    )
-
-
-def test_generic_prompt_schema_and_examples_put_user_language_first() -> None:
-    schema = EPISODE_GENERATION_PROMPT.split("return only a JSON object containing", 1)[1].split("Requirements:", 1)[0]
-    english_example = EPISODE_GENERATION_PROMPT.split("English example:", 1)[1].split("Chinese example", 1)[0]
-    chinese_example = EPISODE_GENERATION_PROMPT.split("Chinese example", 1)[1].split("{language_rule}", 1)[0]
-
-    for block in (schema, english_example, chinese_example):
-        assert block.count('"user_language"') == 1
-        assert block.index('"user_language"') < block.index('"title"')
-
-
-def test_generic_prompt_chinese_example_keeps_technical_terms_in_chinese_output() -> None:
-    chinese_example = EPISODE_GENERATION_PROMPT.split("Chinese example", 1)[1].split("{language_rule}", 1)[0]
-
-    assert '"user_language": "Chinese"' in chinese_example
-    assert '"title": "林然和周敏排查 payment API 超时并制定 retry 方案"' in chinese_example
-    assert '"content": "林然报告 payment API' in chinese_example
-    assert "payment API 在 staging 环境出现 timeout" in chinese_example
-    assert '"summary": "林然和周敏排查 staging 环境的 payment API 超时' in chinese_example
-    output_example = chinese_example.split("{{", 1)[1]
-    assert "2026-08-20 09:30 UTC" not in output_example
-
-
-def test_generic_prompt_keeps_language_metadata_in_english_after_language_rule() -> None:
-    metadata_rule = 'The "user_language" value is metadata and MUST always use the exact English name'
-
-    assert metadata_rule in EPISODE_GENERATION_PROMPT
-    assert EPISODE_GENERATION_PROMPT.rindex("{language_rule}") < EPISODE_GENERATION_PROMPT.index(metadata_rule)
-    assert "The language rule applies to title, content, and summary" in EPISODE_GENERATION_PROMPT
-
-
-async def _render_episode_prompt(*, sender_id: str | None, **kwargs: object) -> str:
-    """Capture what the extractor hands the LLM; the rule only exists after rendering."""
-    captured: list[str] = []
-
-    class Capture:
-        async def chat(self, messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-            assert isinstance(messages[0].content, str)  # narrow for test
-            captured.append(messages[0].content)
-            raise _PromptCapturedError
-
-    with pytest.raises(_PromptCapturedError):
-        await EpisodeExtractor(llm=Capture()).aextract(_memcell(), sender_id=sender_id, **kwargs)  # type: ignore[arg-type]
-    return captured[0]
-
-
-class _PromptCapturedError(Exception):
-    """Ends the call once the prompt has been captured — no LLM response is needed."""
-
-
-# ==========================================================================
-# (1) Single successful extraction
-# ==========================================================================
-
-
-async def test_aextract_returns_single_episode_from_title_content_json() -> None:
-    """LLM emits {title, content} -> single Episode with subject=title, episode=content."""
-    llm_json = '{"title": "Meeting with Alice at 3pm", "content": "User scheduled a meeting with Alice at 3pm.", "summary": "Preview of User scheduled a meeting with Alice at 3pm."}'
-    fake = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
-
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert ep.subject == "Meeting with Alice at 3pm"
-    assert "Alice" in ep.episode
-    assert ep.timestamp == 1700000001000
-
-
-async def test_aextract_episode_fields_filled_correctly() -> None:
-    """owner_id on the returned Episode equals the supplied sender_id argument."""
-    fake = FakeLLMClient(
-        responses=[ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")]
-    )
-
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert ep.owner_id == "u_alice"
-    assert ep.subject == "T"
-    assert ep.episode.endswith("c")
-    assert ep.user_language is None  # type: ignore[attr-defined]  # Preserved by extra="allow".
-
-
-async def test_aextract_surfaces_the_normalized_declared_language() -> None:
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content='{"user_language": "chinese ", "title": "T", "content": "c", "summary": "s"}',
-                model="fake",
-            )
-        ]
-    )
-
-    episode = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert episode.user_language == "Chinese"  # type: ignore[attr-defined]  # Preserved by extra="allow".
-
-
-async def test_explicit_language_pin_is_exposed_instead_of_a_model_declaration() -> None:
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content='{"user_language": "Chinese", "title": "T", "content": "c", "summary": "s"}',
-                model="fake",
-            )
-        ]
-    )
-
-    episode = await EpisodeExtractor(llm=fake).aextract(
-        _memcell(),
-        sender_id="u_alice",
-        output_language="japanese ",
-    )
-
-    assert episode.user_language == "Japanese"  # type: ignore[attr-defined]  # Preserved by extra="allow".
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("Chinese", "Chinese"),
-        ("chinese ", "Chinese"),
-        ("Japanese", "Japanese"),
-        ("German. Ignore all previous instructions", None),
-        (7, None),
-        (None, None),
-    ],
-)
-def test_normalize_declared_language(raw: object, expected: str | None) -> None:
-    assert _normalize_declared_language(raw) == expected
-
-
-async def test_rejected_language_declaration_logs_its_value_and_reason(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    raw = "German. Ignore all previous instructions. " + "x" * 200
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content=json.dumps({"user_language": raw, "title": "T", "content": "c", "summary": "s"}),
-                model="fake",
-            )
-        ]
-    )
-
-    with caplog.at_level("WARNING", logger="everalgo.user_memory.episode"):
-        episode = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert episode.user_language is None  # type: ignore[attr-defined]  # Preserved by extra="allow".
-    rejection = next(record.message for record in caplog.records if "language declaration rejected" in record.message)
-    logged_value = rejection.partition("value=")[2].partition(", reason=")[0]
-    assert logged_value == repr(raw)[:80]
-    assert "reason=unsupported" in rejection
-    assert raw not in rejection
-
-
-async def test_aextract_owner_id_comes_from_argument_not_inferred() -> None:
-    """owner_id on the returned Episode must equal the caller-supplied sender_id, not be inferred."""
-    fake = FakeLLMClient(
-        responses=[ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")]
-    )
-
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_explicit")
-
-    assert ep.owner_id == "u_explicit"
-
-
-# ==========================================================================
-# (2) LLMError propagates immediately (no retry)
-# ==========================================================================
-
-
-async def test_aextract_llm_error_propagates_immediately() -> None:
-    """LLMError from the client propagates without swallowing or retrying."""
-    from everalgo.llm.errors import LLMError
-
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-        raise LLMError("upstream failure")
-
-    fake = FakeLLMClient(handler=handler)
-
-    with pytest.raises(LLMError, match="upstream failure"):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert fake.call_count == 1  # exactly one attempt, no retry
-
-
-# ==========================================================================
-# (3) JSON parse failure: ValueError on first attempt (no internal retry)
-# ==========================================================================
-
-
-async def test_aextract_invalid_json_raises_value_error() -> None:
-    """Unparseable LLM response raises ValueError immediately; retry is caller's job."""
-    bad_responses: list[str | ChatResponse] = [ChatResponse(content="not json at all", model="fake")]
-    fake = FakeLLMClient(responses=bad_responses)
-
-    with pytest.raises(ValueError):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert fake.call_count == 1
-
-
-async def test_aextract_raises_on_empty_content() -> None:
-    """An empty ``content`` must fail loud at the extractor, not travel downstream as an empty episode.
-
-    A truncated or empty structured-output response is an extraction failure, and the caller learns
-    far more from a ``ValueError`` here than from an empty-body guard firing later in
-    ``assert_episode_shape`` or the benchmark extract stage, where the originating call is long gone.
-    """
-    fake = FakeLLMClient(
-        responses=[ChatResponse(content='{"title": "T", "content": "", "summary": "Preview"}', model="fake")]
-    )
-
-    with pytest.raises(ValueError, match="empty content"):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-
-async def test_aextract_raises_on_whitespace_only_content() -> None:
-    """Whitespace-only ``content`` must be treated the same as empty ``content``."""
-    fake = FakeLLMClient(
-        responses=[ChatResponse(content='{"title": "T", "content": "   ", "summary": "Preview"}', model="fake")]
-    )
-
-    with pytest.raises(ValueError, match="empty content"):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-
-# ==========================================================================
-# (6) Custom prompt override
-# ==========================================================================
-
-
-async def test_aextract_per_call_prompt_overrides_default() -> None:
-    """Per-call prompt= is what's rendered; standard placeholders are substituted."""
-    captured: dict[str, Any] = {}
-
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-        captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
-
-    fake = FakeLLMClient(handler=handler)
-    custom = "CUSTOM EPISODE start={conversation_start_time} conv={conversation} cust={custom_instructions}"
-
-    await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice", prompt=custom)
-
-    assert captured["content"].startswith("CUSTOM EPISODE")
-    # pseudo-JSON format: speaker and content are unquoted values
-    assert "Alice" in captured["content"]
-    assert "Schedule a meeting" in captured["content"]
-
-
-# ==========================================================================
-# (7) custom_instructions override
-# ==========================================================================
-
-
-async def test_aextract_custom_instructions_override() -> None:
-    """custom_instructions= replaces the default block in the rendered prompt."""
-    captured: dict[str, Any] = {}
-
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-        captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
-
-    fake = FakeLLMClient(handler=handler)
-    custom_prompt = "instruct={custom_instructions}"
-
-    await EpisodeExtractor(llm=fake).aextract(
-        _memcell(), sender_id="u_alice", prompt=custom_prompt, custom_instructions="MY_CUSTOM_INSTR"
-    )
-
-    assert "MY_CUSTOM_INSTR" in captured["content"]
-
-
-# ==========================================================================
-# (8) owner_id from argument, not inferred — user_name resolved from messages
-# ==========================================================================
-
-
-async def test_aextract_user_name_resolved_from_messages() -> None:
-    """user_name in the prompt is taken from the matching message's sender_name, not owner_id literal."""
-    captured: dict[str, Any] = {}
-
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-        captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
-
-    fake = FakeLLMClient(handler=handler)
-    custom_prompt = "user_name={user_name}"
-
-    await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice", prompt=custom_prompt)
-
-    # u_alice has sender_name="Alice" in _memcell()
-    assert "Alice" in captured["content"]
-
-
-async def test_aextract_user_name_falls_back_to_sender_id_when_no_sender_name() -> None:
-    """When no message carries sender_name for sender_id, user_name falls back to the sender_id string."""
-    captured: dict[str, Any] = {}
-
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-        captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
-
-    mc = MemCell(
-        items=[
-            ChatMessage(
-                id="m20",
-                role="user",
-                content="hello",
-                timestamp=1700000000000,
-                sender_id="u_ghost",
-                sender_name=None,
-            ),
-        ],
-        timestamp=1700000000000,
-    )
-    fake = FakeLLMClient(handler=handler)
-    custom_prompt = "user_name={user_name}"
-
-    await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_ghost", prompt=custom_prompt)
-
-    assert "u_ghost" in captured["content"]
-
-
-# ==========================================================================
-# Two independent owner_id calls on the same memcell (replaces fan-out test)
-# ==========================================================================
-
-
-async def test_aextract_two_owner_ids_produce_independent_episodes() -> None:
-    """Calling aextract twice (once per owner_id) yields two independent Episodes."""
-    mc = MemCell(
-        items=[
-            ChatMessage(
-                id="m10",
-                role="user",
-                content="Let's plan the offsite",
-                timestamp=1700000000000,
-                sender_id="u_alice",
-                sender_name="Alice",
-            ),
-            ChatMessage(
-                id="m11",
-                role="user",
-                content="I can host on Friday",
-                timestamp=1700000001000,
-                sender_id="u_bob",
-                sender_name="Bob",
-            ),
-            ChatMessage(
-                id="m12",
-                role="assistant",
-                content="I'll send invites.",
-                timestamp=1700000002000,
-                sender_id="assistant",
-            ),
-        ],
-        timestamp=1700000002000,
-    )
-
-    fake_alice = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content='{"title": "Alice offsite", "content": "Alice proposed offsite.", "summary": "Preview of Alice proposed offsite."}',
-                model="fake",
-            )
-        ]
-    )
-    fake_bob = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content='{"title": "Bob offsite", "content": "Bob offered to host.", "summary": "Preview of Bob offered to host."}',
-                model="fake",
-            )
-        ]
-    )
-
-    ep_alice = await EpisodeExtractor(llm=fake_alice).aextract(mc, sender_id="u_alice")
-    ep_bob = await EpisodeExtractor(llm=fake_bob).aextract(mc, sender_id="u_bob")
-
-    assert ep_alice.owner_id == "u_alice"
-    assert ep_bob.owner_id == "u_bob"
-    assert ep_alice.subject == "Alice offsite"
-    assert ep_bob.subject == "Bob offsite"
-    assert fake_alice.call_count == 1
-    assert fake_bob.call_count == 1
-
-
-# ==========================================================================
-# _render_conversation skips empty content
-# ==========================================================================
-
-
-def test_render_conversation_skips_empty_content() -> None:
-    """Messages with empty content are silently dropped; pseudo-JSON format used."""
-    cell = MemCell(
-        items=[
-            ChatMessage(
-                id="m1", role="user", content="hi", timestamp=1700000000000, sender_id="u_alice", sender_name="Alice"
-            ),
-            ChatMessage(
-                id="m2", role="user", content="", timestamp=1700000001000, sender_id="u_bob", sender_name="Bob"
-            ),
-        ],
-        timestamp=1700000001000,
-    )
-    rendered = _render_conversation(cell)
-    # pseudo-JSON format: "speaker": Alice (unquoted value) and "content": hi (unquoted value)
-    assert "Alice" in rendered
-    assert "hi" in rendered
-    assert "Bob" not in rendered
-
-
-# ==========================================================================
-# _resolve_user_name
-# ==========================================================================
-
-
-def test_resolve_user_name_returns_sender_name_when_present() -> None:
-    """_resolve_user_name returns the matching sender_name from messages."""
-    cell = MemCell(
-        items=[ChatMessage(id="m1", role="user", content="x", timestamp=1, sender_id="u_alice", sender_name="Alice")],
-        timestamp=1,
-    )
-    assert _resolve_user_name(cell, "u_alice") == "Alice"
-
-
-def test_resolve_user_name_falls_back_to_owner_id_when_no_match() -> None:
-    """_resolve_user_name falls back to the owner_id literal when no message has a matching sender_name."""
-    cell = MemCell(
-        items=[ChatMessage(id="m1", role="user", content="x", timestamp=1, sender_id="u_other", sender_name="Other")],
-        timestamp=1,
-    )
-    assert _resolve_user_name(cell, "u_missing") == "u_missing"
-
-
-# ==========================================================================
-# Silent-skip contract — agent → user-memory pipeline
-# ==========================================================================
-
-
-async def test_aextract_silently_skips_non_chat_items() -> None:
-    """EpisodeExtractor must silently skip ToolCallRequest / ToolCallResult items.
-
-    Locks the agent → user-memory pipeline contract: a MemCell with mixed items (ChatMessage +
-    tool calls) must produce the same Episode as a chat-only MemCell with the same ChatMessages.
-    """
-    chat_only_cell = MemCell(
-        items=[
-            ChatMessage(
-                id="c1",
-                role="user",
-                content="Let's schedule the demo for Friday",
-                timestamp=1700000000000,
-                sender_id="u_alice",
-                sender_name="Alice",
-            ),
-        ],
-        timestamp=1700000000000,
-    )
-    mixed_cell = MemCell(
-        items=[
-            ChatMessage(
-                id="c1",
-                role="user",
-                content="Let's schedule the demo for Friday",
-                timestamp=1700000000000,
-                sender_id="u_alice",
-                sender_name="Alice",
-            ),
-            ToolCallRequest(
-                tool_calls=[
-                    ToolCall(
-                        id="tc1", function=ToolCallFunction(name="calendar.create", arguments='{"time": "Friday"}')
-                    )
-                ],
-                timestamp=1700000001000,
-                sender_id="assistant",
-            ),
-            ToolCallResult(
-                tool_call_id="tc1",
-                content="Event created.",
-                timestamp=1700000002000,
-            ),
-        ],
-        timestamp=1700000002000,
-    )
-
-    llm_json = '{"title": "Demo on Friday", "content": "Alice scheduled a demo for Friday.", "summary": "Preview of Alice scheduled a demo for Friday."}'
-
-    fake_chat = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
-    fake_mixed = FakeLLMClient(responses=[ChatResponse(content=llm_json, model="fake")])
-
-    ep_chat = await EpisodeExtractor(llm=fake_chat).aextract(chat_only_cell, sender_id="u_alice")
-    ep_mixed = await EpisodeExtractor(llm=fake_mixed).aextract(mixed_cell, sender_id="u_alice")
-
-    assert ep_chat.subject == ep_mixed.subject
-    assert ep_chat.episode == ep_mixed.episode
-    assert ep_chat.owner_id == ep_mixed.owner_id
-
-
-# ==========================================================================
-# (12) Instance-level llm= binding
-# ==========================================================================
-
-
-async def test_aextract_uses_instance_llm_when_per_call_omitted() -> None:
-    """Instance-level llm= is used when aextract() is called without a per-call llm= argument."""
-    instance_fake = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content='{"title": "Instance test", "content": "From instance llm", "summary": "Preview of From instance llm"}',
-                model="inst",
-            )
-        ]
-    )
-    extractor = EpisodeExtractor(llm=instance_fake)
-    ep = await extractor.aextract(_memcell(), sender_id="u_alice")
-    assert ep.subject == "Instance test"
-    assert instance_fake.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_extract_generic_when_sender_id_is_none() -> None:
-    """sender_id=None → generic prompt (EPISODE_GENERATION_PROMPT, no user_name), owner_id=None."""
-    fake = FakeLLMClient(
-        responses=[
-            '{"title": "Bug fix discussion", "content": "Alice and Bob debugged the login flow.", "summary": "Preview of Alice and Bob debugged the login flow."}'
-        ]
-    )
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=None)
-    assert ep.owner_id is None
-    assert ep.subject == "Bug fix discussion"
-    rendered = fake.calls[0].messages[0].content
-    # Generic prompt: must NOT contain user_name injection.
-    assert "User name:" not in rendered
-    # Generic prompt header signature.
-    assert "You are an episodic memory generation expert" in rendered
-
-
-# ==========================================================================
-# Time formatting helpers — input side keeps the weekday, output side does not
-# ==========================================================================
-
-# 2026-05-29 12:25:10 UTC, a Friday.
-_TS_FRIDAY_MS = 1780057510000
-
-
-def test_format_prompt_time_is_24h_with_weekday() -> None:
-    """Input-side format: 24-hour clock, explicit UTC, weekday retained for relative-time reasoning."""
-    assert _format_prompt_time(_TS_FRIDAY_MS) == "2026-05-29 12:25 UTC (Friday)"
-
-
-def test_format_prompt_time_has_no_am_pm_marker() -> None:
-    """A 12-hour clock makes noon/midnight ambiguous for the LLM; 24-hour clock removes that."""
-    rendered = _format_prompt_time(_TS_FRIDAY_MS)
-    assert "AM" not in rendered
-    assert "PM" not in rendered
-
-
-def test_format_prompt_time_keeps_weekday_for_relative_reasoning() -> None:
-    """Regression guard: the weekday label is what lets the LLM resolve "last Friday".
-
-    Dropping it re-introduces the off-by-one-week errors fixed in user-memory 0.3.1 (commit d9fe22e).
-    """
-    assert "(Friday)" in _format_prompt_time(_TS_FRIDAY_MS)
-
-
-# ==========================================================================
-# Prompt injection uses the 24-hour input-side format
-# ==========================================================================
-
-
-def test_render_conversation_uses_24h_input_format() -> None:
-    """Per-message timestamps in the conversation block use the input-side format."""
-    mc = MemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hello",
-                timestamp=_TS_FRIDAY_MS,
-                sender_id="u_alice",
-                sender_name="Alice",
-            )
-        ],
-        timestamp=_TS_FRIDAY_MS,
-    )
-
-    rendered = _render_conversation(mc)
-
-    assert "2026-05-29 12:25 UTC (Friday)" in rendered
-    assert "PM" not in rendered
-
-
-async def test_conversation_start_time_uses_24h_input_format() -> None:
-    """The {conversation_start_time} slot is filled with the input-side format."""
-    captured: dict[str, Any] = {}
-
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
-        captured["content"] = messages[0].content
-        return ChatResponse(content='{"title": "T", "content": "c", "summary": "Preview of c"}', model="fake")
-
-    fake = FakeLLMClient(handler=handler)
-    mc = MemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hello",
-                timestamp=_TS_FRIDAY_MS,
-                sender_id="u_alice",
-                sender_name="Alice",
-            )
-        ],
-        timestamp=_TS_FRIDAY_MS,
-    )
-
-    await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice", prompt="start={conversation_start_time}")
-
-    assert captured["content"] == "start=2026-05-29 12:25 UTC (Friday)"
-
-
-# ==========================================================================
-# Episode body is stored verbatim; times come from the prompt, not from code
-# ==========================================================================
 
 
 def _memcell_spanning_70_minutes() -> MemCell:
@@ -748,148 +93,357 @@ def _memcell_spanning_70_minutes() -> MemCell:
     )
 
 
-@pytest.mark.parametrize("sender_id", ["u_alice", None])
-async def test_episode_body_is_stored_verbatim(sender_id: str | None) -> None:
-    """Both prompt variants store ``content`` exactly as the LLM returned it."""
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content='{"title": "T", "content": "Alice asked about hiking.", "summary": "Preview of Alice asked about hiking."}',
-                model="fake",
-            )
-        ]
+def _reply(
+    *,
+    content: str = "Alice scheduled a meeting at 3pm.",
+    summary: str = "Alice scheduled a 3pm meeting.",
+    title: str = "Alice schedules a 3pm meeting",
+) -> str:
+    return json.dumps({"content": content, "summary": summary, "title": title})
+
+
+async def _extract(reply: str = "", **kwargs: Any) -> tuple[Any, FakeLLMClient]:
+    """Run one extraction over ``_memcell()`` against a scripted reply; returns the Episode and the fake."""
+    fake = FakeLLMClient(responses=[reply or _reply()])
+    kwargs.setdefault("sender_id", None)
+    episode = await EpisodeExtractor(llm=fake).aextract(kwargs.pop("memcell", _memcell()), **kwargs)
+    return episode, fake
+
+
+def _sent(fake: FakeLLMClient) -> tuple[str, str]:
+    """The one request the extractor sent, as its system and user message contents."""
+    (call,) = fake.calls
+    system, user = call.messages
+    assert (system.role, user.role) == ("system", "user")
+    assert isinstance(system.content, str)
+    assert isinstance(user.content, str)
+    return system.content, user.content
+
+
+class _ClientError(Exception):
+    """A host's own call-failure type, which the operator must neither wrap nor retype."""
+
+
+# ===========================================================================
+# Contract — docs/concepts/llm-contract.md §2.2 / §4.3
+# ===========================================================================
+
+
+def test_reply_model_is_strict_one_level_and_default_free() -> None:
+    """The reply model inherits StrictOutputModel directly, requires every field and carries no validators."""
+    assert _EpisodeReply.__bases__ == (StrictOutputModel,)
+    assert _EpisodeReply.model_config.get("strict") is True
+    assert _EpisodeReply.model_config.get("extra") == "forbid"
+    for name, field in _EpisodeReply.model_fields.items():
+        assert field.is_required(), f"_EpisodeReply.{name} has a default"
+    assert not _EpisodeReply.__pydantic_decorators__.field_validators
+    assert not _EpisodeReply.__pydantic_decorators__.model_validators
+
+
+def test_reply_model_fields_follow_the_writing_order() -> None:
+    """Content first; summary after the content it compresses; title last."""
+    assert list(_EpisodeReply.model_fields) == _FIELD_ORDER
+
+
+def test_reply_model_fits_the_strict_subset() -> None:
+    """The request builders raise on anything outside the strict subset or a non-object top level (§8.3)."""
+    response_format = to_openai_response_format(_EpisodeReply)
+
+    assert response_format is not None
+    assert response_format["json_schema"]["schema"]["type"] == "object"
+
+
+async def test_the_call_requests_the_reply_model_with_a_system_and_a_user_message() -> None:
+    _, fake = await _extract()
+
+    assert [call.response_format for call in fake.calls] == [_EpisodeReply]
+    assert [message.role for message in fake.calls[0].messages] == ["system", "user"]
+
+
+async def test_valid_reply_becomes_the_episode() -> None:
+    episode, fake = await _extract(sender_id="u_alice")
+
+    assert episode.owner_id == "u_alice"
+    assert episode.subject == "Alice schedules a 3pm meeting"
+    assert episode.episode == "Alice scheduled a meeting at 3pm."
+    assert episode.summary == "Alice scheduled a 3pm meeting."
+    assert episode.timestamp == _TS_MS + 1000
+    assert fake.call_count == 1
+
+
+def test_sync_bridge_returns_the_episode() -> None:
+    fake = FakeLLMClient(responses=[_reply()])
+
+    episode = EpisodeExtractor(llm=fake).extract(_memcell(), sender_id=None)
+
+    assert episode.subject == "Alice schedules a 3pm meeting"
+    assert fake.call_count == 1
+
+
+# ===========================================================================
+# Error path — single call, no retry
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    ("reply", "failing_location"),
+    [
+        pytest.param(f"not json {_SECRET}", "<root>", id="not-json"),
+        pytest.param(json.dumps({"content": _SECRET, "summary": "s"}), "title:", id="title-missing"),
+        pytest.param(
+            json.dumps({"language": "English", "content": _SECRET, "summary": "s", "title": "t"}),
+            "language:",
+            id="language-declaration-forbidden",
+        ),
+        pytest.param(
+            json.dumps({"content": _SECRET, "summary": "s", "title": "t", "note": "x"}),
+            "note:",
+            id="extra-field-forbidden",
+        ),
+        pytest.param(
+            json.dumps({"content": _SECRET, "summary": "s", "title": 7}),
+            "title:",
+            id="number-not-coerced",
+        ),
+        pytest.param(
+            json.dumps({"content": _SECRET, "summary": None, "title": "t"}),
+            "summary:",
+            id="null-not-accepted",
+        ),
+    ],
+)
+async def test_reply_failing_the_model_raises_llm_output_error(reply: str, failing_location: str) -> None:
+    """An invalid reply is an LLMOutputError at once — no retry, no reply text in the message."""
+    fake = FakeLLMClient(responses=[reply])
+
+    with pytest.raises(LLMOutputError) as excinfo:
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=None)
+
+    assert excinfo.type is LLMOutputError
+    assert isinstance(excinfo.value.__cause__, ValidationError)
+    assert "episode reply is not a valid _EpisodeReply" in str(excinfo.value)
+    assert failing_location in str(excinfo.value)
+    assert _SECRET not in str(excinfo.value)
+    assert fake.call_count == 1
+
+
+@pytest.mark.parametrize("field", ["content", "summary", "title"])
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t"])
+async def test_blank_stored_field_raises_llm_output_error(field: str, blank: str) -> None:
+    """A blank stored field has no honest stand-in, so it fails here where the call is still in hand."""
+    values = {"content": _SECRET, "summary": _SECRET, "title": _SECRET, field: blank}
+    fake = FakeLLMClient(responses=[json.dumps(values)])
+
+    with pytest.raises(LLMOutputError) as excinfo:
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=None)
+
+    assert str(excinfo.value) == f"episode reply leaves fields blank: {field}: empty after stripping whitespace"
+    assert _SECRET not in str(excinfo.value)
+    assert fake.call_count == 1
+
+
+async def test_every_blank_field_is_named() -> None:
+    reply = json.dumps({"content": " ", "summary": "s", "title": ""})
+
+    with pytest.raises(LLMOutputError, match=r"content: empty after stripping whitespace; title: empty"):
+        await _extract(reply)
+
+
+async def test_client_exception_propagates_unchanged() -> None:
+    """The host recognises call failures by its own types, so the operator neither wraps nor retypes them."""
+    error = _ClientError("upstream down")
+    fake = FakeLLMClient(responses=[error])
+
+    with pytest.raises(_ClientError) as excinfo:
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=None)
+
+    assert excinfo.value is error
+    assert fake.call_count == 1
+
+
+# ===========================================================================
+# Signature — prompt= is gone, custom_instructions fills its block, sender_id only sets owner_id
+# ===========================================================================
+
+
+def test_aextract_takes_no_prompt_override() -> None:
+    assert list(inspect.signature(EpisodeExtractor.aextract).parameters) == [
+        "self",
+        "memcell",
+        "sender_id",
+        "custom_instructions",
+        "output_language",
+    ]
+
+
+async def test_custom_instructions_are_the_whole_block_verbatim() -> None:
+    """No bundled principles precede them, and as a rendered value they are never scanned for placeholders."""
+    _, fake = await _extract(custom_instructions="Mention every {{conversation}} literally.")
+
+    system, user = _sent(fake)
+    block = system.split("<custom_instructions>\n", 1)[1].split("\n</custom_instructions>", 1)[0]
+    assert block == "Mention every {{conversation}} literally."
+    assert "Mention every" not in user
+
+
+@pytest.mark.parametrize("custom_instructions", [None, "", "  \n"])
+async def test_no_or_blank_custom_instructions_leave_the_block_out(custom_instructions: str | None) -> None:
+    _, with_none = await _extract()
+    _, with_value = await _extract(custom_instructions=custom_instructions)
+
+    assert _sent(with_value) == _sent(with_none)
+    assert "<custom_instructions>" not in _sent(with_value)[0]
+
+
+async def test_sender_id_only_sets_owner_id() -> None:
+    """The prompt narrates the whole memcell either way; there is no user-centred variant."""
+    alice, alice_fake = await _extract(sender_id="u_alice")
+    generic, generic_fake = await _extract(sender_id=None)
+
+    assert _sent(alice_fake) == _sent(generic_fake)
+    assert alice.owner_id == "u_alice"
+    assert generic.owner_id is None
+    assert all("User name:" not in content for content in _sent(alice_fake))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "USER_EPISODE_SYSTEM_PROMPT",
+        "SUMMARY_COMPRESS_PROMPT",
+        "DEFAULT_CUSTOM_INSTRUCTIONS",
+        "EPISODE_DECLARE_LANGUAGE_ADDITION",
+        "EPISODE_PARTICIPANT_LANGUAGE_RULE",
+        "EPISODE_CALLER_LANGUAGE_RULE",
+    ],
+)
+def test_retired_prompt_constants_are_gone(name: str) -> None:
+    assert not hasattr(prompts, name)
+
+
+def test_user_centred_prompt_slot_is_gone() -> None:
+    assert "{{user_name}}" not in EPISODE_SYSTEM_PROMPT + EPISODE_USER_PROMPT
+
+
+async def test_default_call_sends_the_templates_filled() -> None:
+    """Pins the host's call (no language, no instructions): the static rules and the participant rule only."""
+    _, fake = await _extract()
+
+    assert _sent(fake) == (
+        assemble_system_prompt(custom_instructions=None, language_rule=PARTICIPANT_LANGUAGE_RULE),
+        '<conversation count="2">\n'
+        "[2023-11-14 22:13 UTC (Tuesday)] Alice: Schedule a meeting with Alice at 3pm\n"
+        "[2023-11-14 22:13 UTC (Tuesday)] assistant: Done. Sent invite for 3pm.\n"
+        "</conversation>",
     )
 
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id=sender_id)
 
-    assert ep.episode == "Alice asked about hiking."
-
-
-async def test_episode_body_gets_no_code_built_timestamp_prefix() -> None:
-    """Code must not prepend a timestamp — the prompt owns the narrative's times.
-
-    A prefix was tried and removed: its value was ``items[0].timestamp``, the same instant the
-    narrative's own timeline opens on, so it restated the opening message's time a second time
-    (``2026-05-29 12:25 UTC — 2026-05-29 12:25 UTC, Alice…``). A real-LLM run over 35 extractions
-    found the model always wrote an absolute UTC time of its own, including for single-message
-    conversations with no temporal content, so the prefix guarded a case that did not occur. The
-    format the prefix guaranteed is now guaranteed by the prompt's UTC rule instead.
-    """
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(content='{"title": "T", "content": "body", "summary": "Preview of body"}', model="fake")
-        ]
-    )
-
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell_spanning_70_minutes(), sender_id="u_alice")
-
-    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC — ", ep.episode) is None
+# ===========================================================================
+# Language — the rule the model writes in; no declaration
+# ===========================================================================
 
 
-async def test_episode_timestamp_field_still_holds_closing_time() -> None:
-    """Dropping the prefix must not disturb the ``timestamp`` field: still ``memcell.timestamp``."""
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(content='{"title": "T", "content": "body", "summary": "Preview of body"}', model="fake")
-        ]
-    )
-    mc = _memcell_spanning_70_minutes()
+async def test_rendering_injects_the_participant_rule_when_no_language_is_named() -> None:
+    _, fake = await _extract()
 
-    ep = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
-
-    assert ep.timestamp == mc.timestamp == _TS_FRIDAY_MS + 70 * 60 * 1000
+    system, user = _sent(fake)
+    output_language = system.split("<output_language>\n", 1)[1].split("\n</output_language>", 1)[0]
+    assert output_language == PARTICIPANT_LANGUAGE_RULE
+    assert "{{" not in system
+    assert PARTICIPANT_LANGUAGE_RULE not in user
 
 
-# ==========================================================================
-# summary — a model-written display preview, not a slice of the body
-#
-# For 0.1 through 0.4 this field was `body[:200]`: the prompts never asked for it, so the extractor's
-# `data.get("summary")` branch was unreachable and every caller got a blind truncation — cut mid-word in
-# English, and a verbatim copy of the whole body in Chinese, where 200 characters is most of an episode.
-# ==========================================================================
+async def test_rendering_injects_the_named_language_instead_of_the_participant_rule() -> None:
+    _, fake = await _extract(output_language=OutputLanguage.GERMAN)
 
-_SUMMARY = "Alice raised async retries and the assistant promised a doc."
+    system, _ = _sent(fake)
+    assert system.count(build_language_rule(OutputLanguage.GERMAN)) == 1
+    assert "in language" not in system
+    assert PARTICIPANT_LANGUAGE_RULE not in system
 
 
-def _episode_response(*, title: str = "T", content: str = "A long narrative body.", summary: str = _SUMMARY) -> str:
-    return json.dumps({"title": title, "content": content, "summary": summary})
+@pytest.mark.parametrize("output_language", [None, OutputLanguage.CHINESE])
+async def test_episode_reports_no_language(output_language: OutputLanguage | None) -> None:
+    """The model declares none and a named language is not echoed back: a host judges it from the text."""
+    episode, _ = await _extract(output_language=output_language)
+
+    assert getattr(episode, "user_language", None) is None
+    assert episode.model_extra == {}
 
 
-@pytest.mark.parametrize("sender_id", [None, "u_alice"])
-async def test_summary_comes_from_the_model_verbatim(sender_id: str | None) -> None:
-    """Both prompt variants must carry the model's summary through untouched."""
-    fake = FakeLLMClient(responses=[ChatResponse(content=_episode_response(), model="fake")])
+async def test_unsupported_output_language_raises_before_any_call() -> None:
+    fake = FakeLLMClient(responses=[_reply()])
 
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=sender_id)
+    with pytest.raises(ValueError, match="unsupported output_language"):
+        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=None, output_language="Klingon")
 
-    assert ep.summary == _SUMMARY
-
-
-async def test_summary_is_not_a_slice_of_the_body() -> None:
-    """The regression that prompted the change: a body long enough that a 200-char slice is visible."""
-    body = "Alice asked about async retries. " * 20
-    fake = FakeLLMClient(responses=[ChatResponse(content=_episode_response(content=body), model="fake")])
-
-    ep = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    assert ep.summary == _SUMMARY
-    assert ep.summary != body[:200]
-    assert not body.startswith(ep.summary)
+    assert fake.call_count == 0
 
 
-async def test_missing_summary_raises_rather_than_substituting_one() -> None:
-    """There is no honest value to invent for a preview the model did not write."""
-    fake = FakeLLMClient(responses=[ChatResponse(content='{"title": "T", "content": "body"}', model="fake")])
-
-    with pytest.raises(ValueError, match=r"missing required keys \['summary'\]"):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+# ===========================================================================
+# Prompt — skeleton and examples, and the rules the stored record depends on
+# ===========================================================================
 
 
-@pytest.mark.parametrize("summary", ["", "   ", "\n\t"])
-async def test_blank_summary_raises_like_blank_content(summary: str) -> None:
-    """A blank preview is a defect the caller cannot see, so it fails here where the call is still in hand."""
-    fake = FakeLLMClient(responses=[ChatResponse(content=_episode_response(summary=summary), model="fake")])
-
-    with pytest.raises(ValueError, match="empty summary"):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-
-@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
-def test_both_variants_ask_for_summary_after_content(name: str) -> None:
-    """Field order is generation order: a summary emitted first would summarise a body that does not exist yet.
-
-    That would make it a second independent pass over the conversation, which is exactly what the field is
-    not — it is a compression of `content`. Guarded here because the ordering is invisible at a glance and
-    a well-meaning edit that alphabetises the JSON example would silently break it.
-    """
-    import everalgo.user_memory.prompts.en.episode as mod
-
-    prompt = getattr(mod, name)
-    assert prompt.count('"summary"') >= 1
-    assert prompt.count('"summary"') == prompt.count('"content"')
-    for index in range(len(prompt)):
-        if prompt.startswith('"summary"', index):
-            assert prompt.rfind('"content"', 0, index) > prompt.rfind('"summary"', 0, index), (
-                f"{name}: a summary at offset {index} is not preceded by its own content"
-            )
+def _shown_replies() -> dict[str, dict[str, Any]]:
+    """The skeleton and the two worked examples' replies, parsed."""
+    english, chinese = re.findall(r"<reply>\n(.*?)\n</reply>", EPISODE_SYSTEM_PROMPT, re.DOTALL)
+    skeleton = EPISODE_SYSTEM_PROMPT.split("<reply_format>\n", 1)[1].split("\n</reply_format>", 1)[0].split("\n", 1)[1]
+    return {
+        name: json.loads(text) for name, text in (("skeleton", skeleton), ("english", english), ("chinese", chinese))
+    }
 
 
-@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
-def test_both_variants_bound_the_summary_length_and_self_containment(name: str) -> None:
-    """The three rigid clauses of the spec: bounded, faithful, and readable without the record."""
-    import everalgo.user_memory.prompts.en.episode as mod
+@pytest.mark.parametrize("name", ["skeleton", "english", "chinese"])
+def test_skeleton_and_examples_are_valid_replies_in_field_order(name: str) -> None:
+    """What the prompt shows is what the code accepts: each block parses, validates, and keeps the field order."""
+    block = _shown_replies()[name]
 
-    prompt = getattr(mod, name)
-    assert "1-3 short sentences" in prompt
-    assert "COMPRESS, never restate" in prompt
-    assert "without inventing facts or distorting their meaning" in prompt
-    assert "every included detail must remain faithful to the content" in prompt
-    assert "Do not refer to the record itself" in prompt
+    assert list(block) == _FIELD_ORDER
+    _EpisodeReply.model_validate_json(json.dumps(block))
 
 
-# ==========================================================================
-# Date-related prompt text
-# ==========================================================================
+def test_field_descriptions_follow_the_field_order() -> None:
+    section = EPISODE_SYSTEM_PROMPT.split("<what_to_write>\n", 1)[1].split("\n</what_to_write>", 1)[0]
+
+    assert [line.partition(":")[0] for line in section.splitlines()] == [f"- {name}" for name in _FIELD_ORDER]
+
+
+def test_prompt_text_never_says_user_language() -> None:
+    """No prompt text names ``user_language``: the model declares no language under any name."""
+    for name, value in vars(prompts).items():
+        if name.isupper() and isinstance(value, str):
+            assert "user_language" not in value, name
+
+
+def test_participant_rule_asks_for_no_declaration() -> None:
+    """The shared rule the episode takes asks only for the participants' language, never for it to be declared."""
+    assert "the language the participants use" in PARTICIPANT_LANGUAGE_RULE
+    assert "English name" not in PARTICIPANT_LANGUAGE_RULE
+    assert "in language" not in PARTICIPANT_LANGUAGE_RULE
+
+
+def test_chinese_example_keeps_technical_terms_in_chinese_output() -> None:
+    example = _shown_replies()["chinese"]
+
+    assert example["title"] == "林然和周敏排查 payment API 超时并制定 retry 方案"
+    assert "payment API 在 staging 环境" in example["content"]
+    assert "timeout" in example["content"]
+    assert example["summary"].startswith("林然和周敏排查 staging 环境的 payment API 超时")
+    assert all("2026-08-20 09:30 UTC" not in value for value in example.values())
+
+
+def test_summary_spec_bounds_length_and_self_containment() -> None:
+    """The rigid clauses of the spec: bounded, faithful, and readable without the record."""
+    for clause in (
+        "1-3 short sentences",
+        "Compress, never restate",
+        "You may omit minor details.",
+        "Do not refer to the record itself",
+    ):
+        assert clause in EPISODE_SYSTEM_PROMPT
+    assert "Do not invent facts" not in EPISODE_SYSTEM_PROMPT
+
 
 _MONTH_NAME_DATE_RE = re.compile(
     r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)"
@@ -898,306 +452,317 @@ _MONTH_NAME_DATE_RE = re.compile(
 _LEADING_TIMESTAMP_RE = re.compile(r"^(?:\d|(?:On|At|In)\s+(?:\S+\s+){0,3}?\d)")
 
 
-def _extract_example_field(prompt_text: str, heading: str, field: str) -> str:
-    """Extract a `"field": "..."` value from the JSON block following `heading` in the worked example."""
-    section = prompt_text.split(heading, 1)[1]
-    match = re.search(rf'"{field}":\s*"([^"]*)"', section)
-    assert match is not None, f"could not find {field!r} field after {heading!r}"
-    return match.group(1)
+def test_dual_format_examples_preserve_granularity_and_use_iso_dates() -> None:
+    for clause in (
+        "Resolve it against the timestamp of the message that contains it",
+        "last Friday (2023-05-12)",
+        "last week (2023-05-08 to 2023-05-14)",
+        "ISO Monday-Sunday weeks",
+        "at the same granularity",
+    ):
+        assert clause in EPISODE_SYSTEM_PROMPT
+    assert _MONTH_NAME_DATE_RE.search(EPISODE_SYSTEM_PROMPT) is None
 
 
-@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
-def test_en_dual_format_examples_preserve_granularity_and_use_iso_dates(name: str) -> None:
-    """Both variants preserve relative-time granularity and use ISO dates in their examples."""
-    import everalgo.user_memory.prompts.en.episode as mod
-
-    prompt = getattr(mod, name)
-    assert 'message timestamped "2023-05-15 10:00 UTC (Monday)"' in prompt
-    assert "last Friday (2023-05-12)" in prompt
-    assert "last week (2023-05-08 to 2023-05-14)" in prompt
-    assert "ISO Monday-Sunday calendar week" in prompt
-    assert "at the same granularity" in prompt
-    assert _MONTH_NAME_DATE_RE.search(prompt) is None
+def test_time_rules_keep_vague_references_vague_and_name_no_start_time() -> None:
+    for clause in (
+        '("recently", "later", "someday")',
+        "never invent a date or range for them",
+        "do not copy message timestamps into content",
+    ):
+        assert clause in EPISODE_SYSTEM_PROMPT
+    assert "start time" not in EPISODE_SYSTEM_PROMPT.lower()
 
 
-@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
-def test_en_time_rules_keep_conversation_start_contextual_and_vague_references_vague(name: str) -> None:
-    """Neither variant writes the conversation anchor into content or invents bounds for vague references."""
-    import everalgo.user_memory.prompts.en.episode as mod
+def test_absolute_clock_times_require_the_utc_label() -> None:
+    """The negative half guards a rule tried and removed: forbidding ``content`` from opening with a time.
 
-    prompt = getattr(mod, name)
-    assert "only as context for when this conversation/episode began" in prompt
-    assert "do not copy it into content or use it to resolve time references" in prompt
-    assert 'such as "recently", "later", or "someday"' in prompt
-    assert "without inventing an absolute date or range" in prompt
-
-
-def test_en_generic_example_body_has_no_timestamp_prefix() -> None:
-    """The generic example was what taught the model to open the body with a date.
-
-    Guards the invariant (no leading digit, no "On/At/In <date>" opening), not just the one
-    historical string, so reintroducing ANY timestamp-shaped opening fails this test.
+    It contradicted the prompt's own demand for a chronological account with per-event times, and a real-LLM run
+    showed the model ignoring it 15/15 — correctly, since the narrative's times belong to the events.
     """
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+    assert (
+        "Only a clock time you derive yourself from a message timestamp, when a relative expression resolves to one "
+        '("in two hours"), carries the UTC label, written "2024-03-14 15:00 UTC"' in EPISODE_SYSTEM_PROMPT
+    )
+    assert "do not convert it and do not add a zone label" in EPISODE_SYSTEM_PROMPT
+    assert "must NOT begin with a timestamp" not in EPISODE_SYSTEM_PROMPT
 
-    content = _extract_example_field(EPISODE_GENERATION_PROMPT, "If the conversation start time is", "content")
-    assert not content[0].isdigit()
+
+def test_english_example_body_has_no_timestamp_prefix() -> None:
+    """The example was what taught the model to open the body with a date; guard the invariant, not one string."""
+    content = _shown_replies()["english"]["content"]
+
     assert _LEADING_TIMESTAMP_RE.match(content) is None
 
 
-def test_en_generic_example_title_prioritises_event_and_outcome_over_date() -> None:
-    """The generic title should carry searchable event details without a redundant calendar date."""
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+def test_english_example_title_prioritises_event_and_outcome_over_date() -> None:
+    title = _shown_replies()["english"]["title"]
 
-    title = _extract_example_field(EPISODE_GENERATION_PROMPT, "If the conversation start time is", "title")
     assert "Caroline" in title
     assert "Mount Rainier" in title
-    assert "Early Saturday Start" in title
+    assert "Early Saturday" in title
     assert "2024-03-14" not in title
     assert _MONTH_NAME_DATE_RE.search(title) is None
 
 
-def test_en_user_example_title_prioritises_event_and_outcome_over_date() -> None:
-    """The user-centred title should record the decision without repeating an unneeded owner name."""
-    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT
-
-    title = _extract_example_field(USER_EPISODE_GENERATION_PROMPT, "Example (correct style", "title")
-    assert "{user_name}" not in title
-    assert "Mount Rainier Sunrise Hike" in title
-    assert "Early Saturday Start" in title
-    assert "with Friends" in title
-    assert "2024-03-14" not in title
-    assert _MONTH_NAME_DATE_RE.search(title) is None
+def test_title_length_has_only_an_upper_bound() -> None:
+    assert "fewer than 20 words, and only as many as needed" in EPISODE_SYSTEM_PROMPT
+    assert "10-20 words" not in EPISODE_SYSTEM_PROMPT
 
 
-def test_en_user_title_requires_a_name_only_for_disambiguation() -> None:
-    """Owner identity belongs to metadata unless participant ambiguity makes the name useful."""
-    from everalgo.user_memory.prompts.en.episode import USER_EPISODE_GENERATION_PROMPT
-
-    assert "does not need to begin with or include `{user_name}`" in USER_EPISODE_GENERATION_PROMPT
-    assert "only when needed to disambiguate participants" in USER_EPISODE_GENERATION_PROMPT
+def test_example_lines_use_the_input_side_format() -> None:
+    assert "\n[2024-03-14 15:00 UTC (Thursday)] Caroline: " in EPISODE_SYSTEM_PROMPT
 
 
-@pytest.mark.parametrize("name", _LANGUAGE_PROMPTS)
-def test_en_title_length_has_only_an_upper_bound(name: str) -> None:
-    """Both variants allow naturally short titles and forbid padding to meet a minimum."""
-    import everalgo.user_memory.prompts.en.episode as mod
-
-    prompt = getattr(mod, name)
-    assert "fewer than 20 words" in prompt
-    assert "10-20 words" not in prompt
-    assert "never" in prompt and "pad" in prompt
+# ===========================================================================
+# Rendering — the conversation
+# ===========================================================================
 
 
-def test_en_example_start_time_uses_input_side_format() -> None:
-    """The example's conversation-start-time value must match what the code now injects."""
-    from everalgo.user_memory.prompts.en.episode import EPISODE_GENERATION_PROMPT
+def test_render_conversation_skips_empty_content() -> None:
+    cell = MemCell(
+        items=[
+            ChatMessage(id="m1", role="user", content="hi", timestamp=_TS_MS, sender_id="u_alice", sender_name="Alice"),
+            ChatMessage(id="m2", role="user", content="", timestamp=_TS_MS + 1, sender_id="u_bob", sender_name="Bob"),
+        ],
+        timestamp=_TS_MS + 1,
+    )
 
-    assert "2024-03-14 15:00 UTC (Thursday)" in EPISODE_GENERATION_PROMPT
+    rendered = _render_conversation(cell)
+
+    assert rendered.startswith('<conversation count="1">\n')
+    assert "] Alice: hi\n" in rendered
+    assert "Bob" not in rendered
 
 
-def test_all_variants_require_utc_label_on_absolute_clock_times() -> None:
-    """Absolute times stating a clock time must be labelled UTC, in all four prompt variants.
+def test_render_conversation_uses_24h_input_format_with_the_weekday() -> None:
+    """The weekday is what lets the LLM resolve "last Friday"; dropping it re-introduces off-by-one-week errors."""
+    cell = MemCell(
+        items=[
+            ChatMessage(
+                id="m1", role="user", content="hello", timestamp=_TS_FRIDAY_MS, sender_id="u_alice", sender_name="Alice"
+            )
+        ],
+        timestamp=_TS_FRIDAY_MS,
+    )
 
-    The negative half guards a rule that was tried and removed: an instruction forbidding ``content``
-    from opening with a date or time. It contradicted the same prompt's own demand for a chronological
-    account with per-event times, and a real-LLM run showed the model ignoring it 15/15 — correctly,
-    since the narrative's times belong to the events. Do not reintroduce it.
+    rendered = _render_conversation(cell)
+
+    assert "\n[2026-05-29 12:25 UTC (Friday)] Alice: hello\n" in rendered
+    assert "PM" not in rendered
+
+
+def test_render_conversation_falls_back_to_the_sender_id() -> None:
+    cell = MemCell(
+        items=[ChatMessage(id="m1", role="user", content="hi", timestamp=_TS_MS, sender_id="u_alice")],
+        timestamp=_TS_MS,
+    )
+
+    lines = _render_conversation(cell).splitlines()[1:-1]
+
+    assert lines == ["[2023-11-14 22:13 UTC (Tuesday)] u_alice: hi"]
+
+
+def test_render_conversation_rejects_a_message_without_a_timestamp() -> None:
+    """Every line carries its time, so a timestamp of 0 is an input error, named by id, never by text or speaker."""
+    cell = MemCell(
+        items=[
+            ChatMessage(id="m1", role="user", content="hi", timestamp=_TS_MS, sender_id="u_alice"),
+            ChatMessage(id="m2", role="user", content="secret plan", timestamp=0, sender_id="u_bob", sender_name="Bob"),
+        ],
+        timestamp=_TS_MS,
+    )
+
+    with pytest.raises(ValueError, match=r"^chat message 'm2' has no timestamp$") as raised:
+        _render_conversation(cell)
+
+    assert "secret plan" not in str(raised.value)
+    assert "Bob" not in str(raised.value)
+
+
+async def test_extraction_without_a_message_timestamp_fails_before_calling_the_model() -> None:
+    cell = MemCell(
+        items=[ChatMessage(id="m1", role="user", content="hi", timestamp=0, sender_id="u_alice")],
+        timestamp=_TS_MS,
+    )
+    fake = FakeLLMClient(responses=[])
+
+    with pytest.raises(ValueError, match="has no timestamp"):
+        await EpisodeExtractor(llm=fake).aextract(cell, sender_id=None)
+
+    assert fake.calls == []
+
+
+async def test_user_message_carries_no_start_time_only_per_message_times() -> None:
+    """The first line's time is when the conversation began; nothing restates it as a start time."""
+    _, fake = await _extract(memcell=_memcell_spanning_70_minutes())
+
+    _, user = _sent(fake)
+    assert user.startswith('<conversation count="2">\n[2026-05-29 12:25 UTC (Friday)] Alice: start\n')
+    assert "start_time" not in user
+
+
+async def test_non_chat_items_are_silently_skipped() -> None:
+    """Agent → user-memory contract: tool items in a MemCell change nothing the model is shown."""
+    chat = ChatMessage(
+        id="c1",
+        role="user",
+        content="Let's schedule the demo for Friday",
+        timestamp=_TS_MS,
+        sender_id="u_alice",
+        sender_name="Alice",
+    )
+    mixed = MemCell(
+        items=[
+            chat,
+            ToolCallRequest(
+                tool_calls=[
+                    ToolCall(
+                        id="tc1", function=ToolCallFunction(name="calendar.create", arguments='{"time": "Friday"}')
+                    )
+                ],
+                timestamp=_TS_MS + 1000,
+                sender_id="assistant",
+            ),
+            ToolCallResult(tool_call_id="tc1", content="Event created.", timestamp=_TS_MS + 2000),
+        ],
+        timestamp=_TS_MS + 2000,
+    )
+
+    _, chat_fake = await _extract(memcell=MemCell(items=[chat], timestamp=_TS_MS + 2000))
+    _, mixed_fake = await _extract(memcell=mixed)
+
+    assert _sent(chat_fake) == _sent(mixed_fake)
+
+
+# ===========================================================================
+# Stored record — body verbatim, times from the model, summary from the model
+# ===========================================================================
+
+
+async def test_episode_body_is_stored_verbatim_with_no_code_built_prefix() -> None:
+    """Code must not prepend a timestamp — the prompt owns the narrative's times.
+
+    A prefix was tried and removed: its value was ``items[0].timestamp``, the instant the narrative's own timeline
+    opens on, so it restated the opening message's time a second time.
     """
-    import everalgo.user_memory.prompts.en.episode as en_mod
+    episode, _ = await _extract(_reply(content="Alice asked about hiking."), memcell=_memcell_spanning_70_minutes())
 
-    for name in ("EPISODE_GENERATION_PROMPT", "USER_EPISODE_GENERATION_PROMPT"):
-        assert "MUST carry the UTC zone label" in getattr(en_mod, name)
-        assert "must NOT begin with a timestamp" not in getattr(en_mod, name)
+    assert episode.episode == "Alice asked about hiking."
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC — ", episode.episode) is None
 
 
-# ==========================================================================
-# Summary width guard (three tiers)
-# ==========================================================================
+async def test_episode_timestamp_is_the_memcell_closing_time() -> None:
+    cell = _memcell_spanning_70_minutes()
 
-_CONTENT_BODY = "CONTENT_ONLY_MARKER: Alice and Bob discussed database capacity."
+    episode, _ = await _extract(memcell=cell)
+
+    assert episode.timestamp == cell.timestamp == _TS_FRIDAY_MS + 70 * 60 * 1000
+
+
+async def test_summary_comes_from_the_model_not_a_slice_of_the_body() -> None:
+    """For 0.1 through 0.4 the summary was ``body[:200]``; it is the model's own preview now."""
+    body = "Alice asked about async retries. " * 20
+    summary = "Alice raised async retries and the assistant promised a doc."
+
+    episode, _ = await _extract(_reply(content=body, summary=summary))
+
+    assert episode.summary == summary
+    assert not body.startswith(episode.summary)
+
+
+# ===========================================================================
+# Summary width guard — truncation in place, never a second call
+# ===========================================================================
+
 _LONG_SUMMARY = "SUMMARY_ONLY_MARKER. The team met and decided many things. " * 30
 
 
-def _episode_json(summary: str) -> str:
-    return json.dumps({"title": "T", "content": _CONTENT_BODY, "summary": summary})
+async def test_summary_at_the_cap_passes_untouched() -> None:
+    at_cap = "a" * _SUMMARY_WIDTH_CAP
+
+    episode, fake = await _extract(_reply(summary=at_cap))
+
+    assert episode.summary == at_cap
+    assert fake.call_count == 1
 
 
-def test_summary_width_cap_is_400_ascii_equivalent_units() -> None:
-    assert _SUMMARY_WIDTH_CAP == 400
+async def test_overwide_summary_is_truncated_without_a_second_call() -> None:
+    episode, fake = await _extract(_reply(summary=_LONG_SUMMARY))
 
-
-async def test_compliant_summary_passes_untouched_with_one_llm_call() -> None:
-    """Tier 1: a within-cap summary is stored verbatim; no repair call is spent."""
-    calls: list[str] = []
-
-    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        assert isinstance(messages[0].content, str)
-        calls.append(messages[0].content)
-        return ChatResponse(content=_episode_json("Alice and Bob met and agreed."), model="fake")
-
-    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
-
-    assert ep.summary == "Alice and Bob met and agreed."  # type: ignore[attr-defined]
-    assert len(calls) == 1
-
-
-async def test_overwide_summary_is_replaced_by_the_compress_call() -> None:
-    """Tier 2: repair sees the over-cap summary and never the episode content."""
-    calls: list[str] = []
-
-    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        assert isinstance(messages[0].content, str)
-        calls.append(messages[0].content)
-        if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
-        return ChatResponse(content="A short faithful preview.", model="fake")
-
-    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
-
-    assert ep.summary == "A short faithful preview."  # type: ignore[attr-defined]
-    assert len(calls) == 2
-    assert _LONG_SUMMARY[:80] in calls[1]
-    assert _CONTENT_BODY not in calls[1]
-
-
-async def test_failed_compress_degrades_to_sentence_truncation_not_an_error() -> None:
-    """Tier 3: repair call dies -> truncated prefix stored; extraction itself never fails."""
-    calls: list[int] = []
-
-    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        calls.append(1)
-        if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
-        raise RuntimeError("compress model down")
-
-    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
-
-    summary = ep.summary  # type: ignore[attr-defined]
-    assert summary.endswith("\u2026")
-    assert len(summary) <= _SUMMARY_WIDTH_CAP
-    # whole sentences kept, with the ellipsis REPLACING the final terminator
-    body = summary.removesuffix("\u2026")
+    assert fake.call_count == 1
+    assert episode.summary.endswith("…")
+    assert ascii_width(episode.summary) <= _SUMMARY_WIDTH_CAP
+    body = episode.summary.removesuffix("…")
     assert not body.endswith((".", "!", "?"))
-    assert (body + ". ") in _LONG_SUMMARY  # the kept prefix ends exactly where a sentence did
+    assert (body + ". ") in _LONG_SUMMARY
 
 
-async def test_compress_output_still_over_cap_falls_through_to_truncation() -> None:
-    """Tier 2 output that itself violates the cap is not stored; tier 3 truncates it."""
-    calls: list[int] = []
+async def test_one_unit_over_the_cap_is_truncated() -> None:
+    episode, _ = await _extract(_reply(summary="a" * (_SUMMARY_WIDTH_CAP + 1)))
 
-    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        calls.append(1)
-        if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
-        return ChatResponse(content="Still very wordy. " * 40, model="fake")
+    assert episode.summary.endswith("…")
+    assert ascii_width(episode.summary) <= _SUMMARY_WIDTH_CAP
 
-    ep = await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
 
-    summary = ep.summary  # type: ignore[attr-defined]
-    assert summary.endswith("\u2026")
-    assert len(summary) <= _SUMMARY_WIDTH_CAP
+async def test_guard_logs_the_violation_and_the_truncation(caplog: pytest.LogCaptureFixture) -> None:
+    """The violation line's rate is the production model's; the truncation line records what was stored."""
+    with caplog.at_level("INFO", logger=_LOGGER):
+        episode, _ = await _extract(_reply(summary=_LONG_SUMMARY))
+
+    by_level = {(record.levelname, record.message) for record in caplog.records}
+    original = ascii_width(_LONG_SUMMARY)
+    assert ("WARNING", f"episode summary over cap ({original} > {_SUMMARY_WIDTH_CAP} units)") in by_level
+    assert ("INFO", f"episode summary truncated: {original} -> {ascii_width(episode.summary)} units") in by_level
+
+
+async def test_compliant_summary_logs_no_guard_line(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("INFO", logger=_LOGGER):
+        await _extract()
+
+    assert not any("episode summary" in record.message for record in caplog.records)
 
 
 def test_truncation_cuts_at_a_sentence_boundary_and_replaces_the_terminator() -> None:
     text = "First sentence here. Second one follows! Third asks a question? " * 20
+
     out = _truncate_at_sentence_boundary(text, 100)
-    assert out.endswith("\u2026")
-    body = out.removesuffix("\u2026")
-    assert not body.endswith((".", "!", "?"))  # ellipsis replaced the terminator
-    assert text.startswith(body) and text[len(body)] in ".!?"  # cut sat ON a boundary
+
+    assert out.endswith("…")
+    body = out.removesuffix("…")
+    assert not body.endswith((".", "!", "?"))
+    assert text.startswith(body) and text[len(body)] in ".!?"
     assert len(out) <= 100
 
 
 def test_truncation_handles_cjk_width_and_terminators() -> None:
-    text = "\u4ed6\u5468\u516d\u65e9\u4e0a\u51fa\u53d1\u53bb\u770b\u65e5\u51fa\u3002" * 30
-    out = _truncate_at_sentence_boundary(text, 100)
-    assert out.endswith("\u2026")
-    body = out.removesuffix("\u2026")
-    assert not body.endswith("\u3002")  # ellipsis replaced the CJK full stop
-    assert text.startswith(body) and text[len(body)] == "\u3002"
-    from everalgo.user_memory._width import ascii_width
+    text = "他周六早上出发去看日出。" * 30
 
+    out = _truncate_at_sentence_boundary(text, 100)
+
+    assert out.endswith("…")
+    body = out.removesuffix("…")
+    assert not body.endswith("。")
+    assert text.startswith(body) and text[len(body)] == "。"
     assert ascii_width(out) <= 100
 
 
 def test_truncation_without_any_sentence_end_hard_cuts_with_ellipsis() -> None:
-    text = "word " * 200  # no terminator at all
-    out = _truncate_at_sentence_boundary(text, 60)
-    assert out.endswith("\u2026")
+    out = _truncate_at_sentence_boundary("word " * 200, 60)
+
+    assert out.endswith("…")
     assert len(out) <= 60
 
 
-async def test_guard_logs_the_violation_and_the_repair(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Tier-2 entry logs at WARNING, a successful repair at INFO.
-
-    These two lines are what make the production violation rate and repair success
-    rate observable — neither is recorded anywhere else.
-    """
-    calls: list[int] = []
-
-    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        calls.append(1)
-        if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
-        return ChatResponse(content="A short faithful preview.", model="fake")
-
-    with caplog.at_level("INFO", logger="everalgo.user_memory.episode"):
-        await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
-
-    messages_logged = [r.message for r in caplog.records]
-    assert any("over cap" in m and "attempting compress repair" in m for m in messages_logged)
-    assert any("repaired by compress" in m for m in messages_logged)
-
-
-async def test_guard_logs_the_truncation_fallback(caplog: pytest.LogCaptureFixture) -> None:
-    """A repair that dies leaves both the failure and the truncation in the log."""
-    calls: list[int] = []
-
-    async def handler(messages: list[LLMChatMessage], **_: object) -> ChatResponse:
-        calls.append(1)
-        if len(calls) == 1:
-            return ChatResponse(content=_episode_json(_LONG_SUMMARY), model="fake")
-        raise RuntimeError("compress model down")
-
-    with caplog.at_level("WARNING", logger="everalgo.user_memory.episode"):
-        await EpisodeExtractor(llm=FakeLLMClient(handler=handler)).aextract(_memcell(), sender_id="u_alice")
-
-    messages_logged = [r.message for r in caplog.records]
-    assert any("compress call failed" in m for m in messages_logged)
-    assert any("truncating" in m for m in messages_logged)
+# ===========================================================================
+# Log lines — one extraction reads as one story
+# ===========================================================================
 
 
 async def test_extraction_logs_entry_and_exit(caplog: pytest.LogCaptureFixture) -> None:
-    """One extraction reads as one story in the log: an entry line and an exit line.
+    with caplog.at_level("INFO", logger=_LOGGER):
+        await _extract(_reply(content="Alice met Bob.", summary="Alice met Bob."))
 
-    Entry carries scale, template and requested language; exit carries product widths and the resolved language.
-    """
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(
-                content='{"user_language": "english ", "title": "T", "content": "Alice met Bob.", "summary": "Alice met Bob."}',
-                model="fake",
-            )
-        ]
-    )
-
-    with caplog.at_level("INFO", logger="everalgo.user_memory.episode"):
-        await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
-
-    messages_logged = [r.message for r in caplog.records]
-    assert any("extracting episode:" in m and "template=user-centred" in m for m in messages_logged)
-    assert any("episode extracted:" in m and "summary" in m and "user_language=English" in m for m in messages_logged)
-
-
-def test_compress_prompt_carries_its_contract() -> None:
-    """Placeholders present; data slot last, matching the assembly arc convention."""
-    assert "{language_rule}" in SUMMARY_COMPRESS_PROMPT
-    assert "{summary_text}" in SUMMARY_COMPRESS_PROMPT
-    assert "{episode_text}" not in SUMMARY_COMPRESS_PROMPT
-    assert SUMMARY_COMPRESS_PROMPT.rstrip().endswith("{summary_text}")
-    assert "1-3 short sentences" in SUMMARY_COMPRESS_PROMPT
-    assert "~50 English words / ~100 Chinese characters" in SUMMARY_COMPRESS_PROMPT
-    assert "removing complete sentences or clauses" in SUMMARY_COMPRESS_PROMPT
+    logged = [record.message for record in caplog.records]
+    assert any(m.startswith("extracting episode: 2 items, ") and m.endswith("output_language=None") for m in logged)
+    assert "episode extracted: content 14 units, summary 14 units" in logged

@@ -1,21 +1,15 @@
-"""Shared rendering helpers for user-memory extractors.
-
-This module is internal (``_render``-prefixed) — not part of the public API of ``everalgo.user_memory``.
-``render_content`` is re-exported from ``everalgo.types._render`` (moved to core in Stage 4 so that
-``everalgo-agent-memory`` can import it without creating a cross-package dependency on user-memory).
-"""
+"""Input helpers shared by the user-memory operators."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from everalgo.types._render import render_content
 from everalgo.types.chat import ChatMessage
 
 if TYPE_CHECKING:
     from everalgo.types.conversation import MemCell
 
-__all__ = ["chat_messages", "render_content"]
+__all__ = ["chat_messages", "nonblank"]
 
 
 def chat_messages(memcell: MemCell) -> list[ChatMessage]:
@@ -26,3 +20,8 @@ def chat_messages(memcell: MemCell) -> list[ChatMessage]:
     caller need not pre-filter; an AgentMemCell-shaped ``MemCell`` is acceptable input.
     """
     return [item for item in memcell.items if isinstance(item, ChatMessage)]
+
+
+def nonblank(text: str | None) -> str | None:
+    """``text``, or None when it is None or only whitespace."""
+    return text if text is not None and text.strip() else None

@@ -33,7 +33,7 @@ import json
 import numpy as np
 
 from everalgo.clustering import Cluster, cluster_by_geometry
-from everalgo.llm.types import ChatMessage as LLMChatMessage, ChatResponse
+from everalgo.llm import LLMMessage
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 from everalgo.user_memory import BoundaryDetector
@@ -43,25 +43,28 @@ from everalgo.user_memory import AtomicFactExtractor, EpisodeExtractor, Foresigh
 # Scripted LLM responses — one per pipeline stage, in call order.
 # ---------------------------------------------------------------------------
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "should_wait": False})
-_EPISODE_JSON = json.dumps({"title": "Alice asks about Python async", "content": "Discussion on async retry.", "summary": "Alice asked about async retries."})
+_BOUNDARY_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "tail_complete": True})
+_EPISODE_JSON = json.dumps({"content": "Discussion on async retry.", "summary": "Alice asked about async retries.", "title": "Alice asks about Python async"})
 _FORESIGHT_JSON = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "...", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
-_ATOMIC_FACT_JSON = json.dumps({"atomic_facts": {"time": "2023-11-14 22:13 UTC", "atomic_fact": ["Alice is learning async retry semantics."]}})
-_PROFILE_JSON = json.dumps({"explicit_info": [{"category": "Technical Skills", "description": "Python developer."}], "implicit_traits": []})
+_ATOMIC_FACT_JSON = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning async retry semantics."]}})
+_PROFILE_JSON = json.dumps({"explicit_info": [{"evidence": "Asked about async retries.", "description": "Python developer.", "category": "Technical Skills"}], "implicit_traits": []})
 
 _STAGE_ORDER = ("boundary", "episode", "foresight", "atomic_fact", "profile")
 _STAGE_RESPONSE = dict(zip(_STAGE_ORDER, [_BOUNDARY_JSON, _EPISODE_JSON, _FORESIGHT_JSON, _ATOMIC_FACT_JSON, _PROFILE_JSON]))
 
 
 def _make_fake() -> FakeLLMClient:
-    """Route each LLM call to its scripted response by pipeline call order."""
+    """Route each LLM call to its scripted response by pipeline call order.
+
+    ``achat`` returns the reply text, so the handler returns the JSON the operator's ``response_format`` expects.
+    """
     call_index = 0
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: object) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **_kwargs: object) -> str:
         nonlocal call_index
         stage = _STAGE_ORDER[call_index]
         call_index += 1
-        return ChatResponse(content=_STAGE_RESPONSE[stage], model="fake")
+        return _STAGE_RESPONSE[stage]
 
     return FakeLLMClient(handler=handler)
 
@@ -151,7 +154,7 @@ total LLM calls: 5  (expected 5)
 ### The `a`-prefix convention
 
 Methods named `adetect`, `aextract`, `arank`, `aparse` are **native async** — they make real I/O calls (LLM, network) and must be called with `await`.
-Most names without the `a` prefix are **synchronous**. Some (`rrf`, `count_tokens`) are pure compute; others (`extract`, `detect`, `rank`, `parse`) are blocking sync bridges over async I/O and must not run inside an event loop. Three established interfaces are native async despite lacking the prefix: `LLMClient.chat`, `detect_boundaries`, and `cluster_by_llm`; all three must be awaited.
+Most names without the `a` prefix are **synchronous**. Some (`rrf`, `count_tokens`) are pure compute; others (`extract`, `detect`, `rank`, `parse`) are blocking sync bridges over async I/O and must not run inside an event loop. `LLMClient.achat` and `acluster_by_llm` follow the same rule.
 
 ```python
 # async: always await
@@ -172,38 +175,29 @@ See [Async–sync bridge](concepts/async-sync-bridge.md) for the full explanatio
 For production or experiments with a real model, build an `OpenAICompatClient` and pass it to each extractor:
 
 ```python
-from everalgo.llm import LLMConfig
-from everalgo.llm.providers.openai_compat import OpenAICompatClient
+from everalgo.llm.openai_compat import OpenAICompatClient
 from everalgo.user_memory import EpisodeExtractor
 
-client = OpenAICompatClient(
-    LLMConfig(
-        model="gpt-4o-mini",
-        api_key="sk-...",
-        base_url="https://api.openai.com/v1",
-    )
-)
+client = OpenAICompatClient(model="gpt-4o-mini", api_key="sk-...")
 episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alice")
 ```
 
 The `llm=` argument is bound at construction time. There is no global default — each operator instance holds its own client.
 
-### Product facade and low-level primitive
+### Boundary class and low-level primitive
 
-The product package exposes the scenario facade. The tool package exposes the lower-level boundary function used by facade implementations:
+`BoundaryDetector` is defined in the boundary package, next to the lower-level function it forwards to; both product packages re-export it:
 
 ```python
-# Product path — follow EverOS contracts
+# Defining package — the class and its function primitive
+from everalgo.boundary import BoundaryDetector, adetect_boundaries
+
+# Product re-exports — the same class object
 from everalgo.user_memory import BoundaryDetector
-
-# Physical module containing that same facade class
-from everalgo.user_memory.boundary import BoundaryDetector
-
-# Low-level async primitive — a function, not the facade class
-from everalgo.boundary import detect_boundaries
+from everalgo.agent_memory import BoundaryDetector
 ```
 
-The first two imports resolve to the same class. `everalgo.boundary.chat` does not define `BoundaryDetector`; it contains `detect_boundaries`, `adetect_boundary_step`, and their result types.
+All three `BoundaryDetector` imports resolve to the same class. `adetect_boundaries` (with its sync bridge `detect_boundaries`) is what `BoundaryDetector.adetect` calls; it accepts agent trajectories with tool calls as well as plain chat.
 
 ---
 

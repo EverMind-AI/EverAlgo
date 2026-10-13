@@ -64,9 +64,9 @@ It is CRITICAL that you move beyond simple fact extraction and perform logical i
 
 ---
 
-{context}
+{{context}}
 
-Question: {question}
+Question: {{question}}
 
 Now, follow the Chain-of-Thought process above to answer the question:
 """
@@ -91,9 +91,9 @@ The generated answer might be much longer, but you should be generous with your 
 For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
 
 Now it's time for the real question:
-Question: {question}
-Gold answer: {gold_answer}
-Generated answer: {response}
+Question: {{question}}
+Gold answer: {{gold_answer}}
+Generated answer: {{response}}
 
 First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG.
 Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.

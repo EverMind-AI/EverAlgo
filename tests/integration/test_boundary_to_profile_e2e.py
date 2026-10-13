@@ -6,15 +6,16 @@ LLM JSON follows ``PROFILE_INITIAL_EXTRACTION_PROMPT`` schema:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.assertions import assert_profile_shape
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 from everalgo.user_memory import BoundaryDetector
 from everalgo.user_memory.profile import ProfileExtractor
+
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
 
 
 def _prior_cluster() -> list[MemCell]:
@@ -58,37 +59,30 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
 
     Verifies:
     1. Cluster MemCells land in the profile ``{conversation_text}`` placeholder.
-    2. ``extra="allow"`` preserves explicit_info + implicit_traits as first-class attrs on Profile.
+    2. ``explicit_info`` and ``implicit_traits`` come back as typed items on Profile.
     3. ``assert_profile_shape`` passes.
     """
     call_count = 0
     captured_profile_prompt: dict[str, str] = {}
 
-    def handler(messages: list[LLMChatMessage], **kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return ChatResponse(
-                content='{"reasoning": "single coherent topic", "boundaries": [], "should_wait": false}',
-                model="fake",
-            )
+            return '{"reasoning": "single coherent topic", "boundaries": [], "tail_complete": true}'
         assert isinstance(messages[0].content, str)  # narrow for test
         captured_profile_prompt["text"] = messages[0].content
-        return ChatResponse(
-            content=(
-                '{"explicit_info": ['
-                '{"category": "Technical Skills",'
-                ' "description": "Alice is a Python developer focused on async patterns.",'
-                ' "evidence": "Alice asked about async retry semantics."}'
-                "],"
-                '"implicit_traits": ['
-                '{"trait": "[Pragmatic]",'
-                ' "description": "Prefers tooling that minimises ceremony.",'
-                ' "basis": "Repeated preference for ruff over black.",'
-                ' "evidence": "Mentioned ruff preference in prior conversation."}'
-                "]}"
-            ),
-            model="fake",
+        return (
+            '{"explicit_info": ['
+            '{"category": "Technical Skills",'
+            ' "description": "Alice is a Python developer focused on async patterns.",'
+            ' "evidence": "Alice asked about async retry semantics."}'
+            "],"
+            '"implicit_traits": ['
+            '{"trait": "[Pragmatic]",'
+            ' "description": "Prefers tooling that minimises ceremony.",'
+            ' "basis": "Repeated preference for ruff over black."}'
+            "]}"
         )
 
     fake = FakeLLMClient(handler=handler)
@@ -120,9 +114,8 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
     pf = assert_profile_shape(profile)
     assert pf.owner_id == "u_alice"
     assert "Python" in pf.summary
-    # explicit_info / implicit_traits preserved via extra="allow"
-    assert pf.explicit_info[0]["category"] == "Technical Skills"  # type: ignore[attr-defined]
-    assert pf.implicit_traits[0]["trait"] == "[Pragmatic]"  # type: ignore[attr-defined]
+    assert pf.explicit_info[0].category == "Technical Skills"
+    assert pf.implicit_traits[0].trait == "[Pragmatic]"
 
     # Cluster rendering reached the profile prompt
     prompt_text = captured_profile_prompt["text"]

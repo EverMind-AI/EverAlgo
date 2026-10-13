@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from everalgo.llm.types import ChatResponse
 from everalgo.parser import video
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import RawFile
 
 
 def _fake() -> FakeLLMClient:
-    return FakeLLMClient(responses=[ChatResponse(content="x", model="fake", finish_reason="stop")])
+    return FakeLLMClient(responses=['{"text": "x"}'])
 
 
 async def test_aparse_raises_not_implemented() -> None:

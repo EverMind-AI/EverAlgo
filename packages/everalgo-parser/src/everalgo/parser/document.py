@@ -14,6 +14,9 @@ Per ``AGENTS.md`` and the engineering alignment for the parser migration, the
 - ``Modality.DOCUMENT`` — Office / iWork / ODF; LibreOffice subprocess to
   convert to PDF, then reuse the PDF path. Requires ``soffice`` on PATH.
 
+Every LLM call sends the rules as the system message and the file (or the
+tagged HTML) as the user message, and reads the reply's ``text``.
+
 This module is stateless: callers hydrate ``RawFile.content`` upstream and
 pass it in. Retry, rate-limit, fallback are caller / deployment concerns.
 """
@@ -32,13 +35,17 @@ from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
-from everalgo.llm import ChatMessage, LLMClient, TextPart, image_url_part_from_bytes
+from everalgo.llm import image_url_part_from_bytes
+from everalgo.parser._replies import _call_llm_for_text
 from everalgo.parser._utils import clean_html_content, clean_html_for_llm
-from everalgo.parser.prompts.en import PROMPT_FOR_FILE, PROMPT_FOR_HTML, PROMPT_FOR_PICTURE
+from everalgo.parser.prompts.en import HTML_USER_PROMPT, PROMPT_FOR_FILE, PROMPT_FOR_HTML, PROMPT_FOR_PICTURE
 from everalgo.types import Modality, ParsedContent, RawFile, get_modality
+from everalgo.utils import decode_bytes, render_prompt
 
 if TYPE_CHECKING:
     from email.message import EmailMessage
+
+    from everalgo.llm import LLMClient
 
 __all__ = ["aparse", "parse"]
 
@@ -75,7 +82,13 @@ _MIME_TO_EXTENSION = {
 
 
 async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
-    """Parse a document-shaped ``RawFile`` into ``ParsedContent``."""
+    """Parse a document-shaped ``RawFile`` into ``ParsedContent``.
+
+    Raises:
+        ValueError: If ``raw_file`` has no content or is not a document modality.
+        LLMOutputError: If a PDF, HTML or Office reply is not a valid ``{"text": "..."}`` object. An email's
+            inline-image OCR never raises it: a failed image gets a placeholder instead.
+    """
     if not raw_file.content:
         raise ValueError("RawFile.content is empty; cannot parse document")
 
@@ -100,29 +113,14 @@ parse = async_to_sync(aparse)
 
 async def _aparse_pdf(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     """PDF → ``ParsedContent`` via a single multimodal LLM call."""
-    message = ChatMessage(
-        role="user",
-        content=[
-            TextPart(text=PROMPT_FOR_FILE),
-            image_url_part_from_bytes(raw_file.content, _PDF_MIME),
-        ],
-    )
     logger.debug("parsing PDF, bytes=%d", len(raw_file.content))
-    response = await llm.chat([message])
-    return ParsedContent(
-        text=response.content,
-        modality=Modality.PDF,
-        mime=raw_file.mime or _PDF_MIME,
-        metadata={
-            "model": response.model,
-            "finish_reason": response.finish_reason,
-        },
-    )
+    text = await _read_pdf(llm, raw_file.content, operator="parser pdf")
+    return ParsedContent(text=text, modality=Modality.PDF, mime=raw_file.mime or _PDF_MIME)
 
 
 async def _aparse_html(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     """HTML → ``ParsedContent`` via bs4 cleanup + LLM extraction."""
-    html_text = _decode_bytes(raw_file.content)
+    html_text = decode_bytes(raw_file.content)
     cleaned = clean_html_for_llm(html_text)
     if not cleaned:
         logger.warning("HTML content is empty after cleaning")
@@ -136,19 +134,18 @@ async def _aparse_html(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
         logger.warning("HTML truncated from %d to %d chars", len(cleaned), _HTML_MAX_INPUT_CHARS)
         cleaned = cleaned[:_HTML_MAX_INPUT_CHARS]
 
-    message = ChatMessage(
-        role="user",
-        content=[TextPart(text=f"{PROMPT_FOR_HTML}\n\n---\n{cleaned}")],
-    )
     logger.debug("parsing HTML, raw_chars=%d cleaned_chars=%d", len(html_text), len(cleaned))
-    response = await llm.chat([message])
+    text = await _call_llm_for_text(
+        llm,
+        system=PROMPT_FOR_HTML,
+        user=render_prompt(HTML_USER_PROMPT, None, html=cleaned),
+        operator="parser html",
+    )
     return ParsedContent(
-        text=response.content,
+        text=text,
         modality=Modality.HTML,
         mime=raw_file.mime or "text/html",
         metadata={
-            "model": response.model,
-            "finish_reason": response.finish_reason,
             "raw_chars": len(html_text),
             "cleaned_chars": len(cleaned),
         },
@@ -228,28 +225,31 @@ async def _aparse_office(
             metadata={"warning": "LibreOffice conversion returned empty bytes"},
         )
 
-    message = ChatMessage(  # pragma: no cover
-        role="user",
-        content=[
-            TextPart(text=PROMPT_FOR_FILE),
-            image_url_part_from_bytes(pdf_bytes, _PDF_MIME),
-        ],
-    )
     logger.debug(  # pragma: no cover
         "parsing Office doc extension=%s converted_pdf_bytes=%d",
         raw_file.extension,
         len(pdf_bytes),
     )
-    response = await llm.chat([message])  # pragma: no cover
+    text = await _read_pdf(llm, pdf_bytes, operator="parser office")  # pragma: no cover
     return ParsedContent(  # pragma: no cover
-        text=response.content,
+        text=text,
         modality=Modality.DOCUMENT,
         mime=raw_file.mime,
-        metadata={
-            "model": response.model,
-            "finish_reason": response.finish_reason,
-            "intermediate_pdf_bytes": len(pdf_bytes),
-        },
+        metadata={"intermediate_pdf_bytes": len(pdf_bytes)},
+    )
+
+
+async def _read_pdf(llm: LLMClient, pdf_bytes: bytes, *, operator: str) -> str:
+    """Read one PDF: the rules as the system message, the PDF alone as the user message.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid ``{"text": "..."}`` object.
+    """
+    return await _call_llm_for_text(
+        llm,
+        system=PROMPT_FOR_FILE,
+        user=[image_url_part_from_bytes(pdf_bytes, _PDF_MIME)],
+        operator=operator,
     )
 
 
@@ -347,38 +347,28 @@ async def _ocr_inline_images(
     for idx, (_, image_bytes, mime_type, filename) in inline_images.items():
         logger.debug("OCR inline email image: %s (%s)", filename, mime_type)
         try:
-            message = ChatMessage(
-                role="user",
-                content=[
-                    TextPart(text=PROMPT_FOR_PICTURE),
-                    image_url_part_from_bytes(image_bytes, mime_type),
-                ],
+            text = await _call_llm_for_text(
+                client,
+                system=PROMPT_FOR_PICTURE,
+                user=[image_url_part_from_bytes(image_bytes, mime_type)],
+                operator="parser email image",
+                max_tokens=_INLINE_OCR_MAX_TOKENS,
             )
-            response = await client.chat([message], max_tokens=_INLINE_OCR_MAX_TOKENS)
-            text = (response.content or "").strip()
+            text = text.strip()
             if text:
                 results[idx] = f"[image: {filename}, content follows]\n{text}\n[end of image]"
             else:
                 results[idx] = f"[image: {filename}, no content recognised]"
         except Exception as exc:
-            # Best-effort per-image: a single OCR failure should not abort the
-            # whole email parse — log and continue with a placeholder marker.
+            # Best-effort per-image: a single OCR failure (the call raising, or an
+            # invalid reply) should not abort the whole email parse — log and
+            # continue with a placeholder marker.
             logger.warning("OCR failed for inline image %s: %s", filename, exc, exc_info=True)
             results[idx] = f"[image: {filename}, OCR failed]"
     return results
 
 
 # ---- generic helpers ----
-
-
-def _decode_bytes(content: bytes) -> str:
-    """Try several encodings; fall back to utf-8 with replace."""
-    for encoding in ("utf-8", "gbk", "gb2312", "latin-1"):
-        try:
-            return content.decode(encoding)
-        except (UnicodeDecodeError, LookupError):
-            continue
-    return content.decode("utf-8", errors="replace")
 
 
 def _find_soffice() -> str:  # pragma: no cover  (libreoffice binary, not in CI)

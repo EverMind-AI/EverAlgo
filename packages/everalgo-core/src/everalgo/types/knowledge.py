@@ -1,5 +1,9 @@
 """Knowledge memory contract — flattened topic-tree node emitted by KnowledgeExtractor."""
 
+from __future__ import annotations
+
+__all__ = ["CategorySpec", "KnowledgeMemory"]
+
 from pydantic import BaseModel, Field
 
 
@@ -48,8 +52,8 @@ class KnowledgeMemory(BaseModel):
             "Original prose under this section, joined from atoms via ``block_refs``. Empty for container nodes."
         ),
     )
-    block_refs: list[int] = Field(  # pyright: ignore[reportUnknownVariableType] — pyright infers list() as list[Unknown]
-        default_factory=list,
+    block_refs: list[int] = Field(
+        default=[],
         description="Indices into the document's atom list that compose this node.",
     )
     depth: int = Field(description="Tree depth; 0 is the document root.")
@@ -57,8 +61,8 @@ class KnowledgeMemory(BaseModel):
         default=None,
         description="``topic_index`` of the parent node; ``None`` for the root.",
     )
-    children_index: list[int] = Field(  # pyright: ignore[reportUnknownVariableType] — pyright infers list() as list[Unknown]
-        default_factory=list,
+    children_index: list[int] = Field(
+        default=[],
         description="``topic_index`` values of the direct children, in DFS order.",
     )
     topic_path: str = Field(

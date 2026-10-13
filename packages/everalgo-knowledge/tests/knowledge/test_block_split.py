@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from everalgo._tokenize import count_tokens
 from everalgo.knowledge._block_split import (
     DEFAULT_MAX_TOKENS_PER_ATOM,
     DEFAULT_MAX_TOKENS_PER_BATCH,
@@ -15,6 +14,7 @@ from everalgo.knowledge._block_split import (
     split_and_batch_content,
     split_content_to_blocks,
 )
+from everalgo.utils import count_tokens
 
 # ── preprocess_content ───────────────────────────────────────────────
 

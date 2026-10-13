@@ -6,6 +6,21 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0rc1] - 2026-10-13
+
+### Removed
+
+- **BREAKING: `RankConfig.expand_limit` and `RankConfig.max_convergence_rounds`.** Nothing read them: they belonged to the episode → atomic-fact expansion the episodic ranker no longer performs.
+
+### Changed
+
+- **BREAKING:** the four LLM calls (`aagentic_retrieve`'s sufficiency check, multi-query and refined-query generation, and `arerank`, which the `case` / `skill` / `episodic` facades use when `enable_rerank=True`) request their reply as a strict pydantic model passed as `response_format` and validate it with `everalgo.llm.parse_reply`, instead of asking for `{"type": "text"}` and pulling a `{...}` block out of `.content`. Sufficiency: `{"is_sufficient", "reasoning", "key_information_found", "missing_information"}`; multi-query: `{"queries", "reasoning"}`; rerank: `{"ranked": [{"id", "score"}]}`. Refined-query generation, which used to return free text, now asks for `{"text": "..."}` (the contract has no free-text tier); the prefix stripping, the 5-300 character check and the fall-back to the original query apply to `text` as before. A reply that fails now raises `everalgo.llm.LLMOutputError` instead of `ValueError` / `json.JSONDecodeError`; its message names each failing location, never the reply's content. Replies previously repaired are now rejected: prose around the object, an extra key, a missing key (the sufficiency fields used to default to `False` / `""` / `[]`, a rerank item's `score` to `0.0`), or a mistyped value (a non-string rerank `id` used to be skipped). Rerank ids the model made up are still skipped. Temperatures are unchanged (0.0 / 0.4 / 0.3; rerank none). The `LLMClient` passed as `llm` must implement the current contract: `achat(messages, *, response_format: type[BaseModel]) -> str`. See `everalgo-core` for the contract.
+- **BREAKING:** each LLM call sends a system message with the rules and a user message with the data, instead of one user message holding both. The constants keep their names and now hold the rules only: `SUFFICIENCY_CHECK_PROMPT_EN`, `MULTI_QUERY_PROMPT_EN` and `REFINED_QUERY_PROMPT_EN` have no placeholder; the six `*_RERANK_PROMPT_{EN,ZH}` keep only `{{top_k}}`. The data templates are new: `SUFFICIENCY_CHECK_USER_PROMPT`, `MULTI_QUERY_USER_PROMPT`, `REFINED_QUERY_USER_PROMPT` beside them, and `everalgo.rank.prompts.rerank_user.RERANK_USER_PROMPT` shared by every rerank. Every rule line is kept; Markdown headings became XML-style tags, `**` and inline backticks were dropped, each prompt closes with a `<reply_format>` block whose skeleton is now parseable JSON, and the rerank candidates line points at `<candidates>`.
+- **BREAKING:** the prompt overrides are removed, and a host's text goes in `custom_instructions=`, which appends to the bundled rules instead of replacing them. `aagentic_retrieve` loses `sufficiency_prompt`, `multi_query_prompt` and `refined_query_prompt` and takes one `custom_instructions`, sent with each of its LLM calls (the sufficiency check and the Round 2 query generation); the `case` / `skill` / `episodic` rankers (module `arank` and the `CaseRanker` / `SkillRanker` / `EpisodicRanker` classes) lose `prompt` and take `custom_instructions`, sent with the rerank call when `enable_rerank=True`; passing a removed name raises `TypeError`. The text is sent verbatim, never rendered as a template (a `{{...}}` in it stays literal), as a `<custom_instructions>` block that is always the system message's last; `None` or a blank string sends exactly the bundled rules. The data always goes in the user message the operator renders. `arerank` keeps `prompt`, the rerank rules it renders with `{{top_k}}` (it has no bundled default; a rule template naming any other slot raises `ValueError` before the call), and takes `custom_instructions` the same way, after the rendered rules. With the ranker `prompt` gone, the `*_RERANK_PROMPT_ZH` rules reach the model only through `arerank(prompt=...)`.
+- **BREAKING:** operators call `LLMClient.achat`, the new name of the protocol method; a custom client passed as `llm` must implement `achat` instead of `chat`. See `everalgo-core` for the contract.
+- The `Date` row of each retrieved document in the sufficiency, multi-query and refined-query prompts renders as `YYYY-MM-DD HH:MM UTC` (`everalgo.utils.format_utc_time`, seconds truncated) instead of ISO `YYYY-MM-DDTHH:MM:SSZ`, the shape every other prompt instant takes; a missing or invalid timestamp still renders `N/A`.
+- `pydantic>=2.7` is declared as a direct dependency: the package imports pydantic itself and no longer relies on the transitive pull-in via `everalgo-core`.
+
 ## [0.4.1] - 2026-06-24
 
 ### Changed
@@ -88,7 +103,10 @@ result = await SkillRanker(llm=...).arank(
 
 - `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as EverOS's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.3.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc1...HEAD
+[0.5.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.4.1...everalgo-rank/v0.5.0rc1
+[0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.4.0...everalgo-rank/v0.4.1
+[0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.3.1...everalgo-rank/v0.4.0
 [0.3.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.3.0...everalgo-rank/v0.3.1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.3.0
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-rank/v0.2.0

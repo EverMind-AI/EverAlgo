@@ -1,15 +1,16 @@
 """English prompt for AtomicFactExtractor.
 
-Placeholders: ``{TIME}`` / ``{INPUT_TEXT}`` (single-brace; rendered via :func:`everalgo.prompts.render_prompt`
-which uses ``str.replace`` so the literal JSON example braces in the prompt body are preserved).
-Output schema: ``{"atomic_facts": {"time": str, "atomic_fact": list[str]}}``.
+Placeholders: ``{{time}}`` / ``{{INPUT_TEXT}}``, rendered via :func:`everalgo.utils.render_prompt`.
+Single braces are literal, so the JSON example in the prompt body needs no escaping.
+Output schema: ``{"atomic_facts": {"atomic_fact": list[str]}}``. ``{{time}}`` is
+``format_utc_time(..., weekday=True)``, e.g. ``2024-03-10 14:00 UTC (Sunday)``.
 
-``{language_rule}`` — appearing twice, both copies receiving the same text — is filled from
+``{{language_rule}}`` — appearing twice, both copies receiving the same text — is filled from
 ``user_memory._language.build_language_rule`` according to ``aextract``'s ``output_language`` argument.
 """
 
 ATOMIC_FACT_PROMPT = """
-{language_rule}
+{{language_rule}}
 
 You are an expert information extraction analyst and information architect.
 Your task is to analyze the given raw conversation transcript (called "CONVERSATION_TEXT") and produce atomic facts optimized for factual retrieval.
@@ -18,7 +19,7 @@ Your task is to analyze the given raw conversation transcript (called "CONVERSAT
 
 ### INPUT
 - CONVERSATION_TEXT: The raw conversation transcript.
-- TIME: The start time of the conversation, e.g., "March 10, 2024(Sunday) at 2:00 PM UTC".
+- TIME: The start time of the conversation, e.g., "2024-03-10 14:00 UTC (Sunday)".
 
 ---
 
@@ -27,7 +28,6 @@ Return **only** one valid JSON object, with the following exact structure:
 
 {
   "atomic_facts": {
-    "time": "<THE EXACT TIME STRING FROM INPUT TIME>",
     "atomic_fact": [
       "<Atomic fact sentence 1>",
       "<Atomic fact sentence 2>",
@@ -46,10 +46,10 @@ Return **only** one valid JSON object, with the following exact structure:
 * Each atomic_fact must be **independent and retrievable on its own**.
 
 #### 2. Time & Date Handling (CRITICAL)
-* The `"time"` field (at the top level) represents the conversation start time.
+* The `TIME` input represents the conversation start time.
 * **All generated timestamps must be in UTC.**
 * **Preserve** explicit dates verbatim.
-* **Resolve** relative or vague times (e.g., "yesterday", "last week") relative to `TIME`, and **append the resolved absolute date in parentheses** (e.g., "yesterday (March 9, 2024)").
+* **Resolve** relative or vague times (e.g., "yesterday", "last week") relative to `TIME`, and **append the resolved absolute date in parentheses** (e.g., "yesterday (2024-03-09)").
 
 #### 3. Content Preservation & Attribution
 * **Base facts strictly on the conversation.** Do not infer information not present.
@@ -83,9 +83,9 @@ Before returning the final output, verify that:
 
 Now analyze the provided conversation content and start time carefully, apply all rules above, and return **only the JSON object** in the specified format.
 
-Conversation start time: {TIME}
+Conversation start time: {{time}}
 Conversation content:
-{INPUT_TEXT}
+{{INPUT_TEXT}}
 
-{language_rule}
+{{language_rule}}
 """

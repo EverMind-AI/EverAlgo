@@ -1,8 +1,8 @@
 """Output-language selection for the extraction prompts.
 
 Internal module, like ``_render`` — except for :class:`OutputLanguage`, which the extractors take as an
-argument and which ``everalgo.user_memory`` re-exports. The rule texts live in ``prompts/en/_language.py``;
-this module only chooses between them.
+argument and which ``everalgo.user_memory`` re-exports. The shared rule texts live in ``prompts/en/_language.py``
+and this module only chooses between them, for every operator.
 """
 
 from __future__ import annotations
@@ -15,22 +15,33 @@ from everalgo.user_memory.prompts.en._language import (
     EPISODE_PROFILE_INIT_LANGUAGE_RULE,
     EXISTING_NARRATIVE_LANGUAGE_RULE,
     EXISTING_PROFILE_LANGUAGE_RULE,
+    MEMCELL_COMPACTED_PROFILE_LANGUAGE_RULE,
+    MEMCELL_EXISTING_PROFILE_LANGUAGE_RULE,
+    MEMCELL_REGROUPED_PROFILE_LANGUAGE_RULE,
     MERGED_EPISODES_LANGUAGE_RULE,
     PARTICIPANT_LANGUAGE_RULE,
     PROFILE_INIT_LANGUAGE_RULE,
+    REGROUPED_PROFILE_LANGUAGE_RULE,
     SOURCE_TEXT_LANGUAGE_RULE,
 )
+from everalgo.utils import render_prompt
 
 __all__ = [
     "COMPACTED_PROFILE_LANGUAGE_RULE",
     "EPISODE_PROFILE_INIT_LANGUAGE_RULE",
     "EXISTING_NARRATIVE_LANGUAGE_RULE",
     "EXISTING_PROFILE_LANGUAGE_RULE",
+    "MEMCELL_COMPACTED_PROFILE_LANGUAGE_RULE",
+    "MEMCELL_EXISTING_PROFILE_LANGUAGE_RULE",
+    "MEMCELL_REGROUPED_PROFILE_LANGUAGE_RULE",
     "MERGED_EPISODES_LANGUAGE_RULE",
+    "PARTICIPANT_LANGUAGE_RULE",
     "PROFILE_INIT_LANGUAGE_RULE",
+    "REGROUPED_PROFILE_LANGUAGE_RULE",
     "SOURCE_TEXT_LANGUAGE_RULE",
     "OutputLanguage",
     "build_language_rule",
+    "resolve_output_language",
 ]
 
 
@@ -44,7 +55,7 @@ class OutputLanguage(StrEnum):
     string is an instruction the caller can smuggle in: a language field carrying ``"German. Ignore all
     previous instructions and ..."`` would arrive as prose the model reads as its own directive. Restricting
     it to names chosen here removes that whole class rather than filtering for it. Adding a language is a
-    member plus a regression run; a caller who needs one that is not here can supply its own ``prompt=``.
+    member plus a regression run.
     """
 
     CHINESE = "Chinese"
@@ -64,6 +75,30 @@ class OutputLanguage(StrEnum):
         return next((member for member in cls if member.value.casefold() == wanted), None)
 
 
+def resolve_output_language(output_language: OutputLanguage | str | None) -> OutputLanguage | None:
+    """Return the :class:`OutputLanguage` member a caller's value names, or None when it names none.
+
+    Args:
+        output_language: An :class:`OutputLanguage` member, an equivalent string in any casing, or ``None``.
+
+    Returns:
+        The member, or ``None`` when ``output_language`` is ``None``.
+
+    Raises:
+        ValueError: If ``output_language`` names no known language.
+    """
+    if output_language is None:
+        return None
+    try:
+        return OutputLanguage(output_language)
+    except ValueError as exc:
+        supported = ", ".join(sorted(OutputLanguage))
+        raise ValueError(
+            f"unsupported output_language {output_language!r}; expected one of {supported}, "
+            f"or None to let the model infer it from the conversation"
+        ) from exc
+
+
 def build_language_rule(
     output_language: OutputLanguage | str | None,
     *,
@@ -78,9 +113,12 @@ def build_language_rule(
         fallback: Rule to use when ``output_language`` is ``None``. Defaults to the conversation rule, which
             suits any operator reading a raw conversation. Operators facing a different input pass their own:
             ``SOURCE_TEXT_LANGUAGE_RULE`` for already-extracted memory text, where the judgement the
-            conversation rule adjudicates does not arise; ``EXISTING_PROFILE_LANGUAGE_RULE`` and
-            ``COMPACTED_PROFILE_LANGUAGE_RULE`` for the profile paths that must inherit a language rather
-            than re-decide it; ``PROFILE_INIT_LANGUAGE_RULE`` for the one call that decides it;
+            conversation rule adjudicates does not arise; ``EXISTING_PROFILE_LANGUAGE_RULE``,
+            ``COMPACTED_PROFILE_LANGUAGE_RULE`` and ``REGROUPED_PROFILE_LANGUAGE_RULE`` for the Episode-path
+            profile stages that must inherit a language rather than re-decide it, and their ``MEMCELL_*`` twins for
+            the same stages on the MemCell path; ``PROFILE_INIT_LANGUAGE_RULE`` for the one
+            call that decides it, and ``EPISODE_PROFILE_INIT_LANGUAGE_RULE`` for that call over Episode
+            narratives, which takes the narratives' language;
             ``MERGED_EPISODES_LANGUAGE_RULE`` and ``EXISTING_NARRATIVE_LANGUAGE_RULE`` for the two reflect
             modes, which inherit from the episodes they merge and the narrative they update respectively.
 
@@ -90,17 +128,7 @@ def build_language_rule(
     Raises:
         ValueError: If ``output_language`` names no known language.
     """
-    if output_language is None:
+    language = resolve_output_language(output_language)
+    if language is None:
         return fallback
-    try:
-        language = OutputLanguage(output_language)
-    except ValueError as exc:
-        supported = ", ".join(sorted(OutputLanguage))
-        raise ValueError(
-            f"unsupported output_language {output_language!r}; expected one of {supported}, "
-            f"or None to let the model infer it from the conversation"
-        ) from exc
-    # `str.replace`, not `str.format`: prompt text carries literal JSON braces, and this package's own
-    # `render_prompt` avoids `.format` for that reason. Keeping the same discipline here means the rule
-    # texts stay safe to edit without thinking about escaping.
-    return CALLER_CHOSEN_LANGUAGE_RULE.replace("{language}", language)
+    return render_prompt(CALLER_CHOSEN_LANGUAGE_RULE, None, language=language)

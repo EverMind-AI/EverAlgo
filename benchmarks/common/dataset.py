@@ -102,7 +102,6 @@ class AtomicFactRecord:
     (same length); both are empty lists when the episode body is empty.
     """
 
-    time: str  # LLM-output human-readable time label (e.g. "March 9, 2024"); may be empty
     atomic_fact: list[str]  # Atomic-fact sentences from AtomicFactExtractor
     fact_embeddings: list[list[float]]  # One embedding vector per fact, aligned with atomic_fact
     timestamp: int  # mc.timestamp — segment end time in Unix ms

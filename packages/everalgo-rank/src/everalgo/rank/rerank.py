@@ -5,16 +5,21 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from asgiref.sync import async_to_sync
 from pydantic import BaseModel, ConfigDict
 
-from everalgo.llm.types import ChatMessage
+from everalgo.llm import LLMMessage
+from everalgo.rank._render import append_custom_instructions
+from everalgo.rank._replies import _call_llm_for_rerank
+from everalgo.rank.prompts.rerank_user import RERANK_USER_PROMPT
 from everalgo.types import Candidate, RankInput, RankOutput, ScoredItem
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+    from everalgo.rank._replies import _RankedCandidate
 
 __all__ = [
     "DEFAULT_RANK_CONFIG",
@@ -43,9 +48,6 @@ class RankConfig(BaseModel):
 
     alpha: float = 1.0
 
-    expand_limit: int = 3
-    max_convergence_rounds: int = 10
-
     va_saturation_k: float = 5.0  # vector_anchored: saturation scale for BM25 scores
     va_alpha: float = 0.7  # vector_anchored: blend weight (1=vec-only, 0=bm25-only)
 
@@ -60,18 +62,25 @@ async def arerank(
     prompt: str,
     top_k: int,
     llm: LLMClient,
+    custom_instructions: str | None = None,
 ) -> list[Candidate]:
     """LLM-driven rerank.
 
+    Sends one ``[system, user]`` pair: ``prompt`` rendered as the system message, closed by the
+    ``custom_instructions`` block when there is one, then the query and the candidates in
+    :data:`~everalgo.rank.prompts.rerank_user.RERANK_USER_PROMPT`.
+
     Args:
         items: Candidates produced by fusion (+ optional weighting).
-        query: User query to rerank against. Substituted into the prompt's
-            ``{query}`` placeholder.
-        prompt: Prompt template; must include ``{query}`` / ``{candidates_json}`` /
-            ``{top_k}`` placeholders. Callers typically pass one of the modules
-            in ``everalgo.rank.prompts.{en,zh}``.
+        query: User query to rerank against, sent in the user message's ``<user_query>``.
+        prompt: The system message: the rerank rules, whose only placeholder is ``{{top_k}}``. Callers typically
+            pass one of the constants in ``everalgo.rank.prompts.{en,zh}``.
         top_k: Maximum number of items to return.
         llm: LLM client (required — bound at the ranker instance level).
+        custom_instructions: The caller's instructions, appended after the rendered ``prompt`` as a
+            ``<custom_instructions>`` block, always the system message's last; it adds to the rules, never replaces
+            them. Placed verbatim, never rendered as a template, so ``{{top_k}}`` in it stays literal. None or a blank
+            string adds nothing.
 
     Returns:
         Up to ``top_k`` Candidates, sorted descending by the LLM-assigned score.
@@ -79,86 +88,53 @@ async def arerank(
         fusion score is preserved in ``metadata["fusion_score"]``.
 
     Raises:
-        KeyError: ``prompt`` is missing one of the required placeholders.
-        LLMError: from the client's ``chat`` call.
+        ValueError: ``prompt`` names a placeholder other than ``{{top_k}}``, or still uses the single-brace
+            placeholder syntax.
+        LLMOutputError: If the reply is not a valid rerank output. The client's own exceptions propagate unchanged.
     """
     if not items:
         return []
 
-    client = llm
-
     candidates_payload = [{"id": item.id, "score": item.score, **item.metadata} for item in items]
-    rendered = prompt.format(
-        query=query,
-        candidates_json=json.dumps(candidates_payload, ensure_ascii=False, default=str),
-        top_k=top_k,
-    )
-
-    ranked_items = await _call_llm_for_rerank(client, rendered)
-    return _apply_rerank_scores(items, ranked_items, top_k)
+    messages = [
+        LLMMessage(
+            role="system",
+            content=append_custom_instructions(render_prompt(prompt, None, top_k=top_k), custom_instructions),
+        ),
+        LLMMessage(
+            role="user",
+            content=render_prompt(
+                RERANK_USER_PROMPT,
+                None,
+                query=query,
+                candidates_json=json.dumps(candidates_payload, ensure_ascii=False, default=str),
+            ),
+        ),
+    ]
+    reply = await _call_llm_for_rerank(llm, messages)
+    return _apply_rerank_scores(items, reply.ranked, top_k)
 
 
 rerank = async_to_sync(arerank)
 """Sync bridge for non-event-loop contexts (CLI / pytest). Per ADR 010."""
 
 
-def _extract_json_object(text: str) -> str:
-    """Find first balanced brace block in text (brace-balanced parser for nested JSON).
-
-    Used for rerank responses which contain ``ranked: list[{id, score}]`` — a nested structure
-    that a flat non-nested regex cannot handle.
-    """
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON found: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON: {text[:200]!r}")
-
-
-async def _call_llm_for_rerank(llm: LLMClient, rendered: str) -> list[dict[str, Any]]:
-    """Inner async function decorated with retry; separated so the decorator applies at definition time.
-
-    Uses brace-balanced extractor because RerankResponse is nested (ranked: list[{id, score}]).
-    Returns the raw ``ranked`` list as a list of dicts for score application.
-
-    Raises:
-        ValueError: If no JSON object found or the ``ranked`` field is absent/invalid.
-    """
-    response = await llm.chat(messages=[ChatMessage(role="user", content=rendered)])
-    text = response.content
-    json_str = _extract_json_object(text)
-    data = json.loads(json_str)
-    ranked = data.get("ranked")
-    if not isinstance(ranked, list):
-        raise ValueError(f"Missing or invalid 'ranked' field in rerank response: {data!r}")  # noqa: TRY004
-    return cast("list[dict[str, Any]]", ranked)
-
-
 def _apply_rerank_scores(
     items: Sequence[Candidate],
-    ranked_items: list[dict[str, Any]],
+    ranked: list[_RankedCandidate],
     top_k: int,
 ) -> list[Candidate]:
-    """Apply LLM-assigned scores to candidates, sort, truncate."""
+    """Apply LLM-assigned scores to candidates, sort, truncate; an id the LLM made up is skipped."""
     by_id = {item.id: item for item in items}
     out: list[Candidate] = []
-    for ranked_item in ranked_items:
-        item_id = ranked_item.get("id")
-        item_score = ranked_item.get("score")
-        if not isinstance(item_id, str) or item_id not in by_id:
+    for ranked_item in ranked:
+        original = by_id.get(ranked_item.id)
+        if original is None:
             continue
-        original = by_id[item_id]
         out.append(
             original.model_copy(
                 update={
-                    "score": float(item_score) if item_score is not None else 0.0,
+                    "score": ranked_item.score,
                     "metadata": {**original.metadata, "fusion_score": original.score},
                 }
             )
@@ -188,7 +164,7 @@ async def _basic_arank(
     *,
     config: RankConfig = DEFAULT_RANK_CONFIG,
     llm: LLMClient | None = None,
-    prompt: str | None = None,
+    custom_instructions: str | None = None,
     enable_rerank: bool = False,
     rerank_top_k: int | None = None,
 ) -> RankOutput:
@@ -201,6 +177,9 @@ async def _basic_arank(
     fusion produces a wider candidate pool (``top_k``), the LLM rescores all of them, and only the top
     ``rerank_top_k`` items survive. When ``None`` (default), rerank keeps ``rank_input.top_k`` items — the
     historical behaviour.
+
+    ``custom_instructions`` reaches the rerank call only: the facade's bundled rerank rules, then the caller's
+    ``<custom_instructions>`` block as the system message's last (see :func:`arerank`).
 
     Raises:
         KeyError: ``rank_input.memory_type`` not in ``_ALGO_REGISTRY``.
@@ -260,9 +239,10 @@ async def _basic_arank(
         reranked = await arerank(
             with_query,
             query=rank_input.query,
-            prompt=prompt or rerank_prompt,
+            prompt=rerank_prompt,
             top_k=effective_rerank_top_k,
             llm=llm,
+            custom_instructions=custom_instructions,
         )
         by_id = {it.id: it for it in scored}
         scored = [

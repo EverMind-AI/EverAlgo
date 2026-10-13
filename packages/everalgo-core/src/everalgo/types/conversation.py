@@ -1,5 +1,9 @@
 """Conversation wire types shared by chat and agent pipelines — ``MemCell`` and ``ConversationItem``."""
 
+from __future__ import annotations
+
+__all__ = ["ConversationItem", "MemCell"]
+
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field

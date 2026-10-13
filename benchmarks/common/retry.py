@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, TypeVar
 
@@ -17,7 +16,8 @@ from tenacity import (
     wait_exponential,
 )
 
-from everalgo.llm.errors import LLMError
+from everalgo.llm import LLMOutputError
+from everalgo.llm.openai_compat import LLMError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -44,9 +44,9 @@ def _log_before_sleep(retry_state: RetryCallState) -> None:
 
 
 def llm_retry(*, max_attempts: int = 5, wait: WaitBaseT | None = None) -> Callable[[F], F]:
-    """LLM call retry: JSONDecodeError / ValueError / LLMError."""
+    """LLM call retry: an operator's ``LLMOutputError``, the client's ``LLMError``, or a stage's ``ValueError``."""
     return retry(  # type: ignore[return-value]
-        retry=retry_if_exception_type((json.JSONDecodeError, ValueError, LLMError)),
+        retry=retry_if_exception_type((LLMOutputError, LLMError, ValueError)),
         stop=stop_after_attempt(max_attempts),
         wait=wait if wait is not None else wait_exponential(multiplier=0.5, min=0.5, max=16),
         before_sleep=_log_before_sleep,

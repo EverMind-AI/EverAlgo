@@ -32,6 +32,7 @@ import numpy as np
 from nltk.corpus import stopwords  # type: ignore[import-untyped]
 from nltk.stem import PorterStemmer  # type: ignore[import-untyped]
 
+from benchmarks.common.metrics import estimate_chat_tokens
 from benchmarks.common.retry import http_retry
 from benchmarks.common.stages._tokenize import ensure_nltk as _ensure_nltk
 from benchmarks.common.stages._tokenize import tokenize as _tokenize
@@ -40,10 +41,12 @@ from everalgo.rank import aagentic_retrieve, acluster_retrieve, ahybrid_retrieve
 from everalgo.types import Candidate as _Candidate
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from benchmarks.common.services import EmbeddingClient, RerankClient
     from benchmarks.common.stages.types import StageContext, StageStats
-    from everalgo.llm.providers.openai_compat import OpenAICompatClient
-    from everalgo.llm.types import ChatMessage, ChatResponse
+    from everalgo.llm import LLMMessage
+    from everalgo.llm.openai_compat import OpenAICompatClient
     from everalgo.rank.protocols import RerankFn, RetrieveFn
 
 logger = logging.getLogger(__name__)
@@ -106,12 +109,12 @@ def _candidates_to_scored(candidates: list[_Candidate]) -> list[_Scored]:
 
 
 class _TokenCountingLLM:
-    """Thin proxy around ``OpenAICompatClient`` that accumulates token usage.
+    """Thin proxy around ``OpenAICompatClient`` that accumulates estimated token usage.
 
-    Wraps every ``chat`` call to sum up ``usage.prompt_tokens`` and
-    ``usage.completion_tokens`` into ``self.prompt_tokens`` / ``self.completion_tokens``.
-    This lets ``_process_single_qa`` report token totals for the retrieval stage
-    while still delegating all logic to the algo.
+    ``achat`` returns only the reply text, so every call's prompt and completion tokens are estimated
+    with tiktoken and summed into ``self.prompt_tokens`` / ``self.completion_tokens``. This lets
+    ``_process_single_qa`` report token totals for the retrieval stage while still delegating all
+    logic to the algo.
 
     Args:
         inner: The underlying LLM client to proxy.
@@ -122,21 +125,27 @@ class _TokenCountingLLM:
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
 
-    async def chat(
+    async def achat(
         self,
-        messages: list[ChatMessage],
+        messages: list[LLMMessage],
         *,
-        model: str | None = None,
+        response_format: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
         **kwargs: Any,
-    ) -> ChatResponse:
-        """Forward to the inner client and accumulate token counts."""
-        resp = await self._inner.chat(messages, model=model, temperature=temperature, max_tokens=max_tokens, **kwargs)
-        if resp.usage is not None:
-            self.prompt_tokens += resp.usage.prompt_tokens or 0
-            self.completion_tokens += resp.usage.completion_tokens or 0
-        return resp
+    ) -> str:
+        """Forward to the inner client and accumulate estimated token counts."""
+        reply = await self._inner.achat(
+            messages,
+            response_format=response_format,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        prompt_tokens, completion_tokens = estimate_chat_tokens(messages, reply)
+        self.prompt_tokens += prompt_tokens
+        self.completion_tokens += completion_tokens
+        return reply
 
 
 def compute_maxsim_score(

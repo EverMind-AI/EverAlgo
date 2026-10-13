@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
-from everalgo.llm.format import format_message_timestamp
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.prompts import render_prompt
+from everalgo.llm import LLMMessage
 from everalgo.types import Foresight, MemCell
 from everalgo.user_memory._language import OutputLanguage, build_language_rule
-from everalgo.user_memory._render import chat_messages, render_content
-from everalgo.user_memory.prompts.en.foresight import FORESIGHT_GENERATION_PROMPT
+from everalgo.user_memory._render import chat_messages
+from everalgo.user_memory._replies import _call_llm_for_foresights, _ForesightItem
+from everalgo.user_memory.prompts.en.foresight import (
+    FORESIGHT_USER_PROMPT,
+    assemble_system_prompt,
+)
+from everalgo.utils import format_utc_date, parse_utc_date, render_chat_line, render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -30,9 +32,12 @@ _FORESIGHT_MIN_COUNT = 4  # warn-only floor; LLM may legitimately produce fewer
 
 
 class ForesightExtractor:
-    """Extract zero or more foresights from one MemCell.
+    """Extract zero or more foresights from one MemCell: one LLM call, no retry.
 
     Non-ChatMessage items in memcell.items are silently skipped (agent → user-memory contract).
+
+    Args:
+        llm: The client the call goes through.
     """
 
     def __init__(self, *, llm: LLMClient) -> None:
@@ -43,7 +48,6 @@ class ForesightExtractor:
         memcell: MemCell,
         *,
         sender_id: str,
-        prompt: str | None = None,
         output_language: OutputLanguage | str | None = None,
     ) -> list[Foresight]:
         """Extract foresights for ``sender_id`` from ``memcell``.
@@ -51,7 +55,6 @@ class ForesightExtractor:
         Args:
             memcell: Source slice from boundary detection.
             sender_id: Must be one of memcell's chat senders; not inferred.
-            prompt: Prompt override; ``None`` uses the bundled default.
             output_language: Language to write the foresights in, as an :class:`OutputLanguage` member
                 or equivalent string in any casing. Naming one removes the decision from the model, which
                 measured zero wrong languages; leaving it ``None`` asks the model to follow the
@@ -59,25 +62,21 @@ class ForesightExtractor:
                 See ``prompts/en/_language.py`` for the measurements.
 
         Raises:
-            LLMError: From the LLM call.
-            json.JSONDecodeError: On unparseable response.
-            ValueError: If ``output_language`` names no supported language.
+            LLMOutputError: If the reply is not a valid foresight output.
+            ValueError: If ``output_language`` names no supported language, or a ChatMessage with text has no
+                timestamp (0).
         """
-        user_name = _resolve_user_name(memcell, sender_id)
-        rendered = render_prompt(
-            FORESIGHT_GENERATION_PROMPT,
-            prompt,
-            USER_ID=sender_id,
-            USER_NAME=user_name,
-            CONVERSATION_TEXT=_render_conversation(memcell),
+        messages = _render_messages(
+            user_id=sender_id,
+            user_name=_resolve_user_name(memcell, sender_id),
+            conversation=_render_conversation(memcell),
             language_rule=build_language_rule(output_language),
         )
+        start_time_fallback = format_utc_date(memcell.items[0].timestamp)
 
-        start_time_fallback = _format_start_time_from_timestamp(memcell.items[0].timestamp)
-
-        foresight_items = await _call_llm_for_foresight(self._llm, rendered, temperature=_FORESIGHT_TEMPERATURE)
+        reply = await _call_llm_for_foresights(self._llm, messages, temperature=_FORESIGHT_TEMPERATURE)
         foresights = _build_foresights_from_items(
-            foresight_items,
+            reply.foresights,
             memcell=memcell,
             sender_id=sender_id,
             start_time_fallback=start_time_fallback,
@@ -91,50 +90,16 @@ class ForesightExtractor:
     extract = async_to_sync(aextract)
 
 
-# ---------------------------------------------------------------------------
-# LLM callsite — brace-balanced JSON extraction + 5-retry (mirror b150b32).
-# ---------------------------------------------------------------------------
-
-
-async def _call_llm_for_foresight(
-    llm: LLMClient, rendered: str, *, temperature: float | None = None
-) -> list[dict[str, Any]]:
-    """Call LLM and return validated foresights list.
-
-    Uses brace-balanced extraction because ``foresights`` is nested (list of dicts).
-
-    Raises:
-        ValueError: If no JSON found or ``foresights`` key is missing/not a list.
-    """
-    response = await llm.chat(messages=[LLMChatMessage(role="user", content=rendered)], temperature=temperature)
-    text = response.content
-    json_str = _extract_json_object(text)
-    data = json.loads(json_str)
-    if "foresights" not in data:
-        raise ValueError(f"foresights key missing from LLM response: {data!r}")
-    items = data["foresights"]
-    if not isinstance(items, list):
-        raise ValueError(f"foresights must be a list, got {type(items).__name__}: {items!r}")  # noqa: TRY004
-    return cast("list[dict[str, Any]]", items)
-
-
-def _extract_json_object(text: str) -> str:
-    """First balanced {{...}} block in text (brace-balanced parser for nested JSON)."""
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"No JSON object found in foresight LLM response: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    raise ValueError(f"Unbalanced JSON in foresight LLM response: {text[:200]!r}")
-
-
 # Module-level helpers.
+
+
+def _render_messages(*, user_id: str, user_name: str, conversation: str, language_rule: str) -> list[LLMMessage]:
+    """The ``[system, user]`` pair that asks for the foresights: the rules and the language rule, then the data."""
+    user = render_prompt(FORESIGHT_USER_PROMPT, None, user_id=user_id, user_name=user_name, conversation=conversation)
+    return [
+        LLMMessage(role="system", content=assemble_system_prompt(language_rule=language_rule)),
+        LLMMessage(role="user", content=user),
+    ]
 
 
 def _resolve_user_name(memcell: MemCell, sender_id: str) -> str:
@@ -146,93 +111,72 @@ def _resolve_user_name(memcell: MemCell, sender_id: str) -> str:
 
 
 def _render_conversation(memcell: MemCell) -> str:
-    """Render ChatMessage items as ``[YYYY-MM-DDTHH:MM:SSZ] speaker: content`` lines."""
-    lines: list[str] = []
-    for m in chat_messages(memcell):
-        text = render_content(m.content)
-        if not text:
-            continue
-        speaker = m.sender_name or m.sender_id
-        time_str = format_message_timestamp(m.timestamp)
-        lines.append(f"[{time_str}] {speaker}: {text}")
-    return "\n".join(lines)
+    """Render ChatMessage items as :func:`~everalgo.utils.render_chat_line` lines; text-less ones are dropped.
+
+    Raises:
+        ValueError: If a message with text carries no timestamp (0).
+    """
+    return "\n".join(render_chat_line(message) for message in chat_messages(memcell) if message.content)
 
 
-def _format_start_time_from_timestamp(timestamp_ms: int) -> str:
-    """Render MemCell timestamp as ``YYYY-MM-DD`` for foresight start_time fallback."""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).strftime("%Y-%m-%d")
-
-
-def _clean_date_string(date_str: object) -> str | None:
-    """Normalize to ``YYYY-MM-DD`` — keep digits + hyphens, validate regex + constructibility. Returns ``None`` if invalid."""
-    if not isinstance(date_str, str) or not date_str:
+def _clean_date_string(date_str: str | None) -> str | None:
+    """Normalize to ``YYYY-MM-DD`` by keeping only digits and hyphens; ``None`` unless that is a real date."""
+    if date_str is None:
         return None
     cleaned = re.sub(r"[^\d\-]", "", date_str)
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", cleaned):
-        return None
-    try:
-        year, month, day = map(int, cleaned.split("-"))
-        datetime(year, month, day, tzinfo=UTC)
-    except ValueError:
-        return None
-    return cleaned
+    return cleaned if parse_utc_date(cleaned) is not None else None
 
 
 def _calculate_end_time_from_duration(start_time: str, duration_days: int) -> str | None:
-    """Compute ``end_time = start_time + duration_days`` in ``YYYY-MM-DD``."""
-    try:
-        start_date = datetime.strptime(start_time, "%Y-%m-%d").replace(tzinfo=UTC)
-        end_date = start_date + timedelta(days=duration_days)
-    except ValueError:
+    """Compute ``end_time = start_time + duration_days`` in ``YYYY-MM-DD``; ``None`` when not computable."""
+    start_date = parse_utc_date(start_time)
+    if start_date is None:
         return None
-    return end_date.strftime("%Y-%m-%d")
+    try:
+        end_date = start_date + timedelta(days=duration_days)
+    except OverflowError:
+        return None
+    return format_utc_date(end_date)
 
 
 def _calculate_duration_days(start_time: str, end_time: str) -> int | None:
-    """Compute ``end_time - start_time`` in days."""
-    try:
-        start_date = datetime.strptime(start_time, "%Y-%m-%d").replace(tzinfo=UTC)
-        end_date = datetime.strptime(end_time, "%Y-%m-%d").replace(tzinfo=UTC)
-    except ValueError:
+    """Compute ``end_time - start_time`` in days; ``None`` when either is not a ``YYYY-MM-DD`` date."""
+    start_date = parse_utc_date(start_time)
+    end_date = parse_utc_date(end_time)
+    if start_date is None or end_date is None:
         return None
     return (end_date - start_date).days
 
 
 def _build_foresights_from_items(
-    items: list[dict[str, Any]],
+    items: list[_ForesightItem],
     *,
     memcell: MemCell,
     sender_id: str,
     start_time_fallback: str,
 ) -> list[Foresight]:
-    """Build Foresight entities from LLM response item list; apply date cleaning + mutual time computation."""
+    """Build Foresight entities from the reply's items; apply date cleaning + mutual time computation."""
     out: list[Foresight] = []
     for item in items:
-        if not isinstance(item, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-            continue
-        content = str(item.get("content") or "").strip()
+        content = item.content.strip()
         if not content:
             continue
-        evidence = str(item.get("evidence") or "")
 
-        item_start_time = _clean_date_string(item.get("start_time")) or start_time_fallback
-        raw_end_time = item.get("end_time")
-        item_end_time = _clean_date_string(raw_end_time) if raw_end_time else None
-        raw_duration = item.get("duration_days")
-        item_duration_days = int(raw_duration) if isinstance(raw_duration, (int, float)) else None
+        item_start_time = _clean_date_string(item.start_time) or start_time_fallback
+        item_end_time = _clean_date_string(item.end_time)
+        item_duration_days = item.duration_days
 
         # Mutual time computation
-        if item_start_time:
-            if item_duration_days is not None and not item_end_time:
-                item_end_time = _calculate_end_time_from_duration(item_start_time, item_duration_days)
-            elif item_end_time and item_duration_days is None:
-                item_duration_days = _calculate_duration_days(item_start_time, item_end_time)
+        if item_duration_days is not None and not item_end_time:
+            item_end_time = _calculate_end_time_from_duration(item_start_time, item_duration_days)
+        elif item_end_time and item_duration_days is None:
+            item_duration_days = _calculate_duration_days(item_start_time, item_end_time)
 
         out.append(
             Foresight(
                 owner_id=sender_id,
                 foresight=content,
-                evidence=evidence,
+                evidence=item.evidence,
                 timestamp=memcell.timestamp,
                 start_time=item_start_time,
                 end_time=item_end_time,

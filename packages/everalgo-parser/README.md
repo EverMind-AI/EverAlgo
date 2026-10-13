@@ -7,18 +7,17 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Quick start
 
 ```python
-from everalgo.llm.config import LLMConfig
-from everalgo.llm.providers.openai_compat import OpenAICompatClient
+from everalgo.llm.openai_compat import OpenAICompatClient
 from everalgo.parser import aparse, RawFile
 
 # Create an LLM client per call (or share one instance). The parser uses
 # OpenAI-compatible clients; OpenRouter is the reference deployment
 # (Gemini multimodal via OpenRouter passthrough).
-client = OpenAICompatClient(LLMConfig(
+client = OpenAICompatClient(
     model="google/gemini-3-flash-preview",
     api_key="sk-or-v1-...",
     base_url="https://openrouter.ai/api/v1",
-))
+)
 
 # Bytes-in: caller already hydrated the file.
 parsed = await aparse(RawFile(content=pdf_bytes, extension="pdf"), llm=client)
@@ -69,13 +68,14 @@ The parser detects `soffice` via `shutil.which("soffice")` and the canonical mac
 - `aparse(...)` is async; `parse(...)` is the sync bridge via `asgiref.async_to_sync`.
 - Prompts live as module-level string constants under `prompts/{en,zh}/<operator>.py` ([AGENTS.md §5](../../AGENTS.md#5-code-style)). Swap languages by re-binding the constant at startup.
 - The parser owns no durable state and never reads caller-selected local paths. URL parsing performs HTTP(S) I/O, and Office conversion writes files only inside a parser-managed temporary directory that is removed before the call returns.
-- No retry / fallback / metrics inside operators — surface failures via `LLMError`, let the caller wrap.
+- Every LLM call sends the prompt's rules as the system message and the input — the file part, or the cleaned HTML / the OCR texts in XML-style tags — as the user message, and asks for one `{"text": "..."}` object (the `everalgo-core` LLM contract has no free-text tier). `ParsedContent.text` is that `text`.
+- No retry / metrics inside operators — the client's errors propagate unchanged and an invalid reply raises `everalgo.llm.LLMOutputError`; let the caller wrap. The only fallbacks are algorithmic: a failed tall-image merge joins the slices' OCR, and a failed inline-image OCR leaves a placeholder in the email.
 
 ## Security notes for callers
 
 `everalgo-parser` is a stateless library; production safety properties belong to the calling service. The points below are easy to miss and worth wiring into your integration:
 
-- **SSRF — `url.aparse` fetches arbitrary HTTP(S) URIs.** `fetch_uri` rejects non-http(s) schemes (no `file://`, no `gopher://`) but does **not** block private / link-local / loopback IPs (e.g. `127.0.0.1`, `10.0.0.0/8`, `169.254.169.254` cloud metadata, IPv6 ULA). If callers may pass attacker-controlled URLs, resolve the hostname first and reject private ranges before invoking `aparse`, or front the parser with an egress proxy that does the filtering.
+- **SSRF — `url.aparse` fetches arbitrary HTTP(S) URIs.** `everalgo.utils.fetch_uri` rejects non-http(s) schemes (no `file://`, no `gopher://`) but does **not** block private / link-local / loopback IPs (e.g. `127.0.0.1`, `10.0.0.0/8`, `169.254.169.254` cloud metadata, IPv6 ULA). If callers may pass attacker-controlled URLs, resolve the hostname first and reject private ranges before invoking `aparse`, or front the parser with an egress proxy that does the filtering.
 - **Decompression-bomb cap is set at import time.** `everalgo/parser/__init__.py` pins `PIL.Image.MAX_IMAGE_PIXELS = 100_000_000` (10000×10000) — Pillow will raise `DecompressionBombError` above that. Re-assign after import if your workload genuinely needs larger images.
 - **Office conversion runs LibreOffice as a subprocess.** `document._convert_to_pdf_via_soffice` validates the `extension` parameter (alphanumeric, ≤8 chars) before writing the temp file, but the LibreOffice attack surface itself is large. Run the host with a non-root user and treat untrusted office docs as you would any other complex binary input.
 - **`cairosvg` (optional `[svg]` extra) is LGPL-3.0-or-later.** EverAlgo itself is Apache-2.0. LGPLv3 is compatible with Apache-2.0 when `cairosvg` is consumed as an unmodified library through its public Python API (which is what the SVG path does); if you statically vendor or modify `cairosvg`, LGPLv3 §4 / §5 obligations apply to that derivative. Not installing the `[svg]` extra removes the dependency entirely.

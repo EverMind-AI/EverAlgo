@@ -3,19 +3,19 @@
 Algorithm-correctness gate for the full agent-memory pipeline. Captures every rendered LLM prompt
 across 5 stages and asserts:
 
-1. AgentBoundaryDetector preserves tool calls in MemCell but filters them from LLM prompt
+1. BoundaryDetector preserves tool calls in MemCell but filters them from LLM prompt
 2. AgentCaseExtractor consumes the FULL trajectory (tool calls included in case prompts)
 3. AgentSkillExtractor lifts the case into a cluster-level skill (success-branch add path)
 4. Skill prompt sees the case's task_intent / approach / quality_score, including case_prior from
    the cluster's supporting_cases fan-in
 
 Pipeline stages:
-1. AgentBoundaryDetector.adetect(items)    → MemCell          (1 LLM call: boundary)
+1. BoundaryDetector.adetect(items)         → MemCell          (1 LLM call: boundary)
 2. AgentCaseExtractor.aextract(mc)         → [AgentCase]      (2 LLM calls: case_filter + case_compress)
-   [cluster_by_llm step — no LLM call; both invocations fast-path past LLM]
+   [acluster_by_llm step — no LLM call; both invocations fast-path past LLM]
 3. AgentSkillExtractor.aextract(case, ...) → [AgentSkill]     (2 LLM calls: skill_extract + skill_maturity)
 
-Total: 5 LLM calls.  cluster_by_llm does no LLM call in this test: first invocation fast-paths
+Total: 5 LLM calls.  acluster_by_llm does no LLM call in this test: first invocation fast-paths
 because state is empty; second fast-paths because top-1 sim ~0.9999 >= llm_skip_threshold=0.85.
 skill_maturity fires because skip_maturity_scoring=False is passed explicitly —
 the default is True (skip) and would reduce the call count to 4.
@@ -23,14 +23,12 @@ the default is True (skip) and would reduce the call count to 4.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from everalgo.agent_memory import AgentBoundaryDetector, AgentCaseExtractor, AgentSkillExtractor
-from everalgo.clustering import Cluster, cluster_by_llm
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
+from everalgo.agent_memory import AgentCaseExtractor, AgentSkillExtractor, BoundaryDetector
+from everalgo.clustering import Cluster, acluster_by_llm
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import (
     AgentCase,
@@ -42,6 +40,9 @@ from everalgo.types import (
     ToolCallResult,
 )
 
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
+
 # ---------------------------------------------------------------------------
 # Stage ordering and fake responses
 # ---------------------------------------------------------------------------
@@ -50,7 +51,7 @@ from everalgo.types import (
 #   boundary → case_filter → case_compress → skill_extract → skill_maturity
 _STAGE_ORDER = ("boundary", "case_filter", "case_compress", "skill_extract", "skill_maturity")
 
-_BOUNDARY_JSON = '{"reasoning": "single coherent task", "boundaries": [], "should_wait": false}'
+_BOUNDARY_JSON = '{"reasoning": "single coherent task", "boundaries": [], "tail_complete": true}'
 
 # case_filter: has_exploration / has_user_correction drive the worth-extracting decision; either True passes.
 _CASE_FILTER_JSON = (
@@ -113,13 +114,13 @@ def _make_capturing_client() -> tuple[FakeLLMClient, dict[str, str]]:
     captured: dict[str, str] = {}
     call_index = 0
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
         nonlocal call_index
         stage = _STAGE_ORDER[call_index]
-        assert isinstance(messages[0].content, str)  # narrow for test
-        captured[stage] = messages[0].content
+        # Every message, system and user alike: a split prompt carries its rules and its data in different ones.
+        captured[stage] = "\n".join(str(message.content) for message in messages)
         call_index += 1
-        return ChatResponse(content=_STAGE_RESPONSE[stage], model="fake")
+        return _STAGE_RESPONSE[stage]
 
     return FakeLLMClient(handler=handler), captured
 
@@ -183,10 +184,7 @@ async def test_agent_memory_full_pipeline_e2e() -> None:
     fake, captured = _make_capturing_client()
 
     # --- 1. Boundary -------------------------------------------------------
-    boundary_output = await AgentBoundaryDetector(llm=fake).adetect(
-        _agent_trajectory(),  # type: ignore[arg-type]
-        is_final=True,
-    )
+    boundary_output = await BoundaryDetector(llm=fake).adetect(_agent_trajectory(), is_final=True)
     assert boundary_output.tail == [], "expected no tail in is_final=True mode"
     assert len(boundary_output.cells) == 1, "expected exactly one MemCell from a single-topic trajectory"
     mc = boundary_output.cells[0]
@@ -196,7 +194,7 @@ async def test_agent_memory_full_pipeline_e2e() -> None:
 
     boundary_prompt = captured["boundary"]
     assert "Alice" in boundary_prompt, "boundary prompt must include sender_name from ChatMessage"
-    # Tool items must NOT reach the boundary LLM — filter→detect→remap contract.
+    # Tool items must NOT reach the boundary LLM; they stay in the cell.
     assert "list_recent_deploys" not in boundary_prompt, "boundary LLM must not see tool call names"
     assert "call_abc123" not in boundary_prompt, "boundary LLM must not see tool call ids"
 
@@ -219,7 +217,7 @@ async def test_agent_memory_full_pipeline_e2e() -> None:
     assert "list_recent_deploys" in case_compress_prompt, "case_compress prompt must include tool call name"
     assert "abc123" in case_compress_prompt, "case_compress prompt must include tool result content"
 
-    # --- cluster_by_llm (no LLM call — both invocations fast-path) ------------
+    # --- acluster_by_llm (no LLM call — both invocations fast-path) ------------
     # A prior case constructed directly (no extractor call) to simulate a cluster with history.
     case_prior = AgentCase(
         id="case_prior",
@@ -242,13 +240,13 @@ async def test_agent_memory_full_pipeline_e2e() -> None:
         preview=[case_prior.task_intent],
         members=[case_prior.id],
     )
-    result_prior = await cluster_by_llm(new_c_prior, clusters, llm=fake)
+    result_prior = await acluster_by_llm(new_c_prior, clusters, llm=fake)
     assert result_prior is None
     clusters.append(new_c_prior)
 
     # Second call: top-1 sim ~0.9999 >= llm_skip_threshold=0.85 → fast-paths without LLM.
     new_c_current = Cluster(centroid=vec_current, last_ts=case.timestamp, preview=[case.task_intent], members=[case.id])
-    result_current = await cluster_by_llm(new_c_current, clusters, llm=fake)
+    result_current = await acluster_by_llm(new_c_current, clusters, llm=fake)
     assert result_current is not None, "expected merged Cluster, got None"
     assert result_current.id == "cluster_000", f"expected id passthrough, got {result_current.id!r}"
     clusters[0] = result_current

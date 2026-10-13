@@ -8,13 +8,13 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 
 | Distribution | README | What it provides |
 |---|---|---|
-| `everalgo-core` | [`packages/everalgo-core/README.md`](../../packages/everalgo-core/README.md) | `ChatMessage`, `MemCell`, `Episode`, `RankInput`/`RankOutput`, `LLMClient`, `LLMConfig`, `FakeLLMClient` |
-| `everalgo-boundary` | [`packages/everalgo-boundary/README.md`](../../packages/everalgo-boundary/README.md) | `detect_boundaries`, `DetectionResult`, `BoundaryDecision` |
-| `everalgo-clustering` | [`packages/everalgo-clustering/README.md`](../../packages/everalgo-clustering/README.md) | `Cluster`, `cluster_by_geometry`, `cluster_by_llm` |
+| `everalgo-core` | [`packages/everalgo-core/README.md`](../../packages/everalgo-core/README.md) | `ChatMessage`, `MemCell`, `Episode`, `RankInput`/`RankOutput`, `LLMClient`, `OpenAICompatClient`, `FakeLLMClient` |
+| `everalgo-boundary` | [`packages/everalgo-boundary/README.md`](../../packages/everalgo-boundary/README.md) | `adetect_boundaries`, `detect_boundaries`, `DetectionResult`, `adetect_boundary_step`, `BoundaryDecision` |
+| `everalgo-clustering` | [`packages/everalgo-clustering/README.md`](../../packages/everalgo-clustering/README.md) | `Cluster`, `cluster_by_geometry`, `acluster_by_llm`, `cluster_by_llm` |
 | `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `hybrid`, `agentic`, `cluster`, `maxsim`, `category`, business rankers, `fusion`, `weight`, `rerank` |
 | `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `parse`, `ParsedContent`, `Modality`, `RawFile`; image / audio / document / URL parsers (video deferred) |
 | `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `EpisodeReflector`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `OutputLanguage` |
-| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `AgentBoundaryDetector`, three extractors, extraction result / skip reason types, `OpOutcome` |
+| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `BoundaryDetector` (re-exported from `everalgo-boundary`), three extractors, extraction result / skip reason types, `OpOutcome` |
 | `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `aclassify_category`, `classify_category`; `KnowledgeMemory` / `CategorySpec` live in `everalgo.types` |
 
 ---
@@ -39,7 +39,9 @@ from everalgo.types import (
     Episode,            # narrative memory — owner_id, episode, subject, summary, timestamp
     Foresight,          # anticipated future event — owner_id, foresight, evidence, start_time, end_time, duration_days
     AtomicFact,         # single verifiable assertion — owner_id (str | None), content, timestamp
-    Profile,            # structured user profile — owner_id, summary, timestamp; extra fields via extra="allow"
+    Profile,            # structured user profile — owner_id, summary, timestamp, explicit_info, implicit_traits
+    ExplicitInfoItem,   # one Profile.explicit_info item — description, category, evidence, observed_at; extra keys kept
+    ImplicitTraitItem,  # one Profile.implicit_traits item — description, trait, basis, observed_at; extra keys kept
     AgentCase,          # distilled agent trajectory — id, timestamp, task_intent, approach, quality_score, key_insight
     AgentSkill,         # aggregated skill — id, cluster_id (caller-stamped), name, description, content, confidence
     AgentProfilePatch,  # one section-level SOUL.md / AGENTS.md edit — file, action, section, old_text, new_text
@@ -59,10 +61,10 @@ from everalgo.clustering import Cluster
 # Cluster: id (caller-supplied), centroid, count, last_ts, preview, members (caller entity ids)
 ```
 
-LLM wire types live in `everalgo.llm.types`:
+The LLM contract lives in `everalgo.llm`:
 
 ```python
-from everalgo.llm.types import ChatMessage, ChatResponse, Usage
+from everalgo.llm import LLMClient, LLMMessage, LLMOutputError, StrictOutputModel, parse_reply
 ```
 
-`everalgo.llm.types.ChatMessage` is the LLM prompt wire type (sent to the model). `everalgo.types.ChatMessage` is the domain type (conversation message). They are distinct classes.
+`LLMClient.achat(messages, *, response_format, temperature=None, max_tokens=None, **extra)` takes `LLMMessage`s and a `StrictOutputModel` subclass and returns the reply text; an operator validates it with `parse_reply` and raises `LLMOutputError` on a bad reply. `everalgo.llm.LLMMessage` is the request message sent to the model; `everalgo.types.ChatMessage` is the domain type (conversation message). They are distinct classes. The full contract is [concepts/llm-contract.md](../concepts/llm-contract.md).

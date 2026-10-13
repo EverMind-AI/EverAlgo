@@ -5,6 +5,8 @@
   via ``_utils.split_image_with_overlap``; each slice is OCR'd independently
   and the per-slice results are merged with a second LLM call using
   ``PROMPT_FOR_MERGE`` to dedupe the overlap regions.
+- Every call sends the rules as the system message and the image (or the
+  tagged OCR texts) as the user message, and reads the reply's ``text``.
 - BMP / TIFF are transcoded to PNG via Pillow (Gemini does not accept those
   MIMEs natively).
 - SVG is rasterised to PNG via ``cairosvg`` (optional extra ``everalgo-parser[svg]``).
@@ -19,12 +21,15 @@ from typing import TYPE_CHECKING
 from asgiref.sync import async_to_sync
 from PIL import Image
 
-from everalgo.llm import ChatMessage, LLMClient, TextPart, image_url_part_from_bytes
+from everalgo.llm import image_url_part_from_bytes
+from everalgo.parser._replies import _call_llm_for_text
 from everalgo.parser._utils import check_aspect_ratio, split_image_with_overlap
-from everalgo.parser.prompts.en import PROMPT_FOR_MERGE, PROMPT_FOR_PICTURE
+from everalgo.parser.prompts.en import MERGE_USER_PROMPT, PROMPT_FOR_MERGE, PROMPT_FOR_PICTURE
 from everalgo.types import Modality, ParsedContent
+from everalgo.utils import render_prompt, tagged
 
 if TYPE_CHECKING:
+    from everalgo.llm import LLMClient
     from everalgo.types import RawFile
 
 __all__ = ["aparse", "parse"]
@@ -62,8 +67,12 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     """Parse an image ``RawFile`` into ``ParsedContent`` via multimodal LLM.
 
     Tall images (height/width > 10) are split into overlapping vertical
-    slices and OCR'd in parallel; per-slice results are then merged with a
+    slices and OCR'd in turn; per-slice results are then merged with a
     second LLM call. Normal-ratio images go through a single OCR call.
+
+    Raises:
+        ValueError: If ``raw_file`` has no content or an unsupported extension.
+        LLMOutputError: If an OCR reply is not a valid ``{"text": "..."}`` object.
     """
     if not raw_file.content:
         raise ValueError("RawFile.content is empty; cannot parse image")
@@ -103,25 +112,18 @@ async def _aparse_single(
     raw_file: RawFile,
     client: LLMClient,
 ) -> ParsedContent:
-    """Single-shot OCR call for normal-ratio images."""
-    message = ChatMessage(
-        role="user",
-        content=[
-            TextPart(text=PROMPT_FOR_PICTURE),
-            image_url_part_from_bytes(payload_bytes, payload_mime),
-        ],
-    )
+    """Single-shot OCR call for normal-ratio images.
+
+    Raises:
+        LLMOutputError: If the OCR reply is not a valid ``{"text": "..."}`` object.
+    """
     logger.debug("parsing image (single) bytes=%d mime=%s", len(payload_bytes), payload_mime)
-    response = await client.chat([message], max_tokens=_MAX_OCR_OUTPUT_TOKENS)
+    text = await _ocr(client, payload_bytes, payload_mime)
     return ParsedContent(
-        text=response.content,
+        text=text,
         modality=Modality.IMAGE,
         mime=raw_file.mime or payload_mime,
-        metadata={
-            "model": response.model,
-            "finish_reason": response.finish_reason,
-            "tall_image_parts": 1,
-        },
+        metadata={"tall_image_parts": 1},
     )
 
 
@@ -141,102 +143,91 @@ async def _aparse_tall(
     3. ≤ 1 non-empty result → return that single text (or empty string when
        all slices came back blank).
     4. Otherwise call the merge LLM with ``temperature=0.0`` and a 4x token
-       cap; on merge failure fall back to a deterministic ``\n\n`` join so
-       the caller at least gets the raw OCR rather than an exception.
+       cap; on merge failure (the call raises, or its reply is invalid or
+       empty) fall back to a deterministic ``\n\n`` join so the caller at
+       least gets the raw OCR rather than an exception.
+
+    Raises:
+        LLMOutputError: If a slice's OCR reply is not a valid ``{"text": "..."}`` object.
     """
     parts = split_image_with_overlap(payload_bytes, max_ratio=_TALL_IMAGE_RATIO_THRESHOLD)
     logger.info("tall image detected: ratio=%.2f, splitting into %d parts", ratio, len(parts))
 
     ocr_results: list[str] = []
-    last_response = None
     for i, part_bytes in enumerate(parts, 1):
-        message = ChatMessage(
-            role="user",
-            content=[
-                TextPart(text=PROMPT_FOR_PICTURE),
-                image_url_part_from_bytes(part_bytes, payload_mime),
-            ],
-        )
         logger.debug("OCR tall image part %d/%d, bytes=%d", i, len(parts), len(part_bytes))
-        resp = await client.chat([message], max_tokens=_MAX_OCR_OUTPUT_TOKENS)
-        last_response = resp
         # Drop empty per-slice OCR so merge prompt isn't padded with blank parts.
-        text = (resp.content or "").strip()
+        text = (await _ocr(client, part_bytes, payload_mime)).strip()
         if text:
             ocr_results.append(text)
+
+    metadata: dict[str, object] = {"tall_image_parts": len(parts), "aspect_ratio": round(ratio, 2)}
 
     # All slices came back empty — return an empty ParsedContent rather than
     # call the merge LLM with no content (matches original ``parse()`` bailout).
     if not ocr_results:
-        assert last_response is not None  # at least one chat() call was made above
-        return ParsedContent(
-            text="",
-            modality=Modality.IMAGE,
-            mime=raw_file.mime or payload_mime,
-            metadata={
-                "model": last_response.model,
-                "finish_reason": last_response.finish_reason,
-                "tall_image_parts": len(parts),
-                "aspect_ratio": round(ratio, 2),
-                "warning": "all OCR slices returned empty",
-            },
-        )
+        metadata["warning"] = "all OCR slices returned empty"
+        return ParsedContent(text="", modality=Modality.IMAGE, mime=raw_file.mime or payload_mime, metadata=metadata)
 
     # Single non-empty result — skip the merge LLM, return as-is (saves 1 call).
     if len(ocr_results) == 1:
-        assert last_response is not None
         return ParsedContent(
-            text=ocr_results[0],
-            modality=Modality.IMAGE,
-            mime=raw_file.mime or payload_mime,
-            metadata={
-                "model": last_response.model,
-                "finish_reason": last_response.finish_reason,
-                "tall_image_parts": len(parts),
-                "aspect_ratio": round(ratio, 2),
-            },
+            text=ocr_results[0], modality=Modality.IMAGE, mime=raw_file.mime or payload_mime, metadata=metadata
         )
 
-    # Multi-slice merge via LLM. Algorithm-layer fallback (NOT engineering
-    # retry/fallback per ADR-012): if the merge call itself throws, fall back
-    # to a deterministic join so the caller never loses the raw OCR.
-    parts_text = "\n\n".join(f"=== Part {i} ===\n{p}" for i, p in enumerate(ocr_results, 1))
-    merge_prompt = PROMPT_FOR_MERGE.replace("{parts_text}", parts_text)
-    merge_message = ChatMessage(role="user", content=merge_prompt)
+    merged_text = await _merge(client, ocr_results)
+    if merged_text is None:
+        merged_text = "\n\n".join(ocr_results)
+        metadata["merge_fallback"] = "deterministic_join"
+    return ParsedContent(
+        text=merged_text, modality=Modality.IMAGE, mime=raw_file.mime or payload_mime, metadata=metadata
+    )
+
+
+async def _ocr(client: LLMClient, image_bytes: bytes, mime: str) -> str:
+    """OCR one image: the rules as the system message, the image alone as the user message.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid ``{"text": "..."}`` object.
+    """
+    return await _call_llm_for_text(
+        client,
+        system=PROMPT_FOR_PICTURE,
+        user=[image_url_part_from_bytes(image_bytes, mime)],
+        operator="parser image",
+        max_tokens=_MAX_OCR_OUTPUT_TOKENS,
+    )
+
+
+async def _merge(client: LLMClient, ocr_results: list[str]) -> str | None:
+    """Merge the slices' OCR texts with the LLM; None when the merge fails or comes back empty.
+
+    Algorithm-layer fallback (NOT engineering retry/fallback per ADR-012): a merge
+    that raises — the call itself, or an invalid reply — or returns no text leaves
+    the caller to join the raw OCR deterministically, so it never loses it.
+    """
     logger.debug("merging %d OCR parts", len(ocr_results))
-    merge_fallback_used = False
     try:
-        merge_resp = await client.chat(
-            [merge_message],
+        merged = await _call_llm_for_text(
+            client,
+            system=PROMPT_FOR_MERGE,
+            user=_render_ocr_parts(ocr_results),
+            operator="parser image merge",
             temperature=0.0,
             max_tokens=_MAX_MERGE_OUTPUT_TOKENS,
         )
-        merged_text = merge_resp.content or "\n\n".join(ocr_results)
-        if not merge_resp.content:
-            merge_fallback_used = True
-        last_response = merge_resp
     except Exception as exc:
         logger.warning(
             "LLM merge of tall-image OCR parts failed (%s); falling back to deterministic join", exc, exc_info=True
         )
-        merged_text = "\n\n".join(ocr_results)
-        merge_fallback_used = True
+        return None
+    return merged or None
 
-    assert last_response is not None, "tall-image OCR produced no responses"
-    metadata: dict[str, object] = {
-        "model": last_response.model,
-        "finish_reason": last_response.finish_reason,
-        "tall_image_parts": len(parts),
-        "aspect_ratio": round(ratio, 2),
-    }
-    if merge_fallback_used:
-        metadata["merge_fallback"] = "deterministic_join"
-    return ParsedContent(
-        text=merged_text,
-        modality=Modality.IMAGE,
-        mime=raw_file.mime or payload_mime,
-        metadata=metadata,
-    )
+
+def _render_ocr_parts(ocr_results: list[str]) -> str:
+    """The merge call's user message: each OCR text in a numbered ``<part>``, all in ``<ocr_parts count="N">``."""
+    parts = "\n".join(tagged("part", text, number=str(i)) for i, text in enumerate(ocr_results, 1))
+    return render_prompt(MERGE_USER_PROMPT, None, count=len(ocr_results), parts=parts)
 
 
 def _transcode_to_png(data: bytes) -> bytes:

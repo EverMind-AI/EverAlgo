@@ -1,30 +1,20 @@
-"""Tests for everalgo.llm.errors.LLMError."""
+"""Tests for the contract's error (everalgo.llm.errors) and the reference implementation's (openai_compat)."""
 
-import pytest
-
-from everalgo.llm.errors import LLMError
-
-
-def test_llm_error_is_exception_subclass() -> None:
-    assert issubclass(LLMError, Exception)
+import everalgo.llm.errors
+from everalgo.llm import LLMOutputError
+from everalgo.llm.openai_compat import LLMError
 
 
-def test_llm_error_with_message() -> None:
-    err = LLMError("rate limit exceeded")
-    assert str(err) == "rate limit exceeded"
+def test_llm_output_error_is_a_plain_exception() -> None:
+    assert issubclass(LLMOutputError, Exception)
 
 
-def test_llm_error_chains_cause_via_pep_3134() -> None:
-    """The provider layer should attach SDK-native exception via ``raise X from y``.
+def test_llm_output_error_is_unrelated_to_the_reference_implementation_error() -> None:
+    """A host must be able to tell "the model's reply was unusable" from "the call failed" by type alone."""
+    assert not issubclass(LLMOutputError, LLMError)
+    assert not issubclass(LLMError, LLMOutputError)
 
-    Callers can then inspect ``e.__cause__`` to reach the original SDK exception class.
-    """
-    sdk_native = ValueError("upstream failure")
 
-    with pytest.raises(LLMError) as caught:
-        try:
-            raise sdk_native
-        except ValueError as exc:
-            raise LLMError("wrapped failure") from exc
-
-    assert caught.value.__cause__ is sdk_native
+def test_contract_errors_module_defines_only_llm_output_error() -> None:
+    assert everalgo.llm.errors.__all__ == ["LLMOutputError"]
+    assert not hasattr(everalgo.llm.errors, "LLMError")

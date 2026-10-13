@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import everalgo.parser as parser_pkg
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Modality, RawFile
 
 
 def _fake(text: str = "extracted") -> FakeLLMClient:
-    return FakeLLMClient(responses=[ChatResponse(content=text, model="fake", finish_reason="stop")])
+    return FakeLLMClient(responses=[json.dumps({"text": text})])
 
 
 @pytest.mark.asyncio

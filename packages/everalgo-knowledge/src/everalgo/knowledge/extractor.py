@@ -4,12 +4,12 @@ Orchestrates the four-stage knowledge extraction pipeline:
 
 1. **Preprocess + atomize** (``_block_split``): normalize parsed text into
    numbered atom blocks (paragraphs, merged tables, merged lists).
-2. **Topic-tree LLM extraction** (``TOPIC_TREE_EXTRACT_PROMPT_EN``): one
+2. **Topic-tree LLM extraction** (``prompts.en.topic_tree_extract``): one
    LLM call per token-bounded batch produces a nested ``topics`` JSON
    plus document-level ``summary`` / ``content_labels``.
 3. **Cross-batch merge** (``_batch_merge``, multi-batch only): one LLM
-   call via ``CONTENT_MERGE_PROMPT_EN`` consolidates per-batch summaries,
-   then one LLM call via ``TOPIC_MERGE_PROMPT_EN`` de-duplicates topics
+   call via ``prompts.en.content_merge`` consolidates per-batch summaries,
+   then one LLM call via ``prompts.en.topic_merge`` de-duplicates topics
    that straddle a batch boundary. Skipped entirely for single-batch
    documents.
 4. **Post-processing** (``_postprocess``): two conditional LLM passes —
@@ -20,6 +20,9 @@ Orchestrates the four-stage knowledge extraction pipeline:
    children + deduplicate parent refs), wrap under a synthetic doc root
    carrying the title + doc-level summary, and DFS-flatten into the
    public ``list[KnowledgeMemory]`` output.
+
+Every LLM call is held to a strict reply model (``_replies``); a reply that does not validate raises
+``LLMOutputError`` and stops the extraction, so no partial tree is ever returned in its place.
 """
 
 from __future__ import annotations
@@ -39,11 +42,15 @@ from everalgo.knowledge._block_split import (
 from everalgo.knowledge._classify import aclassify_category
 from everalgo.knowledge._doc_root import build_doc_root
 from everalgo.knowledge._flatten import flatten
-from everalgo.knowledge._llm_json import parse_llm_json
 from everalgo.knowledge._postprocess import apostprocess_topics
+from everalgo.knowledge._render import append_custom_instructions
+from everalgo.knowledge._replies import TopicTreeReply, ask_llm
 from everalgo.knowledge._topic_build import build_topic_clips
-from everalgo.knowledge.prompts.en.topic_tree_extract import TOPIC_TREE_EXTRACT_PROMPT_EN
-from everalgo.llm.types import ChatMessage
+from everalgo.knowledge.prompts.en.topic_tree_extract import (
+    TOPIC_TREE_EXTRACT_SYSTEM_PROMPT,
+    TOPIC_TREE_EXTRACT_USER_PROMPT,
+)
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -58,29 +65,43 @@ async def _aextract_batch(
     client: LLMClient,
     title: str,
     batch: list[tuple[int, str]],
-    prompt_template: str,
-) -> dict[str, Any] | None:
-    """Single LLM call for one atom batch; returns the parsed JSON dict or None."""
-    rendered = prompt_template.format(
+    custom_instructions: str | None,
+) -> dict[str, Any]:
+    """Single LLM call for one non-empty atom batch; returns the validated reply as a plain dict.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid topic-tree output.
+    """
+    user = render_prompt(
+        TOPIC_TREE_EXTRACT_USER_PROMPT,
+        None,
         title=title,
+        count=len(batch),
+        max_id=batch[-1][0],
         numbered_paragraphs=format_numbered_paragraphs(batch),
-        num_paragraphs=len(batch),
-        max_id=batch[-1][0] if batch else 0,
     )
-    response = await client.chat([ChatMessage(role="user", content=rendered)])
-    return parse_llm_json(response.content)
+    reply = await ask_llm(
+        client,
+        system=append_custom_instructions(TOPIC_TREE_EXTRACT_SYSTEM_PROMPT, custom_instructions),
+        user=user,
+        reply_model=TopicTreeReply,
+        operator="knowledge topic_tree_extract",
+    )
+    return reply.model_dump()
 
 
 async def _arun_extraction_batches(
     client: LLMClient,
     text: str,
     title: str,
-    prompt: str,
+    custom_instructions: str | None,
 ) -> tuple[list[tuple[int, str]], list[dict[str, Any]]] | None:
     """Preprocess, atomize, batch, and run per-batch LLM extraction.
 
-    Returns ``(atoms, batch_results)`` or ``None`` when input is empty or
-    every batch failed to parse.
+    Returns ``(atoms, batch_results)``, or ``None`` when the input yields no atoms.
+
+    Raises:
+        LLMOutputError: If a batch's reply is not a valid topic-tree output.
     """
     text = preprocess_content(text)
     atoms = split_content_to_blocks(text)
@@ -88,20 +109,9 @@ async def _arun_extraction_batches(
         logger.warning("knowledge.aextract: empty input, no atoms")
         return None
 
-    batches = split_and_batch_content(atoms)
-
-    batch_results: list[dict[str, Any]] = []
-    for batch in batches:
-        data = await _aextract_batch(client, title, batch, prompt)
-        if data is None:
-            logger.warning("knowledge.aextract: batch JSON parse failed; skipping")
-            continue
-        batch_results.append(data)
-
-    if not batch_results:
-        logger.warning("knowledge.aextract: no batches parsed; returning empty")
-        return None
-
+    batch_results = [
+        await _aextract_batch(client, title, batch, custom_instructions) for batch in split_and_batch_content(atoms)
+    ]
     return atoms, batch_results
 
 
@@ -141,8 +151,8 @@ class KnowledgeExtractor:
     """Extracts a flattened topic tree from one document.
 
     Construct with the LLM client (``KnowledgeExtractor(llm=client)``); the
-    same instance can extract many documents. Customize the prompt per call
-    via ``prompt=``.
+    same instance can extract many documents. Add to the bundled rules per call
+    via ``custom_instructions=``.
 
     Args:
         llm: Caller-injected ``LLMClient``.
@@ -159,7 +169,7 @@ class KnowledgeExtractor:
         title: str = "",
         categories: list[CategorySpec] | None = None,
         category_id: str = "",
-        prompt: str = TOPIC_TREE_EXTRACT_PROMPT_EN,
+        custom_instructions: str | None = None,
     ) -> list[KnowledgeMemory]:
         """Extract a flattened topic tree from ``parsed``.
 
@@ -179,18 +189,26 @@ class KnowledgeExtractor:
             category_id: Pre-known category id. Non-empty values short-circuit
                 the classifier and are used verbatim. ``""`` (default) means
                 "ask the classifier if ``categories`` is also provided".
-            prompt: Override the topic-tree extraction prompt template.
+            custom_instructions: The caller's instructions, appended to every LLM call of the
+                extraction (each topic-tree batch, the content and topic merges, classification,
+                leaf split, uncovered-block assignment) as a ``<custom_instructions>`` block, always
+                the system message's last; it adds to the bundled rules, never replaces them. Placed
+                verbatim, never rendered as a template. None or a blank string adds nothing.
 
         Returns:
             ``list[KnowledgeMemory]`` — index 0 is the synthetic doc-root
             (``depth=0``, ``parent_index=None``); subsequent entries are
-            DFS-ordered descendants. Returns an empty list when input is empty
-            or every batch failed to parse.
+            DFS-ordered descendants. Returns an empty list when the input
+            yields no atom blocks.
+
+        Raises:
+            LLMOutputError: If any LLM reply along the pipeline (topic tree, merges,
+                classification, post-processing) fails its reply model.
         """
         client = self._llm
         title = title or "Untitled"
 
-        result = await _arun_extraction_batches(client, parsed.text, title, prompt)
+        result = await _arun_extraction_batches(client, parsed.text, title, custom_instructions)
         if result is None:
             return []
         atoms, batch_results = result
@@ -198,13 +216,19 @@ class KnowledgeExtractor:
         doc_summary, doc_labels, all_topics = _consolidate_batch_results(batch_results)
 
         if len(batch_results) > 1:
-            doc_summary = await amerge_doc_summary(client, title, batch_results)
-            all_topics = await amerge_topics(client, title, all_topics)
+            doc_summary = await amerge_doc_summary(
+                client, title, batch_results, custom_instructions=custom_instructions
+            )
+            all_topics = await amerge_topics(client, title, all_topics, custom_instructions=custom_instructions)
 
         if not category_id and categories:
-            category_id = await aclassify_category(client, title, doc_summary, categories)
+            category_id = await aclassify_category(
+                client, title, doc_summary, categories, custom_instructions=custom_instructions
+            )
 
-        all_topics = await apostprocess_topics(client, title, all_topics, atoms)
+        all_topics = await apostprocess_topics(
+            client, title, all_topics, atoms, custom_instructions=custom_instructions
+        )
         forest = build_topic_clips(all_topics, atoms)
         root = build_doc_root(
             forest,

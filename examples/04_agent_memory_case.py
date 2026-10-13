@@ -19,7 +19,6 @@ import asyncio
 import json
 
 from everalgo.agent_memory.case import AgentCaseExtractor
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import (
     AgentCase,
@@ -50,8 +49,8 @@ _COMPRESS_JSON = json.dumps(
     {
         "task_intent": "Search for Python async retry libraries and summarise options",
         "approach": "1. Search for retry libraries.\n2. Drill into tenacity.\n3. Verify the async API.",
-        "quality_score": 0.82,
         "key_insight": "Use `tenacity` with `AsyncRetrying` for async-native exponential back-off.",
+        "quality_score": 0.82,
     }
 )
 
@@ -126,12 +125,7 @@ def _make_memcell() -> MemCell:
 async def main() -> None:
     """Extract an AgentCase from a three-round tool trajectory and print its fields."""
     # Three tool rounds → min-rounds gate cleared, filter runs (exploration), then compress: two LLM calls.
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(content=_FILTER_JSON, model="fake"),
-            ChatResponse(content=_COMPRESS_JSON, model="fake"),
-        ]
-    )
+    fake = FakeLLMClient(responses=[_FILTER_JSON, _COMPRESS_JSON])
     mc = _make_memcell()
 
     cases: list[AgentCase] = await AgentCaseExtractor(llm=fake).aextract(mc)

@@ -2,10 +2,19 @@
 
 Chinese counterpart to ``prompts/en/document.py``: PDF / Office (after the
 LibreOffice → PDF conversion) share ``PROMPT_FOR_FILE``; the HTML parser
-uses ``PROMPT_FOR_HTML``.
+uses ``PROMPT_FOR_HTML``. Same constants and same message split as the English set: each system message ends with
+the shared English ``<reply_format>`` block; ``HTML_USER_PROMPT`` is the English one, the markup holding no language.
 """
 
-PROMPT_FOR_FILE = """请阅读这份文档,像自然阅读一样返回它的内容。
+from __future__ import annotations
+
+__all__ = ["HTML_USER_PROMPT", "PROMPT_FOR_FILE", "PROMPT_FOR_HTML"]
+
+from everalgo.parser.prompts._reply_format import TEXT_REPLY_FORMAT
+from everalgo.parser.prompts.en.document import HTML_USER_PROMPT
+from everalgo.utils import paragraphs
+
+_FILE_RULES = """请阅读这份文档,像自然阅读一样返回它的内容。
 
 关键指令:
 - 仅输出提取出来的内容,不要任何开场白或结束语。
@@ -22,8 +31,10 @@ PROMPT_FOR_FILE = """请阅读这份文档,像自然阅读一样返回它的内�
 6. 对于非文字元素(照片、插图等),详细描述其主要内容与关键元素
 7. 保留原始结构与层级"""
 
+PROMPT_FOR_FILE = paragraphs(_FILE_RULES, TEXT_REPLY_FORMAT)
 
-PROMPT_FOR_HTML = """请阅读这段从网页上抽取出的 HTML 内容,返回主要正文。
+
+_HTML_RULES = """请阅读这段从网页上抽取出的 HTML 内容,返回主要正文。
 
 关键指令:
 - 仅输出提取出来的内容,不要任何开场白或结束语。
@@ -38,3 +49,5 @@ PROMPT_FOR_HTML = """请阅读这段从网页上抽取出的 HTML 内容,返回�
 4. 公式转为 LaTeX 格式
 5. 保留原始结构与层级(标题、段落、列表)
 6. 对于图片,如有 alt 文本或描述则描述其内容"""
+
+PROMPT_FOR_HTML = paragraphs(_HTML_RULES, TEXT_REPLY_FORMAT)

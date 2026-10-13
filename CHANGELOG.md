@@ -13,14 +13,31 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.5.1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.3.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
-| `everalgo-clustering` | 0.2.1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.4.1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.8.0rc9 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.5.1 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
-| `everalgo-parser` | 0.2.1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.2.1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-core` | 0.6.0rc1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.4.0rc1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-clustering` | 0.3.0rc1 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
+| `everalgo-rank` | 0.5.0rc1 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.9.0rc1 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.6.0rc1 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-parser` | 0.3.0rc1 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.3.0rc1 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Coordinated release — 2026-10-13
+
+All eight distributions move to one LLM contract at once, so a host upgrades them together. `everalgo-core` 0.6.0rc1 defines it: an operator passes the pydantic model it will validate the reply against as `response_format`, calls `LLMClient.achat`, gets the reply back as `str`, and validates it with `everalgo.llm.parse_reply`; a reply that does not validate raises `everalgo.llm.LLMOutputError`, with no repair and no retry. Every operator also sends a static system message of rules and a user message holding only the data, and every time a prompt shows a model is `YYYY-MM-DD HH:MM UTC`. Every package that depends on `everalgo-core` raises its floor to `>=0.6.0rc1`, `everalgo-user-memory` and `everalgo-agent-memory` require `everalgo-boundary>=0.4.0rc1`, `everalgo-agent-memory` requires `everalgo-clustering>=0.3.0rc1`, and `everalgo-knowledge` requires `everalgo-parser>=0.3.0rc1`; the floors name `rc1` because a PEP 440 specifier such as `>=0.6.0` does not match `0.6.0rc1`, so the release candidates would not resolve against each other. All eight ship first as `rc1`, which a host installs with `--pre` or an exact pin. Pre-1.0, so every breaking change takes a minor bump (Invariant 6 of `docs/releasing.md`).
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.6.0rc1 | minor — the `LLMClient` contract, the reference client over `httpx`, `everalgo.utils`, typed profile items |
+| `everalgo-boundary` | 0.4.0rc1 | minor — one `BoundaryDetector`, strict replies, `tail_complete` replaces `should_wait`; `prompt=` removed, `custom_instructions=` appends a block to the bundled rules |
+| `everalgo-clustering` | 0.3.0rc1 | minor — `acluster_by_llm`, strict reply, system / user split; `prompt=` removed, `custom_instructions=` appends a block to the bundled rules |
+| `everalgo-rank` | 0.5.0rc1 | minor — strict replies for sufficiency, query generation and rerank, system / user split; the prompt overrides are removed, `custom_instructions=` appends a block to the bundled rules |
+| `everalgo-user-memory` | 0.9.0rc1 | minor — first release since the 0.8.0 candidates; strict replies, `custom_instructions=` replaces `prompt=`, rewritten Episode and profile prompts |
+| `everalgo-agent-memory` | 0.6.0rc1 | minor — strict replies, `AgentBoundaryDetector` removed, per-call prompt overrides removed |
+| `everalgo-parser` | 0.3.0rc1 | minor — `{"text": ...}` reply contract, `model` / `finish_reason` leave `ParsedContent.metadata` |
+| `everalgo-knowledge` | 0.3.0rc1 | minor — strict replies, no more silent degradation on an unparsable reply; `prompt=` removed, `custom_instructions=` appends a block to the bundled rules |
+
+Detail in each `packages/everalgo-<dist>/CHANGELOG.md`; `docs/concepts/llm-contract.md` states the contract.
 
 ## Patch release — 2026-09-16
 

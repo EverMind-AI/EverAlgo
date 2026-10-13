@@ -23,13 +23,11 @@ call order is deterministic) and captures every prompt for later inspection.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from everalgo.clustering import Cluster, cluster_by_geometry
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.assertions import (
     assert_atomic_fact_shape,
     assert_episode_shape,
@@ -43,6 +41,9 @@ from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.episode import EpisodeExtractor
 from everalgo.user_memory.foresight import ForesightExtractor
 from everalgo.user_memory.profile import ProfileExtractor
+
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
 
 
 def _prior_memcell() -> MemCell:
@@ -93,12 +94,12 @@ def _conversation() -> list[ChatMessage]:
 # ---------------------------------------------------------------------------
 
 
-_BOUNDARY_JSON = '{"reasoning": "single coherent topic", "boundaries": [], "should_wait": false}'
+_BOUNDARY_JSON = '{"reasoning": "single coherent topic", "boundaries": [], "tail_complete": true}'
 
 _EPISODE_JSON = (
-    '{"title": "Alice asks about Python async retry semantics",'
-    ' "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",'
-    ' "summary": "Alice raised Python async retry patterns and the assistant offered a follow-up."}'
+    '{"content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",'
+    ' "summary": "Alice raised Python async retry patterns and the assistant offered a follow-up.",'
+    ' "title": "Alice asks about Python async retry semantics"}'
 )
 
 _FORESIGHT_JSON = (
@@ -111,7 +112,6 @@ _FORESIGHT_JSON = (
 
 _ATOMIC_FACT_JSON = (
     '{"atomic_facts": {'
-    '"time": "November 14, 2023 at 22:13 UTC",'
     '"atomic_fact": ['
     '"Alice is learning Python async retry semantics.",'
     '"Assistant promised a follow-up document next week."'
@@ -127,8 +127,7 @@ _PROFILE_JSON = (
     '"implicit_traits": ['
     '{"trait": "[Curious Learner]",'
     ' "description": "Actively pursues new technical depth without prompting.",'
-    ' "basis": "Self-initiated a deep-dive question into async patterns.",'
-    ' "evidence": "Volunteered her current learning focus."}'
+    ' "basis": "Self-initiated a deep-dive question into async patterns."}'
     "]}"
 )
 
@@ -148,13 +147,13 @@ def _make_capturing_client() -> tuple[FakeLLMClient, dict[str, str]]:
     captured: dict[str, str] = {}
     call_index = 0
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
         nonlocal call_index
         stage = _STAGE_ORDER[call_index]
-        assert isinstance(messages[0].content, str)  # narrow for test
-        captured[stage] = messages[0].content
+        # Every message, system and user alike: a split prompt carries its rules and its data in different ones.
+        captured[stage] = "\n".join(str(message.content) for message in messages)
         call_index += 1
-        return ChatResponse(content=_STAGE_RESPONSE[stage], model="fake")
+        return _STAGE_RESPONSE[stage]
 
     return FakeLLMClient(handler=handler), captured
 
@@ -185,33 +184,25 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     assert ep.owner_id == "u_alice"
 
     episode_prompt = captured["episode"]
-    # Placeholder substitution: literal labels rendered, no raw `{conversation_start_time}` / `{conversation}` /
-    # `{custom_instructions}` left behind.
-    assert "Conversation start time:" in episode_prompt
-    # Episode renders the start time in YYYY-MM-DD HH:MM UTC (Weekday) format — pin the date portion only.
-    assert "2023-11-14" in episode_prompt, "episode prompt missing rendered conversation_start_time"
-    assert "{conversation_start_time}" not in episode_prompt
-    assert "{conversation}" not in episode_prompt
-    assert "{custom_instructions}" not in episode_prompt
-    # Conversation is rendered as pseudo-JSON objects: field names quoted, values unquoted
-    # (not strictly valid JSON but LLM-readable). Timestamps emitted in YYYY-MM-DD HH:MM UTC (Weekday) format
-    # via ``_format_prompt_time`` so LLM can resolve relative time references per message.
-    assert '"timestamp": 2023-11-14 22:13 UTC (Tuesday)' in episode_prompt, (
-        "episode conversation missing Alice timestamp in prompt format"
+    # Placeholder substitution: the <conversation> element carries only its line count, no raw slot left behind.
+    assert '<conversation count="' in episode_prompt, "episode prompt missing the <conversation> element"
+    assert "start_time" not in episode_prompt
+    assert "{{" not in episode_prompt
+    # No custom_instructions passed, so the prompt has no <custom_instructions> block.
+    assert "<custom_instructions>" not in episode_prompt
+    # One ``[time] speaker: text`` line per message, the time from ``format_utc_time(..., weekday=True)`` so the
+    # LLM can resolve relative time references per message.
+    assert "[2023-11-14 22:13 UTC (Tuesday)] Alice: " in episode_prompt, "episode conversation missing Alice's line"
+    assert "[2023-11-14 22:13 UTC (Tuesday)] assistant: " in episode_prompt, (
+        "episode conversation missing the assistant's line"
     )
-    assert '"speaker": Alice' in episode_prompt, "episode conversation missing Alice speaker"
-    assert '"timestamp": 2023-11-14 22:13 UTC (Tuesday)' in episode_prompt, (
-        "episode conversation missing assistant timestamp in prompt format"
-    )
-    assert '"speaker": assistant' in episode_prompt, "episode conversation missing assistant speaker"
     assert "Python async" in episode_prompt
-    # sender_id is a required keyword argument (no default); passing a non-None value selects
-    # USER_EPISODE_GENERATION_PROMPT, while sender_id=None selects the generic variant.
-    # The `{user_name}` placeholder is substituted with the resolved sender_name "Alice"; the raw
-    # placeholder string must no longer appear in the rendered prompt.
-    assert "{user_name}" not in episode_prompt
-    assert "User name: Alice" in episode_prompt, "episode prompt missing rendered user_name label"
-    assert "focus on Alice" in episode_prompt, "episode prompt should be user-centred on Alice"
+    # sender_id is a required keyword argument (no default) that only sets owner_id: the prompt narrates the whole
+    # memcell, with no user-centred variant. No output_language, so the model follows the participants.
+    assert "User name:" not in episode_prompt, "episode prompt must not be user-centred"
+    assert "in the language the participants use" in episode_prompt, (
+        "episode prompt missing the participant language rule"
+    )
 
     # --- 3. Foresight ----------------------------------------------------------
     foresights = await ForesightExtractor(llm=fake).aextract(mc, sender_id="u_alice")
@@ -221,13 +212,15 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     assert fs.duration_days == 7
 
     foresight_prompt = captured["foresight"]
-    # Foresight template uses uppercase placeholders {USER_ID} / {USER_NAME} / {CONVERSATION_TEXT}.
-    assert "- user_id: u_alice" in foresight_prompt, "foresight prompt missing sender_id substitution"
-    assert "- user_name: Alice" in foresight_prompt, "foresight prompt missing sender_name substitution"
+    # The user's identity and the conversation ride as tagged data; no legacy uppercase placeholder is left behind.
+    assert "<user_id>\nu_alice\n</user_id>" in foresight_prompt, "foresight prompt missing sender_id substitution"
+    assert "<user_name>\nAlice\n</user_name>" in foresight_prompt, "foresight prompt missing sender_name substitution"
     assert "{USER_ID}" not in foresight_prompt
     assert "{USER_NAME}" not in foresight_prompt
     assert "{CONVERSATION_TEXT}" not in foresight_prompt
     assert "Python async" in foresight_prompt
+    # Conversation lines carry the UTC minute; the two messages a second apart share it.
+    assert "[2023-11-14 22:13 UTC (Tuesday)] Alice: I've been getting into Python async" in foresight_prompt
 
     # --- 4. AtomicFact ---------------------------------------------------------
     facts = await AtomicFactExtractor(llm=fake).aextract(mc, sender_id="u_alice")
@@ -237,17 +230,19 @@ async def test_user_memory_full_pipeline_e2e() -> None:
         assert af.owner_id == "u_alice"
 
     atomic_prompt = captured["atomic_fact"]
-    # AtomicFact template uses uppercase placeholders {TIME} / {INPUT_TEXT}.
+    # No legacy uppercase placeholder is left behind.
     assert "{TIME}" not in atomic_prompt
     assert "{INPUT_TEXT}" not in atomic_prompt
-    # TIME label is rendered as natural-language UTC.
-    assert "November 14, 2023" in atomic_prompt, "atomic_fact prompt missing rendered TIME label"
-    # AtomicFact's _render_input_text emits `[<ISO>] <speaker>: <content>` lines (mirroring
+    # The conversation start time renders in the shared UTC-minute shape, like every conversation line.
+    assert "Conversation start time: 2023-11-14 22:13 UTC (Tuesday)" in atomic_prompt, (
+        "atomic_fact prompt missing rendered start time"
+    )
+    # AtomicFact's _render_input_text emits `[YYYY-MM-DD HH:MM UTC (Weekday)] <speaker>: <content>` lines (mirroring
     # the upstream reference `atomic_fact_extractor.py:255-262`) — the timestamp prefix anchors message-level
     # time signals into the LLM context so atomic_fact extraction can preserve when each event
     # happened (critical for LoCoMo temporal questions).
-    assert "[2023-11-14 22:13:20] Alice: I've been getting into Python async" in atomic_prompt
-    assert "[2023-11-14 22:13:21] assistant: Sure — what failure mode" in atomic_prompt
+    assert "[2023-11-14 22:13 UTC (Tuesday)] Alice: I've been getting into Python async" in atomic_prompt
+    assert "[2023-11-14 22:13 UTC (Tuesday)] assistant: Sure — what failure mode" in atomic_prompt
 
     # --- cluster_by_geometry (no LLM call — count stays at 5) -----------------
     mc_prior = _prior_memcell()

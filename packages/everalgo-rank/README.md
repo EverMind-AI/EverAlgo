@@ -51,7 +51,6 @@ hits = await ahybrid_retrieve(
 import asyncio
 import json
 
-from everalgo.llm.types import ChatResponse
 from everalgo.rank import EpisodicRanker, DEFAULT_RANK_CONFIG
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate, RankInput
@@ -59,7 +58,7 @@ from everalgo.types import Candidate, RankInput
 _RERANK_JSON = json.dumps({"ranked": [{"id": "ep_a", "score": 0.95}]})
 
 async def main() -> None:
-    fake = FakeLLMClient(responses=[ChatResponse(content=_RERANK_JSON, model="fake")])
+    fake = FakeLLMClient(responses=[_RERANK_JSON])
     ranker = EpisodicRanker(llm=fake)
 
     rank_input = RankInput(
@@ -81,7 +80,7 @@ asyncio.run(main())
 
 ## LLM rerank step
 
-`arerank` is the standalone LLM reranking primitive used internally by the ranker facades and exposed for direct use:
+`arerank` is the standalone LLM reranking primitive used internally by the ranker facades and exposed for direct use. It sends a system message of rules — `prompt`, whose only placeholder is `{{top_k}}` — and a user message holding the query and the candidates, and validates the JSON reply (`{"ranked": [{"id", "score"}]}`) against its reply model; a malformed reply raises `everalgo.llm.LLMOutputError`. `custom_instructions=` adds the host's text after the rendered rules as a `<custom_instructions>` block, always the system message's last, verbatim and never rendered as a template; `None` or a blank string adds nothing. The rankers and `aagentic_retrieve` take the same `custom_instructions=` (they have no prompt override): the rankers send it with the rerank call, `aagentic_retrieve` with each of its LLM calls.
 
 ```python
 from everalgo.rank.rerank import arerank
@@ -90,9 +89,11 @@ from everalgo.types import Candidate
 
 reranked = await arerank(
     candidates,
+    query="Python async retry patterns",
     prompt=EPISODIC_RERANK_PROMPT_EN,
     top_k=5,
     llm=client,
+    custom_instructions="Prefer the most recent episode when two are equally relevant.",
 )
 ```
 
@@ -101,17 +102,17 @@ reranked = await arerank(
 | Symbol | Module | Signature summary |
 |---|---|---|
 | `ahybrid_retrieve` | `everalgo.rank` | `(query, *, dense_retrieve, sparse_retrieve, ...) → list[Candidate]` |
-| `aagentic_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, llm, rerank_fn=None, ...) → tuple[list[Candidate], AgenticDecision]` |
+| `aagentic_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, llm, rerank_fn=None, ..., custom_instructions=None) → tuple[list[Candidate], AgenticDecision]` |
 | `acluster_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, clusters, all_docs, ...) → list[Candidate]` |
 | `amaxsim_retrieve` | `everalgo.rank` | `(query, *, child_retrieve, parent_fetch, ...) → list[Candidate]` |
 | `acategory_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, rerank_fn, ...) → list[Candidate]` |
-| `EpisodicRanker` | `everalgo.rank` | `__init__(*, llm)` → `arank(rank_input, *, config, prompt, enable_rerank, ...) → RankOutput` |
+| `EpisodicRanker` | `everalgo.rank` | `__init__(*, llm)` → `arank(rank_input, *, config, custom_instructions, enable_rerank, ...) → RankOutput` |
 | `CaseRanker` | `everalgo.rank` | Same shape as `EpisodicRanker` |
 | `SkillRanker` | `everalgo.rank` | Same shape as `EpisodicRanker` |
 | `profile.rank` | `everalgo.rank.profile` | `(rank_input, *, threshold=0.0) → RankOutput` — sync, no LLM |
-| `RankConfig` | `everalgo.rank` | `fusion_mode: FusionMode = "rrf"`, `rrf_k: int = 60`, `alpha: float = 1.0`, `expand_limit: int = 3` |
+| `RankConfig` | `everalgo.rank` | `fusion_mode: FusionMode = "rrf"`, `rrf_k: int = 60`, `alpha: float = 1.0` |
 | `arank` | `everalgo.rank` | Top-level async dispatch by `rank_input.memory_type` |
-| `arerank` | `everalgo.rank.rerank` | `(items, *, prompt, top_k, llm) → list[Candidate]` |
+| `arerank` | `everalgo.rank.rerank` | `(items, *, query, prompt, top_k, llm, custom_instructions=None) → list[Candidate]` |
 
 ## Cross-links
 

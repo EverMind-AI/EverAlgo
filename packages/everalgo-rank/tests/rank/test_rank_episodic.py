@@ -6,14 +6,13 @@ import json
 
 from everalgo.rank import RankConfig, episodic
 from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.types import Candidate, FactCandidate, RankInput
+from everalgo.types import Candidate, RankInput
 
 
 def _make_input(
     *,
     sparse: list[Candidate] | None = None,
     dense: list[Candidate] | None = None,
-    facts: dict[str, list[FactCandidate]] | None = None,
     top_k: int = 5,
 ) -> RankInput:
     return RankInput(
@@ -21,25 +20,8 @@ def _make_input(
         memory_type="episodic",
         sparse_candidates=sparse or [],
         dense_candidates=dense or [],
-        episode_to_facts=facts or {},
         top_k=top_k,
     )
-
-
-async def test_arank_rrf_mode_skips_expansion(
-    dense_candidates: list[Candidate],
-    sparse_candidates: list[Candidate],
-    episode_to_facts: dict[str, list[FactCandidate]],
-) -> None:
-    """``fusion_mode='rrf'`` does NOT expand, even when episode_to_facts is provided."""
-    out = await episodic.arank(
-        _make_input(sparse=sparse_candidates, dense=dense_candidates, facts=episode_to_facts, top_k=4),
-        config=RankConfig(fusion_mode="rrf"),
-    )
-
-    # All results stay as episodes; no atomic_fact climbs into top-N.
-    assert all(it.item_type == "episode" for it in out.items)
-    assert out.metadata.get("fusion_mode") == "rrf"
 
 
 async def test_arank_rerank_disabled_does_not_call_llm(

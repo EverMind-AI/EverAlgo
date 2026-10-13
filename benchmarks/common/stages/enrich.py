@@ -24,14 +24,13 @@ from benchmarks.common.services import build_llm_client
 from benchmarks.common.stages.serialization import load_episodes, serialize_atomic_fact, write_json
 from benchmarks.common.stages.types import StageStats
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
-from everalgo.user_memory.prompts.en.atomic_fact_from_text import EVENT_LOG_PROMPT
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from benchmarks.common.services import EmbeddingClient
     from benchmarks.common.stages.types import StageContext
-    from everalgo.llm.providers.openai_compat import OpenAICompatClient
+    from everalgo.llm.openai_compat import OpenAICompatClient
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +73,7 @@ async def _extract_facts_for_episode(
 
     @llm_retry(max_attempts=max_attempts)
     async def _do_extract() -> list[Any]:
-        return await extractor.aextract_from_text(episode_text, timestamp=timestamp, prompt=EVENT_LOG_PROMPT)
+        return await extractor.aextract_from_text(episode_text, timestamp=timestamp)
 
     facts = await _do_extract()
     if not facts:

@@ -10,13 +10,14 @@ Retry is the caller's responsibility.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from everalgo.llm.types import ChatMessage
+from benchmarks.common.metrics import estimate_chat_tokens
+from everalgo.llm import LLMMessage, StrictOutputModel, parse_reply
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -38,45 +39,11 @@ class JudgeResult(BaseModel):
     completion_tokens: int = 0
 
 
-def _extract_outermost_json_object(text: str) -> str:
-    """Extract the outermost ``{...}`` block from ``text`` via greedy slice (``find("{")..rfind("}")+1``).
+class _JudgeVerdict(StrictOutputModel):
+    """The judge's reply: the one-sentence reasoning the prompt asks for first, then the label."""
 
-    More forgiving than a non-greedy ``{[^{}]*}`` regex (tolerates nested objects and surrounding
-    prose). Raises ``ValueError`` when no ``{...}`` is found.
-    """
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError(f"No JSON object found in judge LLM response: {text[:200]!r}")
-    return text[start : end + 1]
-
-
-def _parse_judge_output(content: str) -> tuple[bool, str]:
-    """Extract pass/fail + reasoning from judge LLM output.
-
-    Extract the outermost ``{...}`` from the LLM response, parse as JSON, require
-    a ``label`` field equal to ``"CORRECT"`` or ``"WRONG"`` (case-insensitive).
-    All deviations raise — caller is responsible for retry / fail-loud.
-
-    Args:
-        content: Raw text response from the judge LLM.
-
-    Returns:
-        Tuple of ``(is_correct, reasoning)`` extracted from the content.
-
-    Raises:
-        ValueError: When no ``{...}`` is found, or ``label`` is missing /
-            not one of ``CORRECT`` / ``WRONG``.
-        json.JSONDecodeError: When the extracted slice is not valid JSON.
-    """
-    data = json.loads(_extract_outermost_json_object(content))
-    if "label" not in data:
-        raise ValueError(f"Judge JSON missing 'label': {data!r}")
-    label = str(data["label"]).strip().upper()
-    if label not in ("CORRECT", "WRONG"):
-        raise ValueError(f"Unknown judge label: {label!r}")
-    reasoning = str(data.get("reasoning", ""))
-    return label == "CORRECT", reasoning
+    reasoning: str
+    label: Literal["CORRECT", "WRONG"]
 
 
 async def allm_judge(
@@ -100,32 +67,44 @@ async def allm_judge(
         question: The question to evaluate.
         golden_answer: The ground-truth answer.
         generated_answer: The model-generated answer to judge.
-        judge_prompt: Template with ``{question}``, ``{gold_answer}``, ``{response}`` placeholders.
+        judge_prompt: Template with ``{{question}}``, ``{{gold_answer}}``, ``{{response}}`` placeholders.
         llm: LLM client used to call the judge.
         num_runs: Number of independent judge calls (default 3).
-        judge_model: Optional model override forwarded to ``llm.chat``.
+        judge_model: Optional model override; the contract has no ``model`` parameter, so it rides
+            the ``**extra`` escape hatch and is omitted entirely when unset.
         judge_temperature: Temperature for judge calls (default 0.0 for determinism).
         judge_system_prompt: Optional system-role message prepended to the user prompt.
 
     Returns:
-        JudgeResult with per-run outcomes, majority-vote result, and aggregated token counts.
+        JudgeResult with per-run outcomes, majority-vote result, and aggregated estimated token counts.
+
+    Raises:
+        LLMOutputError: If a run's reply is not a valid verdict.
     """
-    rendered = judge_prompt.format(
+    rendered = render_prompt(
+        judge_prompt,
+        None,
         question=question,
         gold_answer=golden_answer,
         response=generated_answer,
     )
-    messages: list[ChatMessage] = []
+    messages: list[LLMMessage] = []
     if judge_system_prompt:
-        messages.append(ChatMessage(role="system", content=judge_system_prompt))
-    messages.append(ChatMessage(role="user", content=rendered))
+        messages.append(LLMMessage(role="system", content=judge_system_prompt))
+    messages.append(LLMMessage(role="user", content=rendered))
+
+    model_override: dict[str, Any] = {"model": judge_model} if judge_model is not None else {}
 
     async def _one_run() -> tuple[bool, str, int, int]:
-        resp = await llm.chat(messages, model=judge_model, temperature=judge_temperature)
-        is_correct, reasoning = _parse_judge_output(resp.content)
-        pt = (resp.usage.prompt_tokens or 0) if resp.usage is not None else 0
-        ct = (resp.usage.completion_tokens or 0) if resp.usage is not None else 0
-        return is_correct, reasoning, pt, ct
+        reply = await llm.achat(
+            messages,
+            response_format=_JudgeVerdict,
+            temperature=judge_temperature,
+            **model_override,
+        )
+        verdict = parse_reply(_JudgeVerdict, reply, operator="judge")
+        prompt_tokens, completion_tokens = estimate_chat_tokens(messages, reply)
+        return verdict.label == "CORRECT", verdict.reasoning, prompt_tokens, completion_tokens
 
     outcomes = await asyncio.gather(*(_one_run() for _ in range(num_runs)))
     runs = [c for c, _, _, _ in outcomes]

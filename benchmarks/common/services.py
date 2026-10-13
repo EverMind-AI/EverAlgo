@@ -3,7 +3,7 @@
 Thin minimal clients with exponential-backoff retry. Not production-grade --
 sized for one-shot benchmark runs.
 
-``LLMClient`` is the algo ``OpenAICompatClient`` (via ``everalgo.llm.providers.openai_compat``).
+``LLMClient`` is the algo ``OpenAICompatClient`` (via ``everalgo.llm.openai_compat``).
 ``EmbeddingClient`` and ``RerankClient`` are benchmark-private model clients; they use the same
 DeepInfra HTTP surface and are not in the algo surface.
 """
@@ -15,11 +15,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from pydantic import SecretStr
 
 from benchmarks.common.retry import http_retry
-from everalgo.llm.config import LLMConfig
-from everalgo.llm.providers.openai_compat import OpenAICompatClient
+from everalgo.llm.openai_compat import OpenAICompatClient
 
 if TYPE_CHECKING:
     from benchmarks.common.config import BenchmarkConfig
@@ -41,14 +39,12 @@ def build_llm_client(cfg: BenchmarkConfig, *, model: str | None = None) -> OpenA
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY not set")
     return OpenAICompatClient(
-        LLMConfig(
-            api_key=SecretStr(key),
-            base_url=cfg.llm_base_url,
-            model=model if model is not None else cfg.extract_model,
-            temperature=cfg.llm_temperature,
-            max_tokens=cfg.llm_max_tokens,
-            timeout=cfg.llm_timeout,
-        )
+        model=model if model is not None else cfg.extract_model,
+        api_key=key,
+        base_url=cfg.llm_base_url,
+        temperature=cfg.llm_temperature,
+        max_tokens=cfg.llm_max_tokens,
+        timeout=cfg.llm_timeout,
     )
 
 
@@ -268,6 +264,6 @@ class Services:
 
     async def close(self) -> None:
         """Close all underlying HTTP clients."""
-        await self.llm._client.close()
+        await self.llm.aclose()
         await self.embedding.close()
         await self.rerank.close()

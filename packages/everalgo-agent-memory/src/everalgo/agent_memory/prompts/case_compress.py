@@ -1,6 +1,29 @@
-"""Prompt for AgentCaseExtractor single-shot experience compression (step 8)."""
+"""Prompts for AgentCaseExtractor single-shot experience compression (step 8).
 
-AGENT_CASE_COMPRESS_PROMPT = """You are an expert at distilling agent interaction trajectories into concise experience records.
+The SYSTEM message holds the rules and the reply skeleton, with no placeholder, so every call shares it. The USER
+message carries only the pre-processed trajectory, a JSON list of OpenAI-shaped messages, in a ``<trajectory>``
+element.
+
+Every rule sentence is the single-message prompt's, unchanged: only the ``Pre-processed trajectory:`` label and its data
+moved to the user message, and the skeleton's ``0.0-1.0`` range became ``0.5`` so that the sample parses (the rubric
+states the range).
+
+Constants:
+    - ``AGENT_CASE_COMPRESS_SYSTEM_PROMPT`` — the static rules.
+    - ``AGENT_CASE_COMPRESS_USER_PROMPT`` — the data. Placeholder: ``{{messages}}``.
+
+Output schema: ``{"task_intent": str, "approach": str, "key_insight": str, "quality_score": float}``, held to
+``agent_memory._replies._CaseCompressReply``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["AGENT_CASE_COMPRESS_SYSTEM_PROMPT", "AGENT_CASE_COMPRESS_USER_PROMPT"]
+
+from everalgo.utils import tagged
+
+AGENT_CASE_COMPRESS_SYSTEM_PROMPT = """\
+You are an expert at distilling agent interaction trajectories into concise experience records.
 
 Given an agent trajectory (a JSON list of messages from a single task segment), extract ONE experience record that captures the specific problem solved and the concrete problem-solving process.
 
@@ -13,9 +36,6 @@ Input messages are in OpenAI chat completion format:
 - role="assistant" without tool_calls: Agent's direct response
 - role="assistant" with tool_calls: Agent decides to call tools (may include reasoning in content)
 - role="tool" with tool_call_id: Tool execution result (may have been pre-compressed)
-
-Pre-processed trajectory:
-{messages}
 
 **Extract the Experience:**
 
@@ -67,10 +87,11 @@ Pre-processed trajectory:
 **LANGUAGE**: Every string value (``task_intent`` / ``key_insight`` / every line of ``approach``) matches the input-conversation language. JSON keys stay English. Proper nouns, code, shell commands, file paths, library / API / tool names, error strings, numeric literals, identifiers stay verbatim. Inside ``approach``, the placeholders ``<attempt-label>`` / ``<result-label>`` / ``<final-label>`` are NOT literal output — replace each with the language-matched word (English inputs use ``Tried`` / ``Result`` / ``Outcome``; Chinese inputs use ``尝试`` / ``结果`` / ``最终``) and keep them consistent within one output; never mix English labels with non-English prose or vice versa.
 
 Return in JSON format:
-{{
+{
     "task_intent": "The specific task as a self-contained statement (max 50 tokens)",
     "approach": "1. <sub-problem>\\n   - <attempt-label>: <what was attempted, tool or reasoning>\\n   - <result-label>: <what was found/achieved or why it failed>\\n2. <next sub-problem>\\n   - <attempt-label>: <attempt>\\n   - <result-label>: <outcome>\\n...\\n\\n<final-label>: <final result of the overall task>",
     "key_insight": "The pivotal decision or knowledge application that enabled success (max 40 tokens)",
-    "quality_score": 0.0-1.0
-}}
-"""
+    "quality_score": 0.5
+}"""
+
+AGENT_CASE_COMPRESS_USER_PROMPT = tagged("trajectory", "{{messages}}")

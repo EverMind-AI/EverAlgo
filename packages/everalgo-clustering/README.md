@@ -1,6 +1,6 @@
 # everalgo-clustering
 
-Online incremental clustering for EverAlgo — `cluster_by_geometry` (sync) and `cluster_by_llm` (async, LLM-refined) operating on caller-owned `list[Cluster]` state.
+Online incremental clustering for EverAlgo — `cluster_by_geometry` (sync) and `acluster_by_llm` (async, LLM-refined; `cluster_by_llm` is its sync bridge) operating on caller-owned `list[Cluster]` state.
 
 Stateless: the package never embeds, never queries storage, never holds a lock. The caller owns embedding computation, persistence (`list[Cluster]` serialisation), and read-modify-write coordination across concurrent writers.
 
@@ -18,7 +18,8 @@ pip install everalgo-clustering
 |---|---|
 | `Cluster` | Frozen Pydantic value object — one cluster snapshot. Caller-supplied `id` / `members`; algorithm supplies merged `centroid`, `count`, `last_ts`, `preview`. |
 | `cluster_by_geometry` | Cosine similarity + time-window filter + threshold; no LLM; sync |
-| `cluster_by_llm` | Top-K geometric recall → fast-path skip → LLM semantic ranking; raises on LLM failure; async |
+| `acluster_by_llm` | Top-K geometric recall → fast-path skip → LLM semantic ranking; raises on LLM failure; async |
+| `cluster_by_llm` | Blocking sync bridge over `acluster_by_llm`; only outside a running event loop |
 
 ## Cluster type
 
@@ -65,21 +66,20 @@ else:
 
 ## LLM-refined clustering
 
-`cluster_by_llm` adds a semantic ranking step over the top-K geometrically-nearest candidates. It **raises** on LLM failure — there is no internal fallback; the caller decides whether to retry or fall back to `cluster_by_geometry`.
+`acluster_by_llm` adds a semantic ranking step over the top-K geometrically-nearest candidates. It **raises** on LLM failure — there is no internal fallback and no retry; the caller decides whether to retry or fall back to `cluster_by_geometry`. The call asks for a strict `{"idx": int, "reason": str}` object (`idx` is the candidate's index in `existing_clusters`, `-1` for a new cluster); a reply that is not exactly that raises `everalgo.llm.LLMOutputError`. The call sends a system message of rules and a user message holding the candidate clusters and the new item's preview. `custom_instructions=` adds the host's text to the rules, never replacing them: it is placed verbatim, never rendered as a template, in a `<custom_instructions>` block that is always the system message's last, and `None` or a blank string leaves it out. There is no `prompt=`: the bundled rules cannot be replaced per call.
 
 Populate `new_cluster.preview` with the item's representative text so the LLM has something to rank against.
 
 ```python
 import asyncio
 import numpy as np
-from everalgo.clustering import Cluster, cluster_by_llm
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.clustering import Cluster, acluster_by_llm
+from everalgo.testing import FakeLLMClient
 
-_LLM_JSON = '{"idx": 0}'
+_LLM_JSON = '{"idx": 0, "reason": "same domain"}'
 
 async def main() -> None:
-    fake = FakeLLMClient(responses=[ChatResponse(content=_LLM_JSON, model="fake")])
+    fake = FakeLLMClient(responses=[_LLM_JSON])
     existing: list[Cluster] = []
     vector = np.random.rand(2560).astype(np.float32)
 
@@ -88,7 +88,7 @@ async def main() -> None:
         last_ts=1_700_000_000_000,
         preview=["Python async retry patterns"],  # shown to the LLM
     )
-    merged = await cluster_by_llm(
+    merged = await acluster_by_llm(
         new_cluster,
         existing,
         llm=fake,
@@ -131,16 +131,18 @@ def cluster_by_geometry(
     preview_cap: int = 5,
 ) -> Cluster | None: ...
 
-async def cluster_by_llm(
+async def acluster_by_llm(
     new_cluster: Cluster,
     existing_clusters: list[Cluster],
     *,
     llm: LLMClient,
     k_candidates: int = 30,
     llm_skip_threshold: float = 0.85,
-    prompt: str | None = None,
+    custom_instructions: str | None = None,
     preview_cap: int = 5,
 ) -> Cluster | None: ...
+
+cluster_by_llm = async_to_sync(acluster_by_llm)  # same signature, blocking
 ```
 
 Both functions return the **merged** `Cluster` (existing cluster's `id` preserved, centroid/count/members updated) or `None` (no match — caller creates a new cluster entry and mints its own `id`).
@@ -150,4 +152,4 @@ Tested embedding model: `Qwen3-Embedding-4B` (2560-dim float32). Any consistent-
 ## Related distributions
 
 - [`everalgo-user-memory`](../everalgo-user-memory/) — uses `cluster_by_geometry` in the full user-memory pipeline
-- [`everalgo-agent-memory`](../everalgo-agent-memory/) — uses `cluster_by_llm` for skill clustering
+- [`everalgo-agent-memory`](../everalgo-agent-memory/) — uses `acluster_by_llm` for skill clustering

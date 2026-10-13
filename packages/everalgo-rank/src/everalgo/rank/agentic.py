@@ -3,10 +3,14 @@
 Wraps any caller-supplied ``base_retrieve: RetrieveFn`` with a sufficiency check
 and optional Round 2 query expansion.
 
+Each LLM call sends a system message of rules, closed by the caller's ``custom_instructions`` block when one is
+given, and a user message of data the operator always renders; replies are JSON validated against the models in
+``rank._replies``.
+
 Control flow:
     1. Round 1: ``await base_retrieve(query, round1_top_n)``
     2. Optional rerank: ``await rerank_fn(query, round1)`` truncated to ``round1_rerank_top_n``
-    3. Sufficiency check: LLM call (structured outputs) with ``SufficiencyCheckResponse``
+    3. Sufficiency check: LLM call validated against its reply model, returned as ``SufficiencyCheckResponse``
     4. If sufficient: return ``reranked[:top_n]`` + ``AgenticDecision(is_multi_round=False, ...)``
     5. Round 2 (multi_query): LLM generates complementary queries; parallel round2_retrieve (or base_retrieve if unset) + RRF
     6. Round 2 (refined_query): LLM generates single refined query; single round2_retrieve (or base_retrieve if unset)
@@ -16,21 +20,26 @@ Control flow:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import math
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from asgiref.sync import async_to_sync
 
-from everalgo.llm.types import ChatMessage
+from everalgo.llm import LLMMessage
+from everalgo.rank._render import append_custom_instructions
+from everalgo.rank._replies import (
+    _call_llm_for_multi_queries,
+    _call_llm_for_refined_query,
+    _call_llm_for_sufficiency,
+)
 from everalgo.rank.fusion import rrf
-from everalgo.rank.prompts.en.multi_query import MULTI_QUERY_PROMPT_EN
-from everalgo.rank.prompts.en.refined_query import REFINED_QUERY_PROMPT_EN
-from everalgo.rank.prompts.en.sufficiency import SUFFICIENCY_CHECK_PROMPT_EN
+from everalgo.rank.prompts.en.multi_query import MULTI_QUERY_PROMPT_EN, MULTI_QUERY_USER_PROMPT
+from everalgo.rank.prompts.en.refined_query import REFINED_QUERY_PROMPT_EN, REFINED_QUERY_USER_PROMPT
+from everalgo.rank.prompts.en.sufficiency import SUFFICIENCY_CHECK_PROMPT_EN, SUFFICIENCY_CHECK_USER_PROMPT
 from everalgo.rank.protocols import AgenticDecision, RerankFn, RetrieveFn
+from everalgo.utils import format_utc_time, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -89,9 +98,7 @@ async def aagentic_retrieve(
     refinement_strategy: Literal["multi_query", "refined_query"] = "multi_query",
     multi_query_count: int = 3,
     rrf_k: int = 60,
-    sufficiency_prompt: str | None = None,
-    multi_query_prompt: str | None = None,
-    refined_query_prompt: str | None = None,
+    custom_instructions: str | None = None,
 ) -> tuple[list[Candidate], AgenticDecision]:
     """LLM-guided agentic retrieval wrapper.
 
@@ -102,7 +109,7 @@ async def aagentic_retrieve(
     Args:
         query: User query string.
         base_retrieve: ``(query, top_k) -> list[Candidate]`` — async callable the caller provides.
-        llm: LLM client for structured outputs calls.
+        llm: LLM client for the sufficiency and Round 2 query-generation calls.
         rerank_fn: Optional ``(query, candidates) -> list[Candidate]`` cross-encoder. Applied to
             Round 1 before the sufficiency check; result is truncated to ``round1_rerank_top_n``.
         round2_retrieve: Optional separate ``RetrieveFn`` for Round 2 (multi-query / refined-query
@@ -118,12 +125,10 @@ async def aagentic_retrieve(
             generates a single refined query and runs one more ``base_retrieve``.
         multi_query_count: Maximum number of sub-queries to keep (``multi_query`` strategy only).
         rrf_k: RRF smoothing constant for fusing Round 2 sub-query results (``multi_query`` only).
-        sufficiency_prompt: Override for ``SUFFICIENCY_CHECK_PROMPT_EN``. Must contain
-            ``{query}`` and ``{retrieved_docs}`` placeholders.
-        multi_query_prompt: Override for ``MULTI_QUERY_PROMPT_EN``. Must contain
-            ``{original_query}``, ``{retrieved_docs}``, ``{missing_info}``, ``{key_info}`` placeholders.
-        refined_query_prompt: Override for ``REFINED_QUERY_PROMPT_EN``. Must contain
-            ``{original_query}``, ``{retrieved_docs}``, ``{missing_info}`` placeholders.
+        custom_instructions: The caller's instructions, appended to every LLM call this retrieval makes (the
+            sufficiency check and the Round 2 query generation) as a ``<custom_instructions>`` block, always the
+            system message's last; it adds to the bundled rules, never replaces them. Placed verbatim, never rendered
+            as a template. None or a blank string adds nothing.
 
     Returns:
         ``(candidates, decision)`` where ``decision`` carries the LLM verdicts the caller
@@ -131,7 +136,10 @@ async def aagentic_retrieve(
         Token / latency / trace metrics stay caller-side — wrap ``base_retrieve`` / ``llm`` for accounting.
 
     Raises:
-        ValueError: If the LLM returns no parsed structured output (fail-loud per algo responsibility split).
+        LLMOutputError: If an LLM reply is not a valid output for its call. The client's own exceptions propagate
+            unchanged; retry / fallback is the caller's concern.
+        ValueError: If a candidate shown to the LLM has no ``episode.content``.
+        TypeError: If a candidate shown to the LLM has no ``episode`` dict in its metadata.
     """
     # ── Round 1 ──────────────────────────────────────────────────────────────
     round1 = await base_retrieve(query, round1_top_n)
@@ -149,7 +157,7 @@ async def aagentic_retrieve(
         query=query,
         candidates=reranked,
         llm=llm,
-        prompt=sufficiency_prompt or SUFFICIENCY_CHECK_PROMPT_EN,
+        custom_instructions=custom_instructions,
     )
 
     if sufficiency.is_sufficient:
@@ -179,7 +187,7 @@ async def aagentic_retrieve(
             round1_top_n=round1_top_n,
             multi_query_count=multi_query_count,
             rrf_k=rrf_k,
-            prompt=multi_query_prompt or MULTI_QUERY_PROMPT_EN,
+            custom_instructions=custom_instructions,
         )
     return await _refined_query_round2(
         query=query,
@@ -192,7 +200,7 @@ async def aagentic_retrieve(
         rerank_fn=rerank_fn,
         top_n=top_n,
         round1_top_n=round1_top_n,
-        prompt=refined_query_prompt or REFINED_QUERY_PROMPT_EN,
+        custom_instructions=custom_instructions,
     )
 
 
@@ -214,7 +222,7 @@ async def _multi_query_round2(
     round1_top_n: int,
     multi_query_count: int,
     rrf_k: int,
-    prompt: str,
+    custom_instructions: str | None,
 ) -> tuple[list[Candidate], AgenticDecision]:
     """Generate complementary queries via LLM, run parallel Round 2, RRF-fuse, and merge with reranked."""
     multi = await _generate_multi_queries(
@@ -223,7 +231,7 @@ async def _multi_query_round2(
         missing_info=list(sufficiency.missing_information),
         key_info=list(sufficiency.key_information_found),
         llm=llm,
-        prompt=prompt,
+        custom_instructions=custom_instructions,
         count=multi_query_count,
     )
     r2 = round2_retrieve or base_retrieve
@@ -259,7 +267,7 @@ async def _refined_query_round2(
     rerank_fn: RerankFn | None,
     top_n: int,
     round1_top_n: int,
-    prompt: str,
+    custom_instructions: str | None,
 ) -> tuple[list[Candidate], AgenticDecision]:
     """Generate a single refined query via LLM, run Round 2, and merge with reranked."""
     refined = await _generate_refined_query(
@@ -267,7 +275,7 @@ async def _refined_query_round2(
         candidates=reranked,
         missing_info=list(sufficiency.missing_information),
         llm=llm,
-        prompt=prompt,
+        custom_instructions=custom_instructions,
     )
     r2 = round2_retrieve or base_retrieve
     round2 = await r2(refined.refined_query, round1_top_n)
@@ -324,85 +332,29 @@ async def _merge_truncate_rerank(
     return final, decision
 
 
-def _extract_outermost_json_object(text: str) -> str:
-    """Extract the outermost ``{...}`` block from ``text`` via greedy slice (``find("{")..rfind("}")+1``).
-
-    More forgiving than a non-greedy ``{[^{}]*}`` regex: tolerates nested objects
-    (prompt asks for flat JSON but LLMs occasionally inline e.g. ``{"key": {"inner": ...}}``)
-    and surrounding prose. Raises ``ValueError`` when no ``{...}`` is found.
-    """
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError(f"No JSON object found in LLM response: {text[:200]!r}")
-    return text[start : end + 1]
-
-
-async def _call_llm_for_sufficiency(llm: LLMClient, rendered: str) -> SufficiencyCheckResponse:
-    """Call the LLM with the rendered sufficiency prompt and parse the JSON reply.
-
-    Uses greedy outermost-``{...}`` slice for JSON extraction. Retry / fallback is the caller's
-    responsibility — this function fails loud on parse errors.
-    """
-    response = await llm.chat(messages=[ChatMessage(role="user", content=rendered)], temperature=0.0)
-    data = json.loads(_extract_outermost_json_object(response.content))
-    return SufficiencyCheckResponse(
-        is_sufficient=bool(data.get("is_sufficient", False)),
-        reasoning=str(data.get("reasoning", "")),
-        key_information_found=list(data.get("key_information_found") or []),
-        missing_information=list(data.get("missing_information") or []),
-    )
-
-
-async def _call_llm_for_multi_queries(llm: LLMClient, rendered: str) -> MultiQueryResponse:
-    """Call the LLM with the rendered multi-query prompt and parse the JSON reply.
-
-    Uses greedy outermost-``{...}`` slice for JSON extraction. Retry / fallback is the caller's
-    responsibility — this function fails loud on parse errors.
-    """
-    response = await llm.chat(messages=[ChatMessage(role="user", content=rendered)], temperature=0.4)
-    data = json.loads(_extract_outermost_json_object(response.content))
-    return MultiQueryResponse(
-        queries=list(data.get("queries") or []),
-        reasoning=str(data.get("reasoning", "")),
-    )
-
-
-async def _call_llm_for_refined_query(
-    llm: LLMClient,
-    rendered: str,
-    original_query: str,
-) -> RefinedQueryResponse:
-    """Call the LLM with the rendered refined-query prompt and parse the plain-text reply.
-
-    Strips known prefixes (``Refined Query:`` / ``Output:`` / ``Answer:`` / ``Query:``), validates
-    length 5-300, falls back to ``original_query`` when the LLM returns garbage or echoes the original
-    (case-insensitive).
-    """
-    response = await llm.chat(messages=[ChatMessage(role="user", content=rendered)], temperature=0.3)
-    refined = response.content.strip()
-    for prefix in ("Refined Query:", "Output:", "Answer:", "Query:"):
-        if refined.startswith(prefix):
-            refined = refined[len(prefix) :].strip()
-    if not (5 <= len(refined) <= 300) or refined.lower() == original_query.lower():
-        refined = original_query
-    return RefinedQueryResponse(refined_query=refined, reasoning="")
-
-
 async def _check_sufficiency(
     *,
     query: str,
     candidates: Sequence[Candidate],
     llm: LLMClient,
-    prompt: str,
+    custom_instructions: str | None,
 ) -> SufficiencyCheckResponse:
     """LLM call: are these candidates sufficient to answer the query?
 
     Raises:
-        ValueError: If the LLM fails to return a parseable JSON object (fail-loud; no retry).
+        LLMOutputError: If the reply is not a valid sufficiency output (fail-loud; no retry).
     """
-    rendered = prompt.format(query=query, retrieved_docs=_format_docs(candidates))
-    return await _call_llm_for_sufficiency(llm, rendered)
+    messages = _request(
+        append_custom_instructions(SUFFICIENCY_CHECK_PROMPT_EN, custom_instructions),
+        render_prompt(SUFFICIENCY_CHECK_USER_PROMPT, None, query=query, retrieved_docs=_format_docs(candidates)),
+    )
+    reply = await _call_llm_for_sufficiency(llm, messages)
+    return SufficiencyCheckResponse(
+        is_sufficient=reply.is_sufficient,
+        reasoning=reply.reasoning,
+        key_information_found=reply.key_information_found,
+        missing_information=reply.missing_information,
+    )
 
 
 async def _generate_multi_queries(
@@ -412,25 +364,33 @@ async def _generate_multi_queries(
     missing_info: list[str],
     key_info: list[str],
     llm: LLMClient,
-    prompt: str,
+    custom_instructions: str | None,
     count: int,
 ) -> MultiQueryResponse:
     """LLM call: produce complementary queries focused on missing_info.
 
+    Queries outside 5-300 characters, or equal to ``original_query`` ignoring case, are dropped; at most ``count``
+    are kept when ``count > 0``.
+
     Raises:
-        ValueError: If the LLM fails to return a parseable JSON object (fail-loud; no retry).
+        LLMOutputError: If the reply is not a valid multi-query output (fail-loud; no retry).
     """
-    rendered = prompt.format(
-        original_query=original_query,
-        retrieved_docs=_format_docs(candidates),
-        missing_info=", ".join(missing_info) if missing_info else "N/A",
-        key_info=", ".join(key_info) if key_info else "N/A",
+    messages = _request(
+        append_custom_instructions(MULTI_QUERY_PROMPT_EN, custom_instructions),
+        render_prompt(
+            MULTI_QUERY_USER_PROMPT,
+            None,
+            original_query=original_query,
+            key_info=_join_or_na(key_info),
+            missing_info=_join_or_na(missing_info),
+            retrieved_docs=_format_docs(candidates),
+        ),
     )
-    result = await _call_llm_for_multi_queries(llm, rendered)
-    validated = [q for q in result.queries if 5 <= len(q) <= 300 and q.lower() != original_query.lower()]
+    reply = await _call_llm_for_multi_queries(llm, messages)
+    validated = [q for q in reply.queries if 5 <= len(q) <= 300 and q.lower() != original_query.lower()]
     if count > 0:
         validated = validated[:count]
-    return MultiQueryResponse(queries=validated, reasoning=result.reasoning)
+    return MultiQueryResponse(queries=validated, reasoning=reply.reasoning)
 
 
 async def _generate_refined_query(
@@ -439,30 +399,64 @@ async def _generate_refined_query(
     candidates: Sequence[Candidate],
     missing_info: list[str],
     llm: LLMClient,
-    prompt: str,
+    custom_instructions: str | None,
 ) -> RefinedQueryResponse:
     """LLM call: produce a single refined query targeting missing_info.
 
-    Issues one LLM call with the rendered prompt. The parser strips known plain-text prefixes
-    (``Refined Query:`` / ``Output:`` / ``Answer:`` / ``Query:``), validates length 5-300, and
-    falls back to ``original_query`` when the LLM output is invalid or echoes the original.
+    The reply's ``text`` is cleaned by :func:`_usable_refined_query`, which falls back to ``original_query``.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid refined-query output (fail-loud; no retry).
     """
-    rendered = prompt.format(
-        original_query=original_query,
-        retrieved_docs=_format_docs(candidates),
-        missing_info=", ".join(missing_info) if missing_info else "N/A",
+    messages = _request(
+        append_custom_instructions(REFINED_QUERY_PROMPT_EN, custom_instructions),
+        render_prompt(
+            REFINED_QUERY_USER_PROMPT,
+            None,
+            original_query=original_query,
+            retrieved_docs=_format_docs(candidates),
+            missing_info=_join_or_na(missing_info),
+        ),
     )
-    return await _call_llm_for_refined_query(llm, rendered, original_query=original_query)
+    reply = await _call_llm_for_refined_query(llm, messages)
+    return RefinedQueryResponse(refined_query=_usable_refined_query(reply.text, original_query), reasoning="")
+
+
+def _request(system: str, user: str) -> list[LLMMessage]:
+    """The ``[system, user]`` pair every agentic call sends: the rules, then the data."""
+    return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=user)]
+
+
+def _join_or_na(items: list[str]) -> str:
+    """Render a list of findings for the user message: comma-separated, or ``N/A`` when empty."""
+    return ", ".join(items) if items else "N/A"
+
+
+def _usable_refined_query(text: str, original_query: str) -> str:
+    """Clean a refined query; fall back to ``original_query`` when it is unusable.
+
+    Strips known answer prefixes (``Refined Query:`` / ``Output:`` / ``Answer:`` / ``Query:``) the worked examples
+    may prompt the model to repeat, then keeps the result only if it is 5-300 characters long and differs from
+    ``original_query`` ignoring case.
+    """
+    refined = text.strip()
+    for prefix in ("Refined Query:", "Output:", "Answer:", "Query:"):
+        if refined.startswith(prefix):
+            refined = refined[len(prefix) :].strip()
+    if not (5 <= len(refined) <= 300) or refined.lower() == original_query.lower():
+        return original_query
+    return refined
 
 
 def _format_docs(candidates: Sequence[Candidate]) -> str:
     """Format candidates as multi-line blocks for LLM prompt rendering.
 
     Four lines per doc (``Document {i}:`` / Title / Date / Content). Body truncates at 500 chars.
-    ``Date`` renders the doc's ms-epoch ``timestamp`` as ISO ``YYYY-MM-DDTHH:MM:SSZ`` to align
-    with the ``Date`` field referenced by sufficiency/multi-query prompts.
+    ``Date`` renders the doc's ms-epoch ``timestamp`` as ``YYYY-MM-DD HH:MM UTC``, the shape every prompt
+    instant takes, for the ``Date`` field the sufficiency/multi-query prompts refer to.
 
     Raises:
+        TypeError: If any candidate has no ``episode`` dict in its metadata.
         ValueError: If any candidate lacks ``episode.content`` — fail-loud, no fallback.
     """
     if not candidates:
@@ -485,7 +479,7 @@ def _format_docs(candidates: Sequence[Candidate]) -> str:
 
 
 def _format_doc_timestamp(raw: Any) -> str:
-    """Render fork's stage-1 ms epoch as ISO ``YYYY-MM-DDTHH:MM:SSZ``; ``N/A`` on missing or invalid."""
+    """Render a ms-epoch ``timestamp`` as ``YYYY-MM-DD HH:MM UTC``; ``N/A`` on missing or invalid."""
     if isinstance(raw, bool) or not isinstance(raw, int | float) or not math.isfinite(raw) or raw <= 0:
         return "N/A"
-    return datetime.fromtimestamp(raw / 1000, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return format_utc_time(int(raw))

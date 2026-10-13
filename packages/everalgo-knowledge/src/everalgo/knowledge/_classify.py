@@ -5,9 +5,9 @@ Pipeline placement: after the doc-level ``summary`` is finalized (post multi-bat
 emitted ``KnowledgeMemory`` via ``flatten(category_id=...)``.
 
 The taxonomy is caller-owned business data passed in at ingest time. Out-of-set
-predictions and parse failures collapse to ``""`` — the downstream retrieval-side
-soft boost treats unclassified hits as a non-bucket and is robust to occasional
-misses.
+predictions collapse to ``""`` — the downstream retrieval-side soft boost treats
+unclassified hits as a non-bucket and is robust to occasional misses. A reply that
+fails the reply model raises ``LLMOutputError``.
 
 NOT exposed in the package ``__all__`` directly — surfaced through ``everalgo.knowledge``.
 """
@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
-from everalgo.knowledge._llm_json import parse_llm_json
-from everalgo.knowledge.prompts.en.category_classify import CATEGORY_CLASSIFY_PROMPT_EN
-from everalgo.llm.types import ChatMessage
+from everalgo.knowledge._replies import CategoryReply, ask_llm
+from everalgo.knowledge.prompts.en.category_classify import CATEGORY_CLASSIFY_USER_PROMPT, assemble_system_prompt
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def _render_taxonomy(categories: list[CategorySpec]) -> str:
-    """Render the taxonomy block as a stable prefix (one entry per line)."""
+    """Render the taxonomy block, one entry per line; it is the same for every document of an ingest run."""
     return "\n".join(f"- {c.id}: {c.description}" for c in categories)
 
 
@@ -43,12 +43,14 @@ async def aclassify_category(
     doc_summary: str,
     categories: list[CategorySpec],
     *,
-    prompt: str = CATEGORY_CLASSIFY_PROMPT_EN,
+    custom_instructions: str | None = None,
 ) -> str:
     """Classify a document into one ``CategorySpec`` from the supplied taxonomy.
 
-    One LLM call. The taxonomy block lives in the prompt prefix so it stays stable
-    across documents in the same ingest run (prompt caching friendly).
+    One LLM call. The taxonomy follows the static rules in the system message, then the
+    caller's ``<custom_instructions>`` block when there is one; the title and summary form the
+    user message, so the system message stays the same across the documents of one ingest run
+    (prompt caching friendly).
 
     Args:
         client: Caller-injected ``LLMClient``. Algorithm code never holds a client.
@@ -56,33 +58,29 @@ async def aclassify_category(
         doc_summary: Finalized document summary (post merge in the multi-batch path).
         categories: Closed taxonomy. An empty list short-circuits to ``""`` without
             issuing any LLM call.
-        prompt: Override the classifier prompt template. Must accept ``{taxonomy}``,
-            ``{title}``, ``{doc_summary}`` placeholders.
+        custom_instructions: The caller's instructions, appended after the taxonomy as a
+            ``<custom_instructions>`` block, always the system message's last; it adds to the bundled
+            rules, never replaces them. Placed verbatim, never rendered as a template. None or a blank
+            string adds nothing.
 
     Returns:
-        The chosen ``CategorySpec.id``; ``""`` when categories is empty, the LLM
-        response fails to parse, or the predicted id is not in the closed set.
+        The chosen ``CategorySpec.id``; ``""`` when categories is empty, the model
+        answers ``""``, or the predicted id is not in the closed set.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid classification output.
     """
     if not categories:
         return ""
 
-    rendered = prompt.format(
-        taxonomy=_render_taxonomy(categories),
-        title=title or "Untitled",
-        doc_summary=doc_summary,
+    reply = await ask_llm(
+        client,
+        system=assemble_system_prompt(taxonomy=_render_taxonomy(categories), custom_instructions=custom_instructions),
+        user=render_prompt(CATEGORY_CLASSIFY_USER_PROMPT, None, title=title or "Untitled", doc_summary=doc_summary),
+        reply_model=CategoryReply,
+        operator="knowledge category_classify",
     )
-    response = await client.chat([ChatMessage(role="user", content=rendered)])
-    data = parse_llm_json(response.content)
-    if data is None:
-        logger.warning("classify_category: LLM JSON parse failed; returning empty id")
-        return ""
-
-    raw = data.get("category_id", "")
-    if not isinstance(raw, str):
-        logger.warning("classify_category: non-string category_id %r; returning empty id", raw)
-        return ""
-
-    predicted = raw.strip()
+    predicted = reply.category_id.strip()
     if predicted == "":
         return ""
 

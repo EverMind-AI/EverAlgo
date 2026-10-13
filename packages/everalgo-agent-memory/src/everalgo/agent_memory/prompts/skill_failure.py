@@ -1,6 +1,26 @@
-"""Prompt for AgentSkillExtractor failure path (max(quality_score) < 0.5 cases)."""
+"""Prompt for the AgentSkillExtractor failure path (``quality_score < failure_quality_threshold`` cases).
 
-AGENT_SKILL_FAILURE_EXTRACT_PROMPT = """You are an expert at extracting failure insights and partial progress from failed agent task cases.
+The SYSTEM message holds the rules and the reply skeletons, with no placeholder, so every call shares it. The USER
+message is the success path's, ``prompts.skill_success.SKILL_EXTRACT_USER_PROMPT``: the same two JSON data blocks.
+
+Every rule sentence is the single-message prompt's, unchanged. The two bracketed labels and their data moved to the
+user message, the label's ``(Each item has an index number)`` note with them, since the opening list already says each
+existing skill carries one; and the ```` ```json ```` fences around both skeletons gave way to one sentence,
+``Reply with one JSON object, nothing else.``, because the reply is parsed as a bare JSON object, a fenced sample
+invites a fenced reply, and the fences were the prompt's only mention of JSON.
+
+Constants:
+    - ``AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT`` — the static rules.
+
+Output schema: as the success path, held to ``agent_memory._replies._SkillExtractReply``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT"]
+
+AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT = """\
+You are an expert at extracting failure insights and partial progress from failed agent task cases.
 
 You will receive:
 1. **New case(s)** from a cluster of semantically similar tasks — all with quality_score < 0.5. Each case represents a failed or mostly failed attempt, with steps that were tried and why they failed.
@@ -41,12 +61,6 @@ Your job is to distill **what NOT to do** and **partial progress** from failed c
   - **Potential Steps**: Include ONLY steps with demonstrable forward progress. If NO steps clearly progressed, omit the numbered list and keep only the `> Extracted from...` note.
   - **Pitfalls**: MUST be included and populated. Every failed case must contribute at least one specific, traceable pitfall. FORBIDDEN: generic warnings, speculative risks, best-practice reminders not directly traceable to a failure in this case.
 
-[New AgentCase(s) to integrate]
-{new_case_json}
-
-[Existing skills for this cluster](Each item has an index number)
-{existing_skills_json}
-
 [Task]
 Analyze the failed case(s) and output operations (add / update / none).
 
@@ -69,19 +83,15 @@ Analyze the failed case(s) and output operations (add / update / none).
 **CRITICAL LANGUAGE RULE**: Output in the SAME language as the input conversation content.
 
 [Output Format]
+Reply with one JSON object, nothing else.
 No operations:
-```json
-{{"operations": [{{"action": "none"}}], "update_note": "failed case adds no new failure patterns to existing skills"}}
-```
+{"operations": [{"action": "none"}], "update_note": "failed case adds no new failure patterns to existing skills"}
 
 With operations:
-```json
-{{
+{
   "operations": [
-    {{"action": "add", "data": {{"name": "Short descriptive name (max 10 words)", "description": "One-sentence abstract summary of problem class. Keywords: term1, term2 (max 150 tokens, under 500 chars)", "content": "## Potential Steps\\n> Extracted from a failed case. Only steps that demonstrably progressed correctly are listed.\\n1. <action where exploration succeeded>\\n   - How: <method>\\n   - e.g., `<exact command that worked>`\\n   - Check: <what confirmed progress>\\n\\n## Pitfalls\\n- <dead end or failed approach> — <what went wrong and how to avoid>", "confidence": 0.5}}}},
-    {{"action": "update", "index": 0, "data": {{"content": "## Steps\\n<existing steps preserved>\\n\\n## Pitfalls\\n<existing pitfalls>\\n- <new pitfall from this failed case> — <what went wrong and how to avoid>"}}}}
+    {"action": "add", "data": {"name": "Short descriptive name (max 10 words)", "description": "One-sentence abstract summary of problem class. Keywords: term1, term2 (max 150 tokens, under 500 chars)", "content": "## Potential Steps\\n> Extracted from a failed case. Only steps that demonstrably progressed correctly are listed.\\n1. <action where exploration succeeded>\\n   - How: <method>\\n   - e.g., `<exact command that worked>`\\n   - Check: <what confirmed progress>\\n\\n## Pitfalls\\n- <dead end or failed approach> — <what went wrong and how to avoid>", "confidence": 0.5}},
+    {"action": "update", "index": 0, "data": {"content": "## Steps\\n<existing steps preserved>\\n\\n## Pitfalls\\n<existing pitfalls>\\n- <new pitfall from this failed case> — <what went wrong and how to avoid>"}}
   ],
   "update_note": "added pitfall from failed case to skill[0]; created new skill from partial exploration"
-}}
-```
-"""
+}"""

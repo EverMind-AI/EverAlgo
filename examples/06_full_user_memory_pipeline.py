@@ -20,13 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from everalgo.clustering import Cluster, cluster_by_geometry
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import AtomicFact, ChatMessage, Episode, Foresight, MemCell, Profile
 from everalgo.user_memory import BoundaryDetector
@@ -35,17 +33,20 @@ from everalgo.user_memory.episode import EpisodeExtractor
 from everalgo.user_memory.foresight import ForesightExtractor
 from everalgo.user_memory.profile import ProfileExtractor
 
+if TYPE_CHECKING:
+    from everalgo.llm import LLMMessage
+
 # ---------------------------------------------------------------------------
 # Scripted LLM responses — one per pipeline stage, in call order.
 # ---------------------------------------------------------------------------
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "should_wait": False})
+_BOUNDARY_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "tail_complete": True})
 
 _EPISODE_JSON = json.dumps(
     {
-        "title": "Alice asks about Python async retry semantics",
         "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",
         "summary": "Alice raised Python async retry patterns and the assistant offered a follow-up.",
+        "title": "Alice asks about Python async retry semantics",
     }
 )
 
@@ -66,7 +67,6 @@ _FORESIGHT_JSON = json.dumps(
 _ATOMIC_FACT_JSON = json.dumps(
     {
         "atomic_facts": {
-            "time": "November 14, 2023 at 22:13 UTC",
             "atomic_fact": [
                 "Alice is learning Python async retry semantics.",
                 "Assistant promised a follow-up document next week.",
@@ -79,19 +79,16 @@ _PROFILE_JSON = json.dumps(
     {
         "explicit_info": [
             {
-                "category": "Technical Skills",
-                "description": "Alice is a Python developer interested in async patterns.",
                 "evidence": "Alice asked about async retry semantics.",
-                "sources": ["2023-11-14 22:13|mc_001"],
+                "description": "Alice is a Python developer interested in async patterns.",
+                "category": "Technical Skills",
             }
         ],
         "implicit_traits": [
             {
-                "trait": "[Curious Learner]",
-                "description": "Actively pursues new technical depth without prompting.",
                 "basis": "Self-initiated a deep-dive question into async patterns.",
-                "evidence": "Volunteered her current learning focus.",
-                "sources": ["2023-11-14 22:13|mc_001"],
+                "description": "Actively pursues new technical depth without prompting.",
+                "trait": "[Curious Learner]",
             }
         ],
     }
@@ -111,11 +108,11 @@ def _make_fake() -> FakeLLMClient:
     """Route each call to its scripted response by pipeline call-count position."""
     call_index = 0
 
-    def handler(messages: list[LLMChatMessage], **_kwargs: Any) -> ChatResponse:
+    def handler(messages: list[LLMMessage], **_kwargs: Any) -> str:
         nonlocal call_index
         stage = _STAGE_ORDER[call_index]
         call_index += 1
-        return ChatResponse(content=_STAGE_RESPONSE[stage], model="fake")
+        return _STAGE_RESPONSE[stage]
 
     return FakeLLMClient(handler=handler)
 
@@ -211,14 +208,10 @@ async def main() -> None:
     cluster_memcells = [memcell_dict[mid] for mid in clusters[0].members]
     profile: Profile = await ProfileExtractor(llm=fake).aextract(cluster_memcells, sender_id="u_alice")
     print(f"[profile]   owner={profile.owner_id!r}  timestamp={profile.timestamp}")
-    # explicit_info / implicit_traits are LLM-emitted extra fields (extra="allow" on Profile).
-    extra = profile.model_extra or {}
-    explicit: list[object] = extra.get("explicit_info") or []
-    traits: list[object] = extra.get("implicit_traits") or []
-    print(f"  explicit_info count : {len(explicit)}")
-    print(f"  implicit_traits count: {len(traits)}")
-    if explicit:
-        print(f"  first explicit_info : {explicit[0]}")
+    print(f"  explicit_info count : {len(profile.explicit_info)}")
+    print(f"  implicit_traits count: {len(profile.implicit_traits)}")
+    if profile.explicit_info:
+        print(f"  first explicit_info : {profile.explicit_info[0].model_dump(exclude_unset=True)}")
 
     print(f"\ntotal LLM calls: {fake.call_count}  (expected 5)")
 

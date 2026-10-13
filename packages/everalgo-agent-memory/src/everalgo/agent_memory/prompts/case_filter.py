@@ -1,15 +1,33 @@
-"""Prompt for AgentCaseExtractor LLM filter (step 7)."""
+"""Prompts for the AgentCaseExtractor LLM filter (step 7).
 
-AGENT_CASE_FILTER_PROMPT = """You judge whether an agent interaction is worth extracting as a reusable problem-solving experience.
+The SYSTEM message holds the rules and the reply skeleton, with no placeholder, so every call shares it. The USER
+message carries only the trajectory, a JSON list of OpenAI-shaped messages, in a ``<conversation>`` element.
+
+Every rule sentence is the single-message prompt's, unchanged: only the ``Conversation:`` label and its data moved to
+the user message, and the skeleton's ``true/false`` placeholders became ``false`` so that the sample parses.
+
+Constants:
+    - ``AGENT_CASE_FILTER_SYSTEM_PROMPT`` — the static rules.
+    - ``AGENT_CASE_FILTER_USER_PROMPT`` — the data. Placeholder: ``{{messages}}``.
+
+Output schema: ``{"has_exploration": bool, "has_user_correction": bool, "reason": str}``, held to
+``agent_memory._replies._CaseFilterReply``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["AGENT_CASE_FILTER_SYSTEM_PROMPT", "AGENT_CASE_FILTER_USER_PROMPT"]
+
+from everalgo.utils import tagged
+
+AGENT_CASE_FILTER_SYSTEM_PROMPT = """\
+You judge whether an agent interaction is worth extracting as a reusable problem-solving experience.
 
 The case will be EXTRACTED only if at least one of two independent signals is true. Judge each signal independently — do not bias one with another. Default each signal to False when uncertain (precision over recall — skip rather than over-extract).
 
 The criteria below are domain-general — they apply to any agent task (research, data analysis, ops, coding, writing, planning, …). Some points add a "for example, in coding, …" illustration purely to make the rule concrete; those examples carry no special weight — a non-coding trajectory meeting the same criteria counts exactly the same.
 
 Note: high-volume tool-call trajectories (substantial multi-step work) have already been routed to extraction upstream and never reach this prompt; you only see trajectories where "complexity by volume" does not apply.
-
-Conversation:
-{messages}
 
 **Signal 1 — has_exploration**
 True on either of two axes — judge each, one is enough:
@@ -38,5 +56,6 @@ True when any user message inside the trajectory is feedback / correction on the
 **Hard requirement**: a real correction requires at least two user messages (the initial request plus a corrective follow-up). If the trajectory contains only a single user message, there is nothing to correct — set ``has_user_correction`` to False regardless of any other signal.
 
 Output JSON only:
-{{"has_exploration": true/false, "has_user_correction": true/false, "reason": "1 sentence, less than 30 tokens"}}
-"""
+{"has_exploration": false, "has_user_correction": false, "reason": "1 sentence, less than 30 tokens"}"""
+
+AGENT_CASE_FILTER_USER_PROMPT = tagged("conversation", "{{messages}}")

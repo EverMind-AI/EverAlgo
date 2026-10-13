@@ -71,8 +71,8 @@ class BenchmarkConfig(BaseModel):
 
     # === Stage 1 (extract_base) ===
     # Incremental (per-message) boundary detection: front-2-buffer + smart_mask cut-and-bridge
-    # (``stage1_memcells_extraction.py:221-360``). Force-split (``hard_token_limit=8192`` /
-    # ``hard_message_limit=50``) is owned by ``BoundaryDetector.adetect_step`` and not exposed here.
+    # (``stage1_memcells_extraction.py:221-360``). Force-split (``hard_token_limit=65536`` /
+    # ``hard_message_limit=500``, everalgo.boundary defaults) is owned by ``BoundaryDetector.adetect_step`` and not exposed here.
     extract_smart_mask: bool = True
 
     # Whether to run a LLM reflection pass after initial extraction (Stage 2 — reflect).

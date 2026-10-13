@@ -1,4 +1,4 @@
-"""Tests for the multimodal content-part extension of ``ChatMessage``."""
+"""Tests for ``LLMMessage`` content parts and ``image_url_part_from_bytes``."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ import pytest
 from pydantic import ValidationError
 
 from everalgo.llm.types import (
-    ChatMessage,
     ImageUrlInner,
     ImageUrlPart,
+    LLMMessage,
     TextPart,
     image_url_part_from_bytes,
 )
@@ -25,7 +25,7 @@ def test_text_part_serializes_with_type_field() -> None:
 
 
 def test_image_url_part_default_detail_omitted_or_none() -> None:
-    """ImageUrlInner.detail defaults to None and round-trips."""
+    """``detail`` defaults to ``None`` and is dumped as such."""
     part = ImageUrlPart(image_url=ImageUrlInner(url="data:image/png;base64,AAA"))
     dumped = part.model_dump()
     assert dumped["type"] == "image_url"
@@ -46,16 +46,14 @@ def test_image_url_part_from_bytes_produces_data_uri() -> None:
     assert part.image_url.url == f"data:application/pdf;base64,{expected_b64}"
 
 
-def test_chat_message_accepts_string_content_unchanged() -> None:
-    """Existing API: content as plain str still works."""
-    msg = ChatMessage(role="user", content="hi")
+def test_llm_message_accepts_string_content_unchanged() -> None:
+    msg = LLMMessage(role="user", content="hi")
     assert msg.content == "hi"
     assert json.loads(msg.model_dump_json()) == {"role": "user", "content": "hi"}
 
 
-def test_chat_message_accepts_multimodal_content_list() -> None:
-    """New API: content as list of TextPart + ImageUrlPart."""
-    msg = ChatMessage(
+def test_llm_message_accepts_multimodal_content_list() -> None:
+    msg = LLMMessage(
         role="user",
         content=[
             TextPart(text="describe this"),
@@ -72,22 +70,21 @@ def test_chat_message_accepts_multimodal_content_list() -> None:
     assert cast("str", content[1]["image_url"]["url"]).startswith("data:image/png;base64,")
 
 
-def test_chat_message_multimodal_json_round_trip() -> None:
-    msg = ChatMessage(
+def test_llm_message_multimodal_json_round_trip() -> None:
+    msg = LLMMessage(
         role="user",
         content=[
             TextPart(text="extract"),
             ImageUrlPart(image_url=ImageUrlInner(url="https://example.com/x.png")),
         ],
     )
-    rebuilt = ChatMessage.model_validate_json(msg.model_dump_json())
+    rebuilt = LLMMessage.model_validate_json(msg.model_dump_json())
     assert rebuilt == msg
 
 
-def test_chat_message_unknown_part_type_raises() -> None:
-    """Discriminator rejects unknown ``type`` values in content parts."""
+def test_llm_message_unknown_part_type_raises() -> None:
     with pytest.raises(ValidationError):
-        ChatMessage.model_validate(
+        LLMMessage.model_validate(
             {
                 "role": "user",
                 "content": [{"type": "unknown_kind", "text": "x"}],

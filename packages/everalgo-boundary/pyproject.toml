@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "everalgo-boundary"
-version = "0.3.0"
-description = "EverAlgo boundary: low-level chat boundary detection and a reserved workspace boundary stub."
+version = "0.4.0rc1"
+description = "EverAlgo boundary: BoundaryDetector (batch and incremental) and a reserved workspace boundary stub."
 requires-python = ">=3.12"
 license = "Apache-2.0"
 readme = "README.md"
@@ -23,7 +23,7 @@ classifiers = [
 # third-party deps use a lower bound only (no upper cap). See docs/version-policy.md for the rationale.
 dependencies = [
   "asgiref>=3.0",
-  "everalgo-core>=0.2.0,<2.0.0",
+  "everalgo-core>=0.6.0rc1,<2.0.0",
 ]
 
 [project.urls]

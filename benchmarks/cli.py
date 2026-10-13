@@ -94,10 +94,9 @@ def _setup_logging(output_dir: Path) -> None:
     """Configure root logger to emit WARNING+ to stderr (message-only) and to ``run.log`` (full traceback).
 
     Captures all relevant scenarios:
-    - LLM JSON parse retry failures  (everalgo.llm.parse)
+    - Replies that fail validation and resends after transient failures  (everalgo.llm.openai_compat)
     - Clustering skip / missing embeddings  (benchmarks.common.stages.extract)
     - Cluster index build failures  (benchmarks.common.stages.index)
-    - Provider-layer HTTP errors  (everalgo.llm.providers.*)
     - Any other WARNING/ERROR in the benchmarks or everalgo namespaces
     """
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -1,101 +1,30 @@
 """Internal parser helpers.
 
-- ``decode_bytes`` — multi-encoding decoder for unknown-charset bytes.
 - ``check_aspect_ratio`` / ``split_image_with_overlap`` — long-image (tall
   screenshot) handling for the image parser.
 - ``clean_html_content`` — strict text extraction (drops all tags).
 - ``clean_html_for_llm`` — preserves structural tags inside ``<body>``,
   strips known-noise tags and useless attributes, returns HTML.
-- ``fetch_uri`` — HTTP(S) fetch for the URL parser. Adapted from an
-  upstream internal URL extractor reference implementation.
 """
 
 from __future__ import annotations
-
-import logging
-import math
-import re
-from io import BytesIO
-from urllib.parse import urlparse
-
-import httpx
-from bs4 import BeautifulSoup, Comment
-from PIL import Image
-
-logger = logging.getLogger(__name__)
 
 __all__ = [
     "check_aspect_ratio",
     "clean_html_content",
     "clean_html_for_llm",
-    "decode_bytes",
-    "fetch_uri",
     "split_image_with_overlap",
 ]
 
+import logging
+import math
+import re
+from io import BytesIO
 
-_DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; everalgo-parser/0.1; +https://evermind.ai)"
+from bs4 import BeautifulSoup, Comment
+from PIL import Image
 
-
-async def fetch_uri(uri: str, *, timeout: float = 30.0) -> tuple[bytes, str]:
-    """Fetch ``http``/``https`` URI and return ``(content_bytes, content_type)``.
-
-    Adapted from an upstream internal URL extractor reference implementation;
-    rejects non-http(s) schemes so callers cannot select local filesystem paths.
-
-    Parameters
-    ----------
-    uri : str
-        Origin URI. Must be ``http://`` or ``https://``.
-    timeout : float, optional
-        Per-request timeout in seconds (default 30s).
-
-    Returns:
-    -------
-    tuple[bytes, str]
-        Response body and the upstream ``Content-Type`` (lower-cased,
-        param-stripped, e.g. ``text/html``). Empty string when the upstream
-        omits the header.
-
-    Raises:
-    ------
-    ValueError
-        URI is missing or uses a non-http(s) scheme (``file:`` / ``data:``
-        / ...).
-    httpx.HTTPError
-        Network failure surfaces unchanged so callers can apply their own
-        retry / fallback policy (the library does not retry — see ADR-012).
-    """
-    if not uri:
-        raise ValueError("fetch_uri: empty uri")
-    parsed = urlparse(uri)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(
-            f"fetch_uri: only http/https supported, got scheme={parsed.scheme!r}. "
-            f"file:// and other caller-selected local-filesystem URIs are rejected by design "
-            f"(AGENTS.md §1: the parser does not own caller storage)."
-        )
-
-    headers = {"User-Agent": _DEFAULT_USER_AGENT}
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-        response = await client.get(uri)
-        response.raise_for_status()
-        # Strip the charset/boundary parameters: ``text/html; charset=utf-8`` → ``text/html``.
-        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-        logger.debug(
-            "fetched uri=%s status=%d bytes=%d type=%s", uri, response.status_code, len(response.content), content_type
-        )
-        return response.content, content_type
-
-
-def decode_bytes(content: bytes) -> str:
-    """Try several encodings before falling back to lossy UTF-8."""
-    for encoding in ("utf-8", "gbk", "gb2312", "latin-1"):
-        try:
-            return content.decode(encoding)
-        except (UnicodeDecodeError, LookupError):
-            continue
-    return content.decode("utf-8", errors="ignore")
+logger = logging.getLogger(__name__)
 
 
 def check_aspect_ratio(image_bytes: bytes, max_ratio: float = 10.0) -> tuple[bool, float]:

@@ -1,6 +1,21 @@
-"""Document parser prompts (PDF / Office / HTML)."""
+"""Document parser prompts (PDF / Office / HTML): system messages of rules, and the HTML call's user message.
 
-PROMPT_FOR_FILE = """Read this document and return its content as if you were reading it naturally.
+- ``PROMPT_FOR_FILE`` — system message of the PDF call and of the Office call (after the LibreOffice → PDF
+  conversion). The user message is the PDF part alone.
+- ``PROMPT_FOR_HTML`` — system message of the HTML call. ``HTML_USER_PROMPT`` is its user message: placeholder
+  ``{{html}}``, the cleaned HTML in an ``<html_content>`` element.
+
+Both system messages end with ``<reply_format>``: the output goes in ``{"text": "..."}``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["HTML_USER_PROMPT", "PROMPT_FOR_FILE", "PROMPT_FOR_HTML"]
+
+from everalgo.parser.prompts._reply_format import TEXT_REPLY_FORMAT
+from everalgo.utils import paragraphs, tagged
+
+_FILE_RULES = """Read this document and return its content as if you were reading it naturally.
 
 CRITICAL INSTRUCTIONS:
 - Output ONLY the extracted content directly. Do NOT include any preamble or postscript.
@@ -17,8 +32,10 @@ Requirements:
 6. For non-text elements (photos, illustrations, etc.), describe the main content and key elements in detail
 7. Preserve the original structure and hierarchy"""
 
+PROMPT_FOR_FILE = paragraphs(_FILE_RULES, TEXT_REPLY_FORMAT)
 
-PROMPT_FOR_HTML = """Read this HTML content extracted from a web page and return the main content.
+
+_HTML_RULES = """Read this HTML content extracted from a web page and return the main content.
 
 CRITICAL INSTRUCTIONS:
 - Output ONLY the extracted content directly. Do NOT include any preamble or postscript.
@@ -33,3 +50,7 @@ Requirements:
 4. Convert equations to LaTeX format
 5. Preserve the original structure and hierarchy (headings, paragraphs, lists)
 6. For images, describe their content if alt text or description is available"""
+
+PROMPT_FOR_HTML = paragraphs(_HTML_RULES, TEXT_REPLY_FORMAT)
+
+HTML_USER_PROMPT = tagged("html_content", "{{html}}")

@@ -13,11 +13,14 @@ from typing import Any
 
 import pytest
 
+from everalgo.agent_memory._replies import _ProfileUpdateReply
 from everalgo.agent_memory.profile import (
     AgentProfileExtractor,
     _insert_under_section,
     _unified_diff,
 )
+from everalgo.agent_memory.prompts.profile_update import AGENT_PROFILE_UPDATE_SYSTEM_PROMPT
+from everalgo.llm import LLMOutputError
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import AgentProfileSignal, ChatMessage, MemCell
 
@@ -144,9 +147,36 @@ class TestStructuralNoop:
         await extractor.aextract(
             _memcell(_user("帮我查个东西"), _assistant("好的, 这是结果。")), soul_md=SOUL_MD, agents_md=AGENTS_MD
         )
-        prompt_text = llm.calls[0].messages[0].content
+        prompt_text = llm.calls[0].messages[1].content
         assert "帮我查个东西" in prompt_text
         assert "这是结果" in prompt_text
+
+    async def test_call_sends_static_system_and_data_only_user(self) -> None:
+        llm = FakeLLMClient(responses=[_llm_response([])])
+        extractor = AgentProfileExtractor(llm=llm)
+        await extractor.aextract(
+            _memcell(_user("帮我查个东西"), _assistant("好的, 这是结果。")), soul_md=SOUL_MD, agents_md=AGENTS_MD
+        )
+        call = llm.calls[0]
+        system, user = call.messages
+        assert call.response_format is _ProfileUpdateReply
+        assert (system.role, system.content) == ("system", AGENT_PROFILE_UPDATE_SYSTEM_PROMPT)
+        assert user.role == "user"
+        assert isinstance(user.content, str)
+        assert user.content.startswith(f"<current_soul_md>\n{SOUL_MD}\n</current_soul_md>\n\n<current_agents_md>\n")
+        assert user.content.endswith(
+            "(user) [2023-11-14 22:13 UTC (Tuesday)] user_1: 帮我查个东西\n"
+            "(assistant) [2023-11-14 22:13 UTC (Tuesday)] agent: 好的, 这是结果。\n"
+            "</conversation>"
+        )
+
+    async def test_message_without_timestamp_raises(self) -> None:
+        """An unset time (0) would render as 1970-01-01; the shared line renderer refuses it, naming only the id."""
+        llm = FakeLLMClient(responses=[])
+        extractor = AgentProfileExtractor(llm=llm)
+        with pytest.raises(ValueError, match="chat message 'u1' has no timestamp"):
+            await extractor.aextract(_memcell(_user("secret text", ts=0)), soul_md=SOUL_MD, agents_md=AGENTS_MD)
+        assert llm.call_count == 0
 
 
 # ── Gate drops (one LLM call, no patch emitted) ─────────────────────────────────────────────────────
@@ -193,12 +223,12 @@ class TestGateDrops:
         update = await self._run_single_candidate(cand, "能不能设置成每次保存都自动跑 lint?")
         assert update.patches == [] and update.new_agents_md == AGENTS_MD
 
-    async def test_missing_speech_act_dropped(self) -> None:
-        # White-list semantics: a candidate without the speech_act field is dropped, not trusted.
+    async def test_missing_speech_act_fails_the_reply(self) -> None:
+        # A candidate without the speech_act field is never trusted: the reply is rejected outright.
         cand = _candidate(patch=_ADD_RULE_PATCH)
         del cand["speech_act"]
-        update = await self._run_single_candidate(cand, _EXPLICIT_USER_TEXT)
-        assert update.patches == []
+        with pytest.raises(LLMOutputError, match="agent profile update reply is not a valid _ProfileUpdateReply"):
+            await self._run_single_candidate(cand, _EXPLICIT_USER_TEXT)
 
     async def test_redundant_novelty_dropped(self) -> None:
         cand = _candidate(novelty="redundant", evidence=_EXPLICIT_USER_TEXT, patch=_ADD_RULE_PATCH)
@@ -446,11 +476,16 @@ class TestPatchValidationDrops:
         )
         assert update.patches == [] and update.new_agents_md == AGENTS_MD
 
-    async def test_invalid_action_dropped(self) -> None:
-        update = await self._run_with_patch(
-            {"action": "delete", "section": "Operating Rules", "old_text": "- Ask before deleting files"}
-        )
-        assert update.patches == []
+    async def test_invalid_action_fails_the_reply(self) -> None:
+        with pytest.raises(LLMOutputError):
+            await self._run_with_patch(
+                {
+                    "action": "delete",
+                    "section": "Operating Rules",
+                    "old_text": "- Ask before deleting files",
+                    "new_text": "",
+                }
+            )
 
     async def test_token_budget_guard_drops_oversized_patch(self) -> None:
         oversized = dict(_ADD_RULE_PATCH, new_text="- " + "never auto commit " * 200)
@@ -480,7 +515,7 @@ class TestPatchValidationDrops:
     async def test_malformed_response_raises(self) -> None:
         llm = FakeLLMClient(responses=['{"no_candidates_key": []}'])
         extractor = AgentProfileExtractor(llm=llm)
-        with pytest.raises(ValueError, match="candidates"):
+        with pytest.raises(LLMOutputError, match="candidates"):
             await extractor.aextract(_memcell(_user(_EXPLICIT_USER_TEXT)), soul_md=SOUL_MD, agents_md=AGENTS_MD)
 
 
@@ -493,9 +528,17 @@ class TestDefensiveBranches:
         extractor = AgentProfileExtractor(llm=llm)
         return await extractor.aextract(_memcell(_user(_EXPLICIT_USER_TEXT)), soul_md=SOUL_MD, agents_md=AGENTS_MD)
 
-    async def test_non_dict_candidate_skipped(self) -> None:
-        update = await self._run(_llm_response(["not a dict"]))  # type: ignore[list-item]
-        assert update.patches == [] and update.signals == []
+    async def test_non_dict_candidate_fails_the_reply(self) -> None:
+        with pytest.raises(LLMOutputError):
+            await self._run(json.dumps({"candidates": ["not a dict"]}))
+
+    async def test_out_of_vocabulary_gate_value_fails_the_reply(self) -> None:
+        with pytest.raises(LLMOutputError, match="speech_act"):
+            await self._run(_llm_response([_candidate(speech_act="statement")]))
+
+    async def test_extra_candidate_field_fails_the_reply(self) -> None:
+        with pytest.raises(LLMOutputError, match="extra"):
+            await self._run(_llm_response([dict(_candidate(), extra="x")]))
 
     async def test_implicit_without_key_not_recorded(self) -> None:
         cand = _candidate(persistence="implicit", evidence=_EXPLICIT_USER_TEXT, key="", matched_pending_key=None)
@@ -537,16 +580,21 @@ class TestDefensiveBranches:
         assert "(v1)" not in update.new_agents_md
 
     async def test_candidates_not_a_list_raises(self) -> None:
-        with pytest.raises(ValueError, match="must be a list"):
+        with pytest.raises(LLMOutputError, match="candidates"):
             await self._run('{"candidates": "nope"}')
 
     async def test_response_without_json_raises(self) -> None:
-        with pytest.raises(ValueError, match="No JSON object"):
+        with pytest.raises(LLMOutputError, match="agent profile update reply is not a valid"):
             await self._run("sorry, I cannot help with that")
 
     async def test_unbalanced_json_raises(self) -> None:
-        with pytest.raises(ValueError, match="Unbalanced"):
+        with pytest.raises(LLMOutputError, match="agent profile update reply is not a valid"):
             await self._run('{"candidates": [')
+
+    async def test_error_message_never_quotes_the_reply(self) -> None:
+        with pytest.raises(LLMOutputError) as excinfo:
+            await self._run('{"candidates": [], "leak": "SECRET-REPLY-TEXT"}')
+        assert "SECRET-REPLY-TEXT" not in str(excinfo.value)
 
 
 # ── Pure helpers ────────────────────────────────────────────────────────────────────────────────────

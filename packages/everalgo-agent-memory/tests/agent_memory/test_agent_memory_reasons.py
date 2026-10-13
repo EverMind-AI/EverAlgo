@@ -25,7 +25,7 @@ from everalgo.agent_memory import (
 )
 from everalgo.agent_memory import case as case_module
 from everalgo.agent_memory.case import _should_skip, _strip_before_first_user
-from everalgo.llm.types import ChatResponse
+from everalgo.llm import LLMOutputError
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import (
     AgentCase,
@@ -148,7 +148,7 @@ class TestDocstringContract:
 
     @pytest.mark.parametrize(
         ("enum_cls", "expected"),
-        [(CaseSkipReason, 13), (SkillSkipReason, 12)],
+        [(CaseSkipReason, 13), (SkillSkipReason, 9)],
         ids=["CaseSkipReason", "SkillSkipReason"],
     )
     def test_every_member_is_documented(self, enum_cls: type[StrEnum], expected: int) -> None:
@@ -296,9 +296,7 @@ class TestCaseStructuralReasons:
         items: list[ConversationItem] = [_user("search"), *_tool_rounds(1), _assistant("done", ts=1700000099999)]
         fake = FakeLLMClient(
             responses=[
-                ChatResponse(
-                    content='{"has_exploration": false, "has_user_correction": false, "reason": "linear"}', model="fake"
-                ),
+                '{"has_exploration": false, "has_user_correction": false, "reason": "linear"}',
             ]
         )
         result = await AgentCaseExtractor(llm=fake, min_tool_call_rounds=0).aextract_with_reason(_memcell(items))
@@ -316,12 +314,7 @@ class TestCaseLLMReasons:
 
     async def test_filter_rejected_surfaces_model_rationale(self) -> None:
         fake = FakeLLMClient(
-            responses=[
-                ChatResponse(
-                    content='{"has_exploration": false, "has_user_correction": false, "reason": "linear lookup"}',
-                    model="fake",
-                )
-            ]
+            responses=['{"has_exploration": false, "has_user_correction": false, "reason": "linear lookup"}']
         )
         result = await AgentCaseExtractor(llm=fake).aextract_with_reason(self._three_round_trajectory())
         assert result.cases == []
@@ -335,8 +328,8 @@ class TestCaseLLMReasons:
 
         empty_intent = FakeLLMClient(
             responses=[
-                ChatResponse(content=pass_filter, model="fake"),
-                ChatResponse(content=json.dumps({"task_intent": "", "approach": "x"}), model="fake"),
+                pass_filter,
+                json.dumps({"task_intent": "", "approach": "x", "key_insight": "", "quality_score": 0.5}),
             ]
         )
         assert (
@@ -345,8 +338,8 @@ class TestCaseLLMReasons:
 
         empty_approach = FakeLLMClient(
             responses=[
-                ChatResponse(content=pass_filter, model="fake"),
-                ChatResponse(content=json.dumps({"task_intent": "t", "approach": ""}), model="fake"),
+                pass_filter,
+                json.dumps({"task_intent": "t", "approach": "", "key_insight": "", "quality_score": 0.5}),
             ]
         )
         assert (
@@ -355,7 +348,7 @@ class TestCaseLLMReasons:
 
     async def test_success_has_no_reason_and_empty_detail(self) -> None:
         items: list[ConversationItem] = [_user("build"), *_tool_rounds(21), _assistant("done", ts=1700000099999)]
-        fake = FakeLLMClient(responses=[ChatResponse(content=_COMPRESS_OK, model="fake")])
+        fake = FakeLLMClient(responses=[_COMPRESS_OK])
         result = await AgentCaseExtractor(llm=fake).aextract_with_reason(_memcell(items))
         assert len(result.cases) == 1
         assert result.reason is None
@@ -367,12 +360,8 @@ class TestCaseWrapperEquivalence:
         items: list[ConversationItem] = [_user("build"), *_tool_rounds(21), _assistant("done", ts=1700000099999)]
         cell = _memcell(items)
 
-        plain = await AgentCaseExtractor(
-            llm=FakeLLMClient(responses=[ChatResponse(content=_COMPRESS_OK, model="fake")])
-        ).aextract(cell)
-        rich = await AgentCaseExtractor(
-            llm=FakeLLMClient(responses=[ChatResponse(content=_COMPRESS_OK, model="fake")])
-        ).aextract_with_reason(cell)
+        plain = await AgentCaseExtractor(llm=FakeLLMClient(responses=[_COMPRESS_OK])).aextract(cell)
+        rich = await AgentCaseExtractor(llm=FakeLLMClient(responses=[_COMPRESS_OK])).aextract_with_reason(cell)
 
         assert [c.task_intent for c in plain] == [c.task_intent for c in rich.cases]
 
@@ -400,9 +389,14 @@ class TestSkillPreReason:
     async def test_pre_detail_is_empty_when_no_short_circuit_fired(self) -> None:
         """``pre_detail`` describes ``pre_reason`` and nothing else — per-op context lives on OpOutcome."""
         ops = json.dumps(
-            {"operations": [{"action": "add", "data": {"name": "A", "description": "d", "content": "short"}}]}
+            {
+                "operations": [
+                    {"action": "add", "data": {"name": "A", "description": "d", "content": "short", "confidence": 0.5}}
+                ],
+                "update_note": "",
+            }
         )
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
+        fake = FakeLLMClient(responses=[ops])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(), existing_relevant_skills=[], supporting_cases=[]
         )
@@ -412,7 +406,7 @@ class TestSkillPreReason:
 
     async def test_llm_proposing_nothing_is_distinguishable_from_the_short_circuit(self) -> None:
         """Both yield no skills; only ``pre_reason`` tells the caller whether the LLM ever ran."""
-        fake = FakeLLMClient(responses=[ChatResponse(content='{"operations": []}', model="fake")])
+        fake = FakeLLMClient(responses=['{"operations": [], "update_note": ""}'])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(), existing_relevant_skills=[], supporting_cases=[]
         )
@@ -427,13 +421,20 @@ class TestSkillOpOutcomes:
         ops = json.dumps(
             {
                 "operations": [
-                    {"action": "add", "data": {"name": "A", "description": "d", "content": "too short"}},
+                    {
+                        "action": "add",
+                        "data": {"name": "A", "description": "d", "content": "too short", "confidence": 0.5},
+                    },
                     {"action": "update", "index": 7, "data": {"name": "B"}},
-                    {"action": "add", "data": {"name": "C", "description": "d", "content": _SUFFICIENT_CONTENT}},
-                ]
+                    {
+                        "action": "add",
+                        "data": {"name": "C", "description": "d", "content": _SUFFICIENT_CONTENT, "confidence": 0.5},
+                    },
+                ],
+                "update_note": "",
             }
         )
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
+        fake = FakeLLMClient(responses=[ops])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(), existing_relevant_skills=[_skill()], supporting_cases=[]
         )
@@ -452,9 +453,17 @@ class TestSkillOpOutcomes:
 
     async def test_content_insufficiency_detail_reports_observed_and_required(self) -> None:
         ops = json.dumps(
-            {"operations": [{"action": "add", "data": {"name": "A", "description": "d", "content": "one line only"}}]}
+            {
+                "operations": [
+                    {
+                        "action": "add",
+                        "data": {"name": "A", "description": "d", "content": "one line only", "confidence": 0.5},
+                    }
+                ],
+                "update_note": "",
+            }
         )
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
+        fake = FakeLLMClient(responses=[ops])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(), existing_relevant_skills=[], supporting_cases=[]
         )
@@ -462,22 +471,22 @@ class TestSkillOpOutcomes:
 
     async def test_action_none_is_recorded_not_silently_dropped(self) -> None:
         """An all-``none`` response means "the case taught us nothing new" — a real answer, not a void."""
-        ops = json.dumps({"operations": [{"action": "none"}, {"action": "none"}]})
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
+        ops = json.dumps({"operations": [{"action": "none"}, {"action": "none"}], "update_note": ""})
+        fake = FakeLLMClient(responses=[ops])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(), existing_relevant_skills=[_skill()], supporting_cases=[]
         )
         assert result.skills == []
         assert [o.reason for o in result.outcomes] == [SkillSkipReason.OP_ACTION_NONE] * 2
 
-    async def test_unknown_action_carries_the_offending_value(self) -> None:
-        ops = json.dumps({"operations": [{"action": "delete", "index": 0}]})
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
-        result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
-            _case(), existing_relevant_skills=[_skill()], supporting_cases=[]
-        )
-        assert result.outcomes[0].reason is SkillSkipReason.OP_UNKNOWN_ACTION
-        assert result.outcomes[0].detail == {"action": "delete"}
+    async def test_unknown_action_fails_the_whole_reply(self) -> None:
+        """An action outside add / update / none no longer yields a per-op reason: the reply is invalid."""
+        ops = json.dumps({"operations": [{"action": "delete", "index": 0}], "update_note": ""})
+        fake = FakeLLMClient(responses=[ops])
+        with pytest.raises(LLMOutputError):
+            await AgentSkillExtractor(llm=fake).aextract_with_reason(
+                _case(), existing_relevant_skills=[_skill()], supporting_cases=[]
+            )
 
     async def test_duplicate_update_on_same_existing_skill_is_dropped(self) -> None:
         ops = json.dumps(
@@ -485,10 +494,11 @@ class TestSkillOpOutcomes:
                 "operations": [
                     {"action": "update", "index": 0, "data": {"name": "First rename"}},
                     {"action": "update", "index": 0, "data": {"name": "Second rename"}},
-                ]
+                ],
+                "update_note": "",
             }
         )
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
+        fake = FakeLLMClient(responses=[ops])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(), existing_relevant_skills=[_skill()], supporting_cases=[]
         )
@@ -498,8 +508,10 @@ class TestSkillOpOutcomes:
 
     async def test_op_index_is_not_the_existing_skill_index(self) -> None:
         """``op_index`` counts LLM operations; ``op["index"]`` addresses existing skills. Keep them apart."""
-        ops = json.dumps({"operations": [{"action": "update", "index": 1, "data": {"name": "Renamed"}}]})
-        fake = FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
+        ops = json.dumps(
+            {"operations": [{"action": "update", "index": 1, "data": {"name": "Renamed"}}], "update_note": ""}
+        )
+        fake = FakeLLMClient(responses=[ops])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(),
             existing_relevant_skills=[_skill(name="zero", skill_id="s0"), _skill(name="one", skill_id="s1")],
@@ -512,38 +524,50 @@ class TestSkillOpOutcomes:
 
 
 class TestSkillRemainingDropReasons:
-    """The malformed-LLM-output drop paths — one trajectory each, all through the public method."""
+    """The business-check drop paths of a valid reply — one trajectory each, all through the public method.
+
+    Structurally malformed operations (a non-object entry, an index that is not an integer) fail the whole reply
+    with ``LLMOutputError`` instead; see ``test_structurally_malformed_operation_fails_the_whole_reply``.
+    """
 
     @staticmethod
     async def _single_op(
         op: object, existing: list[AgentSkill] | None = None
     ) -> tuple[SkillSkipReason | None, dict[str, Any]]:
-        fake = FakeLLMClient(responses=[ChatResponse(content=json.dumps({"operations": [op]}), model="fake")])
+        fake = FakeLLMClient(responses=[json.dumps({"operations": [op], "update_note": ""})])
         result = await AgentSkillExtractor(llm=fake).aextract_with_reason(
             _case(), existing_relevant_skills=existing or [_skill()], supporting_cases=[]
         )
         assert len(result.outcomes) == 1
         return result.outcomes[0].reason, result.outcomes[0].detail
 
-    async def test_op_not_dict(self) -> None:
-        reason, _ = await self._single_op("not an object")
-        assert reason is SkillSkipReason.OP_NOT_DICT
+    @pytest.mark.parametrize(
+        "op",
+        ["not an object", {"action": "update", "index": "abc", "data": {"name": "X"}}],
+        ids=["non-object-op", "string-index"],
+    )
+    async def test_structurally_malformed_operation_fails_the_whole_reply(self, op: object) -> None:
+        fake = FakeLLMClient(responses=[json.dumps({"operations": [op], "update_note": ""})])
+        with pytest.raises(LLMOutputError):
+            await AgentSkillExtractor(llm=fake).aextract_with_reason(
+                _case(), existing_relevant_skills=[_skill()], supporting_cases=[]
+            )
 
     async def test_add_content_empty(self) -> None:
-        reason, _ = await self._single_op({"action": "add", "data": {"name": "A", "content": ""}})
+        reason, _ = await self._single_op(
+            {"action": "add", "data": {"name": "A", "description": "d", "content": "", "confidence": 0.5}}
+        )
         assert reason is SkillSkipReason.ADD_CONTENT_EMPTY
 
     async def test_add_name_and_desc_empty(self) -> None:
         """Content is fine; the skill is unusable because nothing names or describes it."""
         reason, _ = await self._single_op(
-            {"action": "add", "data": {"name": "", "description": "", "content": _SUFFICIENT_CONTENT}}
+            {
+                "action": "add",
+                "data": {"name": "", "description": "", "content": _SUFFICIENT_CONTENT, "confidence": 0.5},
+            }
         )
         assert reason is SkillSkipReason.ADD_NAME_AND_DESC_EMPTY
-
-    async def test_update_index_invalid(self) -> None:
-        reason, detail = await self._single_op({"action": "update", "index": "abc", "data": {"name": "X"}})
-        assert reason is SkillSkipReason.UPDATE_INDEX_INVALID
-        assert detail == {"raw": "'abc'"}
 
     async def test_update_content_insufficient(self) -> None:
         reason, detail = await self._single_op({"action": "update", "index": 0, "data": {"content": "one liner"}})
@@ -561,16 +585,23 @@ class TestSkillWrapperEquivalence:
         ops = json.dumps(
             {
                 "operations": [
-                    {"action": "add", "data": {"name": "Kept", "description": "d", "content": _SUFFICIENT_CONTENT}},
-                    {"action": "add", "data": {"name": "Dropped", "description": "d", "content": "short"}},
-                ]
+                    {
+                        "action": "add",
+                        "data": {"name": "Kept", "description": "d", "content": _SUFFICIENT_CONTENT, "confidence": 0.5},
+                    },
+                    {
+                        "action": "add",
+                        "data": {"name": "Dropped", "description": "d", "content": "short", "confidence": 0.5},
+                    },
+                ],
+                "update_note": "",
             }
         )
-        plain = await AgentSkillExtractor(
-            llm=FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
-        ).aextract(_case(), existing_relevant_skills=[], supporting_cases=[])
-        rich = await AgentSkillExtractor(
-            llm=FakeLLMClient(responses=[ChatResponse(content=ops, model="fake")])
-        ).aextract_with_reason(_case(), existing_relevant_skills=[], supporting_cases=[])
+        plain = await AgentSkillExtractor(llm=FakeLLMClient(responses=[ops])).aextract(
+            _case(), existing_relevant_skills=[], supporting_cases=[]
+        )
+        rich = await AgentSkillExtractor(llm=FakeLLMClient(responses=[ops])).aextract_with_reason(
+            _case(), existing_relevant_skills=[], supporting_cases=[]
+        )
 
         assert [s.name for s in plain] == [s.name for s in rich.skills] == ["Kept"]

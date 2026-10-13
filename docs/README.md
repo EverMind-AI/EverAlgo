@@ -10,6 +10,7 @@
 | [version-policy.md](version-policy.md) | SemVer policy, Python version support, deprecation |
 | [contributing.md](contributing.md) | How to contribute; links to AGENTS.md for the full rules |
 | [concepts/architecture.md](concepts/architecture.md) | High-level architecture, subpackage layout, naming, LLM injection |
+| [concepts/llm-contract.md](concepts/llm-contract.md) | The `LLMClient` contract between operators and host implementations: JSON-only output, hard requirements, conformance suite (Chinese companion: [llm-contract.zh-CN.md](concepts/llm-contract.zh-CN.md)) |
 | [concepts/stateless-design.md](concepts/stateless-design.md) | What business-stateless means, including the parser I/O boundary |
 | [concepts/async-sync-bridge.md](concepts/async-sync-bridge.md) | The `a`-prefix convention and the sync bridge |
 | [concepts/stage1-boundary-detection-flow.md](concepts/stage1-boundary-detection-flow.md) | Stage 1 extract-base flow |

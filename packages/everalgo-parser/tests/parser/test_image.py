@@ -1,20 +1,25 @@
 """Unit tests for everalgo.parser.image — covers PIL-based paths, tall-image split/merge.
 
 No cairosvg / SVG paths are tested here (those are pragma'd as native CI gaps).
-No real LLM calls: all tests use FakeLLMClient.
+No real LLM calls: all tests use FakeLLMClient, scripted with ``{"text": ...}`` replies.
 """
 
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 from PIL import Image
 
-from everalgo.llm.types import ChatResponse
+from everalgo.llm import LLMOutputError
 from everalgo.parser import image
+from everalgo.parser._replies import _TextReply
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Modality, RawFile
+
+# Not JSON; a missing field; an extra field; a wrong-typed field.
+BAD_REPLIES = ["plain OCR text", '{"txt": "x"}', '{"text": "x", "extra": 1}', '{"text": 1}']
 
 # ---- helpers ----
 
@@ -37,8 +42,12 @@ def _tiff_bytes(width: int = 10, height: int = 10) -> bytes:
     return buf.getvalue()
 
 
+def _reply(text: str) -> str:
+    return json.dumps({"text": text})
+
+
 def _fake(*texts: str) -> FakeLLMClient:
-    return FakeLLMClient(responses=[ChatResponse(content=t, model="fake", finish_reason="stop") for t in texts])
+    return FakeLLMClient(responses=[_reply(t) for t in texts])
 
 
 # ---- error paths ----
@@ -64,6 +73,7 @@ async def test_aparse_png_single_shot_returns_parsed_content() -> None:
     assert result.modality is Modality.IMAGE
     assert result.text == "ocr result"
     assert fake.call_count == 1
+    assert fake.calls[0].response_format is _TextReply
 
 
 async def test_aparse_jpeg_single_shot() -> None:
@@ -73,6 +83,13 @@ async def test_aparse_jpeg_single_shot() -> None:
     result = await image.aparse(RawFile(content=buf.getvalue(), extension="jpg"), llm=fake)
     assert result.modality is Modality.IMAGE
     assert result.text == "jpeg ocr"
+
+
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+async def test_aparse_single_invalid_reply_raises_llm_output_error(bad_reply: str) -> None:
+    fake = FakeLLMClient(responses=[bad_reply])
+    with pytest.raises(LLMOutputError, match="parser image reply is not a valid _TextReply"):
+        await image.aparse(RawFile(content=_png_bytes(100, 50), extension="png"), llm=fake)
 
 
 # ---- BMP / TIFF transcode paths ----
@@ -110,76 +127,78 @@ async def test_aparse_tif_extension_transcoded_to_png() -> None:
 async def test_aparse_tall_image_uses_split_path_and_merge() -> None:
     # height/width = 100/3000 → ratio ~30; splits into 3 parts; 3 OCR + 1 merge = 4 calls
     tall_png = _png_bytes(100, 3000)
-    # Provide enough responses for 3 OCR slices + 1 merge call
     fake = _fake("part1 text", "part2 text", "part3 text", "merged text")
     result = await image.aparse(RawFile(content=tall_png, extension="png"), llm=fake)
     assert result.modality is Modality.IMAGE
-    assert result.metadata["tall_image_parts"] >= 2
-    # LLM called at least for each slice + 1 merge
-    assert fake.call_count >= 3
+    assert result.text == "merged text"
+    assert result.metadata["tall_image_parts"] == 3
+    assert "merge_fallback" not in result.metadata
+    assert fake.call_count == 4
+    assert all(call.response_format is _TextReply for call in fake.calls)
+    merge_call = fake.calls[-1]
+    assert merge_call.temperature == 0.0
+    assert merge_call.max_tokens == 32_000
 
 
 async def test_aparse_tall_image_all_empty_slices_returns_empty_parsed_content() -> None:
-    # Each OCR slice returns empty string
     tall_png = _png_bytes(100, 3000)
-    # Need enough empty responses for all OCR slices (no merge call when all empty)
-    fake = FakeLLMClient(responses=[ChatResponse(content="", model="fake", finish_reason="stop") for _ in range(10)])
+    # No merge call when every slice is empty; the extra replies are never consumed.
+    fake = FakeLLMClient(responses=[_reply("") for _ in range(10)])
     result = await image.aparse(RawFile(content=tall_png, extension="png"), llm=fake)
     assert result.modality is Modality.IMAGE
     assert result.text == ""
     assert result.metadata.get("warning") == "all OCR slices returned empty"
+    assert fake.call_count == 3
 
 
 async def test_aparse_tall_image_single_non_empty_slice_skips_merge() -> None:
-    # 3 slices; only first returns text; remaining empty → no merge call
     tall_png = _png_bytes(100, 3000)
-    # Provide: first slice non-empty, rest empty, extra to prevent exhaustion
-    fake = FakeLLMClient(
-        responses=[
-            ChatResponse(content="only slice text", model="fake", finish_reason="stop"),
-            ChatResponse(content="", model="fake", finish_reason="stop"),
-            ChatResponse(content="", model="fake", finish_reason="stop"),
-            ChatResponse(content="", model="fake", finish_reason="stop"),
-            ChatResponse(content="", model="fake", finish_reason="stop"),
-        ]
-    )
+    fake = FakeLLMClient(responses=[_reply("only slice text"), _reply(""), _reply("  "), _reply("")])
     result = await image.aparse(RawFile(content=tall_png, extension="png"), llm=fake)
     assert result.modality is Modality.IMAGE
     assert result.text == "only slice text"
-    # No merge call — call count equals number of slices only
-    assert fake.call_count <= 5
+    # No merge call — one call per slice only.
+    assert fake.call_count == 3
+
+
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+async def test_aparse_tall_image_invalid_slice_reply_raises_llm_output_error(bad_reply: str) -> None:
+    fake = FakeLLMClient(responses=[_reply("slice1"), bad_reply])
+    with pytest.raises(LLMOutputError, match="parser image reply"):
+        await image.aparse(RawFile(content=_png_bytes(100, 3000), extension="png"), llm=fake)
 
 
 async def test_aparse_tall_image_merge_failure_falls_back_to_join() -> None:
     """When the merge LLM call throws, the result falls back to deterministic join."""
     tall_png = _png_bytes(100, 3000)
-
-    call_count = 0
-
-    async def handler(messages: list[object], **kwargs: object) -> ChatResponse:
-        nonlocal call_count
-        call_count += 1
-        # First N calls are OCR slices returning real text
-        if call_count <= 3:
-            return ChatResponse(content=f"slice{call_count}", model="fake", finish_reason="stop")
-        # Merge call raises
-        raise RuntimeError("network error")
-
-    fake = FakeLLMClient(handler=handler)
+    fake = FakeLLMClient(responses=[_reply("slice1"), _reply("slice2"), _reply("slice3"), RuntimeError("network")])
     result = await image.aparse(RawFile(content=tall_png, extension="png"), llm=fake)
     assert result.modality is Modality.IMAGE
-    # Fallback join must produce something from the slice texts
-    assert "slice1" in result.text
+    assert result.text == "slice1\n\nslice2\n\nslice3"
+    assert result.metadata.get("merge_fallback") == "deterministic_join"
+
+
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+async def test_aparse_tall_image_invalid_merge_reply_falls_back_to_join(bad_reply: str) -> None:
+    """An invalid merge reply is a failed merge: the raw OCR is joined, not lost to an exception."""
+    fake = FakeLLMClient(responses=[_reply("slice1"), _reply("slice2"), _reply("slice3"), bad_reply])
+    result = await image.aparse(RawFile(content=_png_bytes(100, 3000), extension="png"), llm=fake)
+    assert result.text == "slice1\n\nslice2\n\nslice3"
+    assert result.metadata.get("merge_fallback") == "deterministic_join"
+
+
+async def test_aparse_tall_image_empty_merge_reply_falls_back_to_join() -> None:
+    fake = _fake("slice1", "slice2", "slice3", "")
+    result = await image.aparse(RawFile(content=_png_bytes(100, 3000), extension="png"), llm=fake)
+    assert result.text == "slice1\n\nslice2\n\nslice3"
     assert result.metadata.get("merge_fallback") == "deterministic_join"
 
 
 # ---- metadata fields ----
 
 
-async def test_aparse_single_metadata_contains_model_and_finish_reason() -> None:
+async def test_aparse_single_metadata_counts_parts_and_names_no_model() -> None:
+    """The served model is the host's to record (llm-contract §6.4); ``achat`` returns only the text."""
     png = _png_bytes(100, 50)
-    fake = _fake("result")
-    result = await image.aparse(RawFile(content=png, extension="png"), llm=fake)
-    assert result.metadata["model"] == "fake"
-    assert result.metadata["finish_reason"] == "stop"
-    assert result.metadata["tall_image_parts"] == 1
+    result = await image.aparse(RawFile(content=png, extension="png"), llm=_fake("result"))
+    assert result.metadata == {"tall_image_parts": 1}

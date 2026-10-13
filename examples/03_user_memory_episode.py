@@ -15,18 +15,16 @@ from __future__ import annotations
 import asyncio
 import json
 
-from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, Episode, MemCell
 from everalgo.user_memory.episode import EpisodeExtractor
 
 # ---------------------------------------------------------------------------
-# Scripted LLM response — {title, content} shape parsed by EpisodeExtractor.
+# Scripted LLM reply — the {content, summary, title} shape EpisodeExtractor validates.
 # ---------------------------------------------------------------------------
 
 _EPISODE_JSON = json.dumps(
     {
-        "title": "Alice asks about Python async retry semantics",
         "content": (
             "Alice initiated a discussion on Python async retry patterns. "
             "The assistant offered to send a follow-up document the next week."
@@ -35,6 +33,7 @@ _EPISODE_JSON = json.dumps(
             "Alice asked about Python async retry patterns and the assistant "
             "promised a follow-up document the next week."
         ),
+        "title": "Alice asks about Python async retry semantics",
     }
 )
 
@@ -65,7 +64,7 @@ def _make_memcell() -> MemCell:
 
 async def main() -> None:
     """Extract a single Episode from a MemCell and print its fields."""
-    fake = FakeLLMClient(responses=[ChatResponse(content=_EPISODE_JSON, model="fake")])
+    fake = FakeLLMClient(responses=[_EPISODE_JSON])
     mc = _make_memcell()
 
     episode: Episode = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")

@@ -14,7 +14,7 @@ def rank(
 ) -> RankOutput:
     """Sort dense candidates, drop below threshold, dedup by id, truncate to top_k.
 
-    Only ``dense_candidates`` is consulted; ``sparse_candidates`` and ``episode_to_facts`` are ignored.
+    Only ``dense_candidates`` is consulted; ``sparse_candidates`` is ignored.
     """
     candidates = sorted(rank_input.dense_candidates, key=lambda c: c.score, reverse=True)
 

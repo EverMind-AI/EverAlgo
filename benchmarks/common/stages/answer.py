@@ -13,9 +13,10 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from benchmarks.common.metrics import estimate_chat_tokens
 from benchmarks.common.stages.types import StageStats
-from everalgo.llm.parse import extract_final_answer as _algo_extract_final_answer
-from everalgo.llm.types import ChatMessage
+from everalgo.llm import LLMMessage, StrictOutputModel, parse_reply
+from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,18 +27,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_CONTEXT_TEMPLATE = """Episodes memories for conversation between {speaker_a} and {speaker_b}:
+_CONTEXT_TEMPLATE = """Episodes memories for conversation between {{speaker_a}} and {{speaker_b}}:
 
-    {episodes}
+    {{episodes}}
 """
+
+
+class _AnswerReply(StrictOutputModel):
+    """The answer model's reply; the contract has no free-text tier, so the free-form reasoning rides in ``text``."""
+
+    text: str
 
 
 def _extract_final_answer(raw: str) -> str:
     """LoCoMo-specific marker fallback chain (3 markers in priority order).
 
-    Delegates per-marker extraction to ``everalgo.llm.parse.extract_final_answer`` which uses
-    ``rsplit`` to take the LAST occurrence (handles marker appearing in reasoning prose before the
-    actual answer). Supported markers in priority order:
+    Takes the text after the LAST occurrence of the first marker found, since a marker may also appear in
+    reasoning prose before the actual answer. Supported markers in priority order:
       1. ``## STEP 7: FINAL ANSWER`` (prompt STEP 7 section header)
       2. ``FINAL ANSWER:`` (colon-suffixed)
       3. ``FINAL ANSWER`` (bare — leading colon stripped if present)
@@ -45,7 +51,7 @@ def _extract_final_answer(raw: str) -> str:
     result = raw.strip()
     for marker in ("## STEP 7: FINAL ANSWER", "FINAL ANSWER:", "FINAL ANSWER"):
         if marker in result:
-            extracted = _algo_extract_final_answer(result, marker=marker)
+            extracted = result.rsplit(marker, 1)[1].strip()
             # Bare "FINAL ANSWER" may have a leading ":" — strip it
             if marker == "FINAL ANSWER" and extracted.startswith(":"):
                 extracted = extracted[1:].strip()
@@ -67,7 +73,9 @@ def _build_context(
     """
     speaker_a, speaker_b = speakers if speakers else ("A", "B")
     episode_lines = [f"{ep.get('subject', 'N/A')}: {ep.get('episode', 'N/A')}\n---" for ep in selected_episodes]
-    return _CONTEXT_TEMPLATE.format(
+    return render_prompt(
+        _CONTEXT_TEMPLATE,
+        None,
         speaker_a=speaker_a,
         speaker_b=speaker_b,
         episodes="\n\n".join(episode_lines),
@@ -96,27 +104,31 @@ def _load_episode_map(stage1_dir: Path, ctx: StageContext) -> dict[str, dict[str
 
 
 async def _retry_llm_answer(
-    prompt: str,
+    messages: list[LLMMessage],
     ctx: StageContext,
     question_id: str,
-) -> tuple[str, Any]:
+) -> tuple[str, str]:
     """Call LLM with retry, extracting the final answer. Fail-loud on exhaustion.
 
     Returns:
-        Tuple of ``(answer_text, response_object)``.
+        Tuple of ``(answer_text, raw_text)``, ``raw_text`` being the reply's ``text`` before marker extraction.
+
+    Raises:
+        LLMOutputError: If the last attempt's reply is not a valid ``_AnswerReply``.
+        RuntimeError: If every attempt yields an empty final answer.
     """
-    answer = ""
-    response = None
     for attempt in range(ctx.config.llm_max_retries):
         try:
-            response = await ctx.services.llm.chat(
-                [ChatMessage(role="user", content=prompt)],
+            reply = await ctx.services.llm.achat(
+                messages,
+                response_format=_AnswerReply,
                 temperature=0.0,
                 max_tokens=32768,
             )
-            answer = _extract_final_answer(response.content)
+            raw = parse_reply(_AnswerReply, reply, operator="answer").text
+            answer = _extract_final_answer(raw)
             if answer:
-                return answer, response
+                return answer, raw
         except Exception:
             if attempt == ctx.config.llm_max_retries - 1:
                 raise
@@ -148,11 +160,11 @@ async def _answer_one_question(
     ep_ids = item.get("members", [])
     selected = [session_episodes[ep_id] for ep_id in ep_ids[: ctx.config.response_top_k] if ep_id in session_episodes]
     context = _build_context(selected, speakers)
-    prompt = ctx.dataset.answer_prompt().format(context=context, question=qa["question"])
+    prompt = render_prompt(ctx.dataset.answer_prompt(), None, context=context, question=qa["question"])
 
-    answer, response = await _retry_llm_answer(prompt, ctx, qa["question_id"])
-    pt = (response.usage.prompt_tokens or 0) if response.usage is not None else 0
-    ct = (response.usage.completion_tokens or 0) if response.usage is not None else 0
+    messages = [LLMMessage(role="user", content=prompt)]
+    answer, raw = await _retry_llm_answer(messages, ctx, qa["question_id"])
+    prompt_tokens, completion_tokens = estimate_chat_tokens(messages, raw)
     return {
         "question_id": qa["question_id"],
         "question": qa["question"],
@@ -161,9 +173,9 @@ async def _answer_one_question(
         "category": qa["category"],
         "conversation_id": conv_id,
         "formatted_context": context,
-        "raw_response": response.content,
-        "prompt_tokens": pt,
-        "completion_tokens": ct,
+        "raw_response": raw,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
     }
 
 

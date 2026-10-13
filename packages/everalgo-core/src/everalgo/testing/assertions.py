@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+__all__ = ["assert_atomic_fact_shape", "assert_episode_shape", "assert_foresight_shape", "assert_profile_shape"]
+
 from typing import Any
 
 from everalgo.types import AtomicFact, Episode, Foresight, Profile

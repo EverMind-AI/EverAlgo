@@ -6,6 +6,19 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0rc1] - 2026-10-13
+
+### Changed
+
+- **BREAKING:** every LLM call follows the new `LLMClient` contract (`docs/concepts/llm-contract.md`). Each of the six calls (topic-tree extraction, content merge, topic merge, classification, leaf split, uncovered-block assignment) passes a strict pydantic model as `response_format`, receives the reply as `str`, and validates it with `everalgo.llm.parse_reply`; a reply that does not validate raises `everalgo.llm.LLMOutputError`, and the client's own exceptions propagate unchanged. The operators no longer degrade on an unparsable reply: a failed batch used to be skipped (and a document whose every batch failed extracted to `[]`), a failed merge or post-processing pass returned its input, and a failed classification returned `""`; each now raises. Business fallbacks on a valid reply stay: an out-of-taxonomy category still collapses to `""`, a blank merged summary still falls back to the first batch's, and merge groups, split results and assignments that name an unknown topic or an out-of-range index are still skipped.
+- **BREAKING:** each prompt is a system message of static rules plus a user message of data in snake_case XML tags (`<document_title>`, `<paragraphs count="N" max_id="M">`, ...); the classification taxonomy closes the system message (`CATEGORY_CLASSIFY_SYSTEM_PROMPT`, then `assemble_system_prompt` appends the taxonomy), so the rules stay a cacheable prefix across one ingest run. The rule sentences are unchanged except where the strict reply model or the move demanded it: leaf topics must write `"children": []` (they could omit it), a `should_split=false` split result writes `block_refs` and `children` as `null` (it could omit them), and the rules that pointed at data by position or slot name now name its tag. The `topic_split` and `uncovered_assign` skeletons, which reached the model with doubled braces, are valid JSON. The prompt constants are renamed `*_SYSTEM_PROMPT` / `*_USER_PROMPT` (the `*_PROMPT_EN` names are gone).
+- **BREAKING:** the prompt overrides are removed, and a host's text goes in `custom_instructions=`, which appends to the bundled rules instead of replacing them. `KnowledgeExtractor.aextract` loses `prompt` (it replaced the topic-tree rules only) and takes one `custom_instructions`, sent with every LLM call of the extraction: each topic-tree batch, the content and topic merges, classification, leaf split and uncovered-block assignment. `aclassify_category` loses `prompt` and takes `custom_instructions`; passing a removed name raises `TypeError`. The text is sent verbatim, never rendered as a template (a `{{...}}` in it stays literal), as a `<custom_instructions>` block that is always the system message's last (after the taxonomy in classification); `None` or a blank string sends exactly the bundled rules. `category_classify.assemble_system_prompt` is now `(*, taxonomy, custom_instructions)`.
+- **BREAKING:** operators call `LLMClient.achat`, the new name of the protocol method; a custom client passed as `llm` must implement `achat` instead of `chat`. See `everalgo-core` for the contract.
+
+### Removed
+
+- The internal `_llm_json` module (`parse_llm_json`): fenced / prose-wrapped JSON extraction and the invalid-backslash-escape repair. Replies are parsed strictly against their models; a model that copies LaTeX such as `\kappa` into a JSON string unescaped now gets an `LLMOutputError` instead of a repaired parse; the remedy, as the 0.2.0 entry below said, is a client that constrains the reply to JSON (`OpenAICompatClient`'s `json_schema` or `json_object` mode).
+
 ## [0.2.1] - 2026-09-16
 
 ### Changed
@@ -45,5 +58,6 @@ Previously a reserved namespace with `Private :: Do Not Upload`.
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0
 [0.2.0rc1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0rc1
 [0.1.1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.1.1
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0rc1...HEAD
+[0.3.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.1...everalgo-knowledge/v0.3.0rc1
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.0...everalgo-knowledge/v0.2.1

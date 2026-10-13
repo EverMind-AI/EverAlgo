@@ -18,7 +18,7 @@ class Cluster(BaseModel):
     inspects their semantics.
 
     For an incoming item, build a size-1 Cluster (count=1 default; preview=[item_text] when
-    cluster_by_llm will be called).
+    acluster_by_llm will be called).
     """
 
     id: str | None = None  # caller-supplied business id; algo only passes it through, never mints

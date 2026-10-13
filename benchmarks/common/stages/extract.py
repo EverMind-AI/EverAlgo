@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from benchmarks.common.dataset import Conversation
     from benchmarks.common.services import EmbeddingClient
     from benchmarks.common.stages.types import StageContext
-    from everalgo.llm.providers.openai_compat import OpenAICompatClient
+    from everalgo.llm.openai_compat import OpenAICompatClient
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,8 @@ async def _extract_memcell_data(
 
     Pipeline:
     1. EpisodeExtractor — compress raw MemCell into a narrative episode.
-       Raises ``ValueError`` if the episode body is empty (fail-loud).
+       It raises ``LLMOutputError`` on an invalid reply or a blank body; the empty-body
+       ``ValueError`` below stays as this stage's own fail-loud guard.
     2. Parallel: embed episode body + embed episode subject.
 
     Returns:
