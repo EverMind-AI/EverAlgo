@@ -373,10 +373,10 @@ async def test_init_falls_back_to_owner_id_when_name_is_missing_or_blank() -> No
     [
         ([], "non-empty sequence"),
         (cast("Sequence[Episode]", "Alice selected Python."), "non-empty sequence"),
-        ([_episode("   ")], r"episodes\[0\]\.episode must be a non-blank string"),
+        ([_episode("   ")], r"episodes\[0\]\.episode is blank"),
         (
             [_episode("Bob selected Python."), _episode("The team selected Ruff.")],
-            "no episodes reference target user 'Alice'",
+            "no episode narrative mentions target user 'Alice'",
         ),
     ],
 )
@@ -405,7 +405,7 @@ async def test_non_episode_items_fail_before_llm() -> None:
 async def test_blank_owner_id_fails_before_llm() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    with pytest.raises(ValueError, match="owner_id must be a non-blank string"):
+    with pytest.raises(ValueError, match="owner_id is blank"):
         await ProfileExtractor(llm=fake).aextract_from_episodes(
             [_episode("Alice selected Python.")],
             owner_id="   ",
@@ -418,7 +418,7 @@ async def test_blank_owner_id_fails_before_llm() -> None:
 async def test_owner_name_takes_precedence_over_owner_id_during_validation() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    with pytest.raises(ValueError, match="no episodes reference target user 'Alice'"):
+    with pytest.raises(ValueError, match="no episode narrative mentions target user 'Alice'"):
         await ProfileExtractor(llm=fake).aextract_from_episodes(
             [_episode(f"{_OWNER_ID} selected Python.")],
             owner_id=_OWNER_ID,
@@ -480,7 +480,7 @@ async def test_existing_profile_owner_must_match_before_llm() -> None:
 async def test_unsupported_output_language_fails_before_llm() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    with pytest.raises(ValueError, match="unsupported output_language"):
+    with pytest.raises(ValueError, match="names no supported language"):
         await ProfileExtractor(llm=fake).aextract_from_episodes(
             [_episode("Alice selected Python.")],
             owner_id=_OWNER_ID,
@@ -3015,7 +3015,7 @@ async def test_episode_entry_logs_the_validated_language_and_refuses_an_unknown_
         await extractor.aextract_from_episodes(
             [_episode("Alice works in Python.")], owner_id=_OWNER_ID, owner_name=_OWNER_NAME, output_language="GERMAN"
         )
-        with pytest.raises(ValueError, match="unsupported output_language"):
+        with pytest.raises(ValueError, match="names no supported language"):
             await extractor.aextract_from_episodes(
                 [_episode("Alice works in Python.")],
                 owner_id=_OWNER_ID,

@@ -374,7 +374,7 @@ async def test_episode_reports_no_language(output_language: OutputLanguage | Non
 async def test_unsupported_output_language_raises_before_any_call() -> None:
     fake = FakeLLMClient(responses=[_reply()])
 
-    with pytest.raises(ValueError, match="unsupported output_language"):
+    with pytest.raises(ValueError, match="names no supported language"):
         await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id=None, output_language="Klingon")
 
     assert fake.call_count == 0
@@ -573,7 +573,7 @@ def test_render_conversation_rejects_a_message_without_a_timestamp() -> None:
         timestamp=_TS_MS,
     )
 
-    with pytest.raises(ValueError, match=r"^chat message 'm2' has no timestamp$") as raised:
+    with pytest.raises(ValueError, match=r"^chat message 'm2' has no timestamp: ") as raised:
         _render_conversation(cell)
 
     assert "secret plan" not in str(raised.value)

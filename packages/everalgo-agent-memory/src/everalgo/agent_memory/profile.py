@@ -146,7 +146,7 @@ class AgentProfileExtractor:
 
         Raises:
             LLMOutputError: If the reply is not a valid profile update output.
-            ValueError: If a user or assistant message with text carries no timestamp (0). The error names the
+            InvalidInputError: If a user or assistant message with text carries no timestamp (0). The error names the
                 message's id only, never its text.
         """
         noop = AgentProfileUpdate(new_soul_md=soul_md, new_agents_md=agents_md)
@@ -461,7 +461,7 @@ def _render_chat(memcell: MemCell, *, roles: tuple[str, ...]) -> str:
     text that the evidence anti-hallucination check runs against.
 
     Raises:
-        ValueError: If a message with text carries no timestamp (0).
+        InvalidInputError: If a message with text carries no timestamp (0).
     """
     return "\n".join(
         f"({item.role}) {render_chat_line(item)}"

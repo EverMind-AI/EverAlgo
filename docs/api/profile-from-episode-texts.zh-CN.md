@@ -114,11 +114,11 @@ target_user = owner_name.strip() if owner_name and owner_name.strip() else owner
 
 对每个 `episodes[index]` 执行：
 
-1. 该项不是 `Episode` 时以 `TypeError` 拒绝整个调用；叙事为空白时以 `ValueError` 拒绝。
+1. 该项不是 `Episode` 时以 `TypeError` 拒绝整个调用；叙事为空白时以 `InvalidInputError`（`ValueError` 子类，来自 `everalgo.utils`）拒绝。
 2. 使用一致的规则规范化叙事和 `target_user`。
 3. 叙事包含 `target_user` 的字面目标引用时保留该项。
 4. 不包含目标引用时跳过该项，不把叙事传给 LLM。
-5. 检查完全部序列后，仅在没有剩余项时抛出 `ValueError`。
+5. 检查完全部序列后，仅在没有剩余项时抛出 `InvalidInputError`。
 
 结构校验异常必须包含无效项的列表下标；全部未命中异常必须包含目标用户参数。异常和日志都不得输出 Episode 正文。
 
@@ -202,7 +202,7 @@ EverOS 必须把这些证据视为 Episode 派生证据，而不是原始对话�
 - `episodes` 中某项不是 `Episode`；
 - `categories` 不是字符串序列或包含非字符串值。
 
-出现以下情况时，接口在调用 LLM 前抛出 `ValueError`：
+出现以下情况时，接口在调用 LLM 前抛出 `InvalidInputError`（`ValueError` 子类，来自 `everalgo.utils`）：
 
 - `episodes` 为空；
 - 任一 Episode 叙事为空白；

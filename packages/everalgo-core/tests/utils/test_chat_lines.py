@@ -41,7 +41,7 @@ def test_speaker_prefers_the_sender_name() -> None:
 
 def test_line_rejects_a_message_without_a_timestamp_naming_only_its_id() -> None:
     """A timestamp of 0 would render as 1970-01-01; the error never carries the text or the speaker."""
-    with pytest.raises(ValueError, match=r"^chat message 'm1' has no timestamp$") as raised:
+    with pytest.raises(ValueError, match=r"^chat message 'm1' has no timestamp: ") as raised:
         render_chat_line(_message("secret plan", timestamp=0))
 
     assert "secret plan" not in str(raised.value)

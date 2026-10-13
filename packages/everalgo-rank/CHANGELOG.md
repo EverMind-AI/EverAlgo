@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0rc2] - 2026-10-13
+
+### Changed
+
+- Invalid caller input now raises `everalgo.utils.InvalidInputError` (a `ValueError` subclass, so existing handlers keep working) instead of a bare `ValueError`: `enable_rerank=True` without an `llm`, an unsupported `fusion_mode` for the facade, and a candidate shown to the agentic LLM with an empty `episode.content` (named by its id).
+- Requires `everalgo-core>=0.6.0rc2` (the floor was `0.6.0rc1`): the package imports `everalgo.utils.InvalidInputError`, which `0.6.0rc1` does not define.
+
 ## [0.5.0rc1] - 2026-10-13
 
 ### Removed
@@ -103,7 +110,8 @@ result = await SkillRanker(llm=...).arank(
 
 - `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as EverOS's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc2...HEAD
+[0.5.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc1...everalgo-rank/v0.5.0rc2
 [0.5.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.4.1...everalgo-rank/v0.5.0rc1
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.4.0...everalgo-rank/v0.4.1
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.3.1...everalgo-rank/v0.4.0

@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0rc2] - 2026-10-13
+
+### Changed
+
+- A user or assistant message with text but no timestamp now raises `everalgo.utils.InvalidInputError` (a `ValueError` subclass, so existing handlers keep working) instead of a bare `ValueError`; the message names the chat message's id and what to do about it.
+- Requires `everalgo-core>=0.6.0rc2` (the floor was `0.6.0rc1`): the error above is raised by core's `render_chat_line`, which on `0.6.0rc1` still raises a bare `ValueError`.
+
 ## [0.6.0rc1] - 2026-10-13
 
 ### Changed
@@ -97,7 +104,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc2...HEAD
+[0.6.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc1...everalgo-agent-memory/v0.6.0rc2
 [0.6.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.1...everalgo-agent-memory/v0.6.0rc1
 [0.5.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.0...everalgo-agent-memory/v0.5.1
 [0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.4.0...everalgo-agent-memory/v0.5.0

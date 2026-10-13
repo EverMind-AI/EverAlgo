@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from everalgo.utils.errors import InvalidInputError
+
 _logger = logging.getLogger(__name__)
 
 _USER_AGENT = "Mozilla/5.0 (compatible; everalgo; +https://evermind.ai)"
@@ -30,14 +32,19 @@ async def fetch_uri(uri: str, *, timeout: float = 30.0) -> tuple[bytes, str]:
         empty when the upstream sends no ``Content-Type``.
 
     Raises:
-        ValueError: If ``uri`` is empty or its scheme is not ``http`` or ``https``.
+        InvalidInputError: If ``uri`` is empty or its scheme is not ``http`` or ``https``.
         httpx.HTTPError: If the request fails or the upstream answers with an error status; nothing is retried.
     """
     if not uri:
-        raise ValueError("fetch_uri: empty uri")
+        raise InvalidInputError(
+            "fetch_uri got an empty uri: pass an absolute http or https URI, or skip the fetch when there is none"
+        )
     scheme = urlparse(uri).scheme
     if scheme not in ("http", "https"):
-        raise ValueError(f"fetch_uri: only http and https are supported, got scheme {scheme!r}")
+        raise InvalidInputError(
+            f"fetch_uri got uri with scheme {scheme!r}, only http and https are fetched: "
+            "pass an absolute http or https URI, or supply the content directly"
+        )
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers={"User-Agent": _USER_AGENT}) as client:
         response = await client.get(uri)
     response.raise_for_status()

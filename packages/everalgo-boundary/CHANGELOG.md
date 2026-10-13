@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0rc2] - 2026-10-13
+
+### Changed
+
+- A message with text but no timestamp now raises `everalgo.utils.InvalidInputError` (a `ValueError` subclass, so existing handlers keep working) instead of a bare `ValueError`; the message names the chat message's id and what to do about it.
+- Requires `everalgo-core>=0.6.0rc2` (the floor was `0.6.0rc1`): the error above is raised by core's `render_chat_line`, which on `0.6.0rc1` still raises a bare `ValueError`.
+
 ## [0.4.0rc1] - 2026-10-13
 
 ### Changed
@@ -75,7 +82,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc2...HEAD
+[0.4.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc1...everalgo-boundary/v0.4.0rc2
 [0.4.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.3.0...everalgo-boundary/v0.4.0rc1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.2.1...everalgo-boundary/v0.3.0
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.2.0...everalgo-boundary/v0.2.1

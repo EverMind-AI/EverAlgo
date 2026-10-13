@@ -164,6 +164,8 @@ class LLMOutputError(Exception):
 
 `LLMOutputError` 只表示「模型没按要求输出」，**是否重试由宿主自己决定**（第 5 节）。
 
+> **非法入参也有类型。** 上表最后一行的「调用方传了非法参数」，现在抛 `everalgo.utils.InvalidInputError`（`ValueError` 子类），是 `LLMOutputError` 在调用方一侧的对应物。见 `everalgo-core` README 的「Two error types」一节。
+
 **什么时候才需要协议定义调用异常：** 算子要区分「这次调用失败了」和「其他错误」并做不同处理时。那时它不认识宿主的类型，就需要协议给一个统一类型。现有的降级点用不到这种区分，所以不定义。
 
 ---
@@ -306,7 +308,7 @@ check_business_rules(output)                       # 不过 → 抛 LLMOutputErr
 **但异常类型描述的是失败来源，不等于可恢复性：**
 
 - `LLMOutputError` **不一定值得重试**——prompt 本身有问题、业务约束模型永远满足不了，重几次都一样；
-- 裸 `ValueError` 也**不一定是算子 bug**——调用方传了非法参数同样会得到它。
+- 调用方传了非法参数会得到 `everalgo.utils.InvalidInputError`（`ValueError` 的子类），宿主按类型判终态；仍然冒出来的裸 `ValueError` 是 EverAlgo 侧的编程错误（回复模型越出 strict 子集、prompt 模板占位符、客户端构造参数），不是宿主能处理的数据问题。
 
 所以契约只承诺**来源可辨**，重试与否由宿主结合预算、链路位置、已重试次数决定。
 

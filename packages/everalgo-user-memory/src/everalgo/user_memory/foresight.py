@@ -63,7 +63,7 @@ class ForesightExtractor:
 
         Raises:
             LLMOutputError: If the reply is not a valid foresight output.
-            ValueError: If ``output_language`` names no supported language, or a ChatMessage with text has no
+            InvalidInputError: If ``output_language`` names no supported language, or a ChatMessage with text has no
                 timestamp (0).
         """
         messages = _render_messages(
@@ -114,7 +114,7 @@ def _render_conversation(memcell: MemCell) -> str:
     """Render ChatMessage items as :func:`~everalgo.utils.render_chat_line` lines; text-less ones are dropped.
 
     Raises:
-        ValueError: If a message with text carries no timestamp (0).
+        InvalidInputError: If a message with text carries no timestamp (0).
     """
     return "\n".join(render_chat_line(message) for message in chat_messages(memcell) if message.content)
 

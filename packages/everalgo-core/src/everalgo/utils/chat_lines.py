@@ -6,6 +6,7 @@ __all__ = ["render_chat_line", "speaker"]
 
 from typing import Protocol
 
+from everalgo.utils.errors import InvalidInputError
 from everalgo.utils.timestamps import format_utc_time
 
 
@@ -50,9 +51,12 @@ def render_chat_line(message: _ChatLineSource) -> str:
         The line, with no trailing newline.
 
     Raises:
-        ValueError: If ``message.timestamp`` is 0, an unset time that would render as 1970-01-01. The message names
-            the chat message's id, never its text or speaker.
+        InvalidInputError: If ``message.timestamp`` is 0, an unset time that would render as 1970-01-01. The message
+            names the chat message's id, never its text or speaker.
     """
     if not message.timestamp:
-        raise ValueError(f"chat message {message.id!r} has no timestamp")
+        raise InvalidInputError(
+            f"chat message {message.id!r} has no timestamp: every ChatMessage must carry a positive "
+            "epoch-millisecond timestamp; validate or fill it at ingress before calling the operator"
+        )
     return f"[{format_utc_time(message.timestamp, weekday=True)}] {speaker(message)}: {message.content}"

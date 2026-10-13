@@ -33,7 +33,7 @@ class RawFile(BaseModel):
     - ``content`` present → use as-is, no network I/O.
     - ``content`` empty + ``uri`` set + scheme is ``http``/``https`` → the
       parser fetches via HTTP and fills ``content`` internally.
-    - ``content`` empty + ``uri`` empty → ``ValueError`` at parse time.
+    - ``content`` empty + ``uri`` empty → ``InvalidInputError`` at parse time.
     - ``file://`` and other local-filesystem URIs are *rejected* so callers
       cannot make the parser read an arbitrary local path (AGENTS.md §1).
 

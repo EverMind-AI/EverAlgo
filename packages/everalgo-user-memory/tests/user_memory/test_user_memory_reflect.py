@@ -415,7 +415,7 @@ async def test_an_unsupported_language_is_rejected_before_the_llm_is_called(old_
 
     fake = FakeLLMClient(responses=['{"content": "c", "summary": "s", "title": "t"}'])
 
-    with pytest.raises(ValueError, match="unsupported output_language"):
+    with pytest.raises(ValueError, match="names no supported language"):
         await EpisodeReflector(llm=fake).areflect(
             [_ep(1000), _ep(2000)], old_episode=old_episode, output_language="Klingon"
         )

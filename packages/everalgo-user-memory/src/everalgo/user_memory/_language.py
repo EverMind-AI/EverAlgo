@@ -24,7 +24,7 @@ from everalgo.user_memory.prompts.en._language import (
     REGROUPED_PROFILE_LANGUAGE_RULE,
     SOURCE_TEXT_LANGUAGE_RULE,
 )
-from everalgo.utils import render_prompt
+from everalgo.utils import InvalidInputError, render_prompt
 
 __all__ = [
     "COMPACTED_PROFILE_LANGUAGE_RULE",
@@ -85,7 +85,7 @@ def resolve_output_language(output_language: OutputLanguage | str | None) -> Out
         The member, or ``None`` when ``output_language`` is ``None``.
 
     Raises:
-        ValueError: If ``output_language`` names no known language.
+        InvalidInputError: If ``output_language`` names no known language.
     """
     if output_language is None:
         return None
@@ -93,9 +93,9 @@ def resolve_output_language(output_language: OutputLanguage | str | None) -> Out
         return OutputLanguage(output_language)
     except ValueError as exc:
         supported = ", ".join(sorted(OutputLanguage))
-        raise ValueError(
-            f"unsupported output_language {output_language!r}; expected one of {supported}, "
-            f"or None to let the model infer it from the conversation"
+        raise InvalidInputError(
+            f"output_language {output_language!r} names no supported language: pass one of {supported}, "
+            "or None to let the model infer it from the conversation"
         ) from exc
 
 
@@ -126,7 +126,7 @@ def build_language_rule(
         The rule text, with the language already substituted when one was named.
 
     Raises:
-        ValueError: If ``output_language`` names no known language.
+        InvalidInputError: If ``output_language`` names no known language.
     """
     language = resolve_output_language(output_language)
     if language is None:

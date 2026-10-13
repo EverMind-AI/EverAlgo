@@ -152,7 +152,7 @@ class BoundaryDetector:
 
         Raises:
             LLMOutputError: If the LLM reply is not a valid batch output.
-            ValueError: If a message the prompt shows has no timestamp (0).
+            InvalidInputError: If a message the prompt shows has no timestamp (0).
         """
         return await adetect_boundaries(
             items,
@@ -216,7 +216,7 @@ class BoundaryDetector:
 
         Raises:
             LLMOutputError: If the LLM reply is not a valid step output.
-            ValueError: If a message the prompt shows has no timestamp (0).
+            InvalidInputError: If a message the prompt shows has no timestamp (0).
         """
         bridge = smart_mask and len(history) > smart_mask_threshold
         if _needs_force_split(history, new, hard_token_limit, hard_message_limit):
@@ -276,7 +276,7 @@ async def adetect_boundaries(
     Raises:
         LLMOutputError: If the LLM reply is not a valid batch output. The client's own exceptions propagate
             unchanged; retry policy is the caller's concern.
-        ValueError: If a chat message the prompt shows has text but no timestamp (0).
+        InvalidInputError: If a chat message the prompt shows has text but no timestamp (0).
     """
     chat_positions, messages = _chat_view(items)
     if not messages:
@@ -328,7 +328,7 @@ async def adetect_boundary_step(
     Raises:
         LLMOutputError: If the LLM reply is not a valid step output. The client's own exceptions propagate
             unchanged; retry/fallback policy is the caller's concern.
-        ValueError: If a chat message the prompt shows has text but no timestamp (0).
+        InvalidInputError: If a chat message the prompt shows has text but no timestamp (0).
     """
     if not conversation_history:
         return BoundaryDecision(
@@ -367,7 +367,7 @@ async def _ask_for_boundaries(
 
     Raises:
         LLMOutputError: If the LLM reply is not a valid batch output.
-        ValueError: If a message the prompt shows has no timestamp (0).
+        InvalidInputError: If a message the prompt shows has no timestamp (0).
     """
     reply = await _call_llm_for_batch(llm, _batch_request(messages, custom_instructions))
     in_range = [b for b in reply.boundaries if 1 <= b < len(messages)]
@@ -386,7 +386,7 @@ def _batch_request(messages: Sequence[ChatMessage], custom_instructions: str | N
     """The batch call's ``[system, user]`` pair; ``count`` is the window size, so it bounds the indices.
 
     Raises:
-        ValueError: If a message the prompt shows has no timestamp (0).
+        InvalidInputError: If a message the prompt shows has no timestamp (0).
     """
     user = render_prompt(
         BATCH_BOUNDARY_DETECT_USER_PROMPT,
@@ -414,7 +414,7 @@ def _step_request(
     """The step call's ``[system, user]`` pair.
 
     Raises:
-        ValueError: If a message the prompt shows has no timestamp (0).
+        InvalidInputError: If a message the prompt shows has no timestamp (0).
     """
     user = render_prompt(
         STEP_BOUNDARY_DETECT_USER_PROMPT,

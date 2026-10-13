@@ -7,6 +7,7 @@ Prompt strings are not tools: they live next to their algorithm, at ``<subpkg>/p
 from __future__ import annotations
 
 __all__ = [
+    "InvalidInputError",
     "ascii_width",
     "count_tokens",
     "decode_bytes",
@@ -27,6 +28,7 @@ __all__ = [
 import logging
 
 from everalgo.utils.chat_lines import render_chat_line, speaker
+from everalgo.utils.errors import InvalidInputError
 from everalgo.utils.http import fetch_uri
 from everalgo.utils.json import json_default
 from everalgo.utils.markup import paragraphs, tagged

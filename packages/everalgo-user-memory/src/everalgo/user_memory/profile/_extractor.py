@@ -60,6 +60,7 @@ from everalgo.user_memory.profile._stages import (
     _StagePrompts,
 )
 from everalgo.user_memory.prompts.en.profile_from_episode_texts import REGROUP_REPLY_SKELETONS
+from everalgo.utils import InvalidInputError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -118,18 +119,21 @@ class ProfileExtractor:
             The extracted or updated Profile.
 
         Raises:
-            ValueError: If ``memcells`` is empty, ``sender_id`` is not a user speaker in ``memcells``,
+            InvalidInputError: If ``memcells`` is empty, ``sender_id`` is not a user speaker in ``memcells``,
                 ``output_language`` names no supported language, or a ChatMessage with text has no timestamp (0).
             LLMOutputError: If a reply is not a valid INIT, UPDATE, COMPACT or REGROUP output.
         """
         if not memcells:
-            raise ValueError("memcells must contain at least one MemCell")
+            raise InvalidInputError(
+                "memcells is empty, there is nothing to extract a profile from: "
+                "pass at least one MemCell, or skip the call when a conversation has none"
+            )
 
         user_senders = _user_senders(memcells)
         if sender_id not in user_senders:
-            raise ValueError(
-                f"sender_id {sender_id!r} is not a user speaker in the provided memcells; "
-                f"available user senders: {sorted(user_senders)!r}"
+            raise InvalidInputError(
+                f"sender_id {sender_id!r} is not a user speaker in memcells (user senders: {sorted(user_senders)!r}): "
+                "pass the sender_id of a human speaker (role 'user') who appears in the memcells"
             )
 
         language = resolve_output_language(output_language)
@@ -212,7 +216,7 @@ class ProfileExtractor:
         Raises:
             TypeError: If an item of ``episodes`` is not an :class:`Episode`, or ``categories`` is not a sequence
                 of strings or contains a non-string value.
-            ValueError: If owner or Episode validation fails, ``old_profile`` belongs to another owner, or
+            InvalidInputError: If owner or Episode validation fails, ``old_profile`` belongs to another owner, or
                 ``output_language`` names no supported language.
             LLMOutputError: If a reply is not a valid INIT, UPDATE, COMPACT or REGROUP output.
         """
@@ -221,7 +225,10 @@ class ProfileExtractor:
         category_snapshot = _normalize_available_categories(categories)
         available_categories = _render_available_categories(category_snapshot)
         if old_profile is not None and old_profile.owner_id != owner_id:
-            raise ValueError(f"old_profile.owner_id {old_profile.owner_id!r} does not match owner_id {owner_id!r}")
+            raise InvalidInputError(
+                f"old_profile.owner_id {old_profile.owner_id!r} does not match owner_id {owner_id!r}: "
+                "pass the stored profile of the same owner, or None to start a new one"
+            )
         language = resolve_output_language(output_language)
 
         mode = "INIT" if old_profile is None else "UPDATE"

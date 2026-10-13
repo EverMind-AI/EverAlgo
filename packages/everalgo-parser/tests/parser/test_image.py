@@ -59,7 +59,7 @@ async def test_aparse_empty_content_raises_value_error() -> None:
 
 
 async def test_aparse_unsupported_extension_raises_value_error() -> None:
-    with pytest.raises(ValueError, match="unsupported image extension"):
+    with pytest.raises(ValueError, match="not a supported image extension"):
         await image.aparse(RawFile(content=b"x", extension="xyz"), llm=_fake("unused"))
 
 

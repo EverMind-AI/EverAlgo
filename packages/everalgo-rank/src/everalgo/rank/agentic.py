@@ -39,7 +39,7 @@ from everalgo.rank.prompts.en.multi_query import MULTI_QUERY_PROMPT_EN, MULTI_QU
 from everalgo.rank.prompts.en.refined_query import REFINED_QUERY_PROMPT_EN, REFINED_QUERY_USER_PROMPT
 from everalgo.rank.prompts.en.sufficiency import SUFFICIENCY_CHECK_PROMPT_EN, SUFFICIENCY_CHECK_USER_PROMPT
 from everalgo.rank.protocols import AgenticDecision, RerankFn, RetrieveFn
-from everalgo.utils import format_utc_time, render_prompt
+from everalgo.utils import InvalidInputError, format_utc_time, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -138,7 +138,7 @@ async def aagentic_retrieve(
     Raises:
         LLMOutputError: If an LLM reply is not a valid output for its call. The client's own exceptions propagate
             unchanged; retry / fallback is the caller's concern.
-        ValueError: If a candidate shown to the LLM has no ``episode.content``.
+        InvalidInputError: If a candidate shown to the LLM has no ``episode.content``.
         TypeError: If a candidate shown to the LLM has no ``episode`` dict in its metadata.
     """
     # ── Round 1 ──────────────────────────────────────────────────────────────
@@ -457,7 +457,7 @@ def _format_docs(candidates: Sequence[Candidate]) -> str:
 
     Raises:
         TypeError: If any candidate has no ``episode`` dict in its metadata.
-        ValueError: If any candidate lacks ``episode.content`` — fail-loud, no fallback.
+        InvalidInputError: If any candidate lacks ``episode.content`` — fail-loud, no fallback.
     """
     if not candidates:
         return "No retrieval results"
@@ -470,7 +470,10 @@ def _format_docs(candidates: Sequence[Candidate]) -> str:
         subject = str(episode_dict.get("subject") or "N/A")
         body = str(episode_dict.get("content") or "")
         if not body:
-            raise ValueError(f"Candidate {c.id} has no episode.content")
+            raise InvalidInputError(
+                f"candidate {c.id!r} has an empty metadata['episode']['content']: every candidate shown to the LLM "
+                "needs its episode text; drop the candidate or hydrate its content before calling"
+            )
         if len(body) > 500:
             body = body[:500] + "..."
         timestamp_str = _format_doc_timestamp(c.metadata.get("timestamp"))

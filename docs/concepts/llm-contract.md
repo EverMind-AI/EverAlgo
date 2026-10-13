@@ -164,6 +164,8 @@ So EverAlgo has only one rule to keep here: **exceptions raised by the implement
 
 `LLMOutputError` means only "the model did not produce the required output"; **whether to retry is the host's own decision** (Section 5).
 
+> **Invalid arguments have a type too.** The table's last row says "the caller passed invalid arguments"; since this change that case raises `everalgo.utils.InvalidInputError` (a `ValueError` subclass), the caller-side counterpart of `LLMOutputError`. See "Two error types" in the `everalgo-core` README.
+
 **When the protocol would need to define a call exception:** when an operator must distinguish "this call failed" from "some other error" and handle them differently. The operator does not know the host's types, so the protocol would then have to provide a common type. The existing degradation points need no such distinction, so none is defined.
 
 ---
@@ -306,7 +308,7 @@ The operator has no retry mechanism, and should not have one: it does not know t
 **But an exception type describes the source of a failure, not whether it is recoverable:**
 
 - `LLMOutputError` is **not necessarily worth retrying**: if the prompt itself is broken, or a business rule is one the model can never satisfy, retrying any number of times gives the same result;
-- a bare `ValueError` is **not necessarily an operator bug**: a caller passing invalid arguments gets one as well.
+- a caller passing invalid arguments gets `everalgo.utils.InvalidInputError` (a subclass of `ValueError`), which the host reads by type as terminal; a bare `ValueError` that still escapes is a programming error on the EverAlgo side (a reply model outside the strict schema subset, a prompt template placeholder, a client constructor argument), never a data problem the host can act on.
 
 So the contract promises only that **the source is distinguishable**; whether to retry is decided by the host from budget, pipeline position, and retries already made.
 

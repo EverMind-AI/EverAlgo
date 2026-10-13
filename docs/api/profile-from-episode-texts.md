@@ -114,11 +114,11 @@ target_user = owner_name.strip() if owner_name and owner_name.strip() else owner
 
 For each `episodes[index]`:
 
-1. Reject the call with `TypeError` if the item is not an `Episode`, and with `ValueError` if its narrative is blank.
+1. Reject the call with `TypeError` if the item is not an `Episode`, and with `InvalidInputError` (a `ValueError`, from `everalgo.utils`) if its narrative is blank.
 2. Normalize the narrative and `target_user` consistently for comparison.
 3. Retain the Episode if its narrative contains `target_user` as a literal target reference.
 4. Skip the Episode otherwise, without passing its narrative to the LLM.
-5. After checking the full sequence, reject the call with `ValueError` only if no Episodes remain.
+5. After checking the full sequence, reject the call with `InvalidInputError` only if no Episodes remain.
 
 Structural failures identify the invalid list index. An all-unmatched failure identifies the target value. Neither errors nor logs include Episode bodies.
 
@@ -202,7 +202,7 @@ The method raises `TypeError` before calling the LLM when:
 - an item of `episodes` is not an `Episode`; or
 - `categories` is not a sequence of strings or contains a non-string value.
 
-The method raises `ValueError` before calling the LLM when:
+The method raises `InvalidInputError` (a `ValueError` subclass, from `everalgo.utils`) before calling the LLM when:
 
 - `episodes` is empty;
 - an Episode narrative is blank;

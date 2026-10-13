@@ -26,7 +26,7 @@ from everalgo.parser._replies import _call_llm_for_text
 from everalgo.parser._utils import check_aspect_ratio, split_image_with_overlap
 from everalgo.parser.prompts.en import MERGE_USER_PROMPT, PROMPT_FOR_MERGE, PROMPT_FOR_PICTURE
 from everalgo.types import Modality, ParsedContent
-from everalgo.utils import render_prompt, tagged
+from everalgo.utils import InvalidInputError, render_prompt, tagged
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -71,17 +71,20 @@ async def aparse(raw_file: RawFile, *, llm: LLMClient) -> ParsedContent:
     second LLM call. Normal-ratio images go through a single OCR call.
 
     Raises:
-        ValueError: If ``raw_file`` has no content or an unsupported extension.
+        InvalidInputError: If ``raw_file`` has no content or an unsupported extension.
         LLMOutputError: If an OCR reply is not a valid ``{"text": "..."}`` object.
     """
     if not raw_file.content:
-        raise ValueError("RawFile.content is empty; cannot parse image")
+        raise InvalidInputError(
+            "RawFile.content is empty, there is nothing to read as an image: pass the image bytes in content"
+        )
 
     extension = raw_file.extension.lower().lstrip(".")
     mime = _MIME_MAP.get(extension)
     if mime is None:
-        raise ValueError(
-            f"image.aparse: unsupported image extension {raw_file.extension!r}. Supported: {sorted(_MIME_MAP)}"
+        raise InvalidInputError(
+            f"RawFile.extension {raw_file.extension!r} is not a supported image extension: "
+            f"set it to one of {sorted(_MIME_MAP)}"
         )
 
     payload_bytes = raw_file.content

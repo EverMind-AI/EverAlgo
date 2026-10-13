@@ -15,7 +15,7 @@ from everalgo.rank._render import append_custom_instructions
 from everalgo.rank._replies import _call_llm_for_rerank
 from everalgo.rank.prompts.rerank_user import RERANK_USER_PROMPT
 from everalgo.types import Candidate, RankInput, RankOutput, ScoredItem
-from everalgo.utils import render_prompt
+from everalgo.utils import InvalidInputError, render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -183,15 +183,16 @@ async def _basic_arank(
 
     Raises:
         KeyError: ``rank_input.memory_type`` not in ``_ALGO_REGISTRY``.
-        ValueError: Unsupported ``fusion_mode`` for the facade.
+        InvalidInputError: ``enable_rerank`` is set without an ``llm``, or ``fusion_mode`` is unsupported for the
+            facade.
     """
     spec = _ALGO_REGISTRY.get(rank_input.memory_type)
     if spec is None:
         raise KeyError(f"No ranker for memory_type={rank_input.memory_type!r}; registered: {sorted(_ALGO_REGISTRY)}")
     if config.fusion_mode not in spec.modes:
-        raise ValueError(
-            f"fusion_mode={config.fusion_mode!r} is not supported by the "
-            f"{rank_input.memory_type!r} facade; allowed: {list(spec.modes)}"
+        raise InvalidInputError(
+            f"config.fusion_mode={config.fusion_mode!r} is not supported by the {rank_input.memory_type!r} facade: "
+            f"set it to one of {list(spec.modes)}"
         )
 
     item_type = spec.item_type
@@ -222,7 +223,9 @@ async def _basic_arank(
 
     if enable_rerank and scored:
         if llm is None:
-            raise ValueError("enable_rerank=True requires llm to be provided")
+            raise InvalidInputError(
+                "enable_rerank=True was passed without an llm: pass the llm client, or set enable_rerank=False"
+            )
         with_query = [
             Candidate(
                 id=item.id,

@@ -89,7 +89,7 @@ async def test_aparse_strips_template_variable_leftovers() -> None:
 @pytest.mark.asyncio
 async def test_aparse_empty_body_raises() -> None:
     """Empty ``content`` AND empty ``uri`` → cannot dispatch."""
-    with pytest.raises(ValueError, match="either content or uri"):
+    with pytest.raises(ValueError, match="neither content nor uri"):
         await url.aparse(RawFile(), llm=_fake())
 
 
@@ -229,7 +229,7 @@ async def test_dispatch_inner_unsupported_modality_raises() -> None:
     """UNKNOWN modality (not in dispatch table) → ValueError from _dispatch_inner."""
     from everalgo.parser.url import _dispatch_inner
 
-    with pytest.raises(ValueError, match="cannot dispatch"):
+    with pytest.raises(ValueError, match="cannot read"):
         await _dispatch_inner(Modality.UNKNOWN, b"data", "application/octet-stream", "https://x.com", llm=_fake())
 
 

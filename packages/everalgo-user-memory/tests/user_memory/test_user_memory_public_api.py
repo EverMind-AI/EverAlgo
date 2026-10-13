@@ -8,13 +8,14 @@ from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_public_symbols_exported() -> None:
-    """4 Extractors + EpisodeReflector + BoundaryDetector + OutputLanguage + DetectionResult re-export."""
+    """4 Extractors + EpisodeReflector + EpisodeSummarizer + BoundaryDetector + OutputLanguage + DetectionResult."""
     for name in (
         "AtomicFactExtractor",
         "BoundaryDetector",
         "DetectionResult",
         "EpisodeExtractor",
         "EpisodeReflector",
+        "EpisodeSummarizer",
         "ForesightExtractor",
         "OutputLanguage",
         "ProfileExtractor",
@@ -23,7 +24,7 @@ def test_public_symbols_exported() -> None:
 
 
 def test_dunder_all_lists_exactly_the_public_symbols() -> None:
-    """__all__ exposes 4 Extractors + EpisodeReflector + BoundaryDetector + OutputLanguage + DetectionResult."""
+    """__all__ lists exactly the symbols the test above checks, no more."""
     assert sorted(everalgo.user_memory.__all__) == sorted(
         [
             "AtomicFactExtractor",
@@ -31,6 +32,7 @@ def test_dunder_all_lists_exactly_the_public_symbols() -> None:
             "DetectionResult",
             "EpisodeExtractor",
             "EpisodeReflector",
+            "EpisodeSummarizer",
             "ForesightExtractor",
             "OutputLanguage",
             "ProfileExtractor",
@@ -45,11 +47,12 @@ def test_workspace_extractor_is_not_re_exported() -> None:
 
 
 def test_user_memory_extractors_instantiable_with_llm() -> None:
-    """All 4 Extractors + EpisodeReflector accept a required llm= keyword argument at construction."""
+    """Every LLM-backed operator class accepts a required llm= keyword argument at construction."""
     from everalgo.user_memory import (
         AtomicFactExtractor,
         EpisodeExtractor,
         EpisodeReflector,
+        EpisodeSummarizer,
         ForesightExtractor,
         ProfileExtractor,
     )
@@ -58,6 +61,7 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
     assert AtomicFactExtractor(llm=fake).__class__.__name__ == "AtomicFactExtractor"
     assert EpisodeExtractor(llm=fake).__class__.__name__ == "EpisodeExtractor"
     assert EpisodeReflector(llm=fake).__class__.__name__ == "EpisodeReflector"
+    assert EpisodeSummarizer(llm=fake).__class__.__name__ == "EpisodeSummarizer"
     assert ForesightExtractor(llm=fake).__class__.__name__ == "ForesightExtractor"
     assert ProfileExtractor(llm=fake).__class__.__name__ == "ProfileExtractor"
 

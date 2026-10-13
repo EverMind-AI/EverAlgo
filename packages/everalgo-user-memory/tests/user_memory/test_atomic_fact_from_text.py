@@ -286,7 +286,7 @@ async def test_rendering_injects_the_named_language() -> None:
 async def test_an_unsupported_language_is_rejected_before_the_llm_is_called() -> None:
     fake = FakeLLMClient(responses=[_reply()])
 
-    with pytest.raises(ValueError, match="unsupported output_language"):
+    with pytest.raises(ValueError, match="names no supported language"):
         await AtomicFactExtractor(llm=fake).aextract_from_text(
             "text", timestamp=_MARCH_10_2024_14H_UTC_MS, output_language="Klingon"
         )

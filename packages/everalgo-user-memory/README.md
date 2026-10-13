@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, plus `BoundaryDetector`, re-exported unchanged from `everalgo-boundary`.
+User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, an `EpisodeSummarizer` that writes the summary of an episode text already stored, plus `BoundaryDetector`, re-exported unchanged from `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -90,7 +90,7 @@ episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice")
 ```
 
 Plain strings work too, in any casing (`"chinese"`, `"German"`) — convenient when the value comes from
-config. An unrecognised name raises `ValueError` rather than reaching the prompt.
+config. An unrecognised name raises `everalgo.utils.InvalidInputError` (a `ValueError`) rather than reaching the prompt.
 
 **Decide the language once, upstream, and pass the same value to every call.** The alternative — deriving
 one extractor's language from another's output — inherits that extractor's error rate, and for profiles the
@@ -100,9 +100,9 @@ back out. Note also that `category` and `trait` labels are model-authored, so th
 with the descriptions (`Location` versus `居住地`) — worth knowing if you group or filter on them.
 
 What "leave it out" means depends on the operator. The four reading a raw conversation judge the language from
-what the participants write, which is the 10.2% path above. The three reading already-extracted memory —
-`AtomicFactExtractor.aextract_from_text`, `ProfileExtractor.aextract_from_episodes`, and
-`EpisodeReflector.areflect` — instead inherit the language of their input, which is a much easier call for a
+what the participants write, which is the 10.2% path above. The four reading already-extracted memory —
+`AtomicFactExtractor.aextract_from_text`, `ProfileExtractor.aextract_from_episodes`,
+`EpisodeReflector.areflect` and `EpisodeSummarizer.asummarize` — instead inherit the language of their input, which is a much easier call for a
 single-language narrative but not free. The Profile Episode-text path and `areflect` can take several episodes,
 so inputs that disagree on language leave the model to pick one; an update inherits the existing Profile or
 narrative language. Name a language when inputs may disagree, or to move an existing result that is already in
@@ -112,7 +112,7 @@ the wrong one.
 
 Every operator that takes per-call instructions takes them as `custom_instructions=`: the text is added to the bundled rules
 as the last block of the system message and never replaces them. `BoundaryDetector`, `EpisodeExtractor`, `ProfileExtractor`,
-`AtomicFactExtractor.aextract_from_text` and `EpisodeReflector` take it; `ForesightExtractor` and `AtomicFactExtractor.aextract`
+`AtomicFactExtractor.aextract_from_text`, `EpisodeReflector` and `EpisodeSummarizer` take it; `ForesightExtractor` and `AtomicFactExtractor.aextract`
 take no per-call instructions at all.
 
 `ProfileExtractor` takes `custom_instructions=`, and it appends rather than replaces: the host's
@@ -212,6 +212,14 @@ class EpisodeReflector:
         custom_instructions: str | None = None,   # host's instructions, the closing block
         output_language: OutputLanguage | str | None = None,   # None → inherited from the input
     ) -> Episode: ...
+
+class EpisodeSummarizer:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def asummarize(
+        self, episode_text: str, *,      # the stored narrative (Episode.episode); blank → InvalidInputError
+        output_language: OutputLanguage | str | None = None,   # None → inherited from the text
+        custom_instructions: str | None = None,   # host's instructions, the closing block
+    ) -> str: ...
 ```
 
 Every episode carries three model-written fields: `subject` (the title), `episode` (the full narrative) and
@@ -221,6 +229,25 @@ substituting a value. Up to 0.4 the field was a blind `episode[:200]` slice, bec
 for it — a truncation cut mid-word in English, and in Chinese a verbatim copy of most of the body.
 
 `EpisodeReflector` produces the same three fields, so a merged episode has a preview of the merged narrative.
+
+`EpisodeSummarizer` writes the preview alone, for an episode whose narrative did not just come out of
+`EpisodeExtractor` — a body a user edited, or a record written before the extractor produced summaries. It asks for
+the summary in the very words extraction uses (`prompts.en.episode.EPISODE_SUMMARY_FIELD_RULE`, the one copy both
+prompts are built from), adds that the preview may state no fact the text does not and keeps the text's time format,
+and applies the same 400-unit sentence-boundary guard, so the two paths store interchangeable previews. One call —
+a system message of rules (`EPISODE_SUMMARY_SYSTEM_PROMPT`, then `<output_language>` and, last, `<custom_instructions>`
+when the host passes some) and a user message holding only the text in `<episode_text>`; the reply is held strictly to
+`{"summary"}`, and a reply that fails or leaves it blank raises `LLMOutputError` with no retry. A blank `episode_text`
+raises `InvalidInputError` before any call; no length bound is applied, the host owns its input budget.
+
+```python
+from everalgo.user_memory import EpisodeSummarizer, OutputLanguage
+
+summary = await EpisodeSummarizer(llm=client).asummarize(
+    episode.episode, output_language=OutputLanguage.CHINESE
+)
+episode = episode.model_copy(update={"summary": summary})
+```
 
 `EpisodeReflector.areflect` and `AtomicFactExtractor.aextract_from_text` each make one call — a system message of rules followed by the call-level `<output_language>` block and, only when the host passes some, a closing `<custom_instructions>` block, and a user message holding only the data: the numbered episodes (and, in UPDATE mode, the narrative being updated), or the text and its time. The reply is validated strictly — `{"content", "summary", "title"}` for reflect, `{"atomic_facts": {"atomic_fact"}}` for atomic facts — and a reply that fails raises `LLMOutputError` with no retry; blank fact sentences are dropped. `AtomicFactExtractor.aextract` keeps its single-message prompt, takes no `custom_instructions`, and is held to the same atomic-fact reply. None of the three takes a `prompt=` override.
 
@@ -232,7 +259,7 @@ for it — a truncation cut mid-word in English, and in Chinese a verbatim copy 
 
 The merge is time-aware. Every profile item carries `observed_at`, the observation date of the narrative that last established it, and `Profile.timestamp` never moves backwards. An Episode observed before an item was established may add facts and evidence but cannot rewrite or delete that item — the rule is stated in the UPDATE prompt and enforced in code — so a backfilled older Episode arriving after a newer one cannot turn the profile back in time. Callers pass only the Episodes new to the profile; a batch that straddles the stored `Profile.timestamp` is split into a historical pass and a current pass. See the [Episode integration contract](../../docs/api/profile-from-episode-texts.md).
 
-All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, and the Episode Profile method is exposed as `extract_from_episodes(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
+All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, the Episode Profile method is exposed as `extract_from_episodes(...)`, and `EpisodeSummarizer.asummarize` as `summarize(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
 
 ## Testing
 
