@@ -43,14 +43,13 @@ from everalgo.knowledge._classify import aclassify_category
 from everalgo.knowledge._doc_root import build_doc_root
 from everalgo.knowledge._flatten import flatten
 from everalgo.knowledge._postprocess import apostprocess_topics
-from everalgo.knowledge._render import append_custom_instructions
 from everalgo.knowledge._replies import TopicTreeReply, ask_llm
 from everalgo.knowledge._topic_build import build_topic_clips
 from everalgo.knowledge.prompts.en.topic_tree_extract import (
     TOPIC_TREE_EXTRACT_SYSTEM_PROMPT,
     TOPIC_TREE_EXTRACT_USER_PROMPT,
 )
-from everalgo.utils import render_prompt
+from everalgo.utils import append_custom_instructions, render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient

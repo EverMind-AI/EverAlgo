@@ -50,7 +50,7 @@ __all__ = [
     "assemble_system_prompt",
 ]
 
-from everalgo.utils import paragraphs, tagged
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 _ROLE = """\
 You are an expert episodic memory extraction analyst and information architect.
@@ -173,12 +173,12 @@ def assemble_system_prompt(*, custom_instructions: str | None, language_rule: st
     Both values are placed verbatim and are never scanned for placeholders, so braces in them stay literal.
 
     Args:
-        custom_instructions: The caller's instructions for the ``<custom_instructions>`` block; ``None`` leaves the
-            block out.
+        custom_instructions: The caller's instructions for the ``<custom_instructions>`` block; ``None`` or a blank string
+            leaves the block out.
         language_rule: The ``<output_language>`` text, as ``user_memory._language.build_language_rule`` returns it.
 
     Returns:
         The system message.
     """
-    custom = () if custom_instructions is None else (tagged("custom_instructions", custom_instructions),)
-    return paragraphs(ATOMIC_FACT_FROM_TEXT_SYSTEM_PROMPT, tagged("output_language", language_rule), *custom)
+    system = paragraphs(ATOMIC_FACT_FROM_TEXT_SYSTEM_PROMPT, tagged("output_language", language_rule))
+    return append_custom_instructions(system, custom_instructions)

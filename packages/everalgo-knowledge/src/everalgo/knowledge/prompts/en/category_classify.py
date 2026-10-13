@@ -26,8 +26,7 @@ from __future__ import annotations
 
 __all__ = ["CATEGORY_CLASSIFY_SYSTEM_PROMPT", "CATEGORY_CLASSIFY_USER_PROMPT", "assemble_system_prompt"]
 
-from everalgo.knowledge._render import append_custom_instructions
-from everalgo.utils import paragraphs, tagged
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 _ROLE = """\
 You are a document classifier. Pick exactly ONE category id from the taxonomy below."""

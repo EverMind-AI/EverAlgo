@@ -482,7 +482,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-boundary"
-version = "0.4.0rc2"
+version = "0.4.0rc3"
 source = { editable = "packages/everalgo-boundary" }
 dependencies = [
     { name = "asgiref" },
@@ -497,7 +497,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-clustering"
-version = "0.3.0rc1"
+version = "0.3.0rc2"
 source = { editable = "packages/everalgo-clustering" }
 dependencies = [
     { name = "asgiref" },
@@ -516,7 +516,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-core"
-version = "0.6.0rc2"
+version = "0.6.0rc3"
 source = { editable = "packages/everalgo-core" }
 dependencies = [
     { name = "httpx" },
@@ -533,7 +533,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-knowledge"
-version = "0.3.0rc1"
+version = "0.3.0rc2"
 source = { editable = "packages/everalgo-knowledge" }
 dependencies = [
     { name = "asgiref" },
@@ -576,7 +576,7 @@ provides-extras = ["svg"]
 
 [[package]]
 name = "everalgo-rank"
-version = "0.5.0rc2"
+version = "0.5.0rc3"
 source = { editable = "packages/everalgo-rank" }
 dependencies = [
     { name = "asgiref" },
@@ -593,7 +593,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.9.0rc2"
+version = "0.9.0rc3"
 source = { editable = "packages/everalgo-user-memory" }
 dependencies = [
     { name = "asgiref" },

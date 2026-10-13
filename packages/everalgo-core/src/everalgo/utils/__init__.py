@@ -8,6 +8,7 @@ from __future__ import annotations
 
 __all__ = [
     "InvalidInputError",
+    "append_custom_instructions",
     "ascii_width",
     "count_tokens",
     "decode_bytes",
@@ -31,7 +32,7 @@ from everalgo.utils.chat_lines import render_chat_line, speaker
 from everalgo.utils.errors import InvalidInputError
 from everalgo.utils.http import fetch_uri
 from everalgo.utils.json import json_default
-from everalgo.utils.markup import paragraphs, tagged
+from everalgo.utils.markup import append_custom_instructions, paragraphs, tagged
 from everalgo.utils.templates import render_prompt
 from everalgo.utils.text import ascii_width, decode_bytes
 from everalgo.utils.timestamps import format_utc_date, format_utc_time, parse_utc_date

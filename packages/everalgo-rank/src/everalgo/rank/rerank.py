@@ -11,11 +11,10 @@ from asgiref.sync import async_to_sync
 from pydantic import BaseModel, ConfigDict
 
 from everalgo.llm import LLMMessage
-from everalgo.rank._render import append_custom_instructions
 from everalgo.rank._replies import _call_llm_for_rerank
 from everalgo.rank.prompts.rerank_user import RERANK_USER_PROMPT
 from everalgo.types import Candidate, RankInput, RankOutput, ScoredItem
-from everalgo.utils import InvalidInputError, render_prompt
+from everalgo.utils import InvalidInputError, append_custom_instructions, render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient

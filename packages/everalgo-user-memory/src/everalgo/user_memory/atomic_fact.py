@@ -10,7 +10,7 @@ from asgiref.sync import async_to_sync
 from everalgo.llm import LLMMessage
 from everalgo.types import AtomicFact, MemCell
 from everalgo.user_memory._language import SOURCE_TEXT_LANGUAGE_RULE, OutputLanguage, build_language_rule
-from everalgo.user_memory._render import chat_messages, nonblank
+from everalgo.user_memory._render import chat_messages
 from everalgo.user_memory._replies import _AtomicFactsReply, _call_llm_for_atomic_facts
 from everalgo.user_memory.prompts.en.atomic_fact import ATOMIC_FACT_PROMPT
 from everalgo.user_memory.prompts.en.atomic_fact_from_text import (
@@ -143,7 +143,7 @@ def _render_from_text_messages(
             a template; None or a blank string leaves the block out.
         language_rule: The ``<output_language>`` text.
     """
-    system = assemble_system_prompt(custom_instructions=nonblank(custom_instructions), language_rule=language_rule)
+    system = assemble_system_prompt(custom_instructions=custom_instructions, language_rule=language_rule)
     user = render_prompt(ATOMIC_FACT_FROM_TEXT_USER_PROMPT, None, time=time, episode_text=text)
     return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=user)]
 

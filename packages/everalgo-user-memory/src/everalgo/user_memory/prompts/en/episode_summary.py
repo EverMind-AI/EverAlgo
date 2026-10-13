@@ -34,7 +34,7 @@ __all__ = [
 ]
 
 from everalgo.user_memory.prompts.en.episode import EPISODE_SUMMARY_FIELD_RULE
-from everalgo.utils import paragraphs, tagged
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 _ROLE = (
     "You write the display preview of one episodic memory: the text in <episode_text> is the episode's content, "
@@ -69,11 +69,11 @@ def assemble_system_prompt(*, custom_instructions: str | None, language_rule: st
 
     Args:
         custom_instructions: The caller's instructions for the ``<custom_instructions>`` block, the message's last;
-            ``None`` leaves the block out.
+            ``None`` or a blank string leaves the block out.
         language_rule: The ``<output_language>`` text, as ``user_memory._language.build_language_rule`` returns it.
 
     Returns:
         The system message.
     """
-    custom = () if custom_instructions is None else (tagged("custom_instructions", custom_instructions),)
-    return paragraphs(EPISODE_SUMMARY_SYSTEM_PROMPT, tagged("output_language", language_rule), *custom)
+    system = paragraphs(EPISODE_SUMMARY_SYSTEM_PROMPT, tagged("output_language", language_rule))
+    return append_custom_instructions(system, custom_instructions)

@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from asgiref.sync import async_to_sync
 
 from everalgo.llm import LLMMessage
-from everalgo.rank._render import append_custom_instructions
 from everalgo.rank._replies import (
     _call_llm_for_multi_queries,
     _call_llm_for_refined_query,
@@ -39,7 +38,7 @@ from everalgo.rank.prompts.en.multi_query import MULTI_QUERY_PROMPT_EN, MULTI_QU
 from everalgo.rank.prompts.en.refined_query import REFINED_QUERY_PROMPT_EN, REFINED_QUERY_USER_PROMPT
 from everalgo.rank.prompts.en.sufficiency import SUFFICIENCY_CHECK_PROMPT_EN, SUFFICIENCY_CHECK_USER_PROMPT
 from everalgo.rank.protocols import AgenticDecision, RerankFn, RetrieveFn
-from everalgo.utils import InvalidInputError, format_utc_time, render_prompt
+from everalgo.utils import InvalidInputError, append_custom_instructions, format_utc_time, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

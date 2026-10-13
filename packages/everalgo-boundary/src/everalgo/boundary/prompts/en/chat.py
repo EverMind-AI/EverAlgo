@@ -37,7 +37,7 @@ __all__ = [
     "assemble_system_prompt",
 ]
 
-from everalgo.utils import paragraphs, tagged
+from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
 # --------------------------------------------------------------------------------------------------
 # Batch
@@ -225,6 +225,4 @@ def assemble_system_prompt(rules: str, /, *, custom_instructions: str | None) ->
     Returns:
         The system message.
     """
-    if custom_instructions is None or not custom_instructions.strip():
-        return rules
-    return paragraphs(rules, tagged("custom_instructions", custom_instructions))
+    return append_custom_instructions(rules, custom_instructions)

@@ -11,7 +11,7 @@ from everalgo.user_memory._language import (
     OutputLanguage,
     build_language_rule,
 )
-from everalgo.user_memory._render import chat_messages, nonblank
+from everalgo.user_memory._render import chat_messages
 from everalgo.user_memory.prompts.en.episode import EPISODE_USER_PROMPT, assemble_system_prompt
 from everalgo.user_memory.prompts.en.episode_summary import EPISODE_SUMMARY_USER_PROMPT
 from everalgo.user_memory.prompts.en.episode_summary import assemble_system_prompt as assemble_summary_system_prompt
@@ -36,7 +36,7 @@ def _render_messages(
         output_language: The language the caller named, or None to have the model follow the participants.
     """
     system = assemble_system_prompt(
-        custom_instructions=nonblank(custom_instructions),
+        custom_instructions=custom_instructions,
         language_rule=build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE),
     )
     return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=conversation)]
@@ -73,7 +73,7 @@ def _render_summary_messages(
         output_language: The language the caller named, or None to have the model follow the text's own.
     """
     system = assemble_summary_system_prompt(
-        custom_instructions=nonblank(custom_instructions),
+        custom_instructions=custom_instructions,
         language_rule=build_language_rule(output_language, fallback=SOURCE_TEXT_LANGUAGE_RULE),
     )
     user = render_prompt(EPISODE_SUMMARY_USER_PROMPT, None, episode_text=episode_text)

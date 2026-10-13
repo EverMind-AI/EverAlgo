@@ -6,6 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0rc3] - 2026-10-13
+
+### Changed
+
+- `prompts.en.chat.assemble_system_prompt` builds the `<custom_instructions>` block with core's `everalgo.utils.append_custom_instructions` instead of its own copy of the logic. The rendered system message is byte-for-byte unchanged.
+- Requires `everalgo-core>=0.6.0rc3` (the floor was `0.6.0rc2`): the package imports `everalgo.utils.append_custom_instructions`, which `0.6.0rc2` does not define.
+
 ## [0.4.0rc2] - 2026-10-13
 
 ### Changed
@@ -82,7 +89,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc3...HEAD
+[0.4.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc2...everalgo-boundary/v0.4.0rc3
 [0.4.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc1...everalgo-boundary/v0.4.0rc2
 [0.4.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.3.0...everalgo-boundary/v0.4.0rc1
 [0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.2.1...everalgo-boundary/v0.3.0

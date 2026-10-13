@@ -42,11 +42,10 @@ from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from everalgo.knowledge._render import append_custom_instructions
 from everalgo.knowledge._replies import ContentMergeReply, TopicMergeReply, ask_llm
 from everalgo.knowledge.prompts.en.content_merge import CONTENT_MERGE_SYSTEM_PROMPT, CONTENT_MERGE_USER_PROMPT
 from everalgo.knowledge.prompts.en.topic_merge import TOPIC_MERGE_SYSTEM_PROMPT, TOPIC_MERGE_USER_PROMPT
-from everalgo.utils import render_prompt
+from everalgo.utils import append_custom_instructions, render_prompt
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
