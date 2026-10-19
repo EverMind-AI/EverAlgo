@@ -6,6 +6,18 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0rc4] - 2026-10-19
+
+### Changed
+
+- The batch reply format bounds `reasoning`: it names the topics in order, each as a short label with its message range, then the message numbers after which the topic changes, and nothing more; the worked examples' `reasoning` takes the same shape (`"login bug (1-5); lunch plans (6-7). Changes after 5."`). The previous wording set no length, and the model wrote each topic out as a full sentence. The reply's keys and types are unchanged.
+- The batch prompt's first worked example gains the other speaker's courtesy reply ("Anytime.") after the thanks, and its split moves after that reply, so it shows a courtesy reply staying with the topic it closes; all seven of its messages now fall on one day.
+
+### Removed
+
+- The batch prompt's cross-day rule ("adjacent messages have different calendar dates — MUST split at the date boundary", highest priority) is gone, and the first worked example's `reasoning` no longer cites the new day; its messages now all fall on one day, and it splits after the courtesy reply, where the topic changes. A date change alone is no longer a split signal: the host already closes an idle conversation, and the UTC date the timestamps carry is not the user's day, so the rule split overnight conversations at a fixed local hour (08:00 in UTC+8). The other split signals, the long-gap rule included, are unchanged.
+- The batch prompt's "do not split for" line on transition phrases ("by the way", "oh also" — "usually continue the current episode") is gone. It stated a prior rather than a test, and the model took a transition phrase as a cue to split. The other two "do not split for" lines are unchanged.
+
 ## [0.4.0rc3] - 2026-10-13
 
 ### Changed
@@ -89,7 +101,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc3...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc4...HEAD
+[0.4.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc3...everalgo-boundary/v0.4.0rc4
 [0.4.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc2...everalgo-boundary/v0.4.0rc3
 [0.4.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc1...everalgo-boundary/v0.4.0rc2
 [0.4.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.3.0...everalgo-boundary/v0.4.0rc1
