@@ -14,13 +14,23 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | Distribution | Version | Changelog |
 |---|---|---|
 | `everalgo-core` | 0.6.0rc3 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.4.0rc4 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-boundary` | 0.4.0rc5 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc3 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc2 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Release candidate — 2026-10-19 (boundary 0.4.0rc5)
+
+One distribution moves to the next release candidate for one fix: the third batch worked example's `reasoning` drops a tail note the reply format does not allow, so the example matches the definition's "and nothing more". The reply contract and the `BoundaryDetector` interface are unchanged. No dependency floor moves; the other seven distributions have no change and keep their versions.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-boundary` | 0.4.0rc5 | third batch example's `reasoning` ends at its split points |
+
+Detail in [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md).
 
 ## Release candidate — 2026-10-19 (boundary 0.4.0rc4)
 

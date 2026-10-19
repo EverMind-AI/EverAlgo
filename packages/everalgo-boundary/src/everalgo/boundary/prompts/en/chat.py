@@ -111,7 +111,7 @@ _EXAMPLE_CLOSED_THEN_OPENING = """\
 [4] [2024-05-02 18:30 UTC (Thursday)] Noor: Hey, are you around for a quick call tomorrow?
 </messages>
 <reply>
-{"reasoning": "April invoice (1-3); request for a call (4). Changes after 3; the request has only just begun.", "boundaries": [3], "tail_complete": false}
+{"reasoning": "April invoice (1-3); request for a call (4). Changes after 3.", "boundaries": [3], "tail_complete": false}
 </reply>"""
 
 _BATCH_EXAMPLES = "\n".join(
