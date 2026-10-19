@@ -10,13 +10,17 @@ Every rule sentence comes from the single-message prompts these two pairs replac
 Otherwise only the structure changed: Markdown headings and emphasis became tags, the data moved from the middle of
 the rules to the user message, the reply skeleton became parseable JSON, and the example times took the shape the
 renderer writes. The output-language rule was dropped: ``boundaries``, ``tail_complete`` and ``should_end`` carry
-no language, and ``reasoning`` is never read.
+no language, and ``reasoning`` is never read. The batch cross-day rule was dropped too: the host already closes an
+idle conversation, and the UTC date the timestamps carry is not the user's day. So was the batch transition-phrase
+line: it states a prior, not a test, and the model took a transition phrase as a cue to split.
 
 Two parts were rewritten on purpose. Batch ``<tail_complete>`` says whether the trailing segment already forms a
 complete episode, since the host closes that segment into a MemCell when it is true. A segment that only opens a
 topic is not complete; one that ends with an acknowledgement or farewell closing its own topic is. The third
-example shows both. The batch ``reasoning`` definition and every worked example's ``reasoning`` first name the
-topics in order, then say where they change.
+example shows both. The batch ``reasoning`` definition and every worked example's ``reasoning`` name the topics in
+order as short labels with their message ranges, then say after which messages they change. The first example
+gained the other speaker's courtesy reply, "Anytime.", to show that it stays with the topic it closes; the split
+moved after it, and all its messages fall on one day.
 
 Placeholders, user templates only:
 - batch: ``{{count}}``, the number of chat messages in the window, and ``{{messages}}``, rendered as
@@ -52,14 +56,12 @@ _BATCH_ROLE = (
 
 _WHEN_TO_SPLIT = """\
 Add a boundary (by message number) only when clear signals appear:
-- Cross-day split (highest priority): Adjacent messages have different calendar dates — MUST split at the date boundary.
 - Substantive topic change: Conversation shifts from one concrete topic to a completely unrelated one (e.g., project architecture → weekend plans).
 - Task completion + new topic: A closing message ("migration done") belongs to its task's episode; split only when the next message opens a genuinely unrelated topic.
 - Long gap + new topic: Time gap > 4 hours AND new messages have no clear connection to prior conversation."""
 
 _DO_NOT_SPLIT_FOR = """\
 - Greetings, farewells ("bye", "thanks") — keep with the main episode
-- Transition phrases ("by the way", "oh also") — usually continue the current episode
 - Brief pauses (< 4 hours) followed by the same topic"""
 
 _TAIL_COMPLETE = """\
@@ -78,16 +80,17 @@ _BATCH_DECISION_PRINCIPLES = """\
 - System messages don't trigger splits: System messages (e.g., "[User X] joined the group") have their episode context determined by the next human message that follows them"""
 
 _EXAMPLE_ONE_BOUNDARY = """\
-<messages count="6">
+<messages count="7">
 [1] [2024-03-10 09:00 UTC (Sunday)] Alice: Can you help me debug the login issue?
 [2] [2024-03-10 09:01 UTC (Sunday)] Bob: Sure, let me check the logs.
 [3] [2024-03-10 09:05 UTC (Sunday)] Bob: Found it — a null pointer in AuthService line 42.
 [4] [2024-03-10 09:06 UTC (Sunday)] Alice: Fixed, thanks!
-[5] [2024-03-11 10:00 UTC (Monday)] Alice: Hey, are you free for lunch today?
-[6] [2024-03-11 10:01 UTC (Monday)] Bob: Sure, 12:30?
+[5] [2024-03-10 09:06 UTC (Sunday)] Bob: Anytime.
+[6] [2024-03-10 11:30 UTC (Sunday)] Alice: Hey, are you free for lunch today?
+[7] [2024-03-10 11:31 UTC (Sunday)] Bob: Sure, 12:30?
 </messages>
 <reply>
-{"reasoning": "Topics in order: the login bug (1-4), then lunch plans (5-6); the topic changes after message 4, on a new day.", "boundaries": [4], "tail_complete": true}
+{"reasoning": "login bug (1-5); lunch plans (6-7). Changes after 5.", "boundaries": [5], "tail_complete": true}
 </reply>"""
 
 _EXAMPLE_NO_BOUNDARY = """\
@@ -97,7 +100,7 @@ _EXAMPLE_NO_BOUNDARY = """\
 [3] [2024-03-10 06:10 UTC (Sunday)] Alice: OK, let's review the specs tomorrow.
 </messages>
 <reply>
-{"reasoning": "Topics in order: the Q2 roadmap status (1-3) only; nothing changes.", "boundaries": [], "tail_complete": true}
+{"reasoning": "Q2 roadmap status (1-3). No change.", "boundaries": [], "tail_complete": true}
 </reply>"""
 
 _EXAMPLE_CLOSED_THEN_OPENING = """\
@@ -108,7 +111,7 @@ _EXAMPLE_CLOSED_THEN_OPENING = """\
 [4] [2024-05-02 18:30 UTC (Thursday)] Noor: Hey, are you around for a quick call tomorrow?
 </messages>
 <reply>
-{"reasoning": "Topics in order: the April invoice (1-3), then a new request for a call (4); the topic changes after message 3 and the new request has only just begun.", "boundaries": [3], "tail_complete": false}
+{"reasoning": "April invoice (1-3); request for a call (4). Changes after 3; the request has only just begun.", "boundaries": [3], "tail_complete": false}
 </reply>"""
 
 _BATCH_EXAMPLES = "\n".join(
@@ -121,7 +124,7 @@ _BATCH_EXAMPLES = "\n".join(
 )
 
 _BATCH_REPLY_FORMAT = """\
-Reply with one JSON object, nothing else. reasoning first names the topics the conversation goes through, in order, then states where they change; boundaries lists the 1-indexed message numbers after which to split; tail_complete says whether the trailing segment is already a complete episode. boundaries: [] means all messages belong to the same episode — no split.
+Reply with one JSON object, nothing else. reasoning names the topics the conversation goes through, in order, each as a short label with its message range, then the message numbers after which the topic changes, and nothing more; boundaries lists the 1-indexed message numbers after which to split; tail_complete says whether the trailing segment is already a complete episode. boundaries: [] means all messages belong to the same episode — no split.
 {"reasoning": "...", "boundaries": [4], "tail_complete": true}"""
 
 BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT = paragraphs(

@@ -14,13 +14,23 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | Distribution | Version | Changelog |
 |---|---|---|
 | `everalgo-core` | 0.6.0rc3 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.4.0rc3 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-boundary` | 0.4.0rc4 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc3 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc2 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Release candidate — 2026-10-19 (boundary 0.4.0rc4)
+
+One distribution moves to the next release candidate for a batch-prompt revision: `reasoning` is bounded to short topic labels with their message ranges and the split points, the cross-day split rule and the transition-phrase line are removed, and the first worked example shows a courtesy reply staying with the topic it closes. The reply contract and the `BoundaryDetector` interface are unchanged. No dependency floor moves; the other seven distributions have no change and keep their versions.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-boundary` | 0.4.0rc4 | short-label batch `reasoning`, no cross-day or transition-phrase rule, courtesy-reply example |
+
+Detail in [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md).
 
 ## Release candidate — 2026-10-13 (user-memory 0.9.0rc4)
 

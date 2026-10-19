@@ -5,9 +5,11 @@ of them is either in the new system prompt, sentence by sentence, after the chan
 (``**`` and inline backticks dropped, example times in the rendered ``YYYY-MM-DD HH:MM UTC (Weekday)`` shape), or
 listed in
 ``_RESTRUCTURED`` under the change of the verbatim draft that removed it: F1-F6 restructured a line, C rewrote its
-content on purpose, so a C line must be gone and its replacement present. The old prompts' JSON objects are
-compared as JSON: the worked examples, with the field C renamed, must open the new ``<reply>`` objects, followed
-only by the examples C added; the one skeleton each prompt had gave way to a parseable one. v6 then rewrote the
+content on purpose, so a C line must be gone and its replacement present, D dropped a rule outright, so a D
+line must be gone with nothing in its place, and E rewrote the first batch worked example, so an E line must be
+gone and the new example present. The old prompts' JSON objects are compared as JSON: the worked examples, with the
+field C renamed and the split E moved, must open the new ``<reply>`` objects, followed only by the examples C added;
+the one skeleton each prompt had gave way to a parseable one. v6 then rewrote the
 batch ``reasoning``: its definition, whose old wording lived only in that skeleton, and every worked example's,
 which now lists the topics first. The old wording must be gone, and batch replies are compared without
 ``reasoning``.
@@ -209,12 +211,20 @@ Note:
 # removed it: F1 data moved to the user message, F2 Markdown headings became tags, F3 the input description merged
 # into the role sentence, F4 the output-language rule dropped, F5 the reply skeleton made parseable JSON, C the
 # batch should_wait rule replaced by tail_complete, "the trailing segment already forms a complete episode", with
-# the opposite polarity (draft §0a, 2026-10-10).
+# the opposite polarity (draft §0a, 2026-10-10), D a batch rule dropped: the cross-day rule (2026-10-16), since the
+# host already closes an idle conversation and the UTC date the timestamps carry is not the user's day, and the
+# transition-phrase line (r13), a prior rather than a test that the model applied in reverse, E the first batch
+# example rewritten (r13): the other speaker's courtesy reply joins the topic it closes, on the same day.
 _LANGUAGE_RULE = (
     "CRITICAL LANGUAGE RULE: You MUST output in the SAME language as the input conversation content. If the "
     "conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is "
     "mandatory."
 )
+_CROSS_DAY_RULE = (
+    "- Cross-day split (highest priority): Adjacent messages have different calendar dates — MUST split at the date "
+    "boundary."
+)
+_TRANSITION_PHRASE_RULE = '- Transition phrases ("by the way", "oh also") — usually continue the current episode'
 _RESTRUCTURED: dict[str, dict[str, str]] = {
     "batch": {
         _LANGUAGE_RULE: "F4",
@@ -223,11 +233,15 @@ _RESTRUCTURED: dict[str, dict[str, str]] = {
         "and timestamp:": "F3",
         "{{messages}}": "F1",
         "### When to split": "F2",
+        _CROSS_DAY_RULE: "D",
         "Do NOT split for:": "F2",
+        _TRANSITION_PHRASE_RULE: "D",
         "### should_wait": "C",
         "### Decision Principles": "F2",
         "### Examples": "F2",
         "Example 1 — one boundary:": "F2",
+        "[5] [2024-03-11 10:00 UTC (Monday)] Alice: Hey, are you free for lunch today?": "E",
+        "[6] [2024-03-11 10:01 UTC (Monday)] Bob: Sure, 12:30?": "E",
         "Example 2 — no boundary:": "F2",
         "Input messages:": "F2",
         "Output:": "F2",
@@ -269,13 +283,36 @@ A segment that ends with an acknowledgement or farewell closing its own topic is
 _REWRITTEN_REPLY_FIELD = "tail_complete says whether the trailing segment is already a complete episode."
 _ADDED_EXAMPLES = {"batch": 1, "step": 0}
 
+# What E put in place of the first batch example: a courtesy reply after the thanks, every message on one day, and
+# the split after that reply.
+_REWRITTEN_EXAMPLE_ONE = """\
+<messages count="7">
+[1] [2024-03-10 09:00 UTC (Sunday)] Alice: Can you help me debug the login issue?
+[2] [2024-03-10 09:01 UTC (Sunday)] Bob: Sure, let me check the logs.
+[3] [2024-03-10 09:05 UTC (Sunday)] Bob: Found it — a null pointer in AuthService line 42.
+[4] [2024-03-10 09:06 UTC (Sunday)] Alice: Fixed, thanks!
+[5] [2024-03-10 09:06 UTC (Sunday)] Bob: Anytime.
+[6] [2024-03-10 11:30 UTC (Sunday)] Alice: Hey, are you free for lunch today?
+[7] [2024-03-10 11:31 UTC (Sunday)] Bob: Sure, 12:30?
+</messages>"""
+_EXAMPLE_ONE_DAY = "2024-03-10"
+_REWRITTEN_EXAMPLE_ONE_SPLIT = {"boundaries": [5]}
+
 # v6 (draft §0c) asks for the topics in order before the split points, in place of one sentence on all decisions;
-# every batch worked example's reasoning opens the same way.
+# r8 bounds that list: each topic is a short label with its message range, then only the split points follow.
+# Every batch worked example's reasoning takes that shape, and its split points are the reply's boundaries.
 _OLD_REASONING_DEFINITION = "one sentence explaining all boundary decisions"
-_REWRITTEN_REASONING_DEFINITION = (
+_V6_REASONING_DEFINITION = (
     "reasoning first names the topics the conversation goes through, in order, then states where they change;"
 )
-_TOPICS_FIRST = "Topics in order: "
+_REWRITTEN_REASONING_DEFINITION = (
+    "reasoning names the topics the conversation goes through, in order, each as a short label with its message "
+    "range, then the message numbers after which the topic changes, and nothing more;"
+)
+_V6_TOPICS_FIRST = "Topics in order: "
+_LABELLED_TOPICS = re.compile(r"^[^();]+ \(\d+(?:-\d+)?\)(?:; [^();]+ \(\d+(?:-\d+)?\))*\. ")
+_CHANGES_AFTER = re.compile(r"^Changes after (\d+(?:, \d+)*)(?=[,;.])")
+_NO_CHANGE = "No change."
 
 _OLD = {"batch": _OLD_BATCH_PROMPT, "step": _OLD_STEP_PROMPT}
 _SYSTEM = {"batch": BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, "step": STEP_BOUNDARY_DETECT_SYSTEM_PROMPT}
@@ -324,11 +361,27 @@ def _as_rewritten_by_c(reply: dict[str, object]) -> dict[str, object]:
     return rewritten | {"tail_complete": not reply["should_wait"]}
 
 
+def _as_rewritten_by_e(path: str, index: int, reply: dict[str, object]) -> dict[str, object]:
+    """An old worked example's reply as E rewrote it: the first batch example splits after the added reply."""
+    if path != "batch" or index != 0:
+        return reply
+    return reply | _REWRITTEN_EXAMPLE_ONE_SPLIT
+
+
 def _without_rewritten_reasoning(path: str, reply: dict[str, object]) -> dict[str, object]:
     """A reply minus the field v6 rewrote in every batch worked example: ``reasoning`` now lists the topics first."""
     if path != "batch":
         return reply
     return {key: value for key, value in reply.items() if key != "reasoning"}
+
+
+def _split_points(rest: str) -> list[int]:
+    """The message numbers a worked example's reasoning says the topic changes after, from what follows its topics."""
+    if rest == _NO_CHANGE:
+        return []
+    changes = _CHANGES_AFTER.match(rest)
+    assert changes, rest
+    return [int(number) for number in changes.group(1).split(", ")]
 
 
 def _parses(block: str) -> bool:
@@ -388,6 +441,27 @@ def test_rewritten_old_lines_are_gone_from_the_batch_system_prompt() -> None:
     assert not [line for line in rewritten if line in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT]
 
 
+def test_dropped_rules_are_gone_from_the_batch_system_prompt() -> None:
+    dropped = [line for line, change in _RESTRUCTURED["batch"].items() if change == "D"]
+
+    assert dropped == [_CROSS_DAY_RULE, _TRANSITION_PHRASE_RULE]
+    assert "Cross-day" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+    assert "new day" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, "no worked example cites a date change as its reason"
+    assert "Transition phrases" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+    assert "by the way" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+
+
+def test_rewritten_first_example_replaces_the_old_one_on_a_single_day() -> None:
+    replaced = [line for line, change in _RESTRUCTURED["batch"].items() if change == "E"]
+    first = _EXAMPLE_MESSAGES.search(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
+
+    assert len(replaced) == 2, "the old second-day lunch lines"
+    assert not [line for line in replaced if line in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT]
+    assert first
+    assert first.group(0) == _REWRITTEN_EXAMPLE_ONE
+    assert set(re.findall(r"\d{4}-\d{2}-\d{2}", first.group(2))) == {_EXAMPLE_ONE_DAY}
+
+
 def test_rewritten_tail_complete_rule_is_in_the_batch_system_prompt() -> None:
     assert _REWRITTEN_TAIL_COMPLETE in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
     assert _REWRITTEN_REPLY_FIELD in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
@@ -398,25 +472,31 @@ def test_rewritten_reasoning_definition_replaces_the_old_skeleton_wording() -> N
 
     assert [_OLD_REASONING_DEFINITION in block for block in old_skeletons] == [True]
     assert _OLD_REASONING_DEFINITION not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+    assert _V6_REASONING_DEFINITION not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
     assert _REWRITTEN_REASONING_DEFINITION in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
 
 
-def test_every_batch_example_reasoning_lists_the_topics_then_where_they_change() -> None:
+def test_every_batch_example_reasoning_lists_labelled_topics_then_its_boundaries() -> None:
     old = {json.loads(block)["reasoning"] for block in _old_json_objects(_OLD_BATCH_PROMPT) if _parses(block)}
-    shown = [json.loads(block)["reasoning"] for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
+    replies = [json.loads(block) for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
 
-    assert shown
-    assert all(reasoning.startswith(_TOPICS_FIRST) and "changes" in reasoning for reasoning in shown)
-    assert not old & set(shown)
+    assert replies
+    for reply in replies:
+        reasoning = reply["reasoning"]
+        topics = _LABELLED_TOPICS.match(reasoning)
+        assert topics, reasoning
+        assert not reasoning.startswith(_V6_TOPICS_FIRST)
+        assert _split_points(reasoning[topics.end() :]) == reply["boundaries"], reasoning
+    assert not old & {reply["reasoning"] for reply in replies}
 
 
 @pytest.mark.parametrize("path", _PATHS)
 def test_old_json_objects_are_the_new_replies_plus_one_skeleton(path: str) -> None:
     old_objects = _old_json_objects(_OLD[path])
+    old_replies = [json.loads(block) for block in old_objects if _parses(block)]
     worked_examples = [
-        _without_rewritten_reasoning(path, _as_rewritten_by_c(json.loads(block)))
-        for block in old_objects
-        if _parses(block)
+        _without_rewritten_reasoning(path, _as_rewritten_by_e(path, index, _as_rewritten_by_c(reply)))
+        for index, reply in enumerate(old_replies)
     ]
     new_replies = [_without_rewritten_reasoning(path, json.loads(block)) for block in _REPLY.findall(_SYSTEM[path])]
 
