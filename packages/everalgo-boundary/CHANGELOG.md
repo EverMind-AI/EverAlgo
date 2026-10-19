@@ -6,6 +6,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0rc5] - 2026-10-19
+
+### Fixed
+
+- The third batch worked example's `reasoning` no longer carries a tail note the reply format forbids: it ends at the split points (`"April invoice (1-3); request for a call (4). Changes after 3."`), as the definition's "and nothing more" asks. Its `boundaries` and `tail_complete` are unchanged.
+
 ## [0.4.0rc4] - 2026-10-19
 
 ### Changed
@@ -101,7 +107,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc4...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc5...HEAD
+[0.4.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc4...everalgo-boundary/v0.4.0rc5
 [0.4.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc3...everalgo-boundary/v0.4.0rc4
 [0.4.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc2...everalgo-boundary/v0.4.0rc3
 [0.4.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc1...everalgo-boundary/v0.4.0rc2

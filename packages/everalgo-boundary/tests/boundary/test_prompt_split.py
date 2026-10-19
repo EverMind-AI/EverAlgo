@@ -12,7 +12,8 @@ field C renamed and the split E moved, must open the new ``<reply>`` objects, fo
 the one skeleton each prompt had gave way to a parseable one. v6 then rewrote the
 batch ``reasoning``: its definition, whose old wording lived only in that skeleton, and every worked example's,
 which now lists the topics first. The old wording must be gone, and batch replies are compared without
-``reasoning``.
+``reasoning``. H then cut the third batch example's reasoning back to that definition: after its topics it says
+only where they change, as every worked example's must.
 
 A caller's ``custom_instructions`` close the system message as its last block, verbatim; without them the system
 message is the bundled rules byte for byte. ``prompt=``, which replaced the rules, is gone from every entry point.
@@ -301,6 +302,8 @@ _REWRITTEN_EXAMPLE_ONE_SPLIT = {"boundaries": [5]}
 # v6 (draft §0c) asks for the topics in order before the split points, in place of one sentence on all decisions;
 # r8 bounds that list: each topic is a short label with its message range, then only the split points follow.
 # Every batch worked example's reasoning takes that shape, and its split points are the reply's boundaries.
+# H (r20) cut the note the third example's reasoning carried after its split points ("the request has only just
+# begun"), which "and nothing more" forbids; its boundaries and tail_complete stay as C added them.
 _OLD_REASONING_DEFINITION = "one sentence explaining all boundary decisions"
 _V6_REASONING_DEFINITION = (
     "reasoning first names the topics the conversation goes through, in order, then states where they change;"
@@ -313,6 +316,12 @@ _V6_TOPICS_FIRST = "Topics in order: "
 _LABELLED_TOPICS = re.compile(r"^[^();]+ \(\d+(?:-\d+)?\)(?:; [^();]+ \(\d+(?:-\d+)?\))*\. ")
 _CHANGES_AFTER = re.compile(r"^Changes after (\d+(?:, \d+)*)(?=[,;.])")
 _NO_CHANGE = "No change."
+_SPLIT_POINTS_ONLY = re.compile(r"^(?:Changes after \d+(?:, \d+)*|No change)\.$")
+_RELEASED_EXAMPLE_THREE_REASONING = (
+    "April invoice (1-3); request for a call (4). Changes after 3; the request has only just begun."
+)
+_RELEASED_EXAMPLE_THREE_SPLIT = {"boundaries": [3], "tail_complete": False}
+_EXAMPLE_THREE_TAIL_NOTE = "; the request has only just begun"
 
 _OLD = {"batch": _OLD_BATCH_PROMPT, "step": _OLD_STEP_PROMPT}
 _SYSTEM = {"batch": BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, "step": STEP_BOUNDARY_DETECT_SYSTEM_PROMPT}
@@ -488,6 +497,26 @@ def test_every_batch_example_reasoning_lists_labelled_topics_then_its_boundaries
         assert not reasoning.startswith(_V6_TOPICS_FIRST)
         assert _split_points(reasoning[topics.end() :]) == reply["boundaries"], reasoning
     assert not old & {reply["reasoning"] for reply in replies}
+
+
+def test_every_batch_example_reasoning_says_nothing_after_its_split_points() -> None:
+    """The reply format ends reasoning with the split points "and nothing more"; the examples must show that."""
+    reasonings = [json.loads(block)["reasoning"] for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
+
+    assert len(reasonings) == 3
+    for reasoning in reasonings:
+        topics = _LABELLED_TOPICS.match(reasoning)
+        assert topics, reasoning
+        assert _SPLIT_POINTS_ONLY.match(reasoning[topics.end() :]), reasoning
+
+
+def test_rewritten_third_example_drops_only_the_tail_note() -> None:
+    third = json.loads(_REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)[2])
+    rewritten = _RELEASED_EXAMPLE_THREE_REASONING.replace(_EXAMPLE_THREE_TAIL_NOTE, "")
+
+    assert rewritten != _RELEASED_EXAMPLE_THREE_REASONING
+    assert third == {"reasoning": rewritten, **_RELEASED_EXAMPLE_THREE_SPLIT}
+    assert _EXAMPLE_THREE_TAIL_NOTE.removeprefix("; ") not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
 
 
 @pytest.mark.parametrize("path", _PATHS)
