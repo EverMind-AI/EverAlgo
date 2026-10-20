@@ -13,14 +13,25 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.6.0rc3 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.4.0rc5 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-core` | 0.6.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.4.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc3 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc2 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Coordinated release — 2026-10-20 (core 0.6.0, boundary 0.4.0)
+
+Two distributions leave release candidate: `everalgo-core` 0.6.0rc3 and `everalgo-boundary` 0.4.0rc5 become 0.6.0 and 0.4.0. Core has no code change since 0.6.0rc3. Boundary's source is byte-for-byte that of 0.4.0rc5; the one change is its core floor, raised from `>=0.6.0rc3` to the final `>=0.6.0`, so a resolver no longer picks a core release candidate for it. The other six distributions have no change and keep their versions; their core floors (`>=0.6.0rc3` for clustering, knowledge, rank and user-memory, `>=0.6.0rc2` for agent-memory and parser) and the boundary floor of agent-memory and user-memory (`>=0.4.0rc1`) are already met by these releases.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.6.0 | 0.6.0rc3 promoted unchanged |
+| `everalgo-boundary` | 0.4.0 | 0.4.0rc5 promoted unchanged; core floor `>=0.6.0` |
+
+Detail in [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) and [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md); the release-candidate sections below record the changes since 0.5.1 and 0.3.0.
 
 ## Release candidate — 2026-10-19 (boundary 0.4.0rc5)
 

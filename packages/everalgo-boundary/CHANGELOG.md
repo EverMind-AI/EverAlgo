@@ -6,6 +6,14 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-20
+
+Promotes 0.4.0rc5 unchanged apart from the core floor below; see the release-candidate entries below for the changes since 0.3.0.
+
+### Changed
+
+- The minimum `everalgo-core` version is now `0.6.0`, the final release of the core the release candidates required (`>=0.6.0rc3`). A floor that names a pre-release lets a resolver pick a core release candidate; this one does not. The package's source is byte-for-byte that of 0.4.0rc5.
+
 ## [0.4.0rc5] - 2026-10-19
 
 ### Fixed
@@ -107,7 +115,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc5...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0...HEAD
+[0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc5...everalgo-boundary/v0.4.0
 [0.4.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc4...everalgo-boundary/v0.4.0rc5
 [0.4.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc3...everalgo-boundary/v0.4.0rc4
 [0.4.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc2...everalgo-boundary/v0.4.0rc3
