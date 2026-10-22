@@ -148,7 +148,7 @@ class TestDocstringContract:
 
     @pytest.mark.parametrize(
         ("enum_cls", "expected"),
-        [(CaseSkipReason, 13), (SkillSkipReason, 9)],
+        [(CaseSkipReason, 14), (SkillSkipReason, 9)],
         ids=["CaseSkipReason", "SkillSkipReason"],
     )
     def test_every_member_is_documented(self, enum_cls: type[StrEnum], expected: int) -> None:

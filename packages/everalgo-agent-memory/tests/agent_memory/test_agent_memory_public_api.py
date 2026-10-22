@@ -12,6 +12,13 @@ _EXPECTED_EXPORTS = [
     "AgentProfileExtractor",
     "AgentSkillExtractor",
     "BoundaryDetector",
+    # Optional correctness admission; the host supplies the CaseJudge
+    "AgentCaseGate",
+    "CaseGateConfig",
+    "CaseGateDecision",
+    "CaseGateQuestion",
+    "CaseJudge",
+    "should_extract_skill",
     # Diagnostic surface of the *_with_reason methods
     "CaseExtractionResult",
     "CaseSkipReason",

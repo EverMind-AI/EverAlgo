@@ -69,6 +69,8 @@ class CaseSkipReason(StrEnum):
     - ``FILTER_REJECTED`` — the LLM filter found neither exploration nor user correction.
       ``detail={"llm_reason": ...}`` carries the model's own one-line rationale, which is free text
       and may change between runs — display it, do not branch on it.
+    - ``SUCCESS_GATE_REJECTED`` — a configured correctness gate returned probability below its threshold.
+      ``detail={"case_gate": ...}`` records input size, method, probability, and thresholds.
     - ``COMPRESS_EMPTY_INTENT`` / ``COMPRESS_EMPTY_APPROACH`` — the compression call returned an
       empty required field, i.e. the LLM found nothing to say about the trajectory.
     """
@@ -81,6 +83,7 @@ class CaseSkipReason(StrEnum):
     NO_TOOL_SINGLE_USER = "no_tool_single_user"
     NO_TOOL_TOO_FEW_MESSAGES = "no_tool_too_few_messages"
     NO_TOOL_ASSISTANT_TOO_SHORT = "no_tool_assistant_too_short"
+    SUCCESS_GATE_REJECTED = "success_gate_rejected"
     TOO_FEW_TOOL_ROUNDS = "too_few_tool_rounds"
     TRAJECTORY_TOO_LARGE = "trajectory_too_large"
     FILTER_REJECTED = "filter_rejected"
@@ -142,7 +145,7 @@ class CaseExtractionResult(NamedTuple):
         cases: Zero or one :class:`~everalgo.types.AgentCase`. Non-empty iff ``reason is None``.
         reason: The gate that rejected the MemCell, or ``None`` on success.
         detail: Structured context for ``reason`` — observed values and the thresholds they missed.
-            Empty dict when ``reason is None`` or when the reason carries no numbers.
+            Admitted gated cases also return ``case_gate`` provenance on success; legacy success returns an empty dict.
     """
 
     cases: list[AgentCase]

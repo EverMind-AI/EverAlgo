@@ -74,7 +74,7 @@ class BoundaryDetector:  # everalgo.boundary.BoundaryDetector, re-exported
     ) -> DetectionResult: ...
 
 class AgentCaseExtractor:
-    def __init__(self, *, llm: LLMClient) -> None: ...
+    def __init__(self, *, llm: LLMClient, gate: AgentCaseGate | None = None) -> None: ...
     async def aextract(self, memcell: MemCell) -> list[AgentCase]: ...  # length 0 (filtered) or 1
 
 class AgentSkillExtractor:
@@ -184,3 +184,32 @@ There is no per-call prompt override.
 - [`everalgo-boundary`](../everalgo-boundary/) — defines `BoundaryDetector`
 - [`everalgo-clustering`](../everalgo-clustering/) — `acluster_by_llm` for skill-cluster assignment
 - [`everalgo-rank`](../everalgo-rank/) — `CaseRanker` / `SkillRanker` for read-time ranking
+
+
+## Optional correctness admission
+
+`AgentCaseExtractor(llm=..., gate=AgentCaseGate(...))` replaces the minimum tool-round, no-tool complexity, and value-LLM filters. With no gate the existing behavior is unchanged. The shared boundary detector, structural checks, resource limits, Case generation, clustering, and retrieval are unchanged.
+
+The gate asks its `judge` one question per conversation. `CaseJudge` is a Protocol: the host implements `apredict(conversation, question) -> float` against whichever probability API it deploys, mapping the provider-neutral `CaseGateQuestion` (instructions plus `true` / `false` criteria) onto that provider's request format.
+
+```python
+from everalgo.agent_memory import AgentCaseExtractor, AgentCaseGate, CaseGateConfig, CaseGateQuestion
+
+class MyJudge:
+    async def apredict(self, conversation: str, question: CaseGateQuestion) -> float:
+        ...  # call the host's probability API; return the probability that the question is true
+
+async def extract_with_gate(memcell, llm):
+    gate = AgentCaseGate(judge=MyJudge(), config=CaseGateConfig(success_threshold=0.70, bypass_token_threshold=50_000))
+    return await AgentCaseExtractor(llm=llm, gate=gate).aextract_with_reason(memcell)
+```
+
+Sizing uses `o200k_base` on the OpenAI-wire JSON of the supplied conversation, including tool arguments and results, after dropping the system head and **before** any clipping or compression. It excludes the fixed judge question. Exactly 50,000 tokens still goes to the judge; strictly more bypasses it. This is a reproducible routing measure, not the selected provider tokenizer's billed input count. The input is the supplied closed MemCell, which may be a segment rather than an entire session. The question evaluates that segment's available evidence; the threshold has not been calibrated on production segments by the earlier whole-trajectory benchmark.
+
+The default probability threshold `0.70` favors retaining more Cases and is an initial policy setting, not a validated precision guarantee for any judge model or input distribution. Calibrate it on labeled target inputs. The routing threshold is 50,000 tokens under `o200k_base`, while the provider bills its own tokenizer plus the judge question. Do not silently truncate evidence to fit a provider limit.
+
+Short input calls the judge once and accepts probability `>=0.70`; rejection returns `SUCCESS_GATE_REJECTED` and does not call the generative extractor. Long input skips the judge and continues extraction. The gate raises `LLMOutputError` when the judge returns anything other than a finite probability in `[0, 1]`. Judge errors (including provider context-limit errors), cancellation, and deadline expiry propagate to the host unchanged; none is converted to probability zero, automatic admission, or a fallback LLM decision.
+
+An admitted Case carries `case_gate` provenance with the policy, method (`decision_api` or `length_bypass`), token count, thresholds, and probability (`None` for a length bypass). Hosts must persist and return it unchanged when reconstructing a Case for Skill extraction. `quality_score` remains the generative extractor's diagnostic score. `should_extract_skill(quality_score, case_gate=...)` centralizes eligibility for hosts that cluster before extracting skills. Existing Cases without admission retain the original quality-based routing. Admitted Cases use the success-experience prompt, while preserving real pitfalls and never asserting that length-based admission or a probability proves success.
+
+The host owns the judge implementation: provider request format, HTTP transport lifetime, endpoint, credentials, deadline, deployment settings, storage, and retries. The algorithm owns the correctness question text, token sizing, routing thresholds, probability validation, and Case/Skill policy. No source manifest, benchmark labels, or shared-boundary changes are required.
