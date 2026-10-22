@@ -6,9 +6,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0rc3] - 2026-10-22
+
 ### Added
 
 - Optional correctness admission before Case extraction through a host-supplied `CaseJudge` that answers a provider-neutral `CaseGateQuestion` with a probability: judge untrimmed conversations up to 50,000 `o200k_base` tokens at an initial probability threshold of 0.70, bypass the judge above that limit, and retain typed provenance for evidence-based success Skill extraction without replacing the original quality score. Calibrate thresholds per model and input distribution. Legacy extraction remains the default.
+- New public names in `everalgo.agent_memory`: `AgentCaseGate`, `CaseGateConfig`, `CaseGateDecision`, `CaseGateQuestion`, `CaseJudge` (a Protocol the host implements: `apredict(conversation, question) -> float`) and `should_extract_skill`. `AgentCaseExtractor` takes an optional `gate=`; a rejection returns the new `CaseSkipReason.SUCCESS_GATE_REJECTED` with the decision in `detail["case_gate"]`. An admitted `AgentCase` carries `case_gate`, and `AgentSkillExtractor` sends a case carrying it to a new variant of the success prompt, `AGENT_SKILL_ADMITTED_EXTRACT_SYSTEM_PROMPT`, without the low-quality skip. Without a gate, and for cases without `case_gate`, nothing changes. No dependency floor moves.
 
 ## [0.6.0rc2] - 2026-10-13
 
@@ -108,7 +111,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc3...HEAD
+[0.6.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc2...everalgo-agent-memory/v0.6.0rc3
 [0.6.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc1...everalgo-agent-memory/v0.6.0rc2
 [0.6.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.1...everalgo-agent-memory/v0.6.0rc1
 [0.5.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.0...everalgo-agent-memory/v0.5.1

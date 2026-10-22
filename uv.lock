@@ -424,7 +424,7 @@ wheels = [
 
 [[package]]
 name = "everalgo-agent-memory"
-version = "0.6.0rc2"
+version = "0.6.0rc3"
 source = { editable = "packages/everalgo-agent-memory" }
 dependencies = [
     { name = "asgiref" },
