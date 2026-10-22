@@ -46,6 +46,7 @@ from everalgo.utils import count_tokens, json_default, render_prompt, truncate_t
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from everalgo.agent_memory.gate import AgentCaseGate
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ class AgentCaseExtractor:
         llm: LLMClient,
         min_tool_call_rounds: int = 3,
         complex_task_tool_call_round_threshold: int = 20,
+        gate: AgentCaseGate | None = None,
     ) -> None:
         """Construct the extractor.
 
@@ -104,10 +106,13 @@ class AgentCaseExtractor:
             complex_task_tool_call_round_threshold: Tool-call rounds strictly greater than this
                 value mark the trajectory as a complex task and fast-pass the LLM filter step.
                 Default ``20``.
+            gate: Optional correctness admission. Replaces complexity and value filters; structural and resource
+                checks remain. The gate sees untrimmed input, before any extraction LLM call.
         """
         self._llm = llm
         self._min_tool_call_rounds = min_tool_call_rounds
         self._complex_task_round_threshold = complex_task_tool_call_round_threshold
+        self._gate = gate
 
     async def aextract(self, memcell: MemCell) -> list[AgentCase]:
         """Run the 11-step pipeline on one MemCell; return ``[]`` (filtered) or ``[AgentCase]``.
@@ -147,13 +152,20 @@ class AgentCaseExtractor:
         msgs = _strip_before_first_user(memcell.items)
 
         # Step 3: structural + heuristic pre-filter
-        if skip := _should_skip(msgs):
+        if skip := _should_skip(msgs, skip_complexity=self._gate is not None):
             reason, detail = skip
             logger.info("skipping memcell (n_items=%d): %s %s", len(memcell.items), reason, detail)
             return CaseExtractionResult([], reason, detail)
 
+        gate_detail: dict[str, Any] = {}
+        if self._gate is not None:
+            decision = await self._gate.aevaluate(_dump_messages(msgs))
+            gate_detail = {"case_gate": decision.model_dump(mode="json")}
+            if not decision.accepted:
+                return CaseExtractionResult([], CaseSkipReason.SUCCESS_GATE_REJECTED, gate_detail)
+
         # Step 3b: minimum-rounds gate — drop trajectories that are too simple to be worth learning
-        if self._min_tool_call_rounds > 0:
+        if self._gate is None and self._min_tool_call_rounds > 0:
             rounds = _count_tool_call_rounds(msgs)
             if rounds < self._min_tool_call_rounds:
                 logger.info(
@@ -187,7 +199,7 @@ class AgentCaseExtractor:
                 return CaseExtractionResult(
                     [],
                     CaseSkipReason.TRAJECTORY_TOO_LARGE,
-                    {"tokens": trimmed_tokens, "limit": PRE_COMPRESS_CHUNK_SIZE * 2},
+                    gate_detail | {"tokens": trimmed_tokens, "limit": PRE_COMPRESS_CHUNK_SIZE * 2},
                 )
 
         # Step 6: selective LLM pre-compression of largest tool-call groups
@@ -197,7 +209,7 @@ class AgentCaseExtractor:
         # Step 7: LLM filter — many tool-call rounds auto-passes as complex task; else judge signals
         # on a slimmed view (tool-result bodies shrunk) to cut prompt tokens. `and` short-circuits, so
         # the slim view is built only when the trajectory actually reaches the LLM filter.
-        if _count_tool_call_rounds(msgs) <= self._complex_task_round_threshold:
+        if self._gate is None and _count_tool_call_rounds(msgs) <= self._complex_task_round_threshold:
             worth, llm_reason = await _is_worth_extracting(
                 _dump_messages_for_filter(msgs), _count_user_messages(msgs), client
             )
@@ -208,7 +220,7 @@ class AgentCaseExtractor:
         exp, compress_reason = await _compress_experience(messages_json, client)
         if exp is None:
             # compress_reason is always set when exp is None; the assert-free narrowing keeps mypy happy.
-            return CaseExtractionResult([], compress_reason or CaseSkipReason.COMPRESS_EMPTY_INTENT, {})
+            return CaseExtractionResult([], compress_reason or CaseSkipReason.COMPRESS_EMPTY_INTENT, gate_detail)
 
         # Step 9: hard truncate task_intent (head-only)
         original_intent = exp.task_intent
@@ -227,7 +239,9 @@ class AgentCaseExtractor:
             quality_score=_clamp_quality_score(exp.quality_score),
             key_insight=exp.key_insight,
         )
-        return CaseExtractionResult([case], None, {})
+        if gate_detail:
+            case = case.model_copy(update=gate_detail)
+        return CaseExtractionResult([case], None, gate_detail)
 
     extract_with_reason = async_to_sync(aextract_with_reason)
 
@@ -310,7 +324,9 @@ def _item_kind(item: ConversationItem) -> str:
     return "tool_call" if isinstance(item, ToolCallRequest) else "tool_result"
 
 
-def _should_skip(messages: Sequence[ConversationItem]) -> tuple[CaseSkipReason, dict[str, Any]] | None:
+def _should_skip(
+    messages: Sequence[ConversationItem], *, skip_complexity: bool = False
+) -> tuple[CaseSkipReason, dict[str, Any]] | None:
     """Pre-filter combining structural + heuristic checks. Returns ``(reason, detail)`` or ``None``."""
     if not messages:
         return CaseSkipReason.NO_MESSAGES_AFTER_STRIP, {}
@@ -330,7 +346,7 @@ def _should_skip(messages: Sequence[ConversationItem]) -> tuple[CaseSkipReason, 
         return CaseSkipReason.TRAJECTORY_NOT_CLOSED, {"last_item_kind": _item_kind(last_msg)}
 
     has_tools = _has_tool_calls(messages)
-    if not has_tools:
+    if not has_tools and not skip_complexity:
         user_count = sum(1 for msg in messages if isinstance(msg, ChatMessage) and msg.role == "user")
         if user_count < 2:
             return CaseSkipReason.NO_TOOL_SINGLE_USER, {"user_count": user_count}

@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING
 from asgiref.sync import async_to_sync
 
 from everalgo.agent_memory._replies import _call_llm_for_skill_extract, _SkillAddOp, _SkillUpdateOp
+from everalgo.agent_memory.gate import admitted_case, should_extract_skill
 from everalgo.agent_memory.prompts.skill_failure import AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT
 from everalgo.agent_memory.prompts.skill_success import (
+    AGENT_SKILL_ADMITTED_EXTRACT_SYSTEM_PROMPT,
     AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT,
     SKILL_EXTRACT_USER_PROMPT,
 )
@@ -177,7 +179,11 @@ class AgentSkillExtractor:
             maturity_trivial_change_ratio=maturity_trivial_change_ratio,
             maturity_reeval_change_ratio=maturity_reeval_change_ratio,
         )
-        if case.quality_score < cfg.skip_quality_threshold:
+        admission = admitted_case(case)
+        if admission is None and not should_extract_skill(
+            case.quality_score,
+            skip_quality_threshold=cfg.skip_quality_threshold,
+        ):
             logger.debug(
                 "skipping skill extraction: case.quality_score=%.2f < skip_quality_threshold=%.2f",
                 case.quality_score,
@@ -204,7 +210,9 @@ class AgentSkillExtractor:
 
         # Success-vs-failure prompt selection based on case.quality_score
         max_quality = case.quality_score
-        if max_quality < cfg.failure_quality_threshold:
+        if admission is not None:
+            system = AGENT_SKILL_ADMITTED_EXTRACT_SYSTEM_PROMPT
+        elif max_quality < cfg.failure_quality_threshold:
             system = AGENT_SKILL_FAILURE_EXTRACT_SYSTEM_PROMPT
             logger.debug("using failure prompt (max_quality=%.2f < %.2f)", max_quality, cfg.failure_quality_threshold)
         else:

@@ -127,3 +127,13 @@ SKILL_EXTRACT_USER_PROMPT = paragraphs(
     tagged("new_cases", "{{new_case_json}}"),
     tagged("existing_skills", "{{existing_skills_json}}"),
 )
+
+
+AGENT_SKILL_ADMITTED_EXTRACT_SYSTEM_PROMPT = AGENT_SKILL_SUCCESS_EXTRACT_SYSTEM_PROMPT.replace(
+    "all with quality_score >= 0.5.",
+    "admitted by a correctness probability gate or a conversation-length rule. "
+    "Extract successful, reusable experience supported by the actual case evidence. "
+    "Admission is not proof that the task or every intermediate step succeeded. "
+    "Keep the original quality_score as diagnostic evidence, preserve genuine pitfalls, "
+    "and never promote an unverified or failed step into a confirmed successful procedure.",
+)

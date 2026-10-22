@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Optional correctness admission before Case extraction through a host-supplied `CaseJudge` that answers a provider-neutral `CaseGateQuestion` with a probability: judge untrimmed conversations up to 50,000 `o200k_base` tokens at an initial probability threshold of 0.70, bypass the judge above that limit, and retain typed provenance for evidence-based success Skill extraction without replacing the original quality score. Calibrate thresholds per model and input distribution. Legacy extraction remains the default.
+
 ## [0.6.0rc2] - 2026-10-13
 
 ### Changed
