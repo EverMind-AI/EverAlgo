@@ -18,9 +18,19 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc3 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.6.0rc2 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.6.0rc3 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Release candidate — 2026-10-22 (agent-memory 0.6.0rc3)
+
+One distribution moves to the next release candidate for one feature: optional correctness admission before agent Case extraction. `AgentCaseExtractor(gate=AgentCaseGate(judge=...))` asks a host-supplied `CaseJudge` for the probability that the work in a closed conversation was completed correctly, admits it at `>=0.70`, and admits conversations above 50,000 `o200k_base` tokens without a judge call; an admitted Case carries `case_gate` provenance that routes its Skill extraction to an admitted-case variant of the success prompt. The judge is a Protocol: the host owns the provider, transport and credentials, and algo owns the question text, sizing, thresholds and probability validation. Without a gate nothing changes. No dependency floor moves; the other seven distributions have no change and keep their versions.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-agent-memory` | 0.6.0rc3 | optional Case admission gate with a host-supplied judge |
+
+Detail in [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md).
 
 ## Coordinated release — 2026-10-20 (core 0.6.0, boundary 0.4.0)
 
