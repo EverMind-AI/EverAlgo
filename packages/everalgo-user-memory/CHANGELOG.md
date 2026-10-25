@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- An episode extraction no longer sends an unbounded conversation. Boundary detection caps a cell at 65_536 tokens, but a cell that reaches the extractor from a backfill, an import or a raised limit was rendered whole: a 756 KB cell became a ~3.8M-token request that every fallback backend rejected as `prompt_too_long`, each attempt taking 15-120 s. The conversation now keeps its head and tail inside `MAX_CONVERSATION_TOKENS` (48_000, leaving room for the system message and the reply inside the boundary limit), states how many messages it dropped as a rendered line, and logs `episode conversation capped`. A single message larger than the whole budget is truncated in place by `everalgo.utils.truncate_text`.
+
 ## [0.9.0rc4] - 2026-10-13
 
 ### Fixed
