@@ -24,7 +24,7 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 ## [everalgo-boundary/0.4.1] - 2026-10-27
 
-Fixes premature closure of single-message and multi-message streaming workflows by distinguishing task execution from closed status exchanges. Batch input preserves message boundaries when content contains XML delimiters or line breaks, and the prompt requests short tail evidence without changing the strict reply schema or step path. See the [package changelog](packages/everalgo-boundary/CHANGELOG.md) and [fix validation report](docs/reports/boundary-0.4.1-fix-report.md). Other distributions and dependency floors remain unchanged.
+Fixes premature closure of single-message and multi-message streaming workflows by distinguishing task execution from closed status exchanges. Batch input preserves message boundaries when content contains XML delimiters or line breaks, and the prompt requests short tail evidence without changing the strict reply schema or step path. See the [package changelog](packages/everalgo-boundary/CHANGELOG.md). Other distributions and dependency floors remain unchanged.
 
 ## Release candidate — 2026-10-22 (agent-memory 0.6.0rc3)
 
