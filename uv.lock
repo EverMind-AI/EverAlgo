@@ -482,7 +482,7 @@ requires-dist = [
 
 [[package]]
 name = "everalgo-boundary"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/everalgo-boundary" }
 dependencies = [
     { name = "asgiref" },

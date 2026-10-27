@@ -13,7 +13,8 @@ the one skeleton each prompt had gave way to a parseable one. v6 then rewrote th
 batch ``reasoning``: its definition, whose old wording lived only in that skeleton, and every worked example's,
 which now lists the topics first. The old wording must be gone, and batch replies are compared without
 ``reasoning``. H then cut the third batch example's reasoning back to that definition: after its topics it says
-only where they change, as every worked example's must.
+only where they change. Streaming-tail rules now use a two-to-three-word reason and examples that separate
+completion from message count; the unchanged step prompt retains the historical contract.
 
 A caller's ``custom_instructions`` close the system message as its last block, verbatim; without them the system
 message is the bundled rules byte for byte. ``prompt=``, which replaced the rules, is gone from every entry point.
@@ -215,7 +216,8 @@ Note:
 # the opposite polarity (draft §0a, 2026-10-10), D a batch rule dropped: the cross-day rule (2026-10-16), since the
 # host already closes an idle conversation and the UTC date the timestamps carry is not the user's day, and the
 # transition-phrase line (r13), a prior rather than a test that the model applied in reverse, E the first batch
-# example rewritten (r13): the other speaker's courtesy reply joins the topic it closes, on the same day.
+# example rewritten (r13): the other speaker's courtesy reply joins the topic it closes, on the same day; I separates
+# the absence of internal boundaries from the streaming tail's completion.
 _LANGUAGE_RULE = (
     "CRITICAL LANGUAGE RULE: You MUST output in the SAME language as the input conversation content. If the "
     "conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is "
@@ -248,6 +250,7 @@ _RESTRUCTURED: dict[str, dict[str, str]] = {
         "Output:": "F2",
         "### Output Format": "F2",
         "Return strictly in the following JSON format:": "F5",
+        "boundaries: [] means all messages belong to the same episode — no split.": "I",
         "Set to true when the last segment has insufficient information to determine its episode context:": "C",
         "- Non-text messages: Only media placeholders ([image], [video], [file]) with no accompanying text": "C",
         '- Intent-free short replies: Minimal responses like "ok", "sure", "got it", "😂"': "C",
@@ -270,19 +273,15 @@ _RESTRUCTURED: dict[str, dict[str, str]] = {
     },
 }
 
-# What C put in place of its lines, and the worked examples it added after the old ones.
-_REWRITTEN_TAIL_COMPLETE = """\
-<tail_complete>
-tail_complete says whether the messages after the last boundary (all of them when there is no boundary) already form a complete episode. An episode is complete when what it is about has been said and the messages that follow will not belong to it. Set it to false when that trailing segment:
-- Only opens a topic that the next messages will continue, however clear the opening is
-- Is only media placeholders ([image], [video], [file]) with no accompanying text
-- Is only intent-free short replies ("ok", "sure", "got it", "😂") with nothing before them in the segment that they answer
-- Is only system or non-conversational messages (join/leave group, payment reminders, etc.) — wait for the next human message to decide
-- Follows a gap of 30 min–4 hours with content that is neither clearly continuing nor clearly starting a new topic
-A segment that ends with an acknowledgement or farewell closing its own topic is complete: set it to true.
-</tail_complete>"""  # noqa: RUF001 — en dash kept from the old rule
-_REWRITTEN_REPLY_FIELD = "tail_complete says whether the trailing segment is already a complete episode."
-_ADDED_EXAMPLES = {"batch": 1, "step": 0}
+# Completion remains independent of segmentation and message count.
+_STREAMING_TAIL_RULES = (
+    "Judge tail_complete separately from boundaries:",
+    "Message count and the absence of a next message are NOT completion evidence.",
+    "Completing one action is not completing the workflow.",
+    "A closed status exchange ABOUT unfinished work is dialogue, not execution of that work.",
+    "When completion is uncertain, set false and wait.",
+)
+_ADDED_EXAMPLES = {"batch": 6, "step": 0}
 
 # What E put in place of the first batch example: a courtesy reply after the thanks, every message on one day, and
 # the split after that reply.
@@ -294,34 +293,10 @@ _REWRITTEN_EXAMPLE_ONE = """\
 [4] [2024-03-10 09:06 UTC (Sunday)] Alice: Fixed, thanks!
 [5] [2024-03-10 09:06 UTC (Sunday)] Bob: Anytime.
 [6] [2024-03-10 11:30 UTC (Sunday)] Alice: Hey, are you free for lunch today?
-[7] [2024-03-10 11:31 UTC (Sunday)] Bob: Sure, 12:30?
+[7] [2024-03-10 11:31 UTC (Sunday)] Bob: Yes, our usual 12:30 works. See you there.
 </messages>"""
 _EXAMPLE_ONE_DAY = "2024-03-10"
 _REWRITTEN_EXAMPLE_ONE_SPLIT = {"boundaries": [5]}
-
-# v6 (draft §0c) asks for the topics in order before the split points, in place of one sentence on all decisions;
-# r8 bounds that list: each topic is a short label with its message range, then only the split points follow.
-# Every batch worked example's reasoning takes that shape, and its split points are the reply's boundaries.
-# H (r20) cut the note the third example's reasoning carried after its split points ("the request has only just
-# begun"), which "and nothing more" forbids; its boundaries and tail_complete stay as C added them.
-_OLD_REASONING_DEFINITION = "one sentence explaining all boundary decisions"
-_V6_REASONING_DEFINITION = (
-    "reasoning first names the topics the conversation goes through, in order, then states where they change;"
-)
-_REWRITTEN_REASONING_DEFINITION = (
-    "reasoning names the topics the conversation goes through, in order, each as a short label with its message "
-    "range, then the message numbers after which the topic changes, and nothing more;"
-)
-_V6_TOPICS_FIRST = "Topics in order: "
-_LABELLED_TOPICS = re.compile(r"^[^();]+ \(\d+(?:-\d+)?\)(?:; [^();]+ \(\d+(?:-\d+)?\))*\. ")
-_CHANGES_AFTER = re.compile(r"^Changes after (\d+(?:, \d+)*)(?=[,;.])")
-_NO_CHANGE = "No change."
-_SPLIT_POINTS_ONLY = re.compile(r"^(?:Changes after \d+(?:, \d+)*|No change)\.$")
-_RELEASED_EXAMPLE_THREE_REASONING = (
-    "April invoice (1-3); request for a call (4). Changes after 3; the request has only just begun."
-)
-_RELEASED_EXAMPLE_THREE_SPLIT = {"boundaries": [3], "tail_complete": False}
-_EXAMPLE_THREE_TAIL_NOTE = "; the request has only just begun"
 
 _OLD = {"batch": _OLD_BATCH_PROMPT, "step": _OLD_STEP_PROMPT}
 _SYSTEM = {"batch": BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, "step": STEP_BOUNDARY_DETECT_SYSTEM_PROMPT}
@@ -378,19 +353,10 @@ def _as_rewritten_by_e(path: str, index: int, reply: dict[str, object]) -> dict[
 
 
 def _without_rewritten_reasoning(path: str, reply: dict[str, object]) -> dict[str, object]:
-    """A reply minus the field v6 rewrote in every batch worked example: ``reasoning`` now lists the topics first."""
+    """Compare historical decisions independently of the revised batch explanation."""
     if path != "batch":
         return reply
     return {key: value for key, value in reply.items() if key != "reasoning"}
-
-
-def _split_points(rest: str) -> list[int]:
-    """The message numbers a worked example's reasoning says the topic changes after, from what follows its topics."""
-    if rest == _NO_CHANGE:
-        return []
-    changes = _CHANGES_AFTER.match(rest)
-    assert changes, rest
-    return [int(number) for number in changes.group(1).split(", ")]
 
 
 def _parses(block: str) -> bool:
@@ -471,52 +437,33 @@ def test_rewritten_first_example_replaces_the_old_one_on_a_single_day() -> None:
     assert set(re.findall(r"\d{4}-\d{2}-\d{2}", first.group(2))) == {_EXAMPLE_ONE_DAY}
 
 
-def test_rewritten_tail_complete_rule_is_in_the_batch_system_prompt() -> None:
-    assert _REWRITTEN_TAIL_COMPLETE in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-    assert _REWRITTEN_REPLY_FIELD in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+def test_batch_prompt_distinguishes_streaming_completion_from_segmentation() -> None:
+    assert "ONE or MORE chronological messages" in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+    assert "complete chronological conversation log" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+    for rule in _STREAMING_TAIL_RULES:
+        assert rule in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
 
 
-def test_rewritten_reasoning_definition_replaces_the_old_skeleton_wording() -> None:
-    old_skeletons = [block for block in _old_json_objects(_OLD_BATCH_PROMPT) if not _parses(block)]
-
-    assert [_OLD_REASONING_DEFINITION in block for block in old_skeletons] == [True]
-    assert _OLD_REASONING_DEFINITION not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-    assert _V6_REASONING_DEFINITION not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-    assert _REWRITTEN_REASONING_DEFINITION in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-
-
-def test_every_batch_example_reasoning_lists_labelled_topics_then_its_boundaries() -> None:
-    old = {json.loads(block)["reasoning"] for block in _old_json_objects(_OLD_BATCH_PROMPT) if _parses(block)}
+def test_every_batch_example_reasoning_is_two_to_three_words() -> None:
+    """Examples keep the output budget small without changing the reply schema."""
     replies = [json.loads(block) for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
 
-    assert replies
+    assert len(replies) == 8
     for reply in replies:
-        reasoning = reply["reasoning"]
-        topics = _LABELLED_TOPICS.match(reasoning)
-        assert topics, reasoning
-        assert not reasoning.startswith(_V6_TOPICS_FIRST)
-        assert _split_points(reasoning[topics.end() :]) == reply["boundaries"], reasoning
-    assert not old & {reply["reasoning"] for reply in replies}
+        assert 2 <= len(reply["reasoning"].split()) <= 3
 
 
-def test_every_batch_example_reasoning_says_nothing_after_its_split_points() -> None:
-    """The reply format ends reasoning with the split points "and nothing more"; the examples must show that."""
-    reasonings = [json.loads(block)["reasoning"] for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
+def test_examples_cover_open_and_closed_tails_at_the_same_message_count() -> None:
+    examples = _EXAMPLE_MESSAGES.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
+    replies = [json.loads(block) for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
+    decisions = {
+        (int(count), tuple(reply["boundaries"]), reply["tail_complete"])
+        for (count, _body), reply in zip(examples, replies, strict=True)
+    }
 
-    assert len(reasonings) == 3
-    for reasoning in reasonings:
-        topics = _LABELLED_TOPICS.match(reasoning)
-        assert topics, reasoning
-        assert _SPLIT_POINTS_ONLY.match(reasoning[topics.end() :]), reasoning
-
-
-def test_rewritten_third_example_drops_only_the_tail_note() -> None:
-    third = json.loads(_REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)[2])
-    rewritten = _RELEASED_EXAMPLE_THREE_REASONING.replace(_EXAMPLE_THREE_TAIL_NOTE, "")
-
-    assert rewritten != _RELEASED_EXAMPLE_THREE_REASONING
-    assert third == {"reasoning": rewritten, **_RELEASED_EXAMPLE_THREE_SPLIT}
-    assert _EXAMPLE_THREE_TAIL_NOTE.removeprefix("; ") not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
+    assert {(1, (), False), (1, (), True), (3, (), False), (3, (), True)} <= decisions
+    assert replies[2]["boundaries"] == [3]
+    assert replies[2]["tail_complete"] is False
 
 
 @pytest.mark.parametrize("path", _PATHS)
@@ -584,13 +531,13 @@ def test_every_reply_shown_validates_against_the_reply_model(path: str) -> None:
 
     for block in shown:
         _REPLY_MODEL[path].model_validate(json.loads(block))
-    assert len(shown) == (4 if path == "batch" else 1)
+    assert len(shown) == (9 if path == "batch" else 1)
 
 
 def test_every_batch_example_counts_its_messages() -> None:
     examples = _EXAMPLE_MESSAGES.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
 
-    assert len(examples) == 3
+    assert len(examples) == 8
     for count, body in examples:
         lines = body.splitlines()
         assert len(lines) == int(count)
@@ -600,17 +547,18 @@ def test_every_batch_example_counts_its_messages() -> None:
 # ── What the model receives ─────────────────────────────────────────────────────────────────────────
 
 
-async def test_batch_call_sends_the_rules_then_the_counted_messages() -> None:
+@pytest.mark.parametrize("message_count", [1, 3])
+async def test_batch_call_sends_the_rules_then_the_counted_messages(message_count: int) -> None:
     client = _batch_client()
 
-    await adetect_boundaries(_dialogue(3), llm=client)
+    await adetect_boundaries(_dialogue(message_count), llm=client)
 
     system, user = client.calls[0].messages
     lines = str(user.content).splitlines()[1:-1]
     assert (system.role, system.content) == ("system", BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
     assert user.role == "user"
     assert str(user.content).startswith(f'<messages count="{len(lines)}">\n')
-    assert len(lines) == 3
+    assert len(lines) == message_count
 
 
 async def test_batch_count_is_the_window_the_model_sees_after_the_pre_cut() -> None:

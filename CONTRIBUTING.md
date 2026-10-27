@@ -8,6 +8,9 @@ alongside the code so they stay in sync with it.
 - **Architecture, conventions, and the contract between human and AI contributors** —
   [`AGENTS.md`](AGENTS.md) (the canonical source of truth; `CLAUDE.md` / `.cursorrules` are symlinks).
 
+- **Prompt 文本审核** —
+  [Prompt 文本审核标准](docs/prompt-review-standard.md) 是新建或修改 Prompt 及动态组装时必须遵循的唯一规则正文；适用范围、审核记录和判定方式以该文件为准。
+
 ## Quick reference
 
 ```bash

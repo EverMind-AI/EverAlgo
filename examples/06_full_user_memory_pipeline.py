@@ -40,7 +40,13 @@ if TYPE_CHECKING:
 # Scripted LLM responses — one per pipeline stage, in call order.
 # ---------------------------------------------------------------------------
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "tail_complete": True})
+_BOUNDARY_JSON = json.dumps(
+    {
+        "reasoning": "Clarification unanswered",
+        "boundaries": [],
+        "tail_complete": False,
+    }
+)
 
 _EPISODE_JSON = json.dumps(
     {

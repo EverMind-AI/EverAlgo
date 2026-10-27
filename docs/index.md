@@ -80,6 +80,7 @@ Install only what your use case needs:
 | Browse per-package API docs | [API index](api/README.md) |
 | Versioning and support policy | [Version policy](version-policy.md) |
 | Contribute to EverAlgo | [Contributing](contributing.md) |
+| 审核新建或修改的 Prompt 与动态输入组装 | [Prompt 文本审核标准](prompt-review-standard.md) |
 
 ---
 

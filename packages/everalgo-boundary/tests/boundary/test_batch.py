@@ -125,15 +125,17 @@ async def test_no_boundary_is_final_true_closes_into_one_cell() -> None:
     assert result.tail == []
 
 
-async def test_single_message_no_boundary_returns_as_tail() -> None:
+@pytest.mark.parametrize("tail_complete", [False, True])
+async def test_single_message_no_boundary_returns_as_tail(*, tail_complete: bool) -> None:
     msgs = _dialogue(1)
-    fake = FakeLLMClient(responses=[_resp_no_boundary()])
+    fake = FakeLLMClient(responses=[_resp_no_boundary(tail_complete=tail_complete)])
 
     result = await adetect_boundaries(msgs, llm=fake)
 
     assert fake.call_count == 1
     assert result.cells == []
     assert result.tail == msgs
+    assert result.tail_complete is tail_complete
 
 
 async def test_single_message_is_final_closes_into_one_cell() -> None:
@@ -551,11 +553,13 @@ def test_format_messages_renders_index_timestamp_and_sender_name() -> None:
     ]
 
 
-def test_format_messages_skips_a_text_less_message_before_reading_its_timestamp() -> None:
-    """A dropped message keeps its number and, never rendered, may carry no timestamp."""
+def test_format_messages_keeps_a_text_less_message_without_reading_its_timestamp() -> None:
+    """Empty messages retain their index without introducing a new timestamp requirement."""
     msgs = [_msg("user", "", 0), _msg("user", "hi", _BASE_TS_MS, sender_name="Alice")]
 
-    assert _format_messages_with_indices(msgs) == "[2] [2023-11-14 22:13 UTC (Tuesday)] Alice: hi"
+    assert _format_messages_with_indices(msgs) == (
+        "[1] [empty message]\n[2] [2023-11-14 22:13 UTC (Tuesday)] Alice: hi"
+    )
 
 
 def test_format_messages_rejects_a_message_with_text_but_no_timestamp() -> None:
@@ -574,14 +578,14 @@ def test_format_messages_falls_back_to_sender_id_when_sender_name_absent() -> No
     assert " u_alice: hi" in rendered
 
 
-def test_format_messages_skips_empty_content_entries() -> None:
+def test_format_messages_keeps_empty_content_entries_as_placeholders() -> None:
     msgs = [
         _msg("user", "real content", _BASE_TS_MS, sender_name="Alice"),
         _msg("user", "", _BASE_TS_MS + 1000, sender_id="u_bob", sender_name="Bob"),
     ]
     rendered = _format_messages_with_indices(msgs)
     assert "Alice: real content" in rendered
-    assert "Bob" not in rendered
+    assert rendered.splitlines()[-1] == "[2] [empty message]"
 
 
 def test_format_messages_empty_list_returns_empty_string() -> None:
