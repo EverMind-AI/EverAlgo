@@ -9,6 +9,7 @@
 | [getting-started.md](getting-started.md) | 5-minute end-to-end runnable example |
 | [version-policy.md](version-policy.md) | SemVer policy, Python version support, deprecation |
 | [contributing.md](contributing.md) | How to contribute; links to AGENTS.md for the full rules |
+| [prompt-review-standard.md](prompt-review-standard.md) | Prompt 文本审核正式标准：完整请求、动态材料边界、规则一致性与审核记录 |
 | [concepts/architecture.md](concepts/architecture.md) | High-level architecture, subpackage layout, naming, LLM injection |
 | [concepts/llm-contract.md](concepts/llm-contract.md) | The `LLMClient` contract between operators and host implementations: JSON-only output, hard requirements, conformance suite (Chinese companion: [llm-contract.zh-CN.md](concepts/llm-contract.zh-CN.md)) |
 | [concepts/stateless-design.md](concepts/stateless-design.md) | What business-stateless means, including the parser I/O boundary |

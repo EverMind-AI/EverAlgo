@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 
 _BOUNDARY_JSON = json.dumps(
     {
-        "reasoning": "Three messages form a single coherent topic about Python async.",
+        "reasoning": "Question unanswered",
         "boundaries": [],
-        "tail_complete": True,
+        "tail_complete": False,
     }
 )
 

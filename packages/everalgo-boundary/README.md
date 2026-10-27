@@ -43,6 +43,17 @@ Each model call sends two messages. The system message holds the rules —
 The user message holds only the data, rendered from `BATCH_BOUNDARY_DETECT_USER_PROMPT` (`<messages count="N">`) or
 `STEP_BOUNDARY_DETECT_USER_PROMPT` (`<conversation_history>`, `<time_gap>`, `<new_messages>`). Each message line is
 `[N] [YYYY-MM-DD HH:MM UTC (Weekday)] speaker: text` on the batch path and the same without `[N]` on the step path.
+Batch records escape XML delimiters in names and content, indent continuation lines, and retain empty content
+as `[N] [empty message]`. Material inside these records is data, not instructions to the detector.
+
+The batch input is an open streaming window of one or more messages, not a finished conversation. Topic boundaries
+and tail completion are independent: `boundaries=[]` does not imply `tail_complete=True`. The tail needs evidence
+that its exchange or task has concluded; a workflow opening or intermediate action stays incomplete even if that
+individual action succeeded. A single message can still be complete when it states a final outcome or a
+self-contained fact. A closed status exchange can be complete while the work it discusses is unfinished; this
+differs from executing that workflow. Related feedback stays with the topic it refers to. The prompt limits
+`reasoning` to two to three English words of tail evidence, without topic lists, message ranges, or rule explanations. This is a prompt-level
+output budget; the reply schema remains unchanged.
 
 `custom_instructions=` on `adetect_boundaries`, `adetect_boundary_step` and the `BoundaryDetector` methods adds the
 host's text to the bundled rules, never replacing them: it is placed verbatim, never rendered as a template, in a
@@ -61,7 +72,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
 
 _BOUNDARY_JSON = json.dumps(
-    {"reasoning": "single topic", "boundaries": [], "tail_complete": True}
+    {"reasoning": "Question unanswered", "boundaries": [], "tail_complete": False}
 )
 
 async def main() -> None:
@@ -70,7 +81,7 @@ async def main() -> None:
     messages = [
         ChatMessage(id="m1", role="user",   content="Let's talk about deployment.",     timestamp=1_700_000_000_000, sender_id="u_alice"),
         ChatMessage(id="m2", role="assistant", content="Sure — what's the target env?",  timestamp=1_700_000_001_000, sender_id="assistant"),
-        ChatMessage(id="m3", role="user",   content="K8s. Switching topic: lunch?",     timestamp=1_700_000_002_000, sender_id="u_alice"),
+        ChatMessage(id="m3", role="user",   content="K8s. Which deployment strategy should I use?", timestamp=1_700_000_002_000, sender_id="u_alice"),
     ]
 
     # Streaming: hold `tail` between calls; pass prior tail + new messages each time.
@@ -79,7 +90,7 @@ async def main() -> None:
 
     # `tail_complete` is the LLM's verdict on the tail, not a restatement of it being non-empty: True
     # means the trailing segment already forms a complete episode, so it can be closed now; False
-    # means it is not complete yet (it only opens a topic, or is only media placeholders, a bare "ok",
+    # means it is not complete yet (it opens a topic, is an intermediate task step, or is only media placeholders, a bare "ok",
     # a system notification, an ambiguous 30-min-to-4-hour gap), so hold it for the next batch.
     # `None` means no path judged it — see the DetectionResult docstring.
 

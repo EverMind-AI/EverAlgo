@@ -43,7 +43,7 @@ from everalgo.user_memory import AtomicFactExtractor, EpisodeExtractor, Foresigh
 # Scripted LLM responses — one per pipeline stage, in call order.
 # ---------------------------------------------------------------------------
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "tail_complete": True})
+_BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": [], "tail_complete": False})
 _EPISODE_JSON = json.dumps({"content": "Discussion on async retry.", "summary": "Alice asked about async retries.", "title": "Alice asks about Python async"})
 _FORESIGHT_JSON = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "...", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _ATOMIC_FACT_JSON = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning async retry semantics."]}})

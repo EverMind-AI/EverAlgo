@@ -1,0 +1,335 @@
+{
+  "report_version": 1,
+  "release_target": "everalgo-boundary 0.4.1",
+  "release_status": "release_evidence_only; publication requires successful tag pipeline and PyPI verification",
+  "experiment_date": "2026-10-27",
+  "model": "qwen3-4b-instruct-2507",
+  "scope": {
+    "case_count": 36,
+    "repeats_per_version": 5,
+    "release_comparison_scored_requests": 360,
+    "full_raw_experiment_requests": 543,
+    "full_raw_experiment_scored_requests": 540,
+    "full_raw_experiment_warmups": 3,
+    "note": "Release comparison includes only the published baseline and final candidate; raw experiment also retains an intermediate comparison arm."
+  },
+  "protocol": {
+    "strict_json_schema": true,
+    "temperature": 0.3,
+    "max_tokens": 512,
+    "stream": false,
+    "enable_thinking": false,
+    "custom_instructions": null,
+    "serial_requests": true,
+    "retries": 0,
+    "order": "Rotated six permutations in the full experiment; 30 matched triplets per permutation.",
+    "latency": "HTTP request through complete response download; persistence and validation excluded.",
+    "percentile": "Linear interpolation.",
+    "intervention": "Batch system prompt and batch data renderer; shared schema and generation parameters unchanged."
+  },
+  "variants": {
+    "published_0_4_0": {
+      "attempted": 180,
+      "valid": 180,
+      "tail_labeled": 165,
+      "tail_correct": 79,
+      "boundaries_labeled": 170,
+      "boundaries_correct": 170,
+      "system_prompt": {
+        "system_prompt_characters": 4769,
+        "system_prompt_utf8_bytes": 4786,
+        "system_prompt_lines": 74
+      },
+      "full_request_prompt_tokens": {
+        "n": 180,
+        "p50": 1423,
+        "p90": 1505,
+        "mean": 1447.138888888889,
+        "min": 1361,
+        "max": 1755
+      },
+      "completion_tokens": {
+        "n": 180,
+        "p50": 33,
+        "p90": 40.099999999999994,
+        "mean": 36.28333333333333,
+        "min": 26,
+        "max": 114
+      },
+      "http_latency_seconds": {
+        "n": 180,
+        "p50": 0.6728324170107953,
+        "p90": 0.7649861166370101,
+        "mean": 0.7054040436943372,
+        "min": 0.5618666249793023,
+        "max": 1.6794939159881324
+      },
+      "reasoning_words": {
+        "n": 180,
+        "p50": 12,
+        "p90": 17.099999999999994,
+        "mean": 13.533333333333333,
+        "min": 3,
+        "max": 81
+      }
+    },
+    "release_candidate_0_4_1": {
+      "attempted": 180,
+      "valid": 180,
+      "tail_labeled": 165,
+      "tail_correct": 165,
+      "boundaries_labeled": 170,
+      "boundaries_correct": 170,
+      "system_prompt": {
+        "system_prompt_characters": 6830,
+        "system_prompt_utf8_bytes": 6844,
+        "system_prompt_lines": 121
+      },
+      "full_request_prompt_tokens": {
+        "n": 180,
+        "p50": 1979.5,
+        "p90": 2056,
+        "mean": 1999.0277777777778,
+        "min": 1919,
+        "max": 2306
+      },
+      "completion_tokens": {
+        "n": 180,
+        "p50": 20,
+        "p90": 21,
+        "mean": 20.333333333333332,
+        "min": 20,
+        "max": 23
+      },
+      "http_latency_seconds": {
+        "n": 180,
+        "p50": 0.5165264164679684,
+        "p90": 0.5347986881039105,
+        "mean": 0.5204469025827064,
+        "min": 0.5049568340182304,
+        "max": 0.5830893749371171
+      },
+      "reasoning_words": {
+        "n": 180,
+        "p50": 2,
+        "p90": 2,
+        "mean": 2.0833333333333335,
+        "min": 2,
+        "max": 4
+      }
+    }
+  },
+  "muggle_unfinished_windows": [
+    {
+      "case": "step-1",
+      "expected_tail": false,
+      "published": {
+        "attempted": 5,
+        "correct": 0
+      },
+      "candidate": {
+        "attempted": 5,
+        "correct": 5
+      }
+    },
+    {
+      "case": "step-2",
+      "expected_tail": false,
+      "published": {
+        "attempted": 5,
+        "correct": 0
+      },
+      "candidate": {
+        "attempted": 5,
+        "correct": 5
+      }
+    },
+    {
+      "case": "step-3",
+      "expected_tail": false,
+      "published": {
+        "attempted": 5,
+        "correct": 0
+      },
+      "candidate": {
+        "attempted": 5,
+        "correct": 5
+      }
+    },
+    {
+      "case": "step-7",
+      "expected_tail": false,
+      "published": {
+        "attempted": 5,
+        "correct": 0
+      },
+      "candidate": {
+        "attempted": 5,
+        "correct": 5
+      }
+    },
+    {
+      "case": "context-first-three",
+      "expected_tail": false,
+      "published": {
+        "attempted": 5,
+        "correct": 0
+      },
+      "candidate": {
+        "attempted": 5,
+        "correct": 5
+      }
+    }
+  ],
+  "groups": {
+    "original18": {
+      "cases": 18,
+      "baseline": {
+        "attempted": 90,
+        "tail_correct": 40,
+        "tail_labeled": 75,
+        "boundaries_correct": 80,
+        "boundaries_labeled": 80
+      },
+      "candidate": {
+        "attempted": 90,
+        "tail_correct": 75,
+        "tail_labeled": 75,
+        "boundaries_correct": 80,
+        "boundaries_labeled": 80
+      }
+    },
+    "previous_holdout6": {
+      "cases": 6,
+      "baseline": {
+        "attempted": 30,
+        "tail_correct": 15,
+        "tail_labeled": 30,
+        "boundaries_correct": 30,
+        "boundaries_labeled": 30
+      },
+      "candidate": {
+        "attempted": 30,
+        "tail_correct": 30,
+        "tail_labeled": 30,
+        "boundaries_correct": 30,
+        "boundaries_labeled": 30
+      }
+    },
+    "new_counterexamples12": {
+      "cases": 12,
+      "baseline": {
+        "attempted": 60,
+        "tail_correct": 24,
+        "tail_labeled": 60,
+        "boundaries_correct": 60,
+        "boundaries_labeled": 60
+      },
+      "candidate": {
+        "attempted": 60,
+        "tail_correct": 60,
+        "tail_labeled": 60,
+        "boundaries_correct": 60,
+        "boundaries_labeled": 60
+      }
+    }
+  },
+  "comparison_to_published": {
+    "paired_delta_seconds": {
+      "n": 180,
+      "p50": -0.15110506350174546,
+      "p90": -0.09401086340658367,
+      "mean": -0.18495714111163075,
+      "min": -1.1563367909984663,
+      "max": -0.046214125119149685
+    },
+    "candidate_faster_pairs": 180
+  },
+  "latency_acceptance_to_published": {
+    "evaluable": true,
+    "p50_not_slower": true,
+    "p90_not_slower": true,
+    "paired_median_not_slower": true
+  },
+  "reasoning_word_limit_violations": {
+    "count": 5,
+    "case": "control-task-in-progress",
+    "observed_words": 4,
+    "requested_words": "2–3",
+    "completion_tokens_for_these_calls": 22,
+    "all_candidate_max_completion_tokens": 23
+  },
+  "audit": {
+    "all_http200_stop_schema_valid": true,
+    "all_frozen_and_current_source_hashes_match": true,
+    "all_request_parameters_identical_except_messages": true,
+    "summary_recomputed_from_raw_matches": true,
+    "unique_response_ids": 543
+  },
+  "tested_source_sha256": {
+    "packages/everalgo-boundary/src/everalgo/boundary/prompts/en/chat.py": "8c2439c7b2d5db9af56bd6e7768575c224e817ab166661c67f690ec8f0d66a7e",
+    "packages/everalgo-boundary/src/everalgo/boundary/_render.py": "93f22f2a0a810081da3da9616f759786f25384549c03c8b7271b2eec41fa61ef",
+    "packages/everalgo-boundary/src/everalgo/boundary/_detector.py": "1bfa6ac4c97b54d7faab3b632f7ce6c960dbd54608bbfab01f5c931030fd232f"
+  },
+  "published_prompt_source_sha256": "3b34d70fd6d1409678a0d3b9c39d2b8f0830747ec6bbd6ed23c7bea53bd4dbc2",
+  "system_prompt_sha256": {
+    "published": "e6b4bbbfafeabccb7da8bf5bdcf0987e3cfbd7c8516c14f65112971b329d0db2",
+    "candidate": "06e65b4a86d356e6813e759742a552f54c7a98b6d3ba78df554a0e95f5f825c4"
+  },
+  "response_format_sha256": "564ccddb4f2bc9f82e190c5abaa020f772b26f79a89df8a4e14d81b1b8ef23ca",
+  "raw_artifacts_sha256": {
+    "summary.json": "3e4b09b3219f3e1a06a01456da815548a68a486db2d6e6c603684b0257e09c78",
+    "independent-audit.json": "1b621b9cf0f26ab0172f73a2dc535ed3177e6c16fbe43e5e89294aedbda3e955",
+    "manifest.json": "fa05165c82dc750b764b3cd5620eecdc7f86944c80addd521f6a1c7da5e1827a",
+    "prompt-sizes.json": "e61bc4169efac536dd773d5750692055d71038e2578453b237fbd6fb0de3bc17",
+    "cases.json": "a505b7614445479ef8e28cfd5360cb17c1b4eecb801a342317aa434a29860039",
+    "schedule.json": "0c99831b0c754f16db7cb560df6a836cfdad188d402116aa0f4996792ca49d14",
+    "results.json": "19f0980d1e4290999c3ebd3936e2d9b41baaf8da39daed059f4e9d7ce44ad036"
+  },
+  "local_checks": {
+    "boundary_unit_test": "222 passed in 2.41s",
+    "integration_test": "261 passed in 0.65s",
+    "ruff_check": "All checks passed!",
+    "ruff_format": "5 files already formatted",
+    "release_preflight": "Full release preflight and CI are separate from this benchmark evidence."
+  },
+  "limitations": [
+    "Shared endpoint load and cache state were uncontrolled; results are observed performance, not a production SLO guarantee.",
+    "Report excerpts are truncated; unknown tails are excluded from correctness counts.",
+    "Previous holdout cases are now regression cases; new counterexamples participated in screening and are not an independent final holdout.",
+    "No conclusion about arbitrary custom instructions or all adversarial inputs.",
+    "Package publication does not deploy downstream services."
+  ],
+  "release_preflight": {
+    "python": "3.14.5",
+    "pytest": {
+      "command": "uv run --no-sync pytest -n auto --cov=everalgo --cov-report=xml:<artifact>/coverage.xml -q",
+      "passed": 3556,
+      "skipped": 29
+    },
+    "ruff": {
+      "check": "passed",
+      "format_files": 375
+    },
+    "mypy": {
+      "source_files": 375,
+      "status": "passed"
+    },
+    "pyright": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "diff_cover": {
+      "changed_executable_lines": 12,
+      "missing": 0,
+      "coverage_percent": 100
+    },
+    "log_sha256": {
+      "tests": "6ad63e8893219822f472a01435ae644e0455ac02ba7e7004728039ecea8bb8be",
+      "ruff": "73102cb9e1037d9978bbc9a876d73ddae84fc949c96e8b8e582e80eec3754482",
+      "mypy": "6bf8c95d8f933084f025a406735577ea2765d81fb795f7f99050916fa05f6f36",
+      "pyright": "46a6c7834c9080ada23a415afd925abecc37d531f5c6e3d14ad0a7ff579096cb",
+      "diff-cover": "564bafcf8ef58a8d27f3107af9307602dafef5bfb62413f8adc25fc43eea3d57"
+    }
+  }
+}
