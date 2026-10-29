@@ -42,9 +42,8 @@ if TYPE_CHECKING:
 
 _BOUNDARY_JSON = json.dumps(
     {
-        "reasoning": "Clarification unanswered",
+        "reasoning": "The question and proposed follow-up belong to the same discussion of Python async retries.",
         "boundaries": [],
-        "tail_complete": False,
     }
 )
 

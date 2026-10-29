@@ -8,10 +8,10 @@ No API key is needed: all LLM calls are handled by `FakeLLMClient`.
 ## 1. Install
 
 ```bash
-pip install everalgo-user-memory everalgo-clustering
+pip install everalgo-user-memory everalgo-clustering everalgo-boundary==0.4.2rc0
 ```
 
-`everalgo-user-memory` pulls `everalgo-core` and `everalgo-boundary` automatically. The explicit `everalgo-clustering` install is needed by the example below.
+`everalgo-user-memory` pulls `everalgo-core` and `everalgo-boundary` automatically. The explicit `everalgo-clustering` install is needed by the example below. The boundary pin selects the release candidate whose two-field batch reply this example uses; an unpinned install normally selects the stable version.
 
 For the monorepo development install, see [Installation](installation.md).
 
@@ -43,7 +43,7 @@ from everalgo.user_memory import AtomicFactExtractor, EpisodeExtractor, Foresigh
 # Scripted LLM responses — one per pipeline stage, in call order.
 # ---------------------------------------------------------------------------
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": [], "tail_complete": False})
+_BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": []})
 _EPISODE_JSON = json.dumps({"content": "Discussion on async retry.", "summary": "Alice asked about async retries.", "title": "Alice asks about Python async"})
 _FORESIGHT_JSON = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "...", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _ATOMIC_FACT_JSON = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning async retry semantics."]}})

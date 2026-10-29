@@ -69,7 +69,7 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return '{"reasoning": "single coherent topic", "boundaries": [], "tail_complete": true}'
+            return '{"reasoning": "single coherent topic", "boundaries": []}'
         assert isinstance(messages[0].content, str)  # narrow for test
         captured_profile_prompt["text"] = messages[0].content
         return (

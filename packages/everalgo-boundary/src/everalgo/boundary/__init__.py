@@ -6,7 +6,7 @@ Public surface:
 - adetect_boundaries    — async function: the batch path over ``ConversationItem`` (tool items are kept in the
                           cells but never shown to the model)
 - detect_boundaries     — sync bridge over ``adetect_boundaries``; non-event-loop contexts only
-- DetectionResult       — ``(cells, tail, tail_complete)`` NamedTuple returned by all of the above
+- DetectionResult       — ``(cells, tail)`` NamedTuple returned by all of the above
 - adetect_boundary_step — async function: the single LLM decision under ``adetect_step``
 - BoundaryDecision      — NamedTuple returned by ``adetect_boundary_step``
 

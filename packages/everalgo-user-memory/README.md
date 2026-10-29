@@ -7,8 +7,8 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Install
 
 ```bash
-pip install everalgo-user-memory
-# Auto-pulls: everalgo-core, everalgo-boundary
+pip install everalgo-user-memory everalgo-boundary==0.4.2rc0
+# Explicitly select the boundary RC for the two-field batch reply below.
 ```
 
 ## Quick start
@@ -29,7 +29,7 @@ from everalgo.user_memory import (
     ProfileExtractor,
 )
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": [], "tail_complete": False})
+_BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": []})
 _EPISODE_JSON  = json.dumps({"content": "Alice explored async retry patterns.", "summary": "Alice explored async retry patterns.", "title": "Alice asks about async retries"})
 _FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _FACT_JSON     = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning Python async."]}})

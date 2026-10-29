@@ -66,7 +66,7 @@ from everalgo.user_memory import (
     AtomicFactExtractor, ProfileExtractor,
 )
 
-_BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": [], "tail_complete": True})
+_BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": []})
 _EPISODE_JSON  = json.dumps({"content": "Alice explored async patterns.", "summary": "Alice explored async patterns.", "title": "Alice asks about async"})
 _FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _FACT_JSON     = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning Python async."]}})

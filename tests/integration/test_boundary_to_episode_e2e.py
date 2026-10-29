@@ -25,7 +25,7 @@ from everalgo.user_memory.foresight import ForesightExtractor
 if TYPE_CHECKING:
     from everalgo.llm import LLMMessage
 
-_BOUNDARY_CONTINUE_JSON = '{"reasoning": "single coherent topic", "boundaries": [], "tail_complete": true}'
+_BOUNDARY_CONTINUE_JSON = '{"reasoning": "single coherent topic", "boundaries": []}'
 
 
 def _two_msg_dialogue() -> list[ChatMessage]:

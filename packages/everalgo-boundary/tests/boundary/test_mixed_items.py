@@ -4,8 +4,8 @@ Only chat messages reach the model; the cuts it makes over them are carried back
 tool item lands in exactly one cell or in the tail. All LLM calls use
 :class:`everalgo.testing.fake_llm.FakeLLMClient` — no real network calls.
 
-LLM reply format (``everalgo.boundary._replies._BatchReply``):
-``{"reasoning": <str>, "boundaries": [<1-based indices of first msg in each new cell>], "tail_complete": <bool>}``.
+LLM reply format (``everalgo.boundary._replies.Reply``):
+``{"reasoning": <str>, "boundaries": [<0-based indices of first msg in each new cell>]}``.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ def _tool_res(content: str = "result", *, ts: int = _TS, call_id: str = "call_1"
     return ToolCallResult(tool_call_id=call_id, content=content, timestamp=ts)
 
 
-def _boundary_response(boundaries: list[int], *, tail_complete: bool = True) -> str:
-    return json.dumps({"reasoning": "test boundary decision", "boundaries": boundaries, "tail_complete": tail_complete})
+def _boundary_response(boundaries: list[int]) -> str:
+    return json.dumps({"reasoning": "test boundary decision", "boundaries": boundaries})
 
 
 # ── Chat-only input maps to itself ───────────────────────────────────────────────────────────────────
@@ -87,8 +87,8 @@ async def test_tool_items_are_filtered_from_the_llm_prompt() -> None:
     assert tool_result_content not in prompt_text
     assert captured[-1].content == (
         '<messages count="2">\n'
-        "[1] [2023-11-14 22:13 UTC (Tuesday)] user: do something\n"
-        "[2] [2023-11-14 22:13 UTC (Tuesday)] assistant: done\n"
+        "[0] [2023-11-14 22:13 UTC (Tuesday)] user: do something\n"
+        "[1] [2023-11-14 22:13 UTC (Tuesday)] assistant: done\n"
         "</messages>"
     ), "chat messages are numbered among themselves"
 
@@ -204,18 +204,4 @@ async def test_tool_only_trajectory_reaches_no_llm_and_goes_to_the_tail(is_final
 
     assert result.cells == []
     assert result.tail == items
-    assert result.tail_complete is None
     assert fake.call_count == 0
-
-
-# ── tail_complete is the chat detection's verdict ────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("tail_complete", [True, False])
-async def test_tail_complete_comes_through_for_a_mixed_trajectory(tail_complete: bool) -> None:  # noqa: FBT001
-    items: list[ConversationItem] = [_chat("user", "hello", idx=0), _tool_req(), _chat("assistant", "hi", idx=2)]
-    fake = FakeLLMClient(responses=[_boundary_response([], tail_complete=tail_complete)])
-
-    result = await adetect_boundaries(items, llm=fake)
-
-    assert result.tail_complete is tail_complete

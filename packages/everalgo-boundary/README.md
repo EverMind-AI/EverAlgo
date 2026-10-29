@@ -7,7 +7,7 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Install
 
 ```bash
-pip install everalgo-boundary
+pip install everalgo-boundary==0.4.2rc0
 ```
 
 [`everalgo-user-memory`](../everalgo-user-memory/) and [`everalgo-agent-memory`](../everalgo-agent-memory/) both depend on this package and re-export `BoundaryDetector` unchanged.
@@ -20,7 +20,7 @@ pip install everalgo-boundary
 | `adetect_boundaries` | Async function behind `BoundaryDetector.adetect`: `(Sequence[ConversationItem], *, llm, is_final, ...) → DetectionResult` |
 | `detect_boundaries` | Sync bridge over `adetect_boundaries` (`asgiref.async_to_sync`); never call it inside a running event loop |
 | `adetect_boundary_step` | Async function behind `BoundaryDetector.adetect_step`: single-step boundary decision → `BoundaryDecision` |
-| `DetectionResult` | `NamedTuple(cells: list[MemCell], tail: list[ConversationItem], tail_complete: bool \| None)` |
+| `DetectionResult` | `NamedTuple(cells: list[MemCell], tail: list[ConversationItem])` |
 
 ### Tool items
 
@@ -46,14 +46,16 @@ The user message holds only the data, rendered from `BATCH_BOUNDARY_DETECT_USER_
 Batch records escape XML delimiters in names and content, indent continuation lines, and retain empty content
 as `[N] [empty message]`. Material inside these records is data, not instructions to the detector.
 
-The batch input is an open streaming window of one or more messages, not a finished conversation. Topic boundaries
-and tail completion are independent: `boundaries=[]` does not imply `tail_complete=True`. The tail needs evidence
-that its exchange or task has concluded; a workflow opening or intermediate action stays incomplete even if that
-individual action succeeded. A single message can still be complete when it states a final outcome or a
-self-contained fact. A closed status exchange can be complete while the work it discusses is unfinished; this
-differs from executing that workflow. Related feedback stays with the topic it refers to. The prompt limits
-`reasoning` to two to three English words of tail evidence, without topic lists, message ranges, or rule explanations. This is a prompt-level
-output budget; the reply schema remains unchanged.
+The batch input is an open streaming window of one or more messages. An episode is one coherent event,
+activity or independent discussion, including its execution, outcome and related feedback. Different steps,
+revisions, acknowledgements or dates alone do not establish a new episode. With insufficient evidence of a
+new independent episode, the prompt asks the model to keep the messages together.
+
+Batch labels start at **0**. Each boundary `b` names the first message of a new episode, so the preceding
+slice is `messages[:b]`. For example, `[2]` groups messages 0 and 1, then starts the next episode at 2.
+The valid range is `1 <= b < N`; the final input message can start a new episode. Tool items are not numbered.
+The strict batch response contains only `reasoning` and `boundaries`; reasoning explains all boundary decisions
+in one sentence. It does not predict whether the trailing episode has finished.
 
 `custom_instructions=` on `adetect_boundaries`, `adetect_boundary_step` and the `BoundaryDetector` methods adds the
 host's text to the bundled rules, never replacing them: it is placed verbatim, never rendered as a template, in a
@@ -72,7 +74,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
 
 _BOUNDARY_JSON = json.dumps(
-    {"reasoning": "Question unanswered", "boundaries": [], "tail_complete": False}
+    {"reasoning": "All messages concern the same deployment decision.", "boundaries": []}
 )
 
 async def main() -> None:
@@ -86,13 +88,9 @@ async def main() -> None:
 
     # Streaming: hold `tail` between calls; pass prior tail + new messages each time.
     result = await adetect_boundaries(messages, llm=fake)
-    cells, tail, tail_complete = result  # NamedTuple unpacking
+    cells, tail = result  # NamedTuple unpacking
 
-    # `tail_complete` is the LLM's verdict on the tail, not a restatement of it being non-empty: True
-    # means the trailing segment already forms a complete episode, so it can be closed now; False
-    # means it is not complete yet (it opens a topic, is an intermediate task step, or is only media placeholders, a bare "ok",
-    # a system notification, an ambiguous 30-min-to-4-hour gap), so hold it for the next batch.
-    # `None` means no path judged it — see the DetectionResult docstring.
+    # Persist the closed cells and carry the tail into the next batch.
 
     # End-of-session: tail is forced into the last cell.
     result = await adetect_boundaries(messages, llm=fake, is_final=True)
@@ -120,6 +118,22 @@ for batch in incoming_batches:
 final = await adetect_boundaries(tail, llm=client, is_final=True)
 await persist(final.cells)
 ```
+
+## Migrating from 0.4.1
+
+**Breaking:** `DetectionResult` now has two fields on both batch and step paths. Replace
+`cells, tail, tail_complete = result` with `cells, tail = result`; remove `result.tail_complete` accesses and
+completion-based branches. Persist `result.cells`, retain `result.tail`, and use the host's idle or session-end
+flush policy. The library does not schedule automatic flushing. The step prompt and decision schema are unchanged.
+
+The model's strict batch schema also drops `tail_complete`. Update scripted replies and custom LLM adapters to
+return only `reasoning` and `boundaries`; the removed field is rejected as an extra key. Custom batch instructions
+must use zero-based new-episode start labels. The numeric cut position itself remains a Python slice boundary.
+
+This release candidate replaces the completion prediction because an open window does not establish whether
+more related messages will arrive. It changes the segmentation policy and restores a one-sentence explanation
+of all decisions. The prompt is smaller, but this does not imply lower latency: the evaluated candidate generated
+longer responses and had higher boundary-call latency than 0.4.1. Effects and speed remain model-dependent.
 
 ## Failures
 

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 _TS = 1_700_000_000_000
 _TOKEN_LIMIT = 65_536
 _MESSAGE_LIMIT = 500
-_BATCH_REPLY = json.dumps({"reasoning": "r", "boundaries": [], "tail_complete": True})
+_BATCH_REPLY = json.dumps({"reasoning": "r", "boundaries": []})
 _STEP_REPLY = json.dumps({"reasoning": "r", "should_end": False, "confidence": 0.5, "topic_summary": ""})
 
 

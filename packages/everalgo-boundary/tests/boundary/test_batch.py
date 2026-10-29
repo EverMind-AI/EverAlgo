@@ -6,8 +6,8 @@ Coverage layers:
 - Phase 1  — empty input short-circuits; missing llm raises ValueError
 - Phase 3  — force-split loop (hard_msg_limit / hard_token_limit)
 - Phase 4  — LLM batch detection: happy path, boundary filtering, is_final closure
-- Error path — a reply that fails ``_BatchReply`` raises LLMOutputError; client exceptions propagate unchanged
-- Contract  — the call requests ``_BatchReply``; the reply models obey docs/concepts/llm-contract.md §2.2
+- Error path — a reply that fails ``Reply`` raises LLMOutputError; client exceptions propagate unchanged
+- Contract  — the call requests ``Reply``; the reply models obey docs/concepts/llm-contract.md §2.2
 - Helpers   — _format_messages_with_indices, _find_force_split_point
 - DetectionResult — NamedTuple unpacking, named-field access
 """
@@ -23,7 +23,7 @@ from pydantic import ValidationError
 
 from everalgo.boundary import DetectionResult, adetect_boundaries
 from everalgo.boundary._render import _format_messages_with_indices
-from everalgo.boundary._replies import _BatchReply, _StepReply
+from everalgo.boundary._replies import Reply, _StepReply
 from everalgo.boundary._segments import _find_force_split_point
 from everalgo.boundary.prompts.en.chat import BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
 from everalgo.llm import LLMMessage, LLMOutputError, StrictOutputModel, to_openai_response_format
@@ -71,14 +71,14 @@ def _dialogue(n: int, *, base_ts: int = _BASE_TS_MS, gap_ms: int = 1000) -> list
     ]
 
 
-def _resp_no_boundary(*, tail_complete: bool = True) -> str:
+def _resp_no_boundary() -> str:
     """LLM reply: full input belongs to one episode (no boundary)."""
-    return json.dumps({"reasoning": "single episode", "boundaries": [], "tail_complete": tail_complete})
+    return json.dumps({"reasoning": "single episode", "boundaries": []})
 
 
-def _resp_boundaries(indices: list[int], *, tail_complete: bool = True) -> str:
+def _resp_boundaries(indices: list[int]) -> str:
     """LLM reply: split at each index in ``indices``."""
-    return json.dumps({"reasoning": "split", "boundaries": indices, "tail_complete": tail_complete})
+    return json.dumps({"reasoning": "split", "boundaries": indices})
 
 
 # ===========================================================================
@@ -89,7 +89,7 @@ def _resp_boundaries(indices: list[int], *, tail_complete: bool = True) -> str:
 async def test_empty_messages_short_circuits_without_calling_llm() -> None:
     fake = FakeLLMClient(responses=[])
     result = await adetect_boundaries([], llm=fake)
-    assert result == DetectionResult(cells=[], tail=[], tail_complete=None)
+    assert result == DetectionResult(cells=[], tail=[])
     assert fake.call_count == 0
 
 
@@ -125,17 +125,15 @@ async def test_no_boundary_is_final_true_closes_into_one_cell() -> None:
     assert result.tail == []
 
 
-@pytest.mark.parametrize("tail_complete", [False, True])
-async def test_single_message_no_boundary_returns_as_tail(*, tail_complete: bool) -> None:
+async def test_single_message_no_boundary_returns_as_tail() -> None:
     msgs = _dialogue(1)
-    fake = FakeLLMClient(responses=[_resp_no_boundary(tail_complete=tail_complete)])
+    fake = FakeLLMClient(responses=[_resp_no_boundary()])
 
     result = await adetect_boundaries(msgs, llm=fake)
 
     assert fake.call_count == 1
     assert result.cells == []
     assert result.tail == msgs
-    assert result.tail_complete is tail_complete
 
 
 async def test_single_message_is_final_closes_into_one_cell() -> None:
@@ -252,32 +250,41 @@ class _ClientError(Exception):
     [
         pytest.param(f"not json {_SECRET}", "<root>", id="not-json"),
         pytest.param(
-            json.dumps({"reasoning": _SECRET, "boundaries": "not-a-list", "tail_complete": True}),
+            json.dumps({"reasoning": _SECRET, "boundaries": "not-a-list"}),
             "boundaries:",
             id="boundaries-not-a-list",
         ),
         pytest.param(
-            json.dumps({"reasoning": _SECRET, "boundaries": [], "tail_complete": True, "note": "x"}),
+            json.dumps({"reasoning": _SECRET, "boundaries": [], "note": "x"}),
             "note:",
             id="extra-field-forbidden",
         ),
         pytest.param(
-            json.dumps({"reasoning": _SECRET, "boundaries": []}), "tail_complete:", id="tail-complete-missing"
+            json.dumps({"reasoning": _SECRET, "boundaries": [], "tail_complete": True}),
+            "tail_complete:",
+            id="removed-tail-complete-forbidden",
         ),
         pytest.param(
-            json.dumps({"reasoning": _SECRET, "boundaries": ["2"], "tail_complete": True}),
+            json.dumps({"reasoning": _SECRET, "boundaries": ["2"]}),
             "boundaries.0:",
             id="string-index-not-coerced",
         ),
         pytest.param(
-            json.dumps({"reasoning": _SECRET, "boundaries": [None, 2], "tail_complete": True}),
+            json.dumps({"reasoning": _SECRET, "boundaries": [None, 2]}),
             "boundaries.0:",
             id="null-index-not-skipped",
         ),
+        pytest.param(
+            json.dumps({"reasoning": _SECRET, "boundaries": [True]}),
+            "boundaries.0:",
+            id="boolean-index-not-coerced",
+        ),
+        pytest.param(json.dumps({"boundaries": []}), "reasoning:", id="reasoning-required"),
+        pytest.param(json.dumps({"reasoning": _SECRET}), "boundaries:", id="boundaries-required"),
     ],
 )
 async def test_reply_failing_batch_model_raises_llm_output_error(reply: str, failing_location: str) -> None:
-    """A reply that fails ``_BatchReply`` is an LLMOutputError at once — no retry, no reply text in the message."""
+    """A reply that fails ``Reply`` is an LLMOutputError at once — no retry, no reply text in the message."""
     fake = FakeLLMClient(responses=[reply])
 
     with pytest.raises(LLMOutputError) as excinfo:
@@ -285,7 +292,7 @@ async def test_reply_failing_batch_model_raises_llm_output_error(reply: str, fai
 
     assert excinfo.type is LLMOutputError
     assert isinstance(excinfo.value.__cause__, ValidationError)
-    assert "boundary batch reply is not a valid _BatchReply" in str(excinfo.value)
+    assert "boundary batch reply is not a valid Reply" in str(excinfo.value)
     assert failing_location in str(excinfo.value)
     assert _SECRET not in str(excinfo.value)
     assert fake.call_count == 1
@@ -306,7 +313,7 @@ async def test_client_exception_propagates_unchanged() -> None:
 # ===========================================================================
 
 
-_REPLY_MODELS: tuple[type[StrictOutputModel], ...] = (_BatchReply, _StepReply)
+_REPLY_MODELS: tuple[type[StrictOutputModel], ...] = (Reply, _StepReply)
 
 
 @pytest.mark.parametrize("model", _REPLY_MODELS, ids=lambda model: model.__name__)
@@ -335,19 +342,17 @@ async def test_batch_call_requests_the_batch_reply_model() -> None:
 
     await adetect_boundaries(_dialogue(2), llm=fake)
 
-    assert [call.response_format for call in fake.calls] == [_BatchReply]
+    assert [call.response_format for call in fake.calls] == [Reply]
 
 
 async def test_batch_reply_is_logged_without_content(caplog: pytest.LogCaptureFixture) -> None:
     """One INFO line per call counts what the reply held and what the range check dropped; the reasoning stays out."""
-    reply = json.dumps({"reasoning": _SECRET, "boundaries": [0, 2, 2, 9], "tail_complete": False})
+    reply = json.dumps({"reasoning": _SECRET, "boundaries": [0, 2, 2, 9]})
 
     with caplog.at_level(logging.INFO, logger="everalgo.boundary"):
         await adetect_boundaries(_dialogue(4), llm=FakeLLMClient(responses=[reply]))
 
-    assert caplog.messages == [
-        "boundary batch reply: messages=4 boundaries=1 tail_complete=False dropped_out_of_range=2"
-    ]
+    assert caplog.messages == ["boundary batch reply: messages=4 boundaries=1 dropped_out_of_range=2"]
     assert _SECRET not in caplog.text
 
 
@@ -458,12 +463,11 @@ async def test_tail_cell_timestamp_when_is_final_matches_last_message() -> None:
 
 
 async def test_detection_result_supports_positional_unpacking() -> None:
-    """Three fields now, so two-value unpacking no longer works — 0.3.0 states this as breaking."""
+    """The public result contains only closed cells and the pending tail."""
     fake = FakeLLMClient(responses=[_resp_no_boundary()])
-    cells, tail, tail_complete = await adetect_boundaries(_dialogue(2), llm=fake)
+    cells, tail = await adetect_boundaries(_dialogue(2), llm=fake)
     assert isinstance(cells, list)
     assert isinstance(tail, list)
-    assert isinstance(tail_complete, bool)
 
 
 async def test_detection_result_named_field_access() -> None:
@@ -474,66 +478,31 @@ async def test_detection_result_named_field_access() -> None:
 
 
 def test_detection_result_index_access() -> None:
-    r = DetectionResult(cells=[], tail=[], tail_complete=None)
+    r = DetectionResult(cells=[], tail=[])
     assert r[0] == []
     assert r[1] == []
-    assert r[2] is None
+    assert len(r) == 2
 
 
-# ===========================================================================
-# tail_complete — the LLM's verdict on the tail, previously parsed and then dropped
-# ===========================================================================
-
-
-async def test_tail_complete_false_is_surfaced_to_the_caller() -> None:
-    """It was validated as a mandatory key and then discarded; nothing upstream could see it."""
-    fake = FakeLLMClient(responses=[_resp_no_boundary(tail_complete=False)])
-
-    result = await adetect_boundaries(_dialogue(2), llm=fake)
-
-    assert result.tail_complete is False
-
-
-async def test_tail_complete_true_is_surfaced_to_the_caller() -> None:
-    fake = FakeLLMClient(responses=[_resp_no_boundary(tail_complete=True)])
-
-    result = await adetect_boundaries(_dialogue(2), llm=fake)
-
-    assert result.tail_complete is True
-
-
-async def test_tail_complete_is_independent_of_whether_the_tail_is_empty() -> None:
-    """A non-empty tail is the normal case; tail_complete is a narrower claim about that tail.
-
-    If the two moved together the field would carry no information a caller could not already read off
-    ``tail``, which is exactly the confusion that made it look droppable.
-    """
-    incomplete = await adetect_boundaries(
-        _dialogue(2), llm=FakeLLMClient(responses=[_resp_no_boundary(tail_complete=False)])
-    )
-    complete = await adetect_boundaries(
-        _dialogue(2), llm=FakeLLMClient(responses=[_resp_no_boundary(tail_complete=True)])
+@pytest.mark.parametrize("is_final", [False, True])
+async def test_batch_result_has_no_tail_completion_verdict(*, is_final: bool) -> None:
+    result = await adetect_boundaries(
+        _dialogue(2), llm=FakeLLMClient(responses=[_resp_no_boundary()]), is_final=is_final
     )
 
-    assert incomplete.tail == complete.tail
-    assert incomplete.tail_complete != complete.tail_complete
+    assert result._fields == ("cells", "tail")
+    assert not hasattr(result, "tail_complete")
+    assert len(result.cells) == int(is_final)
+    assert len(result.tail) == (0 if is_final else 2)
 
 
-async def test_tail_complete_survives_is_final_closure() -> None:
-    """``is_final=True`` empties the tail, but the LLM's verdict is still what it was."""
-    fake = FakeLLMClient(responses=[_resp_no_boundary(tail_complete=False)])
+async def test_final_message_can_start_a_pending_episode() -> None:
+    """A new episode's opening is a valid cut before its reply has arrived."""
+    messages = _dialogue(4)
+    result = await adetect_boundaries(messages, llm=FakeLLMClient(responses=[_resp_boundaries([3])]))
 
-    result = await adetect_boundaries(_dialogue(2), llm=fake, is_final=True)
-
-    assert result.tail == []
-    assert result.tail_complete is False
-
-
-async def test_empty_input_reports_no_verdict_rather_than_false() -> None:
-    """No LLM call happened, so nothing judged the tail — ``None``, not a fabricated ``False``."""
-    result = await adetect_boundaries([], llm=FakeLLMClient(responses=[]))
-
-    assert result.tail_complete is None
+    assert [cell.items for cell in result.cells] == [messages[:3]]
+    assert result.tail == [messages[3]]
 
 
 # ===========================================================================
@@ -548,8 +517,8 @@ def test_format_messages_renders_index_timestamp_and_sender_name() -> None:
     ]
     rendered = _format_messages_with_indices(msgs)
     assert rendered.split("\n") == [
-        "[1] [2023-11-14 22:13 UTC (Tuesday)] Alice: hi",
-        "[2] [2023-11-14 22:13 UTC (Tuesday)] Bot: hey",
+        "[0] [2023-11-14 22:13 UTC (Tuesday)] Alice: hi",
+        "[1] [2023-11-14 22:13 UTC (Tuesday)] Bot: hey",
     ]
 
 
@@ -558,7 +527,7 @@ def test_format_messages_keeps_a_text_less_message_without_reading_its_timestamp
     msgs = [_msg("user", "", 0), _msg("user", "hi", _BASE_TS_MS, sender_name="Alice")]
 
     assert _format_messages_with_indices(msgs) == (
-        "[1] [empty message]\n[2] [2023-11-14 22:13 UTC (Tuesday)] Alice: hi"
+        "[0] [empty message]\n[1] [2023-11-14 22:13 UTC (Tuesday)] Alice: hi"
     )
 
 
@@ -585,20 +554,20 @@ def test_format_messages_keeps_empty_content_entries_as_placeholders() -> None:
     ]
     rendered = _format_messages_with_indices(msgs)
     assert "Alice: real content" in rendered
-    assert rendered.splitlines()[-1] == "[2] [empty message]"
+    assert rendered.splitlines()[-1] == "[1] [empty message]"
 
 
 def test_format_messages_empty_list_returns_empty_string() -> None:
     assert _format_messages_with_indices([]) == ""
 
 
-def test_format_messages_indices_are_one_based() -> None:
+def test_format_messages_indices_are_zero_based() -> None:
     msgs = _dialogue(3)
     rendered = _format_messages_with_indices(msgs)
     assert "[1] " in rendered
     assert "[2] " in rendered
-    assert "[3] " in rendered
-    assert "[0] " not in rendered
+    assert "[0] " in rendered
+    assert "[3] " not in rendered
 
 
 # ===========================================================================

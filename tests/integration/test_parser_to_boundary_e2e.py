@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from everalgo.llm import LLMMessage
 
 # Scripted boundary response: no internal cut, all messages form one MemCell.
-_BOUNDARY_NO_CUT_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": [], "tail_complete": True})
+_BOUNDARY_NO_CUT_JSON = json.dumps({"reasoning": "single coherent topic", "boundaries": []})
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "packages" / "everalgo-parser" / "tests" / "fixtures"
 
