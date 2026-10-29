@@ -58,8 +58,7 @@ class DetectionResult(NamedTuple):
         result = await adetect_boundaries(items, llm=client)
         result.cells  # list[MemCell]
         result.tail  # list[ConversationItem]
-        result.tail_complete  # bool | None
-        result[0], result[1], result[2]
+        result[0], result[1]
 
     Attributes:
         cells: Zero or more :class:`~everalgo.types.MemCell` instances the algorithm has confidently
@@ -68,30 +67,10 @@ class DetectionResult(NamedTuple):
             conversation continues beyond the last seen message, so the trailing segment is left as a
             tail for the caller's state machine.  When ``is_final=True``, tail is forced into the final
             MemCell and this field is guaranteed empty.
-        tail_complete: Whether the trailing segment already forms a complete episode — the LLM's own
-            verdict on it, not a restatement of ``tail`` being non-empty. ``True``: the segment after the
-            last boundary (the whole window when there is none) is complete and the caller can close it
-            into a MemCell now; a segment that ends with an acknowledgement or farewell closing its own
-            topic counts as complete. ``False``: it only opens a topic, or is only media placeholders,
-            intent-free short replies, system notifications or an ambiguous 30-minute-to-4-hour gap, so
-            the caller should hold it for the next batch. A caller that closes every non-empty tail will
-            close half-started episodes; one that holds every non-empty tail never closes one.
-
-            ``None`` means no path judged it, and it is not interchangeable with ``False``:
-
-            * :func:`adetect_boundaries` (batch) returns ``bool`` — the LLM's answer.
-            * :meth:`BoundaryDetector.adetect_step` (single-step) returns ``None``.
-              Its prompt answers a different question — has a new episode begun — and never evaluates the
-              trailing segment's completeness. Deriving one from the other does not work: ``should_end``
-              is "no" on nearly every step because the step prompt keeps related content together, so
-              copying it would report "not complete" almost everywhere, and on the steps that do close an
-              episode it would claim "complete" about a tail that path never looked at.
-            * Inputs that reach no LLM at all (no ``ChatMessage`` among the items) return ``None``.
     """
 
     cells: list[MemCell]
     tail: list[ConversationItem]
-    tail_complete: bool | None
 
 
 class BoundaryDecision(NamedTuple):
@@ -148,7 +127,7 @@ class BoundaryDetector:
             hard_msg_limit: Chat-message count at which leading cells are force-split off without the model.
 
         Returns:
-            :class:`DetectionResult` ``(cells, tail, tail_complete)``.
+            :class:`DetectionResult` ``(cells, tail)``.
 
         Raises:
             LLMOutputError: If the LLM reply is not a valid batch output.
@@ -209,11 +188,6 @@ class BoundaryDetector:
               * episode ends without smart-mask: ``[new]`` (clean cut).
               * episode continues: ``[*history, new]`` (accumulate).
 
-            - ``tail_complete`` — always ``None`` on this path. The step prompt answers whether a new
-              episode has begun, and never evaluates whether the trailing segment is a complete episode;
-              ``None`` says so rather than guessing. See :class:`DetectionResult` for why ``should_end`` is
-              not a substitute.
-
         Raises:
             LLMOutputError: If the LLM reply is not a valid step output.
             InvalidInputError: If a message the prompt shows has no timestamp (0).
@@ -231,7 +205,7 @@ class BoundaryDetector:
             time_gap_info=_calculate_time_gap(shown_history, [new]),
         )
         if not decision.should_end:
-            return DetectionResult(cells=[], tail=[*history, new], tail_complete=None)
+            return DetectionResult(cells=[], tail=[*history, new])
         if not decision.topic_summary:
             logger.warning("BoundaryDetector: should_end=True but topic_summary is empty; using fallback")
         return _closed_step(history, new, bridge=bridge)
@@ -271,7 +245,7 @@ async def adetect_boundaries(
 
     Returns:
         :class:`DetectionResult`. Without any ``ChatMessage`` no LLM is called: ``cells`` is empty, ``tail``
-        holds every item, and ``tail_complete`` is ``None``.
+        holds every item. The caller owns idle or end-of-session flushing.
 
     Raises:
         LLMOutputError: If the LLM reply is not a valid batch output. The client's own exceptions propagate
@@ -280,17 +254,17 @@ async def adetect_boundaries(
     """
     chat_positions, messages = _chat_view(items)
     if not messages:
-        return DetectionResult(cells=[], tail=list(items), tail_complete=None)
+        return DetectionResult(cells=[], tail=list(items))
 
     cuts = _force_split_cuts(messages, hard_token_limit, hard_msg_limit)
     window_start = cuts[-1] if cuts else 0
-    boundaries, tail_complete = await _ask_for_boundaries(messages[window_start:], llm, custom_instructions)
+    boundaries = await _ask_for_boundaries(messages[window_start:], llm, custom_instructions)
     cuts += [window_start + boundary for boundary in boundaries]
     if is_final:
         cuts.append(len(messages))
 
     cells, tail = _cut_items(items, chat_positions, cuts)
-    return DetectionResult(cells=cells, tail=tail, tail_complete=tail_complete)
+    return DetectionResult(cells=cells, tail=tail)
 
 
 detect_boundaries = async_to_sync(adetect_boundaries)
@@ -352,15 +326,15 @@ async def adetect_boundary_step(
 def _closed_step(history: list[ChatMessage], new: ChatMessage, *, bridge: bool) -> DetectionResult:
     """The step result that closes ``history`` into a cell."""
     cell, next_history = _close_step(history, new, bridge=bridge)
-    return DetectionResult(cells=[cell], tail=next_history, tail_complete=None)
+    return DetectionResult(cells=[cell], tail=next_history)
 
 
 async def _ask_for_boundaries(
     messages: Sequence[ChatMessage],
     llm: LLMClient,
     custom_instructions: str | None,
-) -> tuple[list[int], bool]:
-    """Call the LLM once; return the usable boundaries and its ``tail_complete`` verdict.
+) -> list[int]:
+    """Call the LLM once and return the usable new-episode start indices.
 
     The schema guarantees integers only; which of them can cut ``messages`` is checked here: indices outside
     ``1 <= b < len(messages)`` are dropped, the rest deduplicated and sorted.
@@ -373,13 +347,12 @@ async def _ask_for_boundaries(
     in_range = [b for b in reply.boundaries if 1 <= b < len(messages)]
     boundaries = sorted(set(in_range))
     logger.info(
-        "boundary batch reply: messages=%d boundaries=%d tail_complete=%s dropped_out_of_range=%d",
+        "boundary batch reply: messages=%d boundaries=%d dropped_out_of_range=%d",
         len(messages),
         len(boundaries),
-        reply.tail_complete,
         len(reply.boundaries) - len(in_range),
     )
-    return boundaries, reply.tail_complete
+    return boundaries
 
 
 def _batch_request(messages: Sequence[ChatMessage], custom_instructions: str | None) -> list[LLMMessage]:

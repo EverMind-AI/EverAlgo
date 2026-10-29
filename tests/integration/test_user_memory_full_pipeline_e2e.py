@@ -94,7 +94,7 @@ def _conversation() -> list[ChatMessage]:
 # ---------------------------------------------------------------------------
 
 
-_BOUNDARY_JSON = '{"reasoning": "single coherent topic", "boundaries": [], "tail_complete": true}'
+_BOUNDARY_JSON = '{"reasoning": "single coherent topic", "boundaries": []}'
 
 _EPISODE_JSON = (
     '{"content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",'

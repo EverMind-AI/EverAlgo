@@ -23,14 +23,13 @@ if TYPE_CHECKING:
 
 # ---------------------------------------------------------------------------
 # Scripted LLM response — mirrors the JSON shape BoundaryDetector parses.
-# No boundaries → all messages land in a single MemCell.
+# With is_final=True, no internal boundaries means one final MemCell.
 # ---------------------------------------------------------------------------
 
 _BOUNDARY_JSON = json.dumps(
     {
-        "reasoning": "Question unanswered",
+        "reasoning": "All messages discuss learning Python async, including the follow-up about error handling.",
         "boundaries": [],
-        "tail_complete": False,
     }
 )
 
@@ -82,9 +81,6 @@ async def main() -> None:
 
     print(f"cells produced : {len(result.cells)}")
     print(f"tail (held back): {len(result.tail)} messages")
-    # The LLM's verdict on the tail, not a restatement of its length: True means the trailing segment
-    # already forms a complete episode and can be closed now. None means no path judged it.
-    print(f"tail_complete  : {result.tail_complete}")
 
     if result.cells:
         first_cell = result.cells[0]

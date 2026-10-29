@@ -1,12 +1,11 @@
 """Tests for BoundaryDetector.adetect_step — the incremental path (93 incremental mirror).
 
-``adetect_step`` returns :class:`DetectionResult` (``cells, tail, tail_complete``):
+``adetect_step`` returns :class:`DetectionResult` (``cells, tail``):
 
 - ``cells`` carries the 0-or-1 closed MemCell.
 - ``tail`` carries the new history the caller must feed back into the next call,
   encapsulating the cut-and-bridge (``[history[-1], new]`` under smart-mask,
   ``[new]`` for a clean cut) or the accumulation (``[*history, new]``).
-- ``tail_complete`` is always ``None`` — this path's prompt never judges it.
 """
 
 from __future__ import annotations
@@ -168,47 +167,19 @@ def test_sync_bridge_exists() -> None:
     assert callable(detector.detect_step)
 
 
-# ===========================================================================
-# tail_complete — this path does not judge it, and says so
-# ===========================================================================
+@pytest.mark.parametrize("should_end", [False, True])
+async def test_step_result_contains_only_cells_and_tail(*, should_end: bool) -> None:
+    detector = BoundaryDetector(llm=FakeLLMClient(responses=[_ok_response(should_end=should_end, topic_summary="T")]))
+    history = [_msg(0), _msg(1)]
+    new = _msg(2)
 
+    result = await detector.adetect_step(history, new)
+    cells, tail = result
 
-async def test_tail_complete_is_none_when_accumulating() -> None:
-    payload = _ok_response(should_end=False)
-    detector = BoundaryDetector(llm=FakeLLMClient(responses=[payload]))
-
-    result = await detector.adetect_step([_msg(0), _msg(1)], _msg(2))
-
-    assert result.tail_complete is None
-
-
-async def test_tail_complete_is_none_when_the_episode_closes() -> None:
-    payload = _ok_response(should_end=True, topic_summary="Topic")
-    detector = BoundaryDetector(llm=FakeLLMClient(responses=[payload]))
-
-    result = await detector.adetect_step([_msg(0), _msg(1)], _msg(2))
-
-    assert len(result.cells) == 1
-    assert result.tail_complete is None
-
-
-async def test_tail_complete_is_not_a_copy_of_should_end() -> None:
-    """Copying ``should_end`` would make the common case report "not complete" and is not what the field means.
-
-    ``should_end`` answers whether a new episode began; ``tail_complete`` answers whether the trailing
-    segment already forms a complete episode. ``should_end`` is false on nearly every step — the step
-    prompt's own principle is to keep related content together — so a copy reports "not complete" almost
-    everywhere, and claims "complete" about a tail this path never evaluated on the steps that close one.
-    """
-    accumulating = await BoundaryDetector(llm=FakeLLMClient(responses=[_ok_response(should_end=False)])).adetect_step(
-        [_msg(0), _msg(1)], _msg(2)
-    )
-    closing = await BoundaryDetector(
-        llm=FakeLLMClient(responses=[_ok_response(should_end=True, topic_summary="T")])
-    ).adetect_step([_msg(0), _msg(1)], _msg(2))
-
-    assert accumulating.tail_complete is None
-    assert closing.tail_complete is None
+    assert result._fields == ("cells", "tail")
+    assert not hasattr(result, "tail_complete")
+    assert [cell.items for cell in cells] == ([history] if should_end else [])
+    assert tail == ([new] if should_end else [*history, new])
 
 
 # ===========================================================================

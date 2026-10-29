@@ -55,13 +55,13 @@ def _two_messages() -> list[ChatMessage]:
 
 def test_detect_boundaries_is_a_blocking_sync_bridge() -> None:
     """Without the prefix the name is synchronous: called outside an event loop, it returns the result itself."""
-    reply = json.dumps({"reasoning": "r", "boundaries": [1], "tail_complete": True})
+    reply = json.dumps({"reasoning": "r", "boundaries": [1]})
     messages = _two_messages()
 
     result = detect_boundaries(messages, llm=FakeLLMClient(responses=[reply]))
 
     assert not inspect.iscoroutinefunction(detect_boundaries)
-    assert (result.tail, result.tail_complete) == (messages[1:], True)
+    assert result.tail == messages[1:]
     assert [cell.items for cell in result.cells] == [messages[:1]]
 
 
@@ -73,7 +73,7 @@ async def test_detect_boundaries_refuses_to_run_inside_an_event_loop() -> None:
 
 def test_boundary_detector_sync_bridges_block_and_return_the_result() -> None:
     """``detect`` / ``detect_step`` are the blocking twins of ``adetect`` / ``adetect_step``."""
-    batch_reply = json.dumps({"reasoning": "r", "boundaries": [1], "tail_complete": True})
+    batch_reply = json.dumps({"reasoning": "r", "boundaries": [1]})
     step_reply = json.dumps({"reasoning": "r", "should_end": False, "confidence": 0.5, "topic_summary": ""})
     messages = _two_messages()
     detector = BoundaryDetector(llm=FakeLLMClient(responses=[batch_reply, step_reply]))
@@ -86,7 +86,7 @@ def test_boundary_detector_sync_bridges_block_and_return_the_result() -> None:
     assert not inspect.iscoroutinefunction(BoundaryDetector.detect)
     assert not inspect.iscoroutinefunction(BoundaryDetector.detect_step)
     assert [cell.items for cell in batch.cells] == [messages[:1]]
-    assert step == ([], messages, None)
+    assert step == ([], messages)
 
 
 def test_detection_result_is_importable_as_top_level_symbol() -> None:
@@ -95,14 +95,14 @@ def test_detection_result_is_importable_as_top_level_symbol() -> None:
 
 
 def test_detection_result_is_named_tuple_subclass() -> None:
-    """Still a NamedTuple, now three fields wide.
+    """Still a NamedTuple, now two fields wide.
 
     The field order is part of the public surface — index and positional access are documented — so it is
     pinned here rather than left to whichever order a future edit happens to leave.
     """
-    r = DetectionResult(cells=[], tail=[], tail_complete=None)
+    r = DetectionResult(cells=[], tail=[])
     assert isinstance(r, tuple)
-    assert r._fields == ("cells", "tail", "tail_complete")
+    assert r._fields == ("cells", "tail")
 
 
 def test_workspace_extractor_is_not_in_public_api() -> None:

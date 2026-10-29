@@ -14,12 +14,11 @@ if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 
-class _BatchReply(StrictOutputModel):
-    """Batch reply: the ``{"reasoning", "boundaries", "tail_complete"}`` skeleton of both batch prompts."""
+class Reply(StrictOutputModel):
+    """Strict internal-cut response shared by both variants."""
 
     reasoning: str
     boundaries: list[int]
-    tail_complete: bool
 
 
 class _StepReply(StrictOutputModel):
@@ -31,14 +30,14 @@ class _StepReply(StrictOutputModel):
     topic_summary: str
 
 
-async def _call_llm_for_batch(llm: LLMClient, messages: list[LLMMessage]) -> _BatchReply:
+async def _call_llm_for_batch(llm: LLMClient, messages: list[LLMMessage]) -> Reply:
     """Request a batch reply and return it validated.
 
     Raises:
         LLMOutputError: If the reply is not a valid batch output.
     """
-    text = await llm.achat(messages=messages, response_format=_BatchReply)
-    return parse_reply(_BatchReply, text, operator="boundary batch")
+    text = await llm.achat(messages=messages, response_format=Reply)
+    return parse_reply(Reply, text, operator="boundary batch")
 
 
 async def _call_llm_for_step(llm: LLMClient, messages: list[LLMMessage]) -> _StepReply:

@@ -1,27 +1,12 @@
-"""The boundary prompts' system / user split: every old rule sentence kept, data only in the user message.
+"""Request contracts for episode-only batch detection and the unchanged incremental step path.
 
-The single-message prompts the split replaced (HEAD ``e5a9df1``) are pinned below verbatim. Every non-blank line
-of them is either in the new system prompt, sentence by sentence, after the changes the split made everywhere
-(``**`` and inline backticks dropped, example times in the rendered ``YYYY-MM-DD HH:MM UTC (Weekday)`` shape), or
-listed in
-``_RESTRUCTURED`` under the change of the verbatim draft that removed it: F1-F6 restructured a line, C rewrote its
-content on purpose, so a C line must be gone and its replacement present, D dropped a rule outright, so a D
-line must be gone with nothing in its place, and E rewrote the first batch worked example, so an E line must be
-gone and the new example present. The old prompts' JSON objects are compared as JSON: the worked examples, with the
-field C renamed and the split E moved, must open the new ``<reply>`` objects, followed only by the examples C added;
-the one skeleton each prompt had gave way to a parseable one. v6 then rewrote the
-batch ``reasoning``: its definition, whose old wording lived only in that skeleton, and every worked example's,
-which now lists the topics first. The old wording must be gone, and batch replies are compared without
-``reasoning``. H then cut the third batch example's reasoning back to that definition: after its topics it says
-only where they change. Streaming-tail rules now use a two-to-three-word reason and examples that separate
-completion from message count; the unchanged step prompt retains the historical contract.
-
-A caller's ``custom_instructions`` close the system message as its last block, verbatim; without them the system
-message is the bundled rules byte for byte. ``prompt=``, which replaced the rules, is gone from every entry point.
+The batch prompt and strict schema are frozen to the evaluated release candidate. Step rules retain their
+historical sentence-by-sentence checks. Both paths exercise the assembled system and data messages.
 """
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import re
@@ -30,19 +15,15 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from everalgo.boundary import (
-    BoundaryDetector,
-    adetect_boundaries,
-    adetect_boundary_step,
-    detect_boundaries,
-)
-from everalgo.boundary._replies import _BatchReply, _StepReply
+from everalgo.boundary import BoundaryDetector, adetect_boundaries, adetect_boundary_step, detect_boundaries
+from everalgo.boundary._replies import Reply, _StepReply
 from everalgo.boundary.prompts.en.chat import (
     BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT,
     BATCH_BOUNDARY_DETECT_USER_PROMPT,
     STEP_BOUNDARY_DETECT_SYSTEM_PROMPT,
     STEP_BOUNDARY_DETECT_USER_PROMPT,
 )
+from everalgo.llm import to_openai_response_format
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
 from everalgo.utils import format_utc_time
@@ -51,97 +32,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from everalgo.llm import StrictOutputModel
-
-# Verbatim from ``git show e5a9df1:packages/everalgo-boundary/src/everalgo/boundary/prompts/en/chat.py``.
-_OLD_BATCH_PROMPT = """
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
-
-You are an episodic memory boundary detection expert. Your task is to find all natural "episode boundaries" in a continuous conversation and split it into meaningful, independently memorable segments (MemCells). Your core principle is **"default to merging, split cautiously"**.
-
-### Input Format
-The following is a complete chronological conversation log. Each message is prefixed with a 1-based index and timestamp:
-
-```
-{{messages}}
-```
-
-### When to split
-
-Add a boundary (by message number) only when **clear signals** appear:
-- **Cross-day split (highest priority):** Adjacent messages have different calendar dates — MUST split at the date boundary.
-- **Substantive topic change:** Conversation shifts from one concrete topic to a completely unrelated one (e.g., project architecture → weekend plans).
-- **Task completion + new topic:** A closing message ("migration done") belongs to its task's episode; split only when the **next** message opens a genuinely unrelated topic.
-- **Long gap + new topic:** Time gap > 4 hours AND new messages have no clear connection to prior conversation.
-
-**Do NOT split for:**
-- Greetings, farewells ("bye", "thanks") — keep with the main episode
-- Transition phrases ("by the way", "oh also") — usually continue the current episode
-- Brief pauses (< 4 hours) followed by the same topic
-
-### `should_wait`
-Set to `true` when the **last segment** has insufficient information to determine its episode context:
-- **Non-text messages:** Only media placeholders (`[image]`, `[video]`, `[file]`) with no accompanying text
-- **Intent-free short replies:** Minimal responses like "ok", "sure", "got it", "😂"
-- **System or non-conversational messages:** System notifications (join/leave group, payment reminders, etc.) cannot themselves determine episode boundaries — wait for the next human message to decide
-- **Ambiguous intermediate state:** Gap of 30 min–4 hours with content that is neither clearly continuing nor clearly starting a new topic
-
-### Decision Principles
-- **Merge by default:** When in doubt, do not split; only split on clear signals
-- **Content over form:** Greetings and farewells belong to the episode they serve, not their own
-- **Process continuity:** Consecutive actions toward the same goal (e.g., create group → post first instruction) form one episode
-- **System messages don't trigger splits:** System messages (e.g., `"[User X] joined the group"`) have their episode context determined by the next human message that follows them
-
-### Examples
-
-**Example 1 — one boundary:**
-Input messages:
-```
-[1] [2024-03-10T09:00:00Z] Alice: Can you help me debug the login issue?
-[2] [2024-03-10T09:01:00Z] Bob: Sure, let me check the logs.
-[3] [2024-03-10T09:05:00Z] Bob: Found it — a null pointer in AuthService line 42.
-[4] [2024-03-10T09:06:00Z] Alice: Fixed, thanks!
-[5] [2024-03-11T10:00:00Z] Alice: Hey, are you free for lunch today?
-[6] [2024-03-11T10:01:00Z] Bob: Sure, 12:30?
-```
-Output:
-```json
-{
-    "reasoning": "Messages 1-4 are a complete bug-fix episode; message 5 starts a new day with an unrelated lunch topic.",
-    "boundaries": [4],
-    "should_wait": false
-}
-```
-
-**Example 2 — no boundary:**
-Input messages:
-```
-[1] [2024-03-10T06:00:00Z] Alice: What's the status of the Q2 roadmap?
-[2] [2024-03-10T06:02:00Z] Bob: About 60% done. Need to finalize the API specs.
-[3] [2024-03-10T06:10:00Z] Alice: OK, let's review the specs tomorrow.
-```
-Output:
-```json
-{
-    "reasoning": "All messages are part of the same Q2 roadmap discussion with no topic change.",
-    "boundaries": [],
-    "should_wait": false
-}
-```
-
-### Output Format
-Return strictly in the following JSON format:
-```json
-{
-    "reasoning": "<one sentence explaining all boundary decisions>",
-    "boundaries": [<1-indexed message numbers after which to split>],
-    "should_wait": <boolean, whether the last segment has insufficient information>
-}
-```
-
-**`boundaries: []` means all messages belong to the same episode — no split.**
-
-**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
-"""  # noqa: RUF001 — verbatim old prompt, en dash included
 
 _OLD_STEP_PROMPT = """
 You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue should end the current episode and start a new one.
@@ -209,99 +99,22 @@ Note:
 - Each episode should contain substantive content that stands alone as a meaningful memory unit
 """
 
-# Old lines, normalized as ``_old_lines`` does, that the split removed on purpose, each with the draft change that
-# removed it: F1 data moved to the user message, F2 Markdown headings became tags, F3 the input description merged
-# into the role sentence, F4 the output-language rule dropped, F5 the reply skeleton made parseable JSON, C the
-# batch should_wait rule replaced by tail_complete, "the trailing segment already forms a complete episode", with
-# the opposite polarity (draft §0a, 2026-10-10), D a batch rule dropped: the cross-day rule (2026-10-16), since the
-# host already closes an idle conversation and the UTC date the timestamps carry is not the user's day, and the
-# transition-phrase line (r13), a prior rather than a test that the model applied in reverse, E the first batch
-# example rewritten (r13): the other speaker's courtesy reply joins the topic it closes, on the same day; I separates
-# the absence of internal boundaries from the streaming tail's completion.
-_LANGUAGE_RULE = (
-    "CRITICAL LANGUAGE RULE: You MUST output in the SAME language as the input conversation content. If the "
-    "conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is "
-    "mandatory."
-)
-_CROSS_DAY_RULE = (
-    "- Cross-day split (highest priority): Adjacent messages have different calendar dates — MUST split at the date "
-    "boundary."
-)
-_TRANSITION_PHRASE_RULE = '- Transition phrases ("by the way", "oh also") — usually continue the current episode'
-_RESTRUCTURED: dict[str, dict[str, str]] = {
-    "batch": {
-        _LANGUAGE_RULE: "F4",
-        "### Input Format": "F2",
-        "The following is a complete chronological conversation log. Each message is prefixed with a 1-based index "
-        "and timestamp:": "F3",
-        "{{messages}}": "F1",
-        "### When to split": "F2",
-        _CROSS_DAY_RULE: "D",
-        "Do NOT split for:": "F2",
-        _TRANSITION_PHRASE_RULE: "D",
-        "### should_wait": "C",
-        "### Decision Principles": "F2",
-        "### Examples": "F2",
-        "Example 1 — one boundary:": "F2",
-        "[5] [2024-03-11 10:00 UTC (Monday)] Alice: Hey, are you free for lunch today?": "E",
-        "[6] [2024-03-11 10:01 UTC (Monday)] Bob: Sure, 12:30?": "E",
-        "Example 2 — no boundary:": "F2",
-        "Input messages:": "F2",
-        "Output:": "F2",
-        "### Output Format": "F2",
-        "Return strictly in the following JSON format:": "F5",
-        "boundaries: [] means all messages belong to the same episode — no split.": "I",
-        "Set to true when the last segment has insufficient information to determine its episode context:": "C",
-        "- Non-text messages: Only media placeholders ([image], [video], [file]) with no accompanying text": "C",
-        '- Intent-free short replies: Minimal responses like "ok", "sure", "got it", "😂"': "C",
-        "- System or non-conversational messages: System notifications (join/leave group, payment reminders, etc.) "
-        "cannot themselves determine episode boundaries — wait for the next human message to decide": "C",
-        "- Ambiguous intermediate state: Gap of 30 min–4 hours with content that is neither clearly continuing nor "  # noqa: RUF001 — verbatim old rule, en dash included
-        "clearly starting a new topic": "C",
-    },
-    "step": {
-        "Current conversation history:": "F1",
-        "{{conversation_history}}": "F1",
-        "Time gap information:": "F1",
-        "{{time_gap_info}}": "F1",
-        "Newly added messages:": "F1",
-        "{{new_messages}}": "F1",
-        "Special Rules for Common Patterns:": "F2",
-        "Decision Principles:": "F2",
-        "Note:": "F2",
-        "Please return your judgment in JSON format:": "F5",
-    },
+_STEP_RESTRUCTURED = {
+    "Current conversation history:": "F1",
+    "{{conversation_history}}": "F1",
+    "Time gap information:": "F1",
+    "{{time_gap_info}}": "F1",
+    "Newly added messages:": "F1",
+    "{{new_messages}}": "F1",
+    "Special Rules for Common Patterns:": "F2",
+    "Decision Principles:": "F2",
+    "Note:": "F2",
+    "Please return your judgment in JSON format:": "F5",
 }
 
-# Completion remains independent of segmentation and message count.
-_STREAMING_TAIL_RULES = (
-    "Judge tail_complete separately from boundaries:",
-    "Message count and the absence of a next message are NOT completion evidence.",
-    "Completing one action is not completing the workflow.",
-    "A closed status exchange ABOUT unfinished work is dialogue, not execution of that work.",
-    "When completion is uncertain, set false and wait.",
-)
-_ADDED_EXAMPLES = {"batch": 6, "step": 0}
-
-# What E put in place of the first batch example: a courtesy reply after the thanks, every message on one day, and
-# the split after that reply.
-_REWRITTEN_EXAMPLE_ONE = """\
-<messages count="7">
-[1] [2024-03-10 09:00 UTC (Sunday)] Alice: Can you help me debug the login issue?
-[2] [2024-03-10 09:01 UTC (Sunday)] Bob: Sure, let me check the logs.
-[3] [2024-03-10 09:05 UTC (Sunday)] Bob: Found it — a null pointer in AuthService line 42.
-[4] [2024-03-10 09:06 UTC (Sunday)] Alice: Fixed, thanks!
-[5] [2024-03-10 09:06 UTC (Sunday)] Bob: Anytime.
-[6] [2024-03-10 11:30 UTC (Sunday)] Alice: Hey, are you free for lunch today?
-[7] [2024-03-10 11:31 UTC (Sunday)] Bob: Yes, our usual 12:30 works. See you there.
-</messages>"""
-_EXAMPLE_ONE_DAY = "2024-03-10"
-_REWRITTEN_EXAMPLE_ONE_SPLIT = {"boundaries": [5]}
-
-_OLD = {"batch": _OLD_BATCH_PROMPT, "step": _OLD_STEP_PROMPT}
 _SYSTEM = {"batch": BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, "step": STEP_BOUNDARY_DETECT_SYSTEM_PROMPT}
 _USER = {"batch": BATCH_BOUNDARY_DETECT_USER_PROMPT, "step": STEP_BOUNDARY_DETECT_USER_PROMPT}
-_REPLY_MODEL: dict[str, type[StrictOutputModel]] = {"batch": _BatchReply, "step": _StepReply}
+_REPLY_MODEL: dict[str, type[StrictOutputModel]] = {"batch": Reply, "step": _StepReply}
 _DATA_SLOTS = {"batch": {"count", "messages"}, "step": {"conversation_history", "time_gap_info", "new_messages"}}
 _PATHS = ["batch", "step"]
 
@@ -318,12 +131,6 @@ _STEP_LINE = re.compile(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \([A-Z][a-z]+day\)
 _BASE_MS = 1_710_064_800_000  # 2024-03-10 10:00 UTC
 
 
-def _old_json_objects(old: str) -> list[str]:
-    """The old prompt's JSON objects: fenced worked examples and skeletons, then the bare skeleton."""
-    fenced = _FENCED_JSON.findall(old)
-    return fenced + _BARE_JSON.findall(_FENCED_JSON.sub("", old))
-
-
 def _old_lines(old: str) -> list[str]:
     """The old prompt's non-blank lines outside JSON objects, with the split's prompt-wide changes applied."""
     text = _BARE_JSON.sub("", _FENCED_JSON.sub("", old))
@@ -335,36 +142,6 @@ def _as_rendered(match: re.Match[str]) -> str:
     """An old ISO 8601 example time in the shape the renderer writes, weekday included."""
     instant = datetime.fromisoformat(match.group(0))
     return format_utc_time(int(instant.timestamp() * 1000), weekday=True)
-
-
-def _as_rewritten_by_c(reply: dict[str, object]) -> dict[str, object]:
-    """An old batch reply as C rewrote it: ``should_wait`` became ``tail_complete`` with the opposite polarity."""
-    if "should_wait" not in reply:
-        return reply
-    rewritten = {key: value for key, value in reply.items() if key != "should_wait"}
-    return rewritten | {"tail_complete": not reply["should_wait"]}
-
-
-def _as_rewritten_by_e(path: str, index: int, reply: dict[str, object]) -> dict[str, object]:
-    """An old worked example's reply as E rewrote it: the first batch example splits after the added reply."""
-    if path != "batch" or index != 0:
-        return reply
-    return reply | _REWRITTEN_EXAMPLE_ONE_SPLIT
-
-
-def _without_rewritten_reasoning(path: str, reply: dict[str, object]) -> dict[str, object]:
-    """Compare historical decisions independently of the revised batch explanation."""
-    if path != "batch":
-        return reply
-    return {key: value for key, value in reply.items() if key != "reasoning"}
-
-
-def _parses(block: str) -> bool:
-    try:
-        json.loads(block)
-    except json.JSONDecodeError:
-        return False
-    return True
 
 
 def _msg(index: int, text: str, *, minutes: int) -> ChatMessage:
@@ -383,7 +160,7 @@ def _dialogue(n: int) -> list[ChatMessage]:
 
 
 def _batch_client() -> FakeLLMClient:
-    return FakeLLMClient(responses=[json.dumps({"reasoning": "r", "boundaries": [], "tail_complete": True})])
+    return FakeLLMClient(responses=[json.dumps({"reasoning": "r", "boundaries": []})])
 
 
 def _step_client() -> FakeLLMClient:
@@ -391,94 +168,51 @@ def _step_client() -> FakeLLMClient:
     return FakeLLMClient(responses=[json.dumps(reply)])
 
 
-# ── Every old rule sentence is kept ─────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("path", _PATHS)
-def test_every_kept_old_sentence_is_in_the_system_prompt(path: str) -> None:
-    kept = [line for line in _old_lines(_OLD[path]) if line not in _RESTRUCTURED[path]]
-    missing = [sentence for line in kept for sentence in _SENTENCE_BREAK.split(line) if sentence not in _SYSTEM[path]]
-
-    assert kept, "the pinned old prompt yielded no lines, so nothing was checked"
+def test_step_keeps_its_historical_rule_sentences() -> None:
+    kept = [line for line in _old_lines(_OLD_STEP_PROMPT) if line not in _STEP_RESTRUCTURED]
+    missing = [
+        sentence
+        for line in kept
+        for sentence in _SENTENCE_BREAK.split(line)
+        if sentence not in STEP_BOUNDARY_DETECT_SYSTEM_PROMPT
+    ]
+    assert kept
     assert not missing
+    assert set(_STEP_RESTRUCTURED) <= set(_old_lines(_OLD_STEP_PROMPT))
 
 
-@pytest.mark.parametrize("path", _PATHS)
-def test_every_restructured_line_is_a_line_of_the_old_prompt(path: str) -> None:
-    """An exclusion that matches no old line would hide nothing today and anything after the next edit."""
-    assert set(_RESTRUCTURED[path]) <= set(_old_lines(_OLD[path]))
-
-
-def test_rewritten_old_lines_are_gone_from_the_batch_system_prompt() -> None:
-    rewritten = [line for line, change in _RESTRUCTURED["batch"].items() if change == "C"]
-
-    assert len(rewritten) == 6, "the old should_wait block: its heading, lead sentence and four cases"
-    assert not [line for line in rewritten if line in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT]
-
-
-def test_dropped_rules_are_gone_from_the_batch_system_prompt() -> None:
-    dropped = [line for line, change in _RESTRUCTURED["batch"].items() if change == "D"]
-
-    assert dropped == [_CROSS_DAY_RULE, _TRANSITION_PHRASE_RULE]
-    assert "Cross-day" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-    assert "new day" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, "no worked example cites a date change as its reason"
-    assert "Transition phrases" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-    assert "by the way" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-
-
-def test_rewritten_first_example_replaces_the_old_one_on_a_single_day() -> None:
-    replaced = [line for line, change in _RESTRUCTURED["batch"].items() if change == "E"]
-    first = _EXAMPLE_MESSAGES.search(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
-
-    assert len(replaced) == 2, "the old second-day lunch lines"
-    assert not [line for line in replaced if line in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT]
-    assert first
-    assert first.group(0) == _REWRITTEN_EXAMPLE_ONE
-    assert set(re.findall(r"\d{4}-\d{2}-\d{2}", first.group(2))) == {_EXAMPLE_ONE_DAY}
-
-
-def test_batch_prompt_distinguishes_streaming_completion_from_segmentation() -> None:
-    assert "ONE or MORE chronological messages" in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-    assert "complete chronological conversation log" not in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-    for rule in _STREAMING_TAIL_RULES:
-        assert rule in BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT
-
-
-def test_every_batch_example_reasoning_is_two_to_three_words() -> None:
-    """Examples keep the output budget small without changing the reply schema."""
-    replies = [json.loads(block) for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
-
-    assert len(replies) == 8
-    for reply in replies:
-        assert 2 <= len(reply["reasoning"].split()) <= 3
-
-
-def test_examples_cover_open_and_closed_tails_at_the_same_message_count() -> None:
-    examples = _EXAMPLE_MESSAGES.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
-    replies = [json.loads(block) for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
-    decisions = {
-        (int(count), tuple(reply["boundaries"]), reply["tail_complete"])
-        for (count, _body), reply in zip(examples, replies, strict=True)
+def test_batch_request_uses_the_evaluated_prompt_and_schema() -> None:
+    """Guard the evaluated contract, including schema metadata visible to the model."""
+    assert hashlib.sha256(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT.encode()).hexdigest() == (
+        "01b3573f9c555afc241c0108b9df3dc53a3962723ece935e2085877aeef6b6e7"
+    )
+    assert to_openai_response_format(Reply) == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "Reply",
+            "schema": {
+                "additionalProperties": False,
+                "description": "Strict internal-cut response shared by both variants.",
+                "properties": {
+                    "reasoning": {"title": "Reasoning", "type": "string"},
+                    "boundaries": {"items": {"type": "integer"}, "title": "Boundaries", "type": "array"},
+                },
+                "required": ["reasoning", "boundaries"],
+                "title": "Reply",
+                "type": "object",
+            },
+            "strict": True,
+        },
     }
 
-    assert {(1, (), False), (1, (), True), (3, (), False), (3, (), True)} <= decisions
-    assert replies[2]["boundaries"] == [3]
-    assert replies[2]["tail_complete"] is False
 
-
-@pytest.mark.parametrize("path", _PATHS)
-def test_old_json_objects_are_the_new_replies_plus_one_skeleton(path: str) -> None:
-    old_objects = _old_json_objects(_OLD[path])
-    old_replies = [json.loads(block) for block in old_objects if _parses(block)]
-    worked_examples = [
-        _without_rewritten_reasoning(path, _as_rewritten_by_e(path, index, _as_rewritten_by_c(reply)))
-        for index, reply in enumerate(old_replies)
-    ]
-    new_replies = [_without_rewritten_reasoning(path, json.loads(block)) for block in _REPLY.findall(_SYSTEM[path])]
-
-    assert new_replies[: len(worked_examples)] == worked_examples
-    assert len(new_replies) - len(worked_examples) == _ADDED_EXAMPLES[path]
-    assert len([block for block in old_objects if not _parses(block)]) == 1, "F5: one unparseable skeleton"
+def test_batch_example_preserves_a_revision_across_days() -> None:
+    """A revision is allowed to retain its original episode even after a completed exchange."""
+    examples = _EXAMPLE_MESSAGES.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
+    replies = [Reply.model_validate_json(block) for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
+    assert len(examples) == len(replies) == 1
+    assert replies[0].boundaries == []
+    assert len(set(re.findall(r"\d{4}-\d{2}-\d{2}", examples[0][1]))) == 2
 
 
 # ── Structure: rules in system, data in user ────────────────────────────────────────────────────────
@@ -503,7 +237,7 @@ def test_system_prompt_blocks_are_closed(path: str) -> None:
     assert sorted(opened) == sorted(re.findall(r"^</([a-z_]+)>$", system, re.MULTILINE))
 
 
-@pytest.mark.parametrize("path", _PATHS)
+@pytest.mark.parametrize("path", ["step"])
 def test_role_sentence_names_exactly_the_user_message_blocks(path: str) -> None:
     role = _SYSTEM[path].split("\n", 1)[0]
     user_blocks = set(re.findall(r"^<([a-z_]+)", _USER[path], re.MULTILINE))
@@ -527,21 +261,22 @@ def test_user_prompt_carries_only_data_slots(path: str) -> None:
 @pytest.mark.parametrize("path", _PATHS)
 def test_every_reply_shown_validates_against_the_reply_model(path: str) -> None:
     """The worked examples and the skeleton are what the model imitates; each must pass the model requested."""
-    shown = [*_REPLY.findall(_SYSTEM[path]), _SYSTEM[path].split("\n</reply_format>")[0].rsplit("\n", 1)[1]]
-
+    shown = _REPLY.findall(_SYSTEM[path])
+    if path == "step":
+        shown.append(_SYSTEM[path].split("\n</reply_format>")[0].rsplit("\n", 1)[1])
+    assert shown
     for block in shown:
         _REPLY_MODEL[path].model_validate(json.loads(block))
-    assert len(shown) == (9 if path == "batch" else 1)
 
 
 def test_every_batch_example_counts_its_messages() -> None:
     examples = _EXAMPLE_MESSAGES.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
 
-    assert len(examples) == 8
+    assert len(examples) == 1
     for count, body in examples:
         lines = body.splitlines()
         assert len(lines) == int(count)
-        assert all(line.startswith(f"[{index}] ") and _BATCH_LINE.match(line) for index, line in enumerate(lines, 1))
+        assert all(line.startswith(f"[{index}] ") and _BATCH_LINE.match(line) for index, line in enumerate(lines))
 
 
 # ── What the model receives ─────────────────────────────────────────────────────────────────────────
@@ -567,8 +302,8 @@ async def test_batch_count_is_the_window_the_model_sees_after_the_pre_cut() -> N
     await adetect_boundaries(_dialogue(10), llm=client, hard_msg_limit=5)
 
     user = str(client.calls[0].messages[1].content)
-    assert user.startswith('<messages count="2">\n[1] ')
-    assert user.endswith("[2] [2024-03-10 10:09 UTC (Sunday)] Speaker9: text 9\n</messages>")
+    assert user.startswith('<messages count="2">\n[0] ')
+    assert user.endswith("[1] [2024-03-10 10:09 UTC (Sunday)] Speaker9: text 9\n</messages>")
 
 
 async def test_step_call_sends_the_rules_then_three_data_blocks() -> None:
@@ -626,7 +361,7 @@ async def test_custom_instructions_close_the_system_message_verbatim(entry: str)
 
     assert system == f"{_SYSTEM[_ENTRY_PATH[entry]]}\n\n<custom_instructions>\n{_CUSTOM}\n</custom_instructions>"
     assert system.endswith("\n</custom_instructions>")
-    assert system.index("</reply_format>") < system.index("<custom_instructions>")
+    assert system.index("<custom_instructions>") > len(_SYSTEM[_ENTRY_PATH[entry]])
     assert "{{project}}" in system
     assert user == default_user
 
@@ -692,4 +427,4 @@ async def test_rendered_lines_show_minutes_and_the_utc_label() -> None:
     step_lines = [line for line in str(step.calls[0].messages[1].content).splitlines() if line.startswith("[")]
     assert batch_lines and all(_BATCH_LINE.match(line) for line in batch_lines)
     assert len(step_lines) == 3 and all(_STEP_LINE.match(line) for line in step_lines)
-    assert batch_lines[0] == "[1] [2024-03-10 10:00 UTC (Sunday)] Speaker0: text 0"
+    assert batch_lines[0] == "[0] [2024-03-10 10:00 UTC (Sunday)] Speaker0: text 0"

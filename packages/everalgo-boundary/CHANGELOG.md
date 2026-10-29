@@ -6,6 +6,17 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2rc0] - 2026-10-29
+
+### Changed
+
+- **BREAKING:** `DetectionResult` now contains only `cells` and `tail` on both batch and step paths. Remove third-value unpacking and `tail_complete` access; the host owns idle and session-end flushing.
+- **BREAKING:** the strict batch model reply contains only `reasoning` and `boundaries`. Scripted replies and adapters must omit `tail_complete`; additional keys remain forbidden.
+- Batch detection groups a coherent event, activity or independent discussion with its execution, outcome and related feedback. It cuts only when a new independent episode begins, rather than predicting completion of the open tail.
+- Batch input uses zero-based labels; a boundary names the first message of the new episode. Numeric cut positions still map directly to Python slices. XML escaping, multiline indentation and empty-message placeholders are preserved.
+- Batch reasoning explains all boundary decisions in one sentence. The evaluated prompt is smaller than 0.4.1 but produces longer replies and higher boundary-call latency; this candidate is not a performance improvement.
+- The step prompt, step reply schema, hard limits and tool-item mapping are unchanged. See the README migration guide before upgrading callers.
+
 ## [0.4.1] - 2026-10-27
 
 ### Fixed
@@ -125,7 +136,8 @@ Promotes 0.4.0rc5 unchanged apart from the core floor below; see the release-can
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2rc0...HEAD
+[0.4.2rc0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.1...everalgo-boundary/v0.4.2rc0
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0...everalgo-boundary/v0.4.1
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc5...everalgo-boundary/v0.4.0
 [0.4.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc4...everalgo-boundary/v0.4.0rc5

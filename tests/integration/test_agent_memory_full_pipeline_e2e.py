@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 #   boundary → case_filter → case_compress → skill_extract → skill_maturity
 _STAGE_ORDER = ("boundary", "case_filter", "case_compress", "skill_extract", "skill_maturity")
 
-_BOUNDARY_JSON = '{"reasoning": "single coherent task", "boundaries": [], "tail_complete": true}'
+_BOUNDARY_JSON = '{"reasoning": "single coherent task", "boundaries": []}'
 
 # case_filter: has_exploration / has_user_correction drive the worth-extracting decision; either True passes.
 _CASE_FILTER_JSON = (

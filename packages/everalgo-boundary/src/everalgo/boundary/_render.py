@@ -19,12 +19,12 @@ if TYPE_CHECKING:
 
 
 def _format_messages_with_indices(messages: Sequence[ChatMessage]) -> str:
-    """Render escaped records with 1-based indices, retaining empty messages without reading their timestamps.
+    """Render escaped records with 0-based indices, retaining empty messages without reading their timestamps.
 
     Raises:
         InvalidInputError: If a message with text has no timestamp (0).
     """
-    return "\n".join(f"[{index}] {_batch_record(message)}" for index, message in enumerate(messages, start=1))
+    return "\n".join(f"[{index}] {_batch_record(message)}" for index, message in enumerate(messages))
 
 
 def _batch_record(message: ChatMessage) -> str:
