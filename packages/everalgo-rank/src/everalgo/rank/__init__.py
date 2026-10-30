@@ -39,7 +39,7 @@ from everalgo.rank.maxsim import ParentFetchFn, amaxsim_retrieve, maxsim_retriev
 from everalgo.rank.prompts.en.case import CASE_RERANK_PROMPT_EN
 from everalgo.rank.prompts.en.episodic import EPISODIC_RERANK_PROMPT_EN
 from everalgo.rank.prompts.en.skill import SKILL_RERANK_PROMPT_EN
-from everalgo.rank.protocols import AgenticDecision, RerankFn, RetrieveFn
+from everalgo.rank.protocols import AgenticDecision, MemberRetrieveFn, RerankFn, RetrieveFn
 from everalgo.rank.rerank import (
     _ALGO_REGISTRY,
     DEFAULT_RANK_CONFIG,
@@ -61,6 +61,7 @@ __all__ = [
     "CaseRanker",
     "EpisodicRanker",
     "FusionMode",
+    "MemberRetrieveFn",
     "ParentFetchFn",
     "RankConfig",
     "RerankFn",

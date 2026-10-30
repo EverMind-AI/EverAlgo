@@ -14,10 +14,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from everalgo.types import Candidate
 
-__all__ = ["AgenticDecision", "RerankFn", "RetrieveFn"]
+__all__ = ["AgenticDecision", "MemberRetrieveFn", "RerankFn", "RetrieveFn"]
 
 RetrieveFn = Callable[[str, int], Awaitable[list[Candidate]]]
 """Retrieve top-k candidates for a query. Caller binds storage / index / client inside."""
+
+MemberRetrieveFn = Callable[[str, list[str], int], Awaitable[list[Candidate]]]
+"""Rank only the given ids for a query and return the top-k of them, best first. Caller scopes its index search."""
 
 RerankFn = Callable[[str, list[Candidate]], Awaitable[list[Candidate]]]
 """Rerank candidates for a query, returning a (possibly truncated) reordered list."""

@@ -51,7 +51,7 @@ Every product operator in EverAlgo contributes to one of two axes. Both axes are
 
 **Retrieve / Rank** has two public layers that coexist:
 
-- The retrieval-composition layer exposes `hybrid`, `agentic`, `cluster`, and `maxsim` strategies plus a category-aware wrapper. They consume caller-injected `RetrieveFn` / `RerankFn` callables. Most return ranked `Candidate` lists, `acluster_retrieve` returns an unranked cluster expansion in the caller's `all_docs` order, and agentic retrieval returns `(candidates, AgenticDecision)`. The callbacks may perform storage or model I/O, but EverAlgo does not own those clients.
+- The retrieval-composition layer exposes `hybrid`, `agentic`, `cluster`, and `maxsim` strategies plus a category-aware wrapper. They consume caller-injected `RetrieveFn` / `RerankFn` callables. Most return ranked `Candidate` lists, `acluster_retrieve` returns an unranked cluster expansion in the caller's `all_docs` order (or, with `max_members`, a ranked cut of it), and agentic retrieval returns `(candidates, AgenticDecision)`. The callbacks may perform storage or model I/O, but EverAlgo does not own those clients.
 - The business-ranker layer exposes episodic, profile, case, and skill facades. The caller pre-fetches candidate sets and cross-memory linkage (for example Episode → AtomicFact) into `RankInput`; the facade returns `RankOutput` without accessing storage.
 
 ---

@@ -16,10 +16,10 @@ pip install everalgo-rank
 |---|---|
 | `ahybrid_retrieve` / `hybrid_retrieve` | Parallel dense + sparse recall followed by RRF or LR fusion |
 | `aagentic_retrieve` / `agentic_retrieve` | LLM sufficiency check with optional multi-query or refined-query Round 2 over any base retriever |
-| `acluster_retrieve` / `cluster_retrieve` | Select top clusters from base recall and expand their full membership |
+| `acluster_retrieve` / `cluster_retrieve` | Select top clusters from base recall and expand their membership, optionally cut to a ranked `max_members` budget |
 | `amaxsim_retrieve` / `maxsim_retrieve` | Child recall → parent max-pool → parent hydration |
 | `acategory_retrieve` / `category_retrieve` | Base recall → category-mass rollup → caller rerank → category boost |
-| `RetrieveFn` / `RerankFn` | Async callable contracts implemented by the caller; storage/index/model clients stay inside the callbacks |
+| `RetrieveFn` / `RerankFn` / `MemberRetrieveFn` | Async callable contracts implemented by the caller; storage/index/model clients stay inside the callbacks |
 | `EpisodicRanker` | Class facade — episodic memory ranking; LLM bound at construction |
 | `CaseRanker` | Class facade — agent case ranking; LLM bound at construction |
 | `SkillRanker` | Class facade — agent skill ranking; LLM bound at construction |
@@ -103,7 +103,7 @@ reranked = await arerank(
 |---|---|---|
 | `ahybrid_retrieve` | `everalgo.rank` | `(query, *, dense_retrieve, sparse_retrieve, ...) → list[Candidate]` |
 | `aagentic_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, llm, rerank_fn=None, ..., custom_instructions=None) → tuple[list[Candidate], AgenticDecision]` |
-| `acluster_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, clusters, all_docs, ...) → list[Candidate]` |
+| `acluster_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, clusters, all_docs, ..., max_members=None, member_retrieve=None) → list[Candidate]` |
 | `amaxsim_retrieve` | `everalgo.rank` | `(query, *, child_retrieve, parent_fetch, ...) → list[Candidate]` |
 | `acategory_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, rerank_fn, ...) → list[Candidate]` |
 | `EpisodicRanker` | `everalgo.rank` | `__init__(*, llm)` → `arank(rank_input, *, config, custom_instructions, enable_rerank, ...) → RankOutput` |

@@ -58,6 +58,8 @@ The two routes each request 50 candidates by default. `ahybrid_retrieve` runs th
 
 The expansion is deliberately unranked and unscored: it preserves the caller's `all_docs` order. `aagentic_retrieve` then applies the configured cross-encoder reranker and keeps the first 10 candidates for the LLM sufficiency check.
 
+The expansion grows with cluster size, so a corpus with large clusters can send thousands of members to the reranker. A caller that needs a bound passes `max_members` with a `member_retrieve` callback: seed hits stay first in hybrid order, and once the expansion exceeds the budget the remaining members are ranked by the callback (for example a vector search filtered to those ids) and only the top ones are kept. At or under the budget nothing is cut and the callback is not called. The benchmark leaves `max_members` unset.
+
 ## 4. Sufficiency and Round 2
 
 If the LLM says the reranked Round 1 context is sufficient, Stage 5 returns those candidates, truncated to the response limit of 10.
