@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from everalgo.clustering import Cluster
 from everalgo.rank.cluster import acluster_retrieve
 from everalgo.types.rank import Candidate
+from everalgo.utils import InvalidInputError
 
 
 def _doc(cid: str, score: float = 1.0) -> Candidate:
@@ -166,3 +168,175 @@ async def test_acluster_ignores_docs_outside_selected_clusters() -> None:
         cluster_top_k=1,
     )
     assert {c.id for c in result} == {"a"}  # only c0 selected; orphan dropped
+
+
+# ── max_members: ranked cut of the expansion ─────────────────────────────────
+
+
+class _MemberRanker:
+    """Ranks members by a fixed preference order and records every call.
+
+    Args:
+        preference: Member ids, best first; members not listed are never returned.
+    """
+
+    def __init__(self, preference: list[str]) -> None:
+        self.preference = preference
+        self.calls: list[tuple[list[str], int]] = []
+
+    async def __call__(self, q: str, member_ids: list[str], k: int) -> list[Candidate]:
+        self.calls.append((list(member_ids), k))
+        return [_doc(i) for i in self.preference if i in member_ids][:k]
+
+
+def _big_cluster_setup() -> tuple[list[Cluster], list[Candidate]]:
+    """One cluster of six members; ``all_docs`` order (a..f) carries no relevance."""
+    clusters = [_cluster("c0", ["a", "b", "c", "d", "e", "f"])]
+    return clusters, [_doc(x) for x in ["a", "b", "c", "d", "e", "f"]]
+
+
+async def _seed_e_c(q: str, k: int) -> list[Candidate]:
+    return [_doc("e", 0.9), _doc("c", 0.8)]
+
+
+async def test_acluster_budget_ranks_rest_and_keeps_seed_hits_first() -> None:
+    """Over budget: seed hits lead in base order, the rest come from ``member_retrieve`` best first."""
+    clusters, all_docs = _big_cluster_setup()
+    ranker = _MemberRanker(["f", "a", "b", "d"])
+
+    result = await acluster_retrieve(
+        "q",
+        base_retrieve=_seed_e_c,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=1,
+        max_members=4,
+        member_retrieve=ranker,
+    )
+
+    assert [c.id for c in result] == ["e", "c", "f", "a"]
+    assert ranker.calls == [(["a", "b", "d", "f"], 2)]
+
+
+async def test_acluster_budget_within_limit_skips_member_retrieve() -> None:
+    """At or under budget nothing is cut: every member returns, seed hits first, no ranking call."""
+    clusters, all_docs = _big_cluster_setup()
+    ranker = _MemberRanker([])
+
+    result = await acluster_retrieve(
+        "q",
+        base_retrieve=_seed_e_c,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=1,
+        max_members=6,
+        member_retrieve=ranker,
+    )
+
+    assert [c.id for c in result] == ["e", "c", "a", "b", "d", "f"]
+    assert ranker.calls == []
+
+
+async def test_acluster_budget_filled_by_seed_hits_alone() -> None:
+    """When seed hits already fill the budget, they are cut in base order and nothing else is ranked."""
+    clusters, all_docs = _big_cluster_setup()
+    ranker = _MemberRanker(["a"])
+
+    result = await acluster_retrieve(
+        "q",
+        base_retrieve=_seed_e_c,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=1,
+        max_members=1,
+        member_retrieve=ranker,
+    )
+
+    assert [c.id for c in result] == ["e"]
+    assert ranker.calls == []
+
+
+async def test_acluster_budget_ignores_ids_outside_the_cut_scope() -> None:
+    """``member_retrieve`` returning a seed hit, a non-member or a duplicate cannot widen or repeat the cut."""
+    clusters, all_docs = _big_cluster_setup()
+
+    async def sloppy(q: str, member_ids: list[str], k: int) -> list[Candidate]:
+        return [_doc("e"), _doc("zzz"), _doc("b"), _doc("b"), _doc("d")]
+
+    result = await acluster_retrieve(
+        "q",
+        base_retrieve=_seed_e_c,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=1,
+        max_members=4,
+        member_retrieve=sloppy,
+    )
+
+    assert [c.id for c in result] == ["e", "c", "b", "d"]
+
+
+async def test_acluster_budget_returns_all_docs_entries() -> None:
+    """Returned candidates are the ``all_docs`` entries, whatever ``member_retrieve`` carried."""
+    clusters, all_docs = _big_cluster_setup()
+
+    async def bare(q: str, member_ids: list[str], k: int) -> list[Candidate]:
+        return [Candidate(id=i, score=0.5) for i in member_ids][:k]
+
+    result = await acluster_retrieve(
+        "q",
+        base_retrieve=_seed_e_c,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=1,
+        max_members=3,
+        member_retrieve=bare,
+    )
+
+    by_id = {d.id: d for d in all_docs}
+    assert all(c is by_id[c.id] for c in result)
+
+
+async def test_acluster_without_budget_keeps_all_docs_order() -> None:
+    """``max_members=None`` keeps the unbounded expansion in ``all_docs`` order, seed hits included."""
+    clusters, all_docs = _big_cluster_setup()
+
+    result = await acluster_retrieve(
+        "q",
+        base_retrieve=_seed_e_c,
+        clusters=clusters,
+        all_docs=all_docs,
+        cluster_top_k=1,
+    )
+
+    assert [c.id for c in result] == ["a", "b", "c", "d", "e", "f"]
+
+
+@pytest.mark.parametrize(
+    ("max_members", "member_retrieve", "message"),
+    [
+        (0, _MemberRanker([]), "max_members must be >= 1"),
+        (3, None, "needs member_retrieve"),
+    ],
+)
+async def test_acluster_budget_rejects_bad_input_before_retrieving(
+    max_members: int, member_retrieve: _MemberRanker | None, message: str
+) -> None:
+    """A bad budget fails before ``base_retrieve`` runs."""
+    clusters, all_docs = _big_cluster_setup()
+    calls: list[int] = []
+
+    async def base(q: str, k: int) -> list[Candidate]:
+        calls.append(k)
+        return []
+
+    with pytest.raises(InvalidInputError, match=message):
+        await acluster_retrieve(
+            "q",
+            base_retrieve=base,
+            clusters=clusters,
+            all_docs=all_docs,
+            max_members=max_members,
+            member_retrieve=member_retrieve,
+        )
+    assert calls == []

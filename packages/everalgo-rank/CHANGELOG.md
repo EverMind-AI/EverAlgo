@@ -6,6 +6,11 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `acluster_retrieve` / `cluster_retrieve` take `max_members` and `member_retrieve` to bound the cluster expansion. The expansion grows with cluster size rather than with any `k`, so a large cluster sent thousands of members to the caller's rerank. With `max_members` set, seed hits come first in base order; once the expansion exceeds the budget, the remaining members are ranked by `member_retrieve(query, member_ids, k)` and only the top ones fill it. At or under the budget nothing is cut and `member_retrieve` is not called. `max_members` below 1, or set without `member_retrieve`, raises `InvalidInputError`. The default (`None`) returns the unbounded expansion in `all_docs` order, unchanged.
+- `MemberRetrieveFn`, the callable type of `member_retrieve`, exported from `everalgo.rank` and `everalgo.rank.protocols`.
+
 ## [0.5.0rc3] - 2026-10-13
 
 ### Changed

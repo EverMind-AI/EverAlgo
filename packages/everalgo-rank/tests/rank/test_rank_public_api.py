@@ -18,6 +18,7 @@ def test_top_level_exports_full_surface() -> None:
             "DEFAULT_RANK_CONFIG",
             "EpisodicRanker",
             "FusionMode",
+            "MemberRetrieveFn",
             "ParentFetchFn",
             "RankConfig",
             "RerankFn",
