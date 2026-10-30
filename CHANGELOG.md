@@ -14,13 +14,17 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | Distribution | Version | Changelog |
 |---|---|---|
 | `everalgo-core` | 0.6.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.4.2rc0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-boundary` | 0.4.2 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc4 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc3 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [everalgo-boundary/0.4.2] - 2026-10-30
+
+Promotes the episode-continuity candidate with batch reasoning requested in one sentence of at most 25 words and a shorter example explanation. **Breaking from 0.4.1:** both detection paths return `(cells, tail)` and the batch model schema omits `tail_complete`; callers own tail flushing. See the [package changelog](packages/everalgo-boundary/CHANGELOG.md) and [migration guide](packages/everalgo-boundary/README.md#migrating-from-041). Other distributions and dependency floors are unchanged.
 
 ## [everalgo-rank/0.5.0rc4] - 2026-10-30
 

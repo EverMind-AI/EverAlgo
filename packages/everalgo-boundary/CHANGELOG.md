@@ -6,6 +6,14 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-30
+
+### Changed
+
+- Promotes the episode-continuity candidate to a stable release with concise batch explanations: the prompt requests one sentence of at most 25 words for all boundary decisions and shortens the example explanation. This is a prompt-level length request, not a schema-enforced word limit.
+- **BREAKING from 0.4.1:** `DetectionResult` contains only `(cells, tail)` on batch and step paths, and the strict batch reply contains only `reasoning` and `boundaries`. Callers must remove `tail_complete` access and own idle or session-end flushing; see the README migration guide.
+- Batch messages retain the candidate's zero-based new-episode start labels and episode-continuity rules. The step prompt, schemas, slicing, hard limits and dependency floors are unchanged from 0.4.2rc0.
+
 ## [0.4.2rc0] - 2026-10-29
 
 ### Changed
@@ -136,7 +144,8 @@ Promotes 0.4.0rc5 unchanged apart from the core floor below; see the release-can
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2rc0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2...HEAD
+[0.4.2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2rc0...everalgo-boundary/v0.4.2
 [0.4.2rc0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.1...everalgo-boundary/v0.4.2rc0
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0...everalgo-boundary/v0.4.1
 [0.4.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0rc5...everalgo-boundary/v0.4.0

@@ -8,10 +8,10 @@ No API key is needed: all LLM calls are handled by `FakeLLMClient`.
 ## 1. Install
 
 ```bash
-pip install everalgo-user-memory everalgo-clustering everalgo-boundary==0.4.2rc0
+pip install everalgo-user-memory everalgo-clustering everalgo-boundary==0.4.2
 ```
 
-`everalgo-user-memory` pulls `everalgo-core` and `everalgo-boundary` automatically. The explicit `everalgo-clustering` install is needed by the example below. The boundary pin selects the release candidate whose two-field batch reply this example uses; an unpinned install normally selects the stable version.
+`everalgo-user-memory` pulls `everalgo-core` and `everalgo-boundary` automatically. The explicit `everalgo-clustering` install is needed by the example below. The boundary pin selects the stable release whose two-field batch reply this example uses.
 
 For the monorepo development install, see [Installation](installation.md).
 
