@@ -42,7 +42,7 @@ dev = [
   "pytest-cov>=7.1.0",
   "pytest-xdist>=3.8.0",
   "diff-cover>=10.2.0",
-  "pyright==1.1.409",
+  "pyright[nodejs]==1.1.409",
 ]
 
 [tool.ruff]
