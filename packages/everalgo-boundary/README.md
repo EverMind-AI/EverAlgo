@@ -7,7 +7,7 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Install
 
 ```bash
-pip install everalgo-boundary==0.4.2rc0
+pip install everalgo-boundary==0.4.2
 ```
 
 [`everalgo-user-memory`](../everalgo-user-memory/) and [`everalgo-agent-memory`](../everalgo-agent-memory/) both depend on this package and re-export `BoundaryDetector` unchanged.
@@ -54,8 +54,8 @@ new independent episode, the prompt asks the model to keep the messages together
 Batch labels start at **0**. Each boundary `b` names the first message of a new episode, so the preceding
 slice is `messages[:b]`. For example, `[2]` groups messages 0 and 1, then starts the next episode at 2.
 The valid range is `1 <= b < N`; the final input message can start a new episode. Tool items are not numbered.
-The strict batch response contains only `reasoning` and `boundaries`; reasoning explains all boundary decisions
-in one sentence. It does not predict whether the trailing episode has finished.
+The strict batch response contains only `reasoning` and `boundaries`; reasoning is requested in one sentence of
+at most 25 words explaining all boundary decisions. It does not predict whether the trailing episode has finished.
 
 `custom_instructions=` on `adetect_boundaries`, `adetect_boundary_step` and the `BoundaryDetector` methods adds the
 host's text to the bundled rules, never replacing them: it is placed verbatim, never rendered as a template, in a
@@ -130,10 +130,10 @@ The model's strict batch schema also drops `tail_complete`. Update scripted repl
 return only `reasoning` and `boundaries`; the removed field is rejected as an extra key. Custom batch instructions
 must use zero-based new-episode start labels. The numeric cut position itself remains a Python slice boundary.
 
-This release candidate replaces the completion prediction because an open window does not establish whether
-more related messages will arrive. It changes the segmentation policy and restores a one-sentence explanation
-of all decisions. The prompt is smaller, but this does not imply lower latency: the evaluated candidate generated
-longer responses and had higher boundary-call latency than 0.4.1. Effects and speed remain model-dependent.
+This release replaces completion prediction because an open window does not establish whether more related
+messages will arrive. It groups related execution, outcomes and feedback into an episode and requests a
+one-sentence explanation of all boundary decisions in at most 25 words. The word limit is a prompt instruction,
+not a schema validator or a truncation step. Effects, response length and speed remain model-dependent.
 
 ## Failures
 

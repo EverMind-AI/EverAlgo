@@ -184,7 +184,7 @@ def test_step_keeps_its_historical_rule_sentences() -> None:
 def test_batch_request_uses_the_evaluated_prompt_and_schema() -> None:
     """Guard the evaluated contract, including schema metadata visible to the model."""
     assert hashlib.sha256(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT.encode()).hexdigest() == (
-        "01b3573f9c555afc241c0108b9df3dc53a3962723ece935e2085877aeef6b6e7"
+        "9944f7f61b9c1fa444f35b9c878e327fb1249d9dc2eaf555c38534fc93f98d35"
     )
     assert to_openai_response_format(Reply) == {
         "type": "json_schema",
