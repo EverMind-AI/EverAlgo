@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0rc4] - 2026-10-30
+
 ### Added
 
 - `acluster_retrieve` / `cluster_retrieve` take `max_members` and `member_retrieve` to bound the cluster expansion. The expansion grows with cluster size rather than with any `k`, so a large cluster sent thousands of members to the caller's rerank. With `max_members` set, seed hits come first in base order; once the expansion exceeds the budget, the remaining members are ranked by `member_retrieve(query, member_ids, k)` and only the top ones fill it. At or under the budget nothing is cut and `member_retrieve` is not called. `max_members` below 1, or set without `member_retrieve`, raises `InvalidInputError`. The default (`None`) returns the unbounded expansion in `all_docs` order, unchanged.
@@ -122,7 +124,8 @@ result = await SkillRanker(llm=...).arank(
 
 - `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as EverOS's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc3...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc4...HEAD
+[0.5.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc3...everalgo-rank/v0.5.0rc4
 [0.5.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc2...everalgo-rank/v0.5.0rc3
 [0.5.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc1...everalgo-rank/v0.5.0rc2
 [0.5.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.4.1...everalgo-rank/v0.5.0rc1

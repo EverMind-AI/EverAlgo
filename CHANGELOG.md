@@ -16,11 +16,15 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-core` | 0.6.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.4.2rc0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.5.0rc3 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-rank` | 0.5.0rc4 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc3 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [everalgo-rank/0.5.0rc4] - 2026-10-30
+
+Bounds `acluster_retrieve`'s cluster expansion. The expansion grew with cluster size rather than with any `k`, so one large cluster sent thousands of members to the caller's rerank. The new `max_members` and `member_retrieve` keep seed hits first and fill the rest of the budget with the members the caller's `member_retrieve` ranks highest; at or under the budget nothing is cut. The default (`None`) leaves behaviour unchanged. See the [package changelog](packages/everalgo-rank/CHANGELOG.md). Other distributions and dependency floors are unchanged.
 
 ## [everalgo-boundary/0.4.2rc0] - 2026-10-29
 

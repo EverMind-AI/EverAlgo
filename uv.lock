@@ -576,7 +576,7 @@ provides-extras = ["svg"]
 
 [[package]]
 name = "everalgo-rank"
-version = "0.5.0rc3"
+version = "0.5.0rc4"
 source = { editable = "packages/everalgo-rank" }
 dependencies = [
     { name = "asgiref" },
