@@ -20,6 +20,7 @@ from everalgo.user_memory.profile._items import (
 )
 from everalgo.user_memory.profile._merge import (
     _apply_ops,
+    _cap_compacted,
     _dedupe,
     _identity_key,
     _overcrowded_labels,
@@ -635,6 +636,7 @@ class ProfileExtractor:
         new_implicit = _dedupe(
             _stored_items("implicit_traits", data["implicit_traits"], profile.timestamp), source="compact"
         )
+        new_explicit, new_implicit = _cap_compacted(new_explicit, new_implicit)
         logger.info(
             "profile compacted: %d -> %d items",
             total_items,

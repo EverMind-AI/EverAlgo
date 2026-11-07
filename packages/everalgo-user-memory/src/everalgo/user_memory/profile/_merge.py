@@ -16,6 +16,7 @@ from everalgo.user_memory.profile._items import (
     _ITEM_WIDTH_BACKSTOP,
     _LABEL_FIELDS,
     _OBSERVED_AT,
+    _PROFILE_MAX_ITEMS,
     _PROFILE_MAX_PER_CATEGORY,
     _dated_buckets,
     _Item,
@@ -337,6 +338,40 @@ def _dedupe(items: list[_Item], *, source: str) -> list[_Item]:
     if dropped := len(items) - len(kept):
         logger.warning("profile duplicates dropped: source=%s count=%d", source, dropped)
     return kept
+
+
+def _cap_compacted(explicit: list[_Item], implicit: list[_Item]) -> tuple[list[_Item], list[_Item]]:
+    """COMPACT's two buckets trimmed so the item cap holds on what is returned.
+
+    The cap reaches the model only as the prompt's ``max_items`` text, so a reply may restate more items than
+    asked; storing it as-is leaves the profile above the limit, the next UPDATE compacts again, and the
+    profile never shrinks. This keeps ``len(explicit) + len(implicit) <= _PROFILE_MAX_ITEMS`` whatever the
+    reply held.
+
+    Ranking by ``observed_at`` is not possible here: ``_stored_items`` dates every COMPACT item with the
+    profile's timestamp, so they all compare equal. The reply's own order is therefore the only signal, and
+    it is the order the prompt asks the model to rank in — the first items of each bucket survive, the tail
+    is what gets dropped. A reply already within the cap is returned untouched.
+    """
+    total = len(explicit) + len(implicit)
+    if total <= _PROFILE_MAX_ITEMS:
+        return explicit, implicit
+
+    # Keep the head of the reply, bucket by bucket, as far as the shared cap allows: explicit_info first,
+    # then implicit_traits gets what is left, so a single reply always trims to the same set.
+    keep_explicit = min(len(explicit), _PROFILE_MAX_ITEMS)
+    keep_implicit = min(len(implicit), max(_PROFILE_MAX_ITEMS - keep_explicit, 0))
+    kept_explicit = explicit[:keep_explicit]
+    kept_implicit = implicit[:keep_implicit]
+    logger.warning(
+        "profile compact over cap: kept=%d dropped=%d cap=%d explicit=%d implicit=%d",
+        len(kept_explicit) + len(kept_implicit),
+        total - len(kept_explicit) - len(kept_implicit),
+        _PROFILE_MAX_ITEMS,
+        len(kept_explicit),
+        len(kept_implicit),
+    )
+    return kept_explicit, kept_implicit
 
 
 def _identity_key(description: object) -> str | None:

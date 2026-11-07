@@ -624,6 +624,123 @@ async def test_update_triggers_compact_when_total_cap_is_exceeded() -> None:
     assert ei[0]["category"] == "Merged"
 
 
+async def test_compact_caps_items_the_reply_ignored_the_limit() -> None:
+    """COMPACT: a reply that breaks the cap is trimmed, not stored as-is.
+
+    The cap reaches the model only as the prompt's ``max_items`` text. A reply that
+    restates more distinct items than the cap leaves the profile above the limit, so the
+    next UPDATE compacts again and the profile never shrinks. The invariant
+    ``len(explicit_info) + len(implicit_traits) <= _PROFILE_MAX_ITEMS`` has to hold on
+    what COMPACT returns, whatever the reply held.
+    """
+    over = _PROFILE_MAX_ITEMS + 30
+    ei_items = [{"category": f"Cat{i}", "description": f"Desc{i}.", "evidence": "x"} for i in range(over)]
+    old_p = _old_profile(explicit_info=ei_items, implicit_traits=[])
+    ops_json = _ops_payload(
+        {
+            "action": "add",
+            "type": "explicit_info",
+            "data": {"category": "New", "description": "One more.", "evidence": "z"},
+        }
+    )
+    # Distinct descriptions: _dedupe has nothing to collapse, so only a cap can bound this.
+    compact_ei = [
+        {"category": f"Merged{i}", "description": f"Merged fact {i}.", "evidence": "all"} for i in range(over)
+    ]
+    fake = FakeLLMClient(responses=[ops_json, _compact_payload(compact_ei, [])])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_p)
+
+    assert fake.call_count == 2  # update call + compact call
+    kept = _items(profile)
+    assert len(kept) <= _PROFILE_MAX_ITEMS, f"COMPACT returned {len(kept)} items, cap is {_PROFILE_MAX_ITEMS}"
+
+
+async def test_compact_caps_the_combined_total_when_both_buckets_are_under_their_own_limits() -> None:
+    """COMPACT: the total cap bites even when each bucket on its own looks reasonable.
+
+    ``max_items`` is a combined limit but the reply states items bucket by bucket, so a reply can respect
+    every per-bucket expectation and still sum past the cap. Only a total trim brings it back.
+    """
+    half = _PROFILE_MAX_ITEMS // 2 + 20
+    old_p = _old_profile(
+        explicit_info=[
+            {"category": f"Cat{i}", "description": f"Desc{i}.", "evidence": "x"} for i in range(_PROFILE_MAX_ITEMS + 2)
+        ],
+        implicit_traits=[],
+    )
+    ops_json = _ops_payload(
+        {
+            "action": "add",
+            "type": "explicit_info",
+            "data": {"category": "New", "description": "One more.", "evidence": "z"},
+        }
+    )
+    compact_ei = [{"category": f"E{i}", "description": f"Explicit fact {i}.", "evidence": "x"} for i in range(half)]
+    compact_it = [{"basis": "y", "description": f"Implicit trait {i}.", "trait": f"T{i}"} for i in range(half)]
+    fake = FakeLLMClient(responses=[ops_json, _compact_payload(compact_ei, compact_it)])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_p)
+
+    assert len(profile.explicit_info) + len(profile.implicit_traits) <= _PROFILE_MAX_ITEMS
+    # Both buckets survive: the trim is not a bucket wipe.
+    assert len(profile.explicit_info) > 0
+    assert len(profile.implicit_traits) > 0
+
+
+async def test_compact_trim_is_deterministic_and_keeps_reply_order() -> None:
+    """COMPACT: over the cap, the trim is deterministic and preserves the reply's own order.
+
+    Every item COMPACT stores carries the same ``observed_at`` (the profile's timestamp), so there is no
+    "newest" to rank by: the choice has to come from reply order alone, and the same reply must always trim
+    to the same set. The surviving items keep the order the reply gave them, which is the order the model
+    ranked them in.
+    """
+    n = _PROFILE_MAX_ITEMS + 10
+    old_p = _old_profile(
+        explicit_info=[{"category": f"Cat{i}", "description": f"Desc{i}.", "evidence": "x"} for i in range(n)],
+        implicit_traits=[],
+    )
+    ops_json = _ops_payload(
+        {
+            "action": "add",
+            "type": "explicit_info",
+            "data": {"category": "New", "description": "One more.", "evidence": "z"},
+        }
+    )
+    compact_ei = [{"category": f"M{i}", "description": f"Merged fact {i}.", "evidence": "all"} for i in range(n)]
+    fake = FakeLLMClient(responses=[ops_json, _compact_payload(compact_ei, [])])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_p)
+
+    descriptions = [it.description for it in profile.explicit_info]
+    assert len(descriptions) == _PROFILE_MAX_ITEMS
+    # Same reply -> same survivors, in the reply's own order.
+    assert descriptions == [f"Merged fact {i}." for i in range(_PROFILE_MAX_ITEMS)]
+
+
+async def test_compact_keeps_a_reply_at_the_cap_intact() -> None:
+    """COMPACT: a reply already within the cap passes through untouched — no silent trimming."""
+    n = _PROFILE_MAX_ITEMS
+    ei_items = [{"category": f"Cat{i}", "description": f"Desc{i}.", "evidence": "x"} for i in range(n)]
+    old_p = _old_profile(explicit_info=ei_items, implicit_traits=[])
+    ops_json = _ops_payload(
+        {
+            "action": "add",
+            "type": "explicit_info",
+            "data": {"category": "New", "description": "One more.", "evidence": "z"},
+        }
+    )
+    at_cap = [{"category": f"Merged{i}", "description": f"Merged fact {i}.", "evidence": "all"} for i in range(n)]
+    fake = FakeLLMClient(responses=[ops_json, _compact_payload(at_cap, [])])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_p)
+
+    kept = _items(profile)
+    assert len(kept) == n
+    assert [it["description"] for it in kept] == [it["description"] for it in at_cap]
+
+
 async def test_init_never_compacts_even_when_over_the_limit() -> None:
     """INIT is extraction, not maintenance: the compact threshold arms UPDATE only.
 
