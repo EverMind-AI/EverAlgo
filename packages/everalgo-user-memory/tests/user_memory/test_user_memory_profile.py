@@ -688,6 +688,38 @@ async def test_compact_caps_the_combined_total_when_both_buckets_are_under_their
     assert len(profile.implicit_traits) > 0
 
 
+async def test_compact_does_not_wipe_a_bucket_when_the_other_one_fills_the_cap() -> None:
+    """COMPACT: a long explicit bucket must not consume the whole cap and drop every implicit trait.
+
+    A reply of 70 explicit items and 20 implicit traits busts the cap on the explicit side alone. Trimming
+    bucket by bucket with ``explicit_info`` served first leaves ``keep_implicit = 0`` — every implicit
+    trait is deleted, which is a whole class of profile content lost rather than the tail of both trimmed.
+    A proportional split keeps both.
+    """
+    over = _PROFILE_MAX_ITEMS + 10
+    old_p = _old_profile(
+        explicit_info=[{"category": f"Cat{i}", "description": f"Desc{i}.", "evidence": "x"} for i in range(over)],
+        implicit_traits=[],
+    )
+    ops_json = _ops_payload(
+        {
+            "action": "add",
+            "type": "explicit_info",
+            "data": {"category": "New", "description": "One more.", "evidence": "z"},
+        }
+    )
+    # explicit alone over the cap; implicit well under it. Explicit-first would give implicit zero slots.
+    compact_ei = [{"category": f"E{i}", "description": f"Explicit fact {i}.", "evidence": "x"} for i in range(over)]
+    compact_it = [{"basis": "y", "description": f"Implicit trait {i}.", "trait": f"T{i}"} for i in range(20)]
+    fake = FakeLLMClient(responses=[ops_json, _compact_payload(compact_ei, compact_it)])
+
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_p)
+
+    assert len(profile.explicit_info) + len(profile.implicit_traits) <= _PROFILE_MAX_ITEMS
+    assert len(profile.implicit_traits) > 0, "every implicit trait was dropped: the explicit bucket took the whole cap"
+    assert len(profile.explicit_info) > 0
+
+
 async def test_compact_trim_is_deterministic_and_keeps_reply_order() -> None:
     """COMPACT: over the cap, the trim is deterministic and preserves the reply's own order.
 

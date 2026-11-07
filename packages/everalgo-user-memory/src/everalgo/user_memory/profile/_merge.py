@@ -352,15 +352,20 @@ def _cap_compacted(explicit: list[_Item], implicit: list[_Item]) -> tuple[list[_
     profile's timestamp, so they all compare equal. The reply's own order is therefore the only signal, and
     it is the order the prompt asks the model to rank in — the first items of each bucket survive, the tail
     is what gets dropped. A reply already within the cap is returned untouched.
+
+    The cap is split in proportion to what each bucket offered. Serving ``explicit_info`` first would let a
+    long explicit bucket consume the whole cap and drop every implicit trait, which loses a whole class of
+    profile content instead of trimming the tail of both.
     """
     total = len(explicit) + len(implicit)
     if total <= _PROFILE_MAX_ITEMS:
         return explicit, implicit
 
-    # Keep the head of the reply, bucket by bucket, as far as the shared cap allows: explicit_info first,
-    # then implicit_traits gets what is left, so a single reply always trims to the same set.
-    keep_explicit = min(len(explicit), _PROFILE_MAX_ITEMS)
-    keep_implicit = min(len(implicit), max(_PROFILE_MAX_ITEMS - keep_explicit, 0))
+    # Proportional share first, then any leftover (one bucket was smaller than its share) goes to the
+    # other bucket's tail, so a single reply always trims to the same set.
+    keep_explicit = min(len(explicit), max(_PROFILE_MAX_ITEMS * len(explicit) // total, 1))
+    keep_implicit = min(len(implicit), _PROFILE_MAX_ITEMS - keep_explicit)
+    keep_explicit = min(len(explicit), _PROFILE_MAX_ITEMS - keep_implicit)
     kept_explicit = explicit[:keep_explicit]
     kept_implicit = implicit[:keep_implicit]
     logger.warning(
