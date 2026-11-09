@@ -9,6 +9,7 @@ call total; structural noops make zero calls.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -595,6 +596,54 @@ class TestDefensiveBranches:
         with pytest.raises(LLMOutputError) as excinfo:
             await self._run('{"candidates": [], "leak": "SECRET-REPLY-TEXT"}')
         assert "SECRET-REPLY-TEXT" not in str(excinfo.value)
+
+
+# ── Time zone ───────────────────────────────────────────────────────────────────────────────────────
+
+
+_UTC_PLUS_14 = timezone(timedelta(hours=14))
+_SUNDAY_10_00_UTC = int(datetime(2024, 3, 10, 10, 0, tzinfo=UTC).timestamp() * 1000)
+
+
+class TestTimeZone:
+    """10:00 UTC on Sunday is 00:00 on Monday in UTC+14: the date, clock and weekday move, the offset is labelled."""
+
+    async def test_aextract_shows_message_times_in_the_zone_passed(self) -> None:
+        llm = FakeLLMClient(responses=[_llm_response([])])
+        memcell = _memcell(
+            _user("帮我查个东西", ts=_SUNDAY_10_00_UTC), _assistant("好的", ts=_SUNDAY_10_00_UTC + 60_000)
+        )
+
+        await AgentProfileExtractor(llm=llm).aextract(memcell, soul_md=SOUL_MD, agents_md=AGENTS_MD, tz=_UTC_PLUS_14)
+
+        assert str(llm.calls[0].messages[1].content).endswith(
+            "(user) [2024-03-11 00:00 UTC+14:00 (Monday)] user_1: 帮我查个东西\n"
+            "(assistant) [2024-03-11 00:01 UTC+14:00 (Monday)] agent: 好的\n"
+            "</conversation>"
+        )
+
+    def test_sync_bridge_extract_shows_message_times_in_the_zone_passed(self) -> None:
+        llm = FakeLLMClient(responses=[_llm_response([])])
+
+        AgentProfileExtractor(llm=llm).extract(
+            _memcell(_user("聊聊天", ts=_SUNDAY_10_00_UTC)), soul_md=SOUL_MD, agents_md=AGENTS_MD, tz=_UTC_PLUS_14
+        )
+
+        assert "(user) [2024-03-11 00:00 UTC+14:00 (Monday)] user_1: 聊聊天\n" in str(llm.calls[0].messages[1].content)
+
+    async def test_evidence_check_reads_the_zone_the_model_saw(self) -> None:
+        """A quote copied with its time prefix is still verbatim: the user-only text is rendered in the same zone."""
+        quoted_line = f"[2024-03-11 00:00 UTC+14:00 (Monday)] user_1: {_EXPLICIT_USER_TEXT}"
+        llm = FakeLLMClient(responses=[_llm_response([_candidate(evidence=quoted_line, patch=_ADD_RULE_PATCH)])])
+
+        update = await AgentProfileExtractor(llm=llm).aextract(
+            _memcell(_user(_EXPLICIT_USER_TEXT, ts=_SUNDAY_10_00_UTC)),
+            soul_md=SOUL_MD,
+            agents_md=AGENTS_MD,
+            tz=_UTC_PLUS_14,
+        )
+
+        assert [patch.evidence for patch in update.patches] == [quoted_line]
 
 
 # ── Pure helpers ────────────────────────────────────────────────────────────────────────────────────
