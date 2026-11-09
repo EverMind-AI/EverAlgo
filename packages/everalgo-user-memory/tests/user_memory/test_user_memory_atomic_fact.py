@@ -151,6 +151,7 @@ def test_aextract_takes_no_prompt_override() -> None:
         "memcell",
         "sender_id",
         "output_language",
+        "tz",
     ]
 
 

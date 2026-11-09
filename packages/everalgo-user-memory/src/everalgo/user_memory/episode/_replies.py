@@ -15,11 +15,10 @@ if TYPE_CHECKING:
 
 
 class _EpisodeReply(StrictOutputModel):
-    """Episode reply: the ``{"content", "summary", "title"}`` skeleton of the episode prompt, in order."""
+    """Episode reply: the ``{"title", "content"}`` skeleton of the episode prompt, in order (the reference run's)."""
 
-    content: str
-    summary: str
     title: str
+    content: str
 
 
 class _SummaryReply(StrictOutputModel):
@@ -29,15 +28,14 @@ class _SummaryReply(StrictOutputModel):
 
 
 # The fields stored as text, which a blank value leaves without an honest stand-in.
-_STORED_TEXT_FIELDS = ("content", "summary", "title")
+_STORED_TEXT_FIELDS = ("title", "content")
 
 
 async def _call_llm_for_episode(llm: LLMClient, messages: list[LLMMessage]) -> _EpisodeReply:
     """Request an episode reply and return it validated.
 
     Raises:
-        LLMOutputError: If the reply is not a valid episode output, or leaves ``content``, ``summary`` or
-            ``title`` blank.
+        LLMOutputError: If the reply is not a valid episode output, or leaves ``title`` or ``content`` blank.
     """
     text = await llm.achat(messages=messages, response_format=_EpisodeReply)
     reply = parse_reply(_EpisodeReply, text, operator="episode")

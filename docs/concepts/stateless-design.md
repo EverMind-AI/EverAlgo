@@ -70,7 +70,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory import EpisodeExtractor
 
 fake = FakeLLMClient(
-    responses=[json.dumps({"content": "Summary.", "summary": "Preview.", "title": "Test"})]
+    responses=[json.dumps({"title": "Test", "content": "Summary."})]
 )
 episode = await EpisodeExtractor(llm=fake).aextract(memcell, sender_id="u_alice")
 assert episode.subject == "Test"

@@ -97,9 +97,8 @@ def _conversation() -> list[ChatMessage]:
 _BOUNDARY_JSON = '{"reasoning": "single coherent topic", "boundaries": []}'
 
 _EPISODE_JSON = (
-    '{"content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",'
-    ' "summary": "Alice raised Python async retry patterns and the assistant offered a follow-up.",'
-    ' "title": "Alice asks about Python async retry semantics"}'
+    '{"title": "Alice asks about Python async retry semantics",'
+    ' "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up."}'
 )
 
 _FORESIGHT_JSON = (
@@ -184,25 +183,23 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     assert ep.owner_id == "u_alice"
 
     episode_prompt = captured["episode"]
-    # Placeholder substitution: the <conversation> element carries only its line count, no raw slot left behind.
-    assert '<conversation count="' in episode_prompt, "episode prompt missing the <conversation> element"
-    assert "start_time" not in episode_prompt
+    # Placeholder substitution: the start time and the <conversation> element are filled, no raw slot left behind.
+    assert "<conversation_start_time>\n2023-11-14 22:13 UTC (Tuesday)\n</conversation_start_time>" in (
+        episode_prompt
+    ), "episode prompt missing the conversation start time"
+    assert "<conversation>" in episode_prompt, "episode prompt missing the <conversation> element"
     assert "{{" not in episode_prompt
-    # No custom_instructions passed, so the prompt has no <custom_instructions> block.
-    assert "<custom_instructions>" not in episode_prompt
-    # One ``[time] speaker: text`` line per message, the time from ``format_utc_time(..., weekday=True)`` so the
-    # LLM can resolve relative time references per message.
-    assert "[2023-11-14 22:13 UTC (Tuesday)] Alice: " in episode_prompt, "episode conversation missing Alice's line"
-    assert "[2023-11-14 22:13 UTC (Tuesday)] assistant: " in episode_prompt, (
-        "episode conversation missing the assistant's line"
-    )
+    # No custom_instructions passed, so the block carries the reference run's default principles.
+    assert "<custom_instructions>\nFollow these principles when generating episodic memories:" in episode_prompt
+    # One reference-run pseudo-JSON block per message, its time in the shared shape with the weekday.
+    assert '"timestamp": 2023-11-14 22:13 UTC (Tuesday),' in episode_prompt
+    assert '"speaker": Alice,' in episode_prompt, "episode conversation missing Alice's block"
+    assert '"speaker": assistant,' in episode_prompt, "episode conversation missing the assistant's block"
     assert "Python async" in episode_prompt
     # sender_id is a required keyword argument (no default) that only sets owner_id: the prompt narrates the whole
-    # memcell, with no user-centred variant. No output_language, so the model follows the participants.
+    # memcell, with no user-centred variant. No output_language, so the prompt carries no language rule.
     assert "User name:" not in episode_prompt, "episode prompt must not be user-centred"
-    assert "in the language the participants use" in episode_prompt, (
-        "episode prompt missing the participant language rule"
-    )
+    assert "<output_language>" not in episode_prompt, "episode prompt must carry no language rule by default"
 
     # --- 3. Foresight ----------------------------------------------------------
     foresights = await ForesightExtractor(llm=fake).aextract(mc, sender_id="u_alice")

@@ -1,4 +1,4 @@
-"""``EpisodeSummarizer``: write the display preview of an episode text already stored, one call, same width guard."""
+"""``EpisodeSummarizer``: write the display preview of an episode text already stored, one call, width-guarded."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ class EpisodeSummarizer:
     """Write the ``summary`` of one episode from its stored text: one LLM call, no retry.
 
     For an episode whose text did not come from :class:`EpisodeExtractor` in the same call — an edited body, a record
-    written before the extractor produced summaries. The summary is asked for in the words extraction uses and held to
-    the same width guard, so the two paths write interchangeable previews.
+    written before the extractor produced summaries. Extraction's own summary is the content's first 200 characters,
+    not a model-written preview, so the two paths do not write interchangeable summaries.
 
     Args:
         llm: The client the call goes through.

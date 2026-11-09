@@ -20,20 +20,16 @@ from everalgo.types import ChatMessage, Episode, MemCell
 from everalgo.user_memory.episode import EpisodeExtractor
 
 # ---------------------------------------------------------------------------
-# Scripted LLM reply — the {content, summary, title} shape EpisodeExtractor validates.
+# Scripted LLM reply — the {title, content} shape EpisodeExtractor validates.
 # ---------------------------------------------------------------------------
 
 _EPISODE_JSON = json.dumps(
     {
+        "title": "Alice asks about Python async retry semantics",
         "content": (
             "Alice initiated a discussion on Python async retry patterns. "
             "The assistant offered to send a follow-up document the next week."
         ),
-        "summary": (
-            "Alice asked about Python async retry patterns and the assistant "
-            "promised a follow-up document the next week."
-        ),
-        "title": "Alice asks about Python async retry semantics",
     }
 )
 

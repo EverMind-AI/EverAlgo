@@ -3,7 +3,7 @@
 Placeholders: ``{{time}}`` / ``{{INPUT_TEXT}}``, rendered via :func:`everalgo.utils.render_prompt`.
 Single braces are literal, so the JSON example in the prompt body needs no escaping.
 Output schema: ``{"atomic_facts": {"atomic_fact": list[str]}}``. ``{{time}}`` is
-``format_utc_time(..., weekday=True)``, e.g. ``2024-03-10 14:00 UTC (Sunday)``.
+``format_time(..., weekday=True)``, e.g. ``2024-03-10 14:00 UTC (Sunday)``, in the caller's zone.
 
 ``{{language_rule}}`` — appearing twice, both copies receiving the same text — is filled from
 ``user_memory._language.build_language_rule`` according to ``aextract``'s ``output_language`` argument.

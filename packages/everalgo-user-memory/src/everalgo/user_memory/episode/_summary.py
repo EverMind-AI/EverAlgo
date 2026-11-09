@@ -1,8 +1,8 @@
 """The width guard on the stored ``summary``: an over-cap one is cut at a sentence boundary, never failed.
 
-The summary is a display preview, and the caller's failure model retries the whole extraction on an exception and
-drops the episode after the last attempt; failing the main product over a cosmetic field is the one outcome this guard
-exists to prevent.
+The summary is a display preview the model writes on the :class:`EpisodeSummarizer` path, and the caller's failure
+model retries the whole call on an exception; failing over a cosmetic field is the one outcome this guard exists to
+prevent.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ logger = logging.getLogger("everalgo.user_memory.episode")
 # Hard cap on the stored ``summary``, in ASCII-equivalent units. The 400-unit ceiling accommodates the prompt's
 # ~50-English-word target with headroom while still catching pathological outputs. Production
 # 2026-08: a qwen3-4b finetune restated the whole ``content`` as ``summary`` on ~22% of
-# episodes (max 9038 chars) — the prompt alone does not hold the line, so the extractor does.
+# episodes (max 9038 chars) — the prompt alone does not hold the line, so the summarizer does.
 _SUMMARY_WIDTH_CAP = 400
 
 _ELLIPSIS = "\u2026"

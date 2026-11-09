@@ -29,7 +29,7 @@ Constants:
     - ``ATOMIC_FACT_FROM_TEXT_SYSTEM_PROMPT`` — the static rules, the role sentences through ``<reply_format>``.
       No placeholder: it is the prefix every call shares. :func:`assemble_system_prompt` appends the call-level blocks.
     - ``ATOMIC_FACT_FROM_TEXT_USER_PROMPT`` — the data. Placeholders: ``{{time}}``, rendered by
-      :func:`~everalgo.utils.format_utc_time` with ``weekday=True`` (``2024-03-10 14:00 UTC (Sunday)``), and
+      :func:`~everalgo.utils.format_time` with ``weekday=True`` (``2024-03-10 14:00 UTC (Sunday)``), and
       ``{{episode_text}}``, the caller's text verbatim.
 
 Output schema: ``{"atomic_facts": {"atomic_fact": list[str]}}``, held to ``user_memory._replies._AtomicFactsReply``.

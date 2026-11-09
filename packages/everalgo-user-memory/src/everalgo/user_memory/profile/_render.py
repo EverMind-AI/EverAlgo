@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
+from datetime import UTC, tzinfo
 from typing import Any, cast
 
 from everalgo.types import ChatMessage, Episode, MemCell, Profile
 from everalgo.user_memory._render import chat_messages
 from everalgo.user_memory.profile._items import _OBSERVED_AT, _dated_buckets, _Item, _item_label, _normalize
-from everalgo.utils import InvalidInputError, format_utc_time, render_chat_line, speaker
+from everalgo.utils import InvalidInputError, format_time, render_chat_line, speaker
 
 # The fields an item shows the model, in this order: the declared order of both output item models, merged, then
 # the date. A host's own keys are not among them.
@@ -92,15 +93,18 @@ def _render_available_categories(categories: Sequence[str]) -> str:
     return json.dumps(list(categories), ensure_ascii=False, indent=2)
 
 
-def _render_episodes(episodes: Sequence[Episode]) -> str:
-    """Render narratives oldest to newest as ``<narrative time="2024-04-10 14:00 UTC">text</narrative>``, one per line."""
-    return "\n".join(_render_narrative(episode) for episode in episodes)
+def _render_episodes(episodes: Sequence[Episode], *, tz: tzinfo = UTC) -> str:
+    """Render narratives oldest to newest as ``<narrative time="2024-04-10 14:00 UTC">text</narrative>``, one per line.
+
+    The time is shown in ``tz``, as :func:`~everalgo.utils.format_time` renders it.
+    """
+    return "\n".join(_render_narrative(episode, tz=tz) for episode in episodes)
 
 
-def _render_narrative(episode: Episode) -> str:
+def _render_narrative(episode: Episode, *, tz: tzinfo = UTC) -> str:
     """One narrative element, its text stripped and its closing-tag look-alikes defused."""
     text = _defuse_closing_tags(episode.episode.strip())
-    return f'<narrative time="{format_utc_time(episode.timestamp)}">{text}</narrative>'
+    return f'<narrative time="{format_time(episode.timestamp, tz=tz)}">{text}</narrative>'
 
 
 def _user_senders(memcells: Sequence[MemCell]) -> set[str]:
@@ -117,17 +121,17 @@ def _sender_display_name(memcells: Sequence[MemCell], sender_id: str) -> str:
     return sender_id
 
 
-def _render_conversation(memcells: Sequence[MemCell]) -> str:
+def _render_conversation(memcells: Sequence[MemCell], *, tz: tzinfo = UTC) -> str:
     """Render ChatMessage items as :func:`~everalgo.utils.render_chat_line` lines, the speaker tagged with its user_id.
 
     A line reads ``[2024-04-10 14:00 UTC (Wednesday)] Alice(user_id:u1): hello``: the prompts locate the target user's
-    lines by that tag. Text-less messages and tool items are skipped.
+    lines by that tag. Times are shown in ``tz``. Text-less messages and tool items are skipped.
 
     Raises:
         InvalidInputError: If a message with text carries no timestamp (0).
     """
     lines = [
-        render_chat_line(_tag_speaker_with_user_id(message))
+        render_chat_line(_tag_speaker_with_user_id(message), tz=tz)
         for cell in memcells
         for message in chat_messages(cell)
         if message.content
@@ -140,19 +144,25 @@ def _tag_speaker_with_user_id(message: ChatMessage) -> ChatMessage:
     return message.model_copy(update={"sender_name": f"{speaker(message)}(user_id:{message.sender_id})"})
 
 
-def _render_profile_for_update(profile: Profile) -> str:
-    """Render the existing profile for the UPDATE prompt: label inventory first, then indexed JSON."""
+def _render_profile_for_update(profile: Profile, *, tz: tzinfo = UTC) -> str:
+    """Render the existing profile for the UPDATE prompt: label inventory first, then indexed JSON, dated in ``tz``."""
     explicit_info, implicit_traits = _dated_buckets(profile)
     return "\n".join(
-        (_render_label_inventory(explicit_info, implicit_traits), _render_indexed_items(explicit_info, implicit_traits))
+        (
+            _render_label_inventory(explicit_info, implicit_traits),
+            _render_indexed_items(explicit_info, implicit_traits, tz=tz),
+        )
     )
 
 
-def _render_profile_for_episode_update(profile: Profile) -> str:
-    """Render both buckets as XML, without listing stored category names as preferred classification choices."""
+def _render_profile_for_episode_update(profile: Profile, *, tz: tzinfo = UTC) -> str:
+    """Render both buckets as XML, dated in ``tz``, without listing stored category names as preferred choices."""
     explicit_info, implicit_traits = _dated_buckets(profile)
     return "\n".join(
-        (_render_bucket("explicit_info", explicit_info), _render_bucket("implicit_traits", implicit_traits))
+        (
+            _render_bucket("explicit_info", explicit_info, tz=tz),
+            _render_bucket("implicit_traits", implicit_traits, tz=tz),
+        )
     )
 
 
@@ -177,20 +187,20 @@ def _render_labels(items: Sequence[_Item]) -> str:
     return ", ".join(seen) if seen else "(none yet)"
 
 
-def _render_indexed_items(explicit_info: Sequence[_Item], implicit_traits: Sequence[_Item]) -> str:
+def _render_indexed_items(explicit_info: Sequence[_Item], implicit_traits: Sequence[_Item], *, tz: tzinfo = UTC) -> str:
     """Render both buckets as ``[i] {json}`` lines for the MemCell UPDATE prompt; its ops resolve against them."""
     parts: list[str] = ["=== explicit_info ==="]
     for i, item in enumerate(explicit_info):
-        parts.append(f"[{i}] {_render_item(item)}")
+        parts.append(f"[{i}] {_render_item(item, tz=tz)}")
     parts.append("=== implicit_traits ===")
     for i, item in enumerate(implicit_traits):
-        parts.append(f"[{i}] {_render_item(item)}")
+        parts.append(f"[{i}] {_render_item(item, tz=tz)}")
     return "\n".join(parts)
 
 
-def _render_bucket(bucket: str, items: Sequence[_Item]) -> str:
+def _render_bucket(bucket: str, items: Sequence[_Item], *, tz: tzinfo = UTC) -> str:
     """Render one bucket as ``<bucket>`` holding ``<item index="i">{json}</item>`` lines; ops name the index."""
-    lines = [f'<item index="{i}">{_render_item(item)}</item>' for i, item in enumerate(items)]
+    lines = [f'<item index="{i}">{_render_item(item, tz=tz)}</item>' for i, item in enumerate(items)]
     return "\n".join((f"<{bucket}>", *lines, f"</{bucket}>"))
 
 
@@ -212,11 +222,11 @@ def _render_group(items: Sequence[_Item]) -> str:
     return _defuse_closing_tags(json.dumps(_undated_shown_fields(items), ensure_ascii=False, indent=2))
 
 
-def _render_item(item: _Item) -> str:
-    """One item as JSON of its shown fields, ``observed_at`` as a UTC minute; a field never set stays out."""
+def _render_item(item: _Item, *, tz: tzinfo = UTC) -> str:
+    """One item as JSON of its shown fields, ``observed_at`` as a minute in ``tz``; a field never set stays out."""
     fields = _shown_fields(item.model_dump(exclude_unset=True))
     if item.observed_at is not None:
-        fields[_OBSERVED_AT] = format_utc_time(item.observed_at)
+        fields[_OBSERVED_AT] = format_time(item.observed_at, tz=tz)
     return _defuse_closing_tags(json.dumps(fields, ensure_ascii=False))
 
 

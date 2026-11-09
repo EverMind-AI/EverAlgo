@@ -7,13 +7,11 @@ host that always passes the same ``custom_instructions`` and ``output_language``
 call. The USER message carries only the episode text, in an ``<episode_text>`` element, and is always rendered by the
 operator.
 
-The summary is asked for in the words episode extraction uses: ``<the_preview>`` opens with
-``prompts.en.episode.EPISODE_SUMMARY_FIELD_RULE``, the one wording of what a summary is, so a preview written for an
-edited or backfilled episode and one written at extraction cannot drift apart. That description calls the text
+``<the_preview>`` opens with ``prompts.en.episode.EPISODE_SUMMARY_FIELD_RULE``, the one wording of what a summary
+is. Episode extraction no longer asks the model for a summary (it keeps the content's first 200 characters, as the
+EverAlgo LoCoMo reference run did), so this prompt is the only place the rule is used. That description calls the text
 "content" and the memory "this episode"; the role sentence says ``<episode_text>`` is the episode's content, so both
-names point at the input. Its second line holds what this prompt adds: extraction holds the summary to the
-conversation through ``<stay_faithful>``, which has no counterpart here, so the line forbids facts the text does not
-state; and a time the preview mentions keeps the text's own format, so the preview never shows a time other than the
+names point at the input. Its second line holds what this prompt adds: it forbids facts the text does not state; and a time the preview mentions keeps the text's own format, so the preview never shows a time other than the
 way the text it previews shows it. The language rule is the shared one for already-extracted text,
 ``SOURCE_TEXT_LANGUAGE_RULE``, which names ``<episode_text>``, or the one the caller names.
 

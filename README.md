@@ -67,7 +67,7 @@ from everalgo.user_memory import (
 )
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": []})
-_EPISODE_JSON  = json.dumps({"content": "Alice explored async patterns.", "summary": "Alice explored async patterns.", "title": "Alice asks about async"})
+_EPISODE_JSON  = json.dumps({"title": "Alice asks about async", "content": "Alice explored async patterns."})
 _FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _FACT_JSON     = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning Python async."]}})
 _PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"basis": "Asked for the shortest path to retries.", "description": "Prefers minimal-ceremony tooling.", "trait": "Pragmatic"}]})

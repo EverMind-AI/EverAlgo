@@ -61,7 +61,7 @@ from everalgo.user_memory.prompts.en.profile_from_episode_texts import (
     REGROUP_REPLY_SKELETONS,
     additional_requirements_block,
 )
-from everalgo.utils import format_utc_time, render_prompt
+from everalgo.utils import format_time, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -238,7 +238,7 @@ def _episode(text: str, *, timestamp: int = _TIMESTAMP) -> Episode:
 
 def _dated(text: str, *, timestamp: int = _TIMESTAMP) -> str:
     """The narrative exactly as the prompt renders it: an element carrying its observation time."""
-    return f'<narrative time="{format_utc_time(timestamp)}">{text}</narrative>'
+    return f'<narrative time="{format_time(timestamp)}">{text}</narrative>'
 
 
 def _profile_payload(*, description: str = "Works mainly in Python.", evidence: str = "Alice works in Python.") -> str:
@@ -665,7 +665,7 @@ async def test_update_applies_operations_and_dates_every_item() -> None:
     assert _rendered_category_snapshot(system) == _expected_category_snapshot()
     assert "categories already in use" not in system
     # The model is shown the same date the merge will judge the legacy item by.
-    assert f'"observed_at": "{format_utc_time(_TIMESTAMP - 1)}"' in user
+    assert f'"observed_at": "{format_time(_TIMESTAMP - 1)}"' in user
 
 
 async def test_stored_items_show_observed_at_as_a_date_the_model_can_compare() -> None:
@@ -685,7 +685,7 @@ async def test_stored_items_show_observed_at_as_a_date_the_model_can_compare() -
     )
 
     prompt = _user_prompt(fake)
-    assert f'"observed_at": "{format_utc_time(_TIMESTAMP)}"' in prompt
+    assert f'"observed_at": "{format_time(_TIMESTAMP)}"' in prompt
     assert str(_TIMESTAMP) not in prompt
 
 
@@ -998,7 +998,7 @@ async def test_mixed_batch_runs_the_historical_pass_before_the_current_pass() ->
     assert older not in current_prompt
     # The current pass sees the profile as the historical pass left it, dates included.
     assert "Grew up in Chengdu." in current_prompt
-    assert f'"observed_at": "{format_utc_time(_EARLIER)}"' in current_prompt
+    assert f'"observed_at": "{format_time(_EARLIER)}"' in current_prompt
     items = _explicit_items(profile)
     assert [item["description"] for item in items] == ["Lives in Hangzhou.", "Grew up in Chengdu."]
     assert [item["observed_at"] for item in items] == [_LATER, _EARLIER]
@@ -2645,7 +2645,7 @@ async def test_stored_profile_renders_each_bucket_as_an_element_of_indexed_items
     )
 
     user = _user_prompt(fake)
-    when = format_utc_time(_TIMESTAMP)
+    when = format_time(_TIMESTAMP)
     stored = user.split("<stored_profile>\n", maxsplit=1)[1].split("\n</stored_profile>", maxsplit=1)[0]
     assert stored.splitlines() == [
         "<explicit_info>",
@@ -2679,7 +2679,7 @@ def test_render_item_puts_known_fields_in_declared_order_and_leaves_host_keys_ou
     rendered = json.loads(_render_item(legacy))
 
     assert list(rendered) == ["evidence", "description", "category", "observed_at"]
-    assert rendered["observed_at"] == format_utc_time(_TIMESTAMP)
+    assert rendered["observed_at"] == format_time(_TIMESTAMP)
 
 
 def test_render_item_leaves_a_missing_field_missing() -> None:

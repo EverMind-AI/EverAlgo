@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
@@ -64,6 +65,7 @@ from everalgo.utils import InvalidInputError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import tzinfo
 
     from everalgo.llm.protocols import LLMClient
     from everalgo.types import Episode, MemCell, Profile
@@ -96,6 +98,7 @@ class ProfileExtractor:
         old_profile: Profile | None = None,
         custom_instructions: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
         """Extract one Profile for ``sender_id`` from ``memcells``.
 
@@ -114,6 +117,8 @@ class ProfileExtractor:
             output_language: Language to write the profile in, as an :class:`OutputLanguage` member or its value
                 in any casing. None lets INIT follow the participants and UPDATE and COMPACT keep the language the
                 profile is written in.
+            tz: The zone the times shown to the model are in, as :func:`everalgo.utils.format_time` renders them:
+                ``UTC`` (the default) or local time with its offset, ``UTC+08:00``.
 
         Returns:
             The extracted or updated Profile.
@@ -154,6 +159,7 @@ class ProfileExtractor:
                 sender_id=sender_id,
                 custom_instructions=custom_instructions,
                 output_language=language,
+                tz=tz,
             )
         else:
             result = await self._update_extract(
@@ -162,6 +168,7 @@ class ProfileExtractor:
                 old_profile=old_profile,
                 custom_instructions=custom_instructions,
                 output_language=language,
+                tz=tz,
             )
         logger.info(
             "profile extracted: mode=%s -> explicit=%d implicit=%d",
@@ -183,6 +190,7 @@ class ProfileExtractor:
         categories: Sequence[str] | None = None,
         custom_instructions: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
         """Extract one owner-scoped Profile from dated Episode narratives.
 
@@ -207,6 +215,8 @@ class ProfileExtractor:
                 output shape. None or a blank string adds nothing.
             output_language: Language to write the profile in. None makes INIT inherit the Episode language and
                 UPDATE preserve the existing Profile language.
+            tz: The zone the times shown to the model are in, as :func:`everalgo.utils.format_time` renders them:
+                ``UTC`` (the default) or local time with its offset, ``UTC+08:00``.
 
         Returns:
             The extracted or updated Profile. ``Profile.timestamp`` is the newest observation date seen so far and
@@ -254,6 +264,7 @@ class ProfileExtractor:
                 available_categories=available_categories,
                 custom_instructions=custom_instructions,
                 output_language=language,
+                tz=tz,
             )
         else:
             result = await self._update_extract_from_episodes(
@@ -264,6 +275,7 @@ class ProfileExtractor:
                 available_categories=available_categories,
                 custom_instructions=custom_instructions,
                 output_language=language,
+                tz=tz,
             )
         logger.info(
             "profile extracted from Episodes: mode=%s -> explicit=%d implicit=%d",
@@ -286,10 +298,11 @@ class ProfileExtractor:
         sender_id: str,
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
+        tz: tzinfo,
     ) -> Profile:
         messages = _MEMCELL_INIT.render(
             custom_instructions=custom_instructions,
-            conversation_text=_render_conversation(memcells),
+            conversation_text=_render_conversation(memcells, tz=tz),
             target_user=_sender_display_name(memcells, sender_id),
             target_user_id=sender_id,
             language_rule=_MEMCELL_INIT.language_rule(output_language),
@@ -315,10 +328,11 @@ class ProfileExtractor:
         available_categories: str,
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
+        tz: tzinfo,
     ) -> Profile:
         messages = _EPISODE_INIT.render(
             custom_instructions=custom_instructions,
-            episode_texts=_render_episodes(episodes),
+            episode_texts=_render_episodes(episodes, tz=tz),
             target_user=target_user,
             available_categories=available_categories,
             language_rule=_EPISODE_INIT.language_rule(output_language),
@@ -349,11 +363,12 @@ class ProfileExtractor:
         old_profile: Profile,
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
+        tz: tzinfo,
     ) -> Profile:
         messages = _MEMCELL_UPDATE.render(
             custom_instructions=custom_instructions,
-            stored_profile=_render_profile_for_update(old_profile),
-            conversations=_render_conversation(memcells),
+            stored_profile=_render_profile_for_update(old_profile, tz=tz),
+            conversations=_render_conversation(memcells, tz=tz),
             target_user=_sender_display_name(memcells, sender_id),
             target_user_id=sender_id,
             language_rule=_MEMCELL_UPDATE.language_rule(output_language),
@@ -385,6 +400,7 @@ class ProfileExtractor:
         available_categories: str,
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
+        tz: tzinfo,
     ) -> Profile:
         """Run UPDATE in up to two passes: Episodes older than the stored profile first, then the rest.
 
@@ -412,6 +428,7 @@ class ProfileExtractor:
                     available_categories=available_categories,
                     custom_instructions=custom_instructions,
                     output_language=output_language,
+                    tz=tz,
                 )
         return profile
 
@@ -426,11 +443,12 @@ class ProfileExtractor:
         available_categories: str,
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
+        tz: tzinfo,
     ) -> Profile:
         messages = _EPISODE_UPDATE.render(
             custom_instructions=custom_instructions,
-            stored_profile=_render_profile_for_episode_update(old_profile),
-            episode_texts=_render_episodes(episodes),
+            stored_profile=_render_profile_for_episode_update(old_profile, tz=tz),
+            episode_texts=_render_episodes(episodes, tz=tz),
             target_user=target_user,
             available_categories=available_categories,
             language_rule=_EPISODE_UPDATE.language_rule(output_language),

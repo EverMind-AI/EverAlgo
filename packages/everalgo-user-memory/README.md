@@ -30,7 +30,7 @@ from everalgo.user_memory import (
 )
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": []})
-_EPISODE_JSON  = json.dumps({"content": "Alice explored async retry patterns.", "summary": "Alice explored async retry patterns.", "title": "Alice asks about async retries"})
+_EPISODE_JSON  = json.dumps({"title": "Alice asks about async retries", "content": "Alice explored async retry patterns."})
 _FORE_JSON     = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "assistant promised a doc", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _FACT_JSON     = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning Python async."]}})
 _PROFILE_JSON  = json.dumps({"explicit_info": [], "implicit_traits": [{"trait": "Pragmatic", "description": "Prefers minimal-ceremony tooling.", "basis": "chose ruff over black"}]})
@@ -100,13 +100,19 @@ back out. Note also that `category` and `trait` labels are model-authored, so th
 with the descriptions (`Location` versus `居住地`) — worth knowing if you group or filter on them.
 
 What "leave it out" means depends on the operator. The four reading a raw conversation judge the language from
-what the participants write, which is the 10.2% path above. The four reading already-extracted memory —
+what the participants write, which is the 10.2% path above. `EpisodeExtractor` is the exception among them: left
+out, it sends no language rule at all, as the EverAlgo LoCoMo reference run it reproduces sent none, so the figures
+above, measured before that change, do not describe it. The four reading already-extracted memory —
 `AtomicFactExtractor.aextract_from_text`, `ProfileExtractor.aextract_from_episodes`,
 `EpisodeReflector.areflect` and `EpisodeSummarizer.asummarize` — instead inherit the language of their input, which is a much easier call for a
 single-language narrative but not free. The Profile Episode-text path and `areflect` can take several episodes,
 so inputs that disagree on language leave the model to pick one; an update inherits the existing Profile or
 narrative language. Name a language when inputs may disagree, or to move an existing result that is already in
 the wrong one.
+
+## Time zone
+
+Every extractor that shows the model a time takes `tz=`, a `datetime.tzinfo` (default UTC): `EpisodeExtractor`, `AtomicFactExtractor` (both entry points), `ForesightExtractor` and `ProfileExtractor` (both entry points). Times render in that zone with its offset, `[2024-03-11 00:00 UTC+14:00 (Monday)] Alice: text`, and the date and English weekday follow the zone, so "yesterday" resolves against the user's own calendar. UTC renders as `2024-03-10 10:00 UTC (Sunday)`. Build the zone on the host side, for example `zoneinfo.ZoneInfo("Asia/Shanghai")`; everalgo adds no time-zone dependency.
 
 ## Customising prompts
 
@@ -129,8 +135,9 @@ profile = await ProfileExtractor(llm=client).aextract_from_episodes(
 ```
 
 `EpisodeExtractor` likewise takes only `custom_instructions=`: the host's text, placed verbatim in a
-`<custom_instructions>` block after the bundled rules and left out when it is `None` or blank; the output shape stays
-fixed.
+`<custom_instructions>` block after the bundled rules; the output shape stays fixed. `None` or a blank string does not
+leave the block out: it holds the EverAlgo LoCoMo reference run's five default principles
+(`prompts.en.episode.DEFAULT_CUSTOM_INSTRUCTIONS`), as that run filled it, and a host's text takes their place.
 
 Prompts ship in English only. A parallel `prompts/zh/` tree used to carry translations and was removed:
 prompt language turned out to dictate output language almost entirely, so the translations were an implicit
@@ -157,8 +164,8 @@ class EpisodeExtractor:
     async def aextract(
         self, memcell: MemCell, *,
         sender_id: str | None,           # only sets Episode.owner_id; None → an episode bound to no user
-        custom_instructions: str | None = None,   # host's instructions, a block after the bundled rules
-        output_language: OutputLanguage | str | None = None,   # None → the model infers it
+        custom_instructions: str | None = None,   # host's instructions; None → the default principles
+        output_language: OutputLanguage | str | None = None,   # None → no language rule
     ) -> Episode: ...
 
 class ForesightExtractor:
@@ -222,19 +229,18 @@ class EpisodeSummarizer:
     ) -> str: ...
 ```
 
-Every episode carries three model-written fields: `subject` (the title), `episode` (the full narrative) and
-`summary` (a display preview of the narrative — faithful to it, readable without it, under 50 words). All
-three are required; if the model omits `summary` or returns it blank, `aextract` raises `LLMOutputError` rather than
-substituting a value. Up to 0.4 the field was a blind `episode[:200]` slice, because the prompts never asked
-for it — a truncation cut mid-word in English, and in Chinese a verbatim copy of most of the body.
+Every episode from `EpisodeExtractor` carries two model-written fields, `subject` (the title) and `episode` (the full
+narrative), both required: if the model omits either or returns it blank, `aextract` raises `LLMOutputError` rather
+than substituting a value. Its `summary` is the narrative's first 200 characters, cut in code as the EverAlgo LoCoMo
+reference run cut it; the model writes none, and the cut can end mid-word.
 
-`EpisodeReflector` produces the same three fields, so a merged episode has a preview of the merged narrative.
+`EpisodeReflector` has the model write all three fields, so a merged episode has a written preview of the merged
+narrative.
 
-`EpisodeSummarizer` writes the preview alone, for an episode whose narrative did not just come out of
-`EpisodeExtractor` — a body a user edited, or a record written before the extractor produced summaries. It asks for
-the summary in the very words extraction uses (`prompts.en.episode.EPISODE_SUMMARY_FIELD_RULE`, the one copy both
-prompts are built from), adds that the preview may state no fact the text does not and keeps the text's time format,
-and applies the same 400-unit sentence-boundary guard, so the two paths store interchangeable previews. One call —
+`EpisodeSummarizer` writes the preview alone, for an episode text already stored — a body a user edited, or an
+extracted episode whose 200-character cut should give way to a written preview. It asks for the summary in the words
+of `prompts.en.episode.EPISODE_SUMMARY_FIELD_RULE`, adds that the preview may state no fact the text does not and
+keeps the text's time format, and cuts a summary wider than 400 units at a sentence boundary. One call —
 a system message of rules (`EPISODE_SUMMARY_SYSTEM_PROMPT`, then `<output_language>` and, last, `<custom_instructions>`
 when the host passes some) and a user message holding only the text in `<episode_text>`; the reply is held strictly to
 `{"summary"}`, and a reply that fails or leaves it blank raises `LLMOutputError` with no retry. A blank `episode_text`
@@ -251,9 +257,9 @@ episode = episode.model_copy(update={"summary": summary})
 
 `EpisodeReflector.areflect` and `AtomicFactExtractor.aextract_from_text` each make one call — a system message of rules followed by the call-level `<output_language>` block and, only when the host passes some, a closing `<custom_instructions>` block, and a user message holding only the data: the numbered episodes (and, in UPDATE mode, the narrative being updated), or the text and its time. The reply is validated strictly — `{"content", "summary", "title"}` for reflect, `{"atomic_facts": {"atomic_fact"}}` for atomic facts — and a reply that fails raises `LLMOutputError` with no retry; blank fact sentences are dropped. `AtomicFactExtractor.aextract` keeps its single-message prompt, takes no `custom_instructions`, and is held to the same atomic-fact reply. None of the three takes a `prompt=` override.
 
-`ForesightExtractor` makes one call at temperature 0.3 — a system message of rules (`FORESIGHT_SYSTEM_PROMPT`, then the call-level `<output_language>` block) and a user message holding only the data (`FORESIGHT_USER_PROMPT`: `<user_id>`, `<user_name>` and `<conversation>` elements, the speaker lines as in Episode). The reply is validated strictly — `{"foresights": [{"content", "evidence", "start_time", "end_time", "duration_days"}]}` — and a reply that fails, or adds a key, raises `LLMOutputError` with no retry. The three time fields may be `null`: a missing `start_time` falls back to the date of the memcell's first message, and an `end_time` and a `duration_days` are each computed from the other; an `end_time` past year 9999 is dropped. Items with blank `content` are skipped and at most ten are kept.
+`ForesightExtractor` makes one call at temperature 0.3 — a system message of rules (`FORESIGHT_SYSTEM_PROMPT`, then the call-level `<output_language>` block) and a user message holding only the data (`FORESIGHT_USER_PROMPT`: `<user_id>`, `<user_name>` and `<conversation>` elements, one `[YYYY-MM-DD HH:MM UTC (Weekday)] speaker: text` line per message, in the zone `tz=` names, UTC by default). The reply is validated strictly — `{"foresights": [{"content", "evidence", "start_time", "end_time", "duration_days"}]}` — and a reply that fails, or adds a key, raises `LLMOutputError` with no retry. The three time fields may be `null`: a missing `start_time` falls back to the date of the memcell's first message in that zone, and an `end_time` and a `duration_days` are each computed from the other; an `end_time` past year 9999 is dropped. Items with blank `content` are skipped and at most ten are kept.
 
-`EpisodeExtractor` makes one call — a system message of rules (`EPISODE_SYSTEM_PROMPT`, then the call-level `<output_language>` block and, last, `<custom_instructions>` when the host passes some) and a user message holding only the conversation (`EPISODE_USER_PROMPT`) — whatever `sender_id` is: the episode narrates the whole memcell, and `sender_id` only becomes `owner_id`. The reply is validated strictly against three fields written in this order — `content`, `summary`, `title` — and a reply that fails, adds a key such as `language`, or leaves a field blank raises `LLMOutputError` with no retry. The model writes in the named `output_language`, or the participants' language when none is named, and declares no language: the Episode carries no `user_language`, so a host that needs the episode's language judges it from the text. An over-wide `summary` is cut at a sentence boundary, never re-requested.
+`EpisodeExtractor` makes one call — a system message of rules (`EPISODE_SYSTEM_PROMPT`, the EverAlgo LoCoMo reference run's episode prompt sentence for sentence, then `<output_language>` only when the host names a language, and last `<custom_instructions>`: the host's text, or that run's five default principles) and a user message holding the data (`EPISODE_USER_PROMPT`: `<conversation_start_time>`, the first message's time, and `<conversation>`, each message with text as that run's pseudo-JSON block, every time as `2024-03-14 15:00 UTC (Thursday)` in the zone `tz=` names) and, after it, a static `<reminder>` to follow every rule, resolve every relative time and keep every fact — whatever `sender_id` is: the episode narrates the whole memcell, and `sender_id` only becomes `owner_id`. The reply is validated strictly against two fields in that run's order — `title`, `content` — and a reply that fails, adds a key such as `summary` or `language`, or leaves a field blank raises `LLMOutputError` with no retry. With no `output_language` named the model gets no language rule, as that run got none; either way it declares no language: the Episode carries no `user_language`, so a host that needs the episode's language judges it from the text. `summary` is the content's first 200 characters.
 
 `ProfileExtractor` accepts either chronological `MemCell` objects through `aextract` or dated generic/reflected `Episode` objects, in any order, through `aextract_from_episodes`. The Episode path resolves one target from non-blank `owner_name` or falls back to `owner_id`, skips narratives that do not contain that target, and raises before the first LLM call only when none contain it. Its optional `categories` argument is the complete current category snapshot for `explicit_info`: all four processing stages receive the same normalized list, select the most semantically accurate listed match, and may create a concise category when none fits; the list does not constrain `implicit_traits.trait`. Both paths use `old_profile=None` for INIT and an existing Profile for UPDATE; transparent compact and regroup maintenance is shared.
 

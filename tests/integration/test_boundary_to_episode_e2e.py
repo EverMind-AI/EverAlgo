@@ -50,7 +50,7 @@ def _two_msg_dialogue() -> list[ChatMessage]:
 
 
 async def test_boundary_to_episode_pipeline_e2e() -> None:
-    """Boundary detects 1 MemCell, episode extracts 1 Episode from a {content, summary, title} reply."""
+    """Boundary detects 1 MemCell, episode extracts 1 Episode from a {title, content} reply."""
     call_count = 0
 
     def handler(messages: list[LLMMessage], **kwargs: Any) -> str:
@@ -60,9 +60,8 @@ async def test_boundary_to_episode_pipeline_e2e() -> None:
             content = _BOUNDARY_CONTINUE_JSON
         else:
             content = (
-                '{"content": "User scheduled a meeting with Alice at 3pm and plans to follow up next week.",'
-                ' "summary": "The user set up a 3pm meeting with Alice and intends to follow up next week.",'
-                ' "title": "Meeting with Alice at 3pm"}'
+                '{"title": "Meeting with Alice at 3pm",'
+                ' "content": "User scheduled a meeting with Alice at 3pm and plans to follow up next week."}'
             )
         return content
 

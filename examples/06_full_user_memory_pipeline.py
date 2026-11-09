@@ -49,9 +49,8 @@ _BOUNDARY_JSON = json.dumps(
 
 _EPISODE_JSON = json.dumps(
     {
-        "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",
-        "summary": "Alice raised Python async retry patterns and the assistant offered a follow-up.",
         "title": "Alice asks about Python async retry semantics",
+        "content": "Alice initiated a discussion on Python async retry patterns; assistant offered a follow-up.",
     }
 )
 
