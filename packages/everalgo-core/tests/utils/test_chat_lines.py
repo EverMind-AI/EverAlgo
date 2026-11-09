@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta, timezone
+
 import pytest
 
 from everalgo.types import ChatMessage
@@ -21,6 +23,13 @@ def _message(
 def test_line_is_the_utc_minute_with_its_weekday_then_speaker_and_text() -> None:
     """Seconds are truncated, not rounded: 14:00:59.999 still renders as 14:00."""
     assert render_chat_line(_message()) == "[2024-04-10 14:00 UTC (Wednesday)] Alice: hi"
+
+
+def test_line_shows_the_time_in_the_zone_passed_with_its_local_weekday() -> None:
+    """14:00 UTC on Wednesday is 01:00 on Thursday in UTC+11; the date, the clock and the weekday all move."""
+    assert render_chat_line(_message(), tz=timezone(timedelta(hours=11))) == (
+        "[2024-04-11 01:00 UTC+11:00 (Thursday)] Alice: hi"
+    )
 
 
 def test_line_places_content_verbatim_newlines_included() -> None:

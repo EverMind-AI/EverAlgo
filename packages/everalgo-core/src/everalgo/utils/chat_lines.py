@@ -4,10 +4,11 @@ from __future__ import annotations
 
 __all__ = ["render_chat_line", "speaker"]
 
+from datetime import UTC, tzinfo
 from typing import Protocol
 
 from everalgo.utils.errors import InvalidInputError
-from everalgo.utils.timestamps import format_utc_time
+from everalgo.utils.timestamps import format_time
 
 
 class _ChatLineSource(Protocol):
@@ -37,7 +38,7 @@ def speaker(message: _ChatLineSource) -> str:
     return message.sender_name or message.sender_id
 
 
-def render_chat_line(message: _ChatLineSource) -> str:
+def render_chat_line(message: _ChatLineSource, *, tz: tzinfo = UTC) -> str:
     """Render one message as ``[2024-04-10 14:00 UTC (Wednesday)] Alice: text``.
 
     The time carries its weekday because the model resolves relative times ("last Friday") against each message's
@@ -46,6 +47,7 @@ def render_chat_line(message: _ChatLineSource) -> str:
 
     Args:
         message: A ``ChatMessage``, or any object with its fields.
+        tz: The zone the time is shown in, as :func:`~everalgo.utils.format_time` renders it; default UTC.
 
     Returns:
         The line, with no trailing newline.
@@ -59,4 +61,4 @@ def render_chat_line(message: _ChatLineSource) -> str:
             f"chat message {message.id!r} has no timestamp: every ChatMessage must carry a positive "
             "epoch-millisecond timestamp; validate or fill it at ingress before calling the operator"
         )
-    return f"[{format_utc_time(message.timestamp, weekday=True)}] {speaker(message)}: {message.content}"
+    return f"[{format_time(message.timestamp, tz=tz, weekday=True)}] {speaker(message)}: {message.content}"

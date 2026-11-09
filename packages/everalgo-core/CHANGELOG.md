@@ -6,6 +6,18 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `everalgo.utils.format_time(timestamp_ms, *, tz=UTC, weekday=False)` and `format_date(value, *, tz=UTC)`: the caller picks the zone an instant or date is shown in, as a `datetime.tzinfo` (no new dependency: a host builds it, for example `zoneinfo.ZoneInfo("Asia/Shanghai")`). UTC renders exactly as before, `2024-04-10 14:00 UTC`; another zone renders its local time with the offset in force at that instant, `2024-04-10 22:00 UTC+08:00`, and the date and weekday are read in that zone. `render_chat_line(message, *, tz=UTC)` passes the zone through.
+
+### Changed
+
+- Weekday names are written from a fixed English list instead of `strftime("%A")`, so a host that calls `locale.setlocale` no longer changes the prompt (`(星期三)` instead of `(Wednesday)` under a Chinese `LC_TIME`).
+
+### Deprecated
+
+- `format_utc_time` and `format_utc_date`: aliases of `format_time` / `format_date` in UTC that warn `DeprecationWarning`. They stay for the packages released against 0.6, which accept any core below 2.0.
+
 ## [0.6.0] - 2026-10-20
 
 Promotes 0.6.0rc3 unchanged; see the release-candidate entries below for the changes since 0.5.1.
