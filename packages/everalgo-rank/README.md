@@ -102,7 +102,7 @@ reranked = await arerank(
 | Symbol | Module | Signature summary |
 |---|---|---|
 | `ahybrid_retrieve` | `everalgo.rank` | `(query, *, dense_retrieve, sparse_retrieve, ...) → list[Candidate]` |
-| `aagentic_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, llm, rerank_fn=None, ..., custom_instructions=None) → tuple[list[Candidate], AgenticDecision]` |
+| `aagentic_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, llm, rerank_fn=None, ..., custom_instructions=None, tz=UTC) → tuple[list[Candidate], AgenticDecision]` |
 | `acluster_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, clusters, all_docs, ..., max_members=None, member_retrieve=None) → list[Candidate]` |
 | `amaxsim_retrieve` | `everalgo.rank` | `(query, *, child_retrieve, parent_fetch, ...) → list[Candidate]` |
 | `acategory_retrieve` | `everalgo.rank` | `(query, *, base_retrieve, rerank_fn, ...) → list[Candidate]` |
@@ -113,6 +113,8 @@ reranked = await arerank(
 | `RankConfig` | `everalgo.rank` | `fusion_mode: FusionMode = "rrf"`, `rrf_k: int = 60`, `alpha: float = 1.0` |
 | `arank` | `everalgo.rank` | Top-level async dispatch by `rank_input.memory_type` |
 | `arerank` | `everalgo.rank.rerank` | `(items, *, query, prompt, top_k, llm, custom_instructions=None) → list[Candidate]` |
+
+Each LLM call of `aagentic_retrieve` shows every document with a `Date` row read from its `metadata["timestamp"]` (epoch milliseconds): `YYYY-MM-DD HH:MM UTC`, or `N/A` when the timestamp is missing or invalid. Times are UTC unless the call passes `tz=` (a `datetime.tzinfo`), which shows each document's local time with its offset, `2024-04-10 22:00 UTC+08:00`; the date follows that zone.
 
 ## Cross-links
 
