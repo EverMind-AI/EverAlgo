@@ -2,11 +2,13 @@
 
 The batch prompt numbers its records, escapes XML delimiters, and indents continuation lines so message text
 cannot introduce a top-level record. Empty messages retain their indices as placeholders. The step prompt keeps
-the original unnumbered lines and drops empty messages. Token counting reads the raw ``speaker: text`` view.
+the original unnumbered lines and drops empty messages. Both show each message's time in the caller's zone
+(``render_chat_line``'s ``tz``). Token counting reads the raw ``speaker: text`` view.
 """
 
 from __future__ import annotations
 
+from datetime import UTC
 from html import escape
 from typing import TYPE_CHECKING
 
@@ -14,20 +16,21 @@ from everalgo.utils import count_tokens, render_chat_line, speaker
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import tzinfo
 
     from everalgo.types import ChatMessage
 
 
-def _format_messages_with_indices(messages: Sequence[ChatMessage]) -> str:
+def _format_messages_with_indices(messages: Sequence[ChatMessage], *, tz: tzinfo = UTC) -> str:
     """Render escaped records with 0-based indices, retaining empty messages without reading their timestamps.
 
     Raises:
         InvalidInputError: If a message with text has no timestamp (0).
     """
-    return "\n".join(f"[{index}] {_batch_record(message)}" for index, message in enumerate(messages))
+    return "\n".join(f"[{index}] {_batch_record(message, tz=tz)}" for index, message in enumerate(messages))
 
 
-def _batch_record(message: ChatMessage) -> str:
+def _batch_record(message: ChatMessage, *, tz: tzinfo) -> str:
     """Keep message text inside its XML block and continuation lines inside their numbered record.
 
     Raises:
@@ -35,16 +38,16 @@ def _batch_record(message: ChatMessage) -> str:
     """
     if not message.content:
         return "[empty message]"
-    return "\n  ".join(escape(render_chat_line(message), quote=False).splitlines())
+    return "\n  ".join(escape(render_chat_line(message, tz=tz), quote=False).splitlines())
 
 
-def _format_messages_step(messages: Sequence[ChatMessage]) -> str:
+def _format_messages_step(messages: Sequence[ChatMessage], *, tz: tzinfo = UTC) -> str:
     """Render one line per message with text, unnumbered: the step prompt answers a single ``should_end``.
 
     Raises:
         InvalidInputError: If a message with text has no timestamp (0).
     """
-    return "\n".join(render_chat_line(message) for message in messages if message.content)
+    return "\n".join(render_chat_line(message, tz=tz) for message in messages if message.content)
 
 
 def _count_history_tokens(messages: Sequence[ChatMessage]) -> int:

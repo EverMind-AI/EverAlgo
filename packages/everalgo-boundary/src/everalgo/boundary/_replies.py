@@ -22,12 +22,18 @@ class Reply(StrictOutputModel):
 
 
 class _StepReply(StrictOutputModel):
-    """Step reply: the ``{"reasoning", "should_end", "confidence", "topic_summary"}`` skeleton of the step prompt."""
+    """Step reply: the ``{"reasoning", "should_end", "confidence", "topic_summary"}`` skeleton of the step prompt.
 
-    reasoning: str
+    Only ``should_end`` is required. The other three default as the reference run's parser (everalgo-boundary 0.2.1)
+    filled them, ``""``, ``1.0`` and ``""``: only ``should_end`` decides a cut, and a reply asked for by the prompt
+    alone sometimes leaves ``confidence`` out (10 of 614 in the LoCoMo boundary stage). A deliberate exception to the
+    contract's no-default rule (``docs/concepts/llm-contract.md`` §2.2), covered by the prompt-only path.
+    """
+
+    reasoning: str = ""
     should_end: bool
-    confidence: float
-    topic_summary: str
+    confidence: float = 1.0
+    topic_summary: str = ""
 
 
 async def _call_llm_for_batch(llm: LLMClient, messages: list[LLMMessage]) -> Reply:

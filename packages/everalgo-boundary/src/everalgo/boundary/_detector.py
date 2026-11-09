@@ -13,6 +13,7 @@ builds.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import TYPE_CHECKING, NamedTuple
 
 from asgiref.sync import async_to_sync
@@ -39,6 +40,7 @@ from everalgo.utils import render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import tzinfo
 
     from everalgo.llm.protocols import LLMClient
     from everalgo.types import ChatMessage, ConversationItem, MemCell
@@ -113,6 +115,7 @@ class BoundaryDetector:
         custom_instructions: str | None = None,
         hard_token_limit: int = DEFAULT_HARD_TOKEN_LIMIT,
         hard_msg_limit: int = DEFAULT_HARD_MSG_LIMIT,
+        tz: tzinfo = UTC,
     ) -> DetectionResult:
         """Detect boundaries in ``items`` with the bound client; :func:`adetect_boundaries` documents the behaviour.
 
@@ -125,6 +128,8 @@ class BoundaryDetector:
                 message unchanged. The user message always carries the data.
             hard_token_limit: Token count at which leading cells are force-split off without the model.
             hard_msg_limit: Chat-message count at which leading cells are force-split off without the model.
+            tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
+                (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
 
         Returns:
             :class:`DetectionResult` ``(cells, tail)``.
@@ -140,6 +145,7 @@ class BoundaryDetector:
             custom_instructions=custom_instructions,
             hard_token_limit=hard_token_limit,
             hard_msg_limit=hard_msg_limit,
+            tz=tz,
         )
 
     detect = async_to_sync(adetect)
@@ -155,6 +161,7 @@ class BoundaryDetector:
         hard_token_limit: int = DEFAULT_HARD_TOKEN_LIMIT,
         hard_message_limit: int = DEFAULT_HARD_MSG_LIMIT,
         custom_instructions: str | None = None,
+        tz: tzinfo = UTC,
     ) -> DetectionResult:
         """Single-step incremental boundary detection — one LLM call + state transition.
 
@@ -176,6 +183,8 @@ class BoundaryDetector:
                 message's last block, ``<custom_instructions>``. They add to the rules, never replace them, and are
                 never rendered as a template, so ``{{`` stays literal. ``None`` or a blank string leaves the system
                 message unchanged. The user message always carries the data.
+            tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
+                (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
 
         Returns:
             :class:`DetectionResult`:
@@ -203,6 +212,7 @@ class BoundaryDetector:
             llm=self._llm,
             custom_instructions=custom_instructions,
             time_gap_info=_calculate_time_gap(shown_history, [new]),
+            tz=tz,
         )
         if not decision.should_end:
             return DetectionResult(cells=[], tail=[*history, new])
@@ -222,6 +232,7 @@ async def adetect_boundaries(
     custom_instructions: str | None = None,
     hard_token_limit: int = DEFAULT_HARD_TOKEN_LIMIT,
     hard_msg_limit: int = DEFAULT_HARD_MSG_LIMIT,
+    tz: tzinfo = UTC,
 ) -> DetectionResult:
     """Detect MemCell boundaries in a conversation, in one LLM call.
 
@@ -242,6 +253,8 @@ async def adetect_boundaries(
         hard_token_limit: Leading cells are force-split off, without the model, until the chat messages left
             hold fewer tokens than this.
         hard_msg_limit: Likewise, until fewer chat messages than this are left.
+        tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
+            (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
 
     Returns:
         :class:`DetectionResult`. Without any ``ChatMessage`` no LLM is called: ``cells`` is empty, ``tail``
@@ -258,7 +271,7 @@ async def adetect_boundaries(
 
     cuts = _force_split_cuts(messages, hard_token_limit, hard_msg_limit)
     window_start = cuts[-1] if cuts else 0
-    boundaries = await _ask_for_boundaries(messages[window_start:], llm, custom_instructions)
+    boundaries = await _ask_for_boundaries(messages[window_start:], llm, custom_instructions, tz=tz)
     cuts += [window_start + boundary for boundary in boundaries]
     if is_final:
         cuts.append(len(messages))
@@ -278,6 +291,7 @@ async def adetect_boundary_step(
     llm: LLMClient,
     custom_instructions: str | None = None,
     time_gap_info: str = "",
+    tz: tzinfo = UTC,
 ) -> BoundaryDecision:
     """Single-step LLM boundary decision over ``history + new_messages``.
 
@@ -295,6 +309,8 @@ async def adetect_boundary_step(
             unchanged. The user message always carries the data.
         time_gap_info: Pre-computed time-gap label rendered into the user message's ``<time_gap>``; an empty
             string renders as "No time gap information available".
+        tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
+            (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
 
     Returns:
         :class:`BoundaryDecision` with the LLM's verdict.
@@ -312,7 +328,7 @@ async def adetect_boundary_step(
             topic_summary="",
         )
 
-    request = _step_request(conversation_history, new_messages, time_gap_info, custom_instructions)
+    request = _step_request(conversation_history, new_messages, time_gap_info, custom_instructions, tz=tz)
     reply = await _call_llm_for_step(llm, request)
     logger.info("boundary step reply: should_end=%s confidence=%.2f", reply.should_end, reply.confidence)
     return BoundaryDecision(
@@ -333,6 +349,8 @@ async def _ask_for_boundaries(
     messages: Sequence[ChatMessage],
     llm: LLMClient,
     custom_instructions: str | None,
+    *,
+    tz: tzinfo,
 ) -> list[int]:
     """Call the LLM once and return the usable new-episode start indices.
 
@@ -343,7 +361,7 @@ async def _ask_for_boundaries(
         LLMOutputError: If the LLM reply is not a valid batch output.
         InvalidInputError: If a message the prompt shows has no timestamp (0).
     """
-    reply = await _call_llm_for_batch(llm, _batch_request(messages, custom_instructions))
+    reply = await _call_llm_for_batch(llm, _batch_request(messages, custom_instructions, tz=tz))
     in_range = [b for b in reply.boundaries if 1 <= b < len(messages)]
     boundaries = sorted(set(in_range))
     logger.info(
@@ -355,7 +373,7 @@ async def _ask_for_boundaries(
     return boundaries
 
 
-def _batch_request(messages: Sequence[ChatMessage], custom_instructions: str | None) -> list[LLMMessage]:
+def _batch_request(messages: Sequence[ChatMessage], custom_instructions: str | None, *, tz: tzinfo) -> list[LLMMessage]:
     """The batch call's ``[system, user]`` pair; ``count`` is the window size, so it bounds the indices.
 
     Raises:
@@ -365,7 +383,7 @@ def _batch_request(messages: Sequence[ChatMessage], custom_instructions: str | N
         BATCH_BOUNDARY_DETECT_USER_PROMPT,
         None,
         count=len(messages),
-        messages=_format_messages_with_indices(messages),
+        messages=_format_messages_with_indices(messages, tz=tz),
     )
     return [
         LLMMessage(
@@ -383,6 +401,8 @@ def _step_request(
     new_messages: list[ChatMessage],
     time_gap_info: str,
     custom_instructions: str | None,
+    *,
+    tz: tzinfo,
 ) -> list[LLMMessage]:
     """The step call's ``[system, user]`` pair.
 
@@ -392,9 +412,9 @@ def _step_request(
     user = render_prompt(
         STEP_BOUNDARY_DETECT_USER_PROMPT,
         None,
-        conversation_history=_format_messages_step(conversation_history),
+        conversation_history=_format_messages_step(conversation_history, tz=tz),
         time_gap_info=time_gap_info or "No time gap information available",
-        new_messages=_format_messages_step(new_messages),
+        new_messages=_format_messages_step(new_messages, tz=tz),
     )
     return [
         LLMMessage(

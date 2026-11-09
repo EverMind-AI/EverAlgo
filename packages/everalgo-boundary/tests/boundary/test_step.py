@@ -183,24 +183,25 @@ async def test_step_result_contains_only_cells_and_tail(*, should_end: bool) -> 
 
 
 # ===========================================================================
-# time gap wording — the count agrees with its unit
+# time gap wording — the reference run's labels (everalgo-boundary 0.2.1), unit always plural
 # ===========================================================================
 
 
 @pytest.mark.parametrize(
     ("gap_ms", "expected"),
     [
-        (1_000, "Time gap: 1 second (immediate response)"),
-        (2_000, "Time gap: 2 seconds (immediate response)"),
-        (90_000, "Time gap: 1 minute (recent conversation)"),
-        (150_000, "Time gap: 2 minutes (recent conversation)"),
-        (3_600_000, "Time gap: 1 hour (same day, but significant pause)"),
-        (7_200_000, "Time gap: 2 hours (same day, but significant pause)"),
-        (93_600_000, "Time gap: 1 day (long gap, likely new conversation)"),
+        (1_000, "Time gap: 1 seconds (immediate response)"),
+        (59_999, "Time gap: 59 seconds (immediate response)"),
+        (90_000, "Time gap: 1 minutes (recent conversation)"),
+        (3_599_999, "Time gap: 59 minutes (recent conversation)"),
+        (3_600_000, "Time gap: 1 hours (same day, but significant pause)"),
+        (86_399_999, "Time gap: 23 hours (same day, but significant pause)"),
+        (93_600_000, "Time gap: 1 days (long gap, likely new conversation)"),
         (172_800_000, "Time gap: 2 days (long gap, likely new conversation)"),
     ],
 )
-def test_time_gap_uses_the_singular_for_a_count_of_one(gap_ms: int, expected: str) -> None:
+def test_time_gap_uses_the_reference_labels(gap_ms: int, expected: str) -> None:
+    """The step prompt keeps the reference run's wording byte for byte, ``1 minutes`` included."""
     before, after = _msg(0), _msg(1)
     after = after.model_copy(update={"timestamp": before.timestamp + gap_ms})
     assert _calculate_time_gap([before], [after]) == expected

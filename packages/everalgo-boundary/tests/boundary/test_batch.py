@@ -314,16 +314,18 @@ async def test_client_exception_propagates_unchanged() -> None:
 
 
 _REPLY_MODELS: tuple[type[StrictOutputModel], ...] = (Reply, _StepReply)
+# The step reply defaults what the reference run's parser defaulted; test_incremental covers the prompt-only path.
+_DELIBERATE_DEFAULTS = {"_StepReply": {"reasoning", "confidence", "topic_summary"}}
 
 
 @pytest.mark.parametrize("model", _REPLY_MODELS, ids=lambda model: model.__name__)
-def test_reply_models_are_strict_one_level_and_default_free(model: type[StrictOutputModel]) -> None:
-    """Both reply models inherit StrictOutputModel directly, require every field and carry no validators (§2.2)."""
+def test_reply_models_are_strict_one_level_and_default_only_deliberately(model: type[StrictOutputModel]) -> None:
+    """Both reply models inherit StrictOutputModel directly, carry no validators and default only on purpose (§2.2)."""
     assert model.__bases__ == (StrictOutputModel,)
     assert model.model_config.get("strict") is True
     assert model.model_config.get("extra") == "forbid"
-    for name, field in model.model_fields.items():
-        assert field.is_required(), f"{model.__name__}.{name} has a default"
+    defaulted = {name for name, field in model.model_fields.items() if not field.is_required()}
+    assert defaulted == _DELIBERATE_DEFAULTS.get(model.__name__, set())
     assert not model.__pydantic_decorators__.field_validators
     assert not model.__pydantic_decorators__.model_validators
 

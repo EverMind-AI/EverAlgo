@@ -3,11 +3,20 @@
 Batch detection identifies new episodes in the available streaming window. Related execution, results and
 feedback remain together. Input labels are zero-based; boundaries are the first-message labels of new episodes.
 The batch reply contains only reasoning and boundaries. Reasoning is requested in one sentence of at most 25 words.
-The caller owns final or idle flushing. The separate incremental step prompt is unchanged.
+The caller owns final or idle flushing.
+
+The incremental step prompt is the EverAlgo LoCoMo reference run's (everalgo-boundary 0.2.1) sentence for sentence,
+the role sentence and ``<reply_format>`` word for word, in tags instead of Markdown headings and bold. It adds
+nothing: the reply format is that run's field skeleton only, whose ``true/false`` and ``0.0-1.0`` do not parse as
+JSON. A deliberate exception to the LLM contract's parseable-example obligation (``llm-contract.md`` §4.3): every
+example reply tried moved the step decisions away from the reference run's. Its message lines keep the shared chat
+line shape rather than the reference run's ``[YYYY-MM-DD HH:MM:SS]``.
 
 User-template placeholders:
 - batch: ``{{count}}`` and ``{{messages}}``, rendered as numbered timestamped records.
-- step: ``{{conversation_history}}``, ``{{time_gap_info}}`` and ``{{new_messages}}``.
+- step: ``{{conversation_history}}``, ``{{time_gap_info}}`` and ``{{new_messages}}``; the messages render as
+  ``[YYYY-MM-DD HH:MM UTC (Weekday)] speaker: text`` lines in the caller's zone, the time gap as the reference run
+  worded it, unit always plural (``Time gap: 1 minutes (recent conversation)``).
 
 Optional caller instructions are appended verbatim to the system message by :func:`assemble_system_prompt`.
 """
@@ -72,8 +81,7 @@ BATCH_BOUNDARY_DETECT_USER_PROMPT = tagged("messages", "{{messages}}", count="{{
 
 _STEP_ROLE = (
     "You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue should "
-    "end the current episode and start a new one. The conversation so far is in <conversation_history>, the time "
-    "gap between it and the new messages in <time_gap>, and the newly added messages in <new_messages>."
+    "end the current episode and start a new one."
 )
 
 _ANALYSIS_ASPECTS = """\
@@ -118,8 +126,13 @@ _NOTES = """\
 - Each episode should contain substantive content that stands alone as a meaningful memory unit"""
 
 _STEP_REPLY_FORMAT = """\
-Reply with one JSON object, nothing else. reasoning is a one sentence summary of your reasoning process; should_end is true or false; confidence is 0.0-1.0; topic_summary summarizes the core meaningful topic of the current episode if should_end = true, otherwise is left blank.
-{"reasoning": "...", "should_end": false, "confidence": 0.9, "topic_summary": ""}"""
+Please return your judgment in JSON format:
+{
+    "reasoning": "One sentence summary of your reasoning process",
+    "should_end": true/false,
+    "confidence": 0.0-1.0,
+    "topic_summary": "If should_end = true, summarize the core meaningful topic of the current episode, otherwise leave it blank"
+}"""
 
 STEP_BOUNDARY_DETECT_SYSTEM_PROMPT = paragraphs(
     _STEP_ROLE,

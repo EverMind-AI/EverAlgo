@@ -6,6 +6,16 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `tz=` (a `datetime.tzinfo`, default UTC) on `adetect_boundaries` / `detect_boundaries`, `adetect_boundary_step` and every `BoundaryDetector` method: message lines show each time in that zone with its offset, `[2024-04-10 22:00 UTC+08:00 (Wednesday)] Alice: text`, through `everalgo.utils.render_chat_line`. UTC renders exactly as before. Requires `everalgo-core` with `format_time`.
+
+### Changed
+
+- The step prompt adds nothing to the EverAlgo LoCoMo reference run's (everalgo-boundary 0.2.1). The role sentence no longer says where the data sits, and `<reply_format>` is that run's sentence and field skeleton word for word (`"should_end": true/false`, `"confidence": 0.0-1.0`), replacing 0.4.0's rewrite, which added "nothing else" and showed one continuing example (`"should_end": false`). The skeleton does not parse, a deliberate exception to the LLM contract's parseable-example obligation (§4.3, which now names it): every example reply tried moved the step decisions away from the reference run's. The system/user split, the tags, the rule sentences and the message lines are unchanged. The batch path is unchanged.
+- The step time-gap labels are the reference run's, unit always plural (`Time gap: 1 minutes (recent conversation)`).
+- The step reply requires only `should_end`; `reasoning`, `confidence` and `topic_summary` default to `""`, `1.0` and `""`, as the reference run's parser filled them. Asked by the prompt alone, the model left `confidence` out of 10 of 614 replies in the LoCoMo boundary stage. A deliberate exception to the no-default rule of the LLM contract (§2.2), with a prompt-only test.
+
 ## [0.4.2] - 2026-10-30
 
 ### Changed

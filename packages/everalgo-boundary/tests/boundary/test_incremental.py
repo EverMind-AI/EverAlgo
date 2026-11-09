@@ -77,9 +77,9 @@ class _ClientError(Exception):
         pytest.param(f"junk {_SECRET}", "<root>", id="not-json"),
         pytest.param(json.dumps({**_VALID, "note": "x"}), "note:", id="extra-field-forbidden"),
         pytest.param(
-            json.dumps({k: v for k, v in _VALID.items() if k != "topic_summary"}),
-            "topic_summary:",
-            id="topic-summary-missing",
+            json.dumps({k: v for k, v in _VALID.items() if k != "should_end"}),
+            "should_end:",
+            id="should-end-missing",
         ),
         pytest.param(json.dumps({**_VALID, "should_end": "false"}), "should_end:", id="string-bool-not-coerced"),
     ],
@@ -96,6 +96,15 @@ async def test_fails_loud_on_bad_llm_response(reply: str, failing_location: str)
     assert failing_location in str(excinfo.value)
     assert _SECRET not in str(excinfo.value)
     assert fake.call_count == 1
+
+
+async def test_a_prompt_only_reply_with_only_should_end_reads_the_reference_defaults() -> None:
+    """Asked by the prompt alone, the model sometimes leaves fields out; only ``should_end`` decides a cut."""
+    fake = FakeLLMClient(responses=[json.dumps({"should_end": True})])
+
+    decision = await adetect_boundary_step([_msg(0), _msg(1)], [_msg(2)], llm=fake)
+
+    assert decision == BoundaryDecision(should_end=True, reasoning="", confidence=1.0, topic_summary="")
 
 
 async def test_client_exception_propagates_unchanged() -> None:

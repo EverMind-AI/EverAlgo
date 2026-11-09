@@ -10,7 +10,7 @@ import hashlib
 import inspect
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -26,7 +26,7 @@ from everalgo.boundary.prompts.en.chat import (
 from everalgo.llm import to_openai_response_format
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
-from everalgo.utils import format_utc_time
+from everalgo.utils import format_time
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -141,7 +141,7 @@ def _old_lines(old: str) -> list[str]:
 def _as_rendered(match: re.Match[str]) -> str:
     """An old ISO 8601 example time in the shape the renderer writes, weekday included."""
     instant = datetime.fromisoformat(match.group(0))
-    return format_utc_time(int(instant.timestamp() * 1000), weekday=True)
+    return format_time(int(instant.timestamp() * 1000), weekday=True)
 
 
 def _msg(index: int, text: str, *, minutes: int) -> ChatMessage:
@@ -237,12 +237,15 @@ def test_system_prompt_blocks_are_closed(path: str) -> None:
     assert sorted(opened) == sorted(re.findall(r"^</([a-z_]+)>$", system, re.MULTILINE))
 
 
-@pytest.mark.parametrize("path", ["step"])
-def test_role_sentence_names_exactly_the_user_message_blocks(path: str) -> None:
-    role = _SYSTEM[path].split("\n", 1)[0]
-    user_blocks = set(re.findall(r"^<([a-z_]+)", _USER[path], re.MULTILINE))
+def test_the_step_role_sentence_is_the_reference_runs_and_names_no_block() -> None:
+    """The step role sentence is the EverAlgo LoCoMo reference run's word for word; it names no data block."""
+    role = _SYSTEM["step"].split("\n", 1)[0]
 
-    assert set(re.findall(r"<([a-z_]+)>", role)) == user_blocks
+    assert role == (
+        "You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue "
+        "should end the current episode and start a new one."
+    )
+    assert not re.findall(r"<([a-z_]+)>", role)
 
 
 @pytest.mark.parametrize("path", _PATHS)
@@ -258,15 +261,35 @@ def test_user_prompt_carries_only_data_slots(path: str) -> None:
     assert re.sub(r"</?[a-z_]+[^>]*>|\{\{[a-z_]+\}\}", "", user).strip() == ""
 
 
-@pytest.mark.parametrize("path", _PATHS)
-def test_every_reply_shown_validates_against_the_reply_model(path: str) -> None:
-    """The worked examples and the skeleton are what the model imitates; each must pass the model requested."""
-    shown = _REPLY.findall(_SYSTEM[path])
-    if path == "step":
-        shown.append(_SYSTEM[path].split("\n</reply_format>")[0].rsplit("\n", 1)[1])
+def test_every_batch_reply_shown_validates_against_the_reply_model() -> None:
+    """The worked examples are what the model imitates; each must pass the model requested."""
+    shown = _REPLY.findall(_SYSTEM["batch"])
     assert shown
     for block in shown:
-        _REPLY_MODEL[path].model_validate(json.loads(block))
+        _REPLY_MODEL["batch"].model_validate(json.loads(block))
+
+
+_STEP_REFERENCE_REPLY_FORMAT = """\
+Please return your judgment in JSON format:
+{
+    "reasoning": "One sentence summary of your reasoning process",
+    "should_end": true/false,
+    "confidence": 0.0-1.0,
+    "topic_summary": "If should_end = true, summarize the core meaningful topic of the current episode, otherwise leave it blank"
+}"""
+
+
+def test_the_step_reply_format_is_the_reference_skeleton_and_shows_no_example_reply() -> None:
+    """The reference run's field skeleton stays and no example reply is added (llm-contract §4.3 exception).
+
+    Every example reply tried moved the step decisions away from the reference run's.
+    """
+    block = _SYSTEM["step"].split("<reply_format>\n", 1)[1].split("\n</reply_format>", 1)[0]
+
+    assert block == _STEP_REFERENCE_REPLY_FORMAT
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(block.split("\n", 1)[1])
+    assert not _REPLY.findall(_SYSTEM["step"])
 
 
 def test_every_batch_example_counts_its_messages() -> None:
@@ -414,6 +437,24 @@ def test_sync_bridges_forward_custom_instructions_and_reject_prompt() -> None:
 
 
 # ── Time shape ──────────────────────────────────────────────────────────────────────────────────────
+
+
+_UTC_PLUS_14 = timezone(timedelta(hours=14))
+
+
+async def test_every_entry_point_shows_message_times_in_the_zone_passed() -> None:
+    """10:00 UTC on Sunday is 00:00 on Monday in UTC+14: the date, clock and weekday move, the offset is labelled."""
+    batch, detector_batch, step, detector_step = _batch_client(), _batch_client(), _step_client(), _step_client()
+
+    await adetect_boundaries(_dialogue(1), llm=batch, tz=_UTC_PLUS_14)
+    await BoundaryDetector(llm=detector_batch).adetect(_dialogue(1), tz=_UTC_PLUS_14)
+    await adetect_boundary_step(_dialogue(1), [_msg(1, "text 1", minutes=1)], llm=step, tz=_UTC_PLUS_14)
+    await BoundaryDetector(llm=detector_step).adetect_step(_dialogue(2), _msg(2, "text 2", minutes=2), tz=_UTC_PLUS_14)
+
+    for client in (batch, detector_batch):
+        assert "[0] [2024-03-11 00:00 UTC+14:00 (Monday)] Speaker0: text 0" in str(client.calls[0].messages[1].content)
+    assert "[2024-03-11 00:01 UTC+14:00 (Monday)] Speaker1: text 1" in str(step.calls[0].messages[1].content)
+    assert "[2024-03-11 00:02 UTC+14:00 (Monday)] Speaker2: text 2" in str(detector_step.calls[0].messages[1].content)
 
 
 async def test_rendered_lines_show_minutes_and_the_utc_label() -> None:

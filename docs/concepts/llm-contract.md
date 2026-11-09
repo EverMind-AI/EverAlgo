@@ -291,6 +291,8 @@ These are rules EverAlgo keeps for itself. The implementation cannot see strateg
 
 Example: both reflect prompts (`everalgo.user_memory.prompts.en.reflect`) say "Reply with one JSON object, nothing else."
 
+Exception: the boundary step prompt's `<reply_format>` (`everalgo.boundary.prompts.en.chat.STEP_BOUNDARY_DETECT_SYSTEM_PROMPT`) is the EverAlgo LoCoMo reference run's word for word, a field skeleton (`"should_end": true/false`) that does not parse. Every example reply tried moved the step decisions away from the reference run's; the module docstring says so, and a unit test keeps an example from being added back.
+
 ---
 
 ## 5. Who retries: operators never retry; the host decides by error type

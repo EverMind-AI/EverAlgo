@@ -116,7 +116,8 @@ def _close_step(
 def _calculate_time_gap(history: Sequence[ChatMessage], new_messages: Sequence[ChatMessage]) -> str:
     """Bucket the time between the last history message and the first new one into a prompt-ready label.
 
-    Timestamps are milliseconds since the epoch; ``0`` reads as missing.
+    Timestamps are milliseconds since the epoch; ``0`` reads as missing. The labels are the reference run's
+    (everalgo-boundary 0.2.1), unit always plural: ``1 minutes``.
     """
     if not history or not new_messages:
         return "No time gap information available"
@@ -128,17 +129,12 @@ def _calculate_time_gap(history: Sequence[ChatMessage], new_messages: Sequence[C
     if total_seconds < 0:
         return "Time gap: Messages appear to be out of order"
     if total_seconds < 60:
-        return f"Time gap: {_quantity(total_seconds, 'second')} (immediate response)"
+        return f"Time gap: {total_seconds} seconds (immediate response)"
     if total_seconds < 3600:
-        return f"Time gap: {_quantity(total_seconds // 60, 'minute')} (recent conversation)"
+        return f"Time gap: {total_seconds // 60} minutes (recent conversation)"
     if total_seconds < 86_400:
-        return f"Time gap: {_quantity(total_seconds // 3600, 'hour')} (same day, but significant pause)"
-    return f"Time gap: {_quantity(total_seconds // 86_400, 'day')} (long gap, likely new conversation)"
-
-
-def _quantity(count: int, unit: str) -> str:
-    """``1 minute`` / ``2 minutes``: English plural for a whole-number count of ``unit``."""
-    return f"{count} {unit}" if count == 1 else f"{count} {unit}s"
+        return f"Time gap: {total_seconds // 3600} hours (same day, but significant pause)"
+    return f"Time gap: {total_seconds // 86_400} days (long gap, likely new conversation)"
 
 
 def _make_cell(items: Sequence[ConversationItem], *, timestamp: int) -> MemCell:
