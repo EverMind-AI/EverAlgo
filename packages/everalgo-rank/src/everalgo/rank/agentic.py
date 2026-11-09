@@ -23,6 +23,7 @@ import asyncio
 import logging
 import math
 from dataclasses import dataclass
+from datetime import UTC
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from asgiref.sync import async_to_sync
@@ -38,10 +39,11 @@ from everalgo.rank.prompts.en.multi_query import MULTI_QUERY_PROMPT_EN, MULTI_QU
 from everalgo.rank.prompts.en.refined_query import REFINED_QUERY_PROMPT_EN, REFINED_QUERY_USER_PROMPT
 from everalgo.rank.prompts.en.sufficiency import SUFFICIENCY_CHECK_PROMPT_EN, SUFFICIENCY_CHECK_USER_PROMPT
 from everalgo.rank.protocols import AgenticDecision, RerankFn, RetrieveFn
-from everalgo.utils import InvalidInputError, append_custom_instructions, format_utc_time, render_prompt
+from everalgo.utils import InvalidInputError, append_custom_instructions, format_time, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import tzinfo
 
     from everalgo.llm.protocols import LLMClient
     from everalgo.types import Candidate
@@ -98,6 +100,7 @@ async def aagentic_retrieve(
     multi_query_count: int = 3,
     rrf_k: int = 60,
     custom_instructions: str | None = None,
+    tz: tzinfo = UTC,
 ) -> tuple[list[Candidate], AgenticDecision]:
     """LLM-guided agentic retrieval wrapper.
 
@@ -128,6 +131,8 @@ async def aagentic_retrieve(
             sufficiency check and the Round 2 query generation) as a ``<custom_instructions>`` block, always the
             system message's last; it adds to the bundled rules, never replaces them. Placed verbatim, never rendered
             as a template. None or a blank string adds nothing.
+        tz: The zone each document's ``Date`` is shown in, as :func:`everalgo.utils.format_time` renders it:
+            ``UTC`` (the default) or local time with its offset, ``UTC+08:00``; the date follows it.
 
     Returns:
         ``(candidates, decision)`` where ``decision`` carries the LLM verdicts the caller
@@ -157,6 +162,7 @@ async def aagentic_retrieve(
         candidates=reranked,
         llm=llm,
         custom_instructions=custom_instructions,
+        tz=tz,
     )
 
     if sufficiency.is_sufficient:
@@ -187,6 +193,7 @@ async def aagentic_retrieve(
             multi_query_count=multi_query_count,
             rrf_k=rrf_k,
             custom_instructions=custom_instructions,
+            tz=tz,
         )
     return await _refined_query_round2(
         query=query,
@@ -200,6 +207,7 @@ async def aagentic_retrieve(
         top_n=top_n,
         round1_top_n=round1_top_n,
         custom_instructions=custom_instructions,
+        tz=tz,
     )
 
 
@@ -222,6 +230,7 @@ async def _multi_query_round2(
     multi_query_count: int,
     rrf_k: int,
     custom_instructions: str | None,
+    tz: tzinfo,
 ) -> tuple[list[Candidate], AgenticDecision]:
     """Generate complementary queries via LLM, run parallel Round 2, RRF-fuse, and merge with reranked."""
     multi = await _generate_multi_queries(
@@ -232,6 +241,7 @@ async def _multi_query_round2(
         llm=llm,
         custom_instructions=custom_instructions,
         count=multi_query_count,
+        tz=tz,
     )
     r2 = round2_retrieve or base_retrieve
     round2_lists = await asyncio.gather(*(r2(q, round1_top_n) for q in multi.queries))
@@ -267,6 +277,7 @@ async def _refined_query_round2(
     top_n: int,
     round1_top_n: int,
     custom_instructions: str | None,
+    tz: tzinfo,
 ) -> tuple[list[Candidate], AgenticDecision]:
     """Generate a single refined query via LLM, run Round 2, and merge with reranked."""
     refined = await _generate_refined_query(
@@ -275,6 +286,7 @@ async def _refined_query_round2(
         missing_info=list(sufficiency.missing_information),
         llm=llm,
         custom_instructions=custom_instructions,
+        tz=tz,
     )
     r2 = round2_retrieve or base_retrieve
     round2 = await r2(refined.refined_query, round1_top_n)
@@ -337,6 +349,7 @@ async def _check_sufficiency(
     candidates: Sequence[Candidate],
     llm: LLMClient,
     custom_instructions: str | None,
+    tz: tzinfo = UTC,
 ) -> SufficiencyCheckResponse:
     """LLM call: are these candidates sufficient to answer the query?
 
@@ -345,7 +358,7 @@ async def _check_sufficiency(
     """
     messages = _request(
         append_custom_instructions(SUFFICIENCY_CHECK_PROMPT_EN, custom_instructions),
-        render_prompt(SUFFICIENCY_CHECK_USER_PROMPT, None, query=query, retrieved_docs=_format_docs(candidates)),
+        render_prompt(SUFFICIENCY_CHECK_USER_PROMPT, None, query=query, retrieved_docs=_format_docs(candidates, tz=tz)),
     )
     reply = await _call_llm_for_sufficiency(llm, messages)
     return SufficiencyCheckResponse(
@@ -365,6 +378,7 @@ async def _generate_multi_queries(
     llm: LLMClient,
     custom_instructions: str | None,
     count: int,
+    tz: tzinfo = UTC,
 ) -> MultiQueryResponse:
     """LLM call: produce complementary queries focused on missing_info.
 
@@ -382,7 +396,7 @@ async def _generate_multi_queries(
             original_query=original_query,
             key_info=_join_or_na(key_info),
             missing_info=_join_or_na(missing_info),
-            retrieved_docs=_format_docs(candidates),
+            retrieved_docs=_format_docs(candidates, tz=tz),
         ),
     )
     reply = await _call_llm_for_multi_queries(llm, messages)
@@ -399,6 +413,7 @@ async def _generate_refined_query(
     missing_info: list[str],
     llm: LLMClient,
     custom_instructions: str | None,
+    tz: tzinfo = UTC,
 ) -> RefinedQueryResponse:
     """LLM call: produce a single refined query targeting missing_info.
 
@@ -413,7 +428,7 @@ async def _generate_refined_query(
             REFINED_QUERY_USER_PROMPT,
             None,
             original_query=original_query,
-            retrieved_docs=_format_docs(candidates),
+            retrieved_docs=_format_docs(candidates, tz=tz),
             missing_info=_join_or_na(missing_info),
         ),
     )
@@ -447,12 +462,13 @@ def _usable_refined_query(text: str, original_query: str) -> str:
     return refined
 
 
-def _format_docs(candidates: Sequence[Candidate]) -> str:
+def _format_docs(candidates: Sequence[Candidate], *, tz: tzinfo = UTC) -> str:
     """Format candidates as multi-line blocks for LLM prompt rendering.
 
     Four lines per doc (``Document {i}:`` / Title / Date / Content). Body truncates at 500 chars.
-    ``Date`` renders the doc's ms-epoch ``timestamp`` as ``YYYY-MM-DD HH:MM UTC``, the shape every prompt
-    instant takes, for the ``Date`` field the sufficiency/multi-query prompts refer to.
+    ``Date`` renders the doc's ms-epoch ``timestamp`` in ``tz`` as ``YYYY-MM-DD HH:MM UTC`` (``UTC+08:00`` in
+    another zone), the shape every prompt instant takes, for the ``Date`` field the sufficiency/multi-query prompts
+    refer to.
 
     Raises:
         TypeError: If any candidate has no ``episode`` dict in its metadata.
@@ -475,13 +491,13 @@ def _format_docs(candidates: Sequence[Candidate]) -> str:
             )
         if len(body) > 500:
             body = body[:500] + "..."
-        timestamp_str = _format_doc_timestamp(c.metadata.get("timestamp"))
+        timestamp_str = _format_doc_timestamp(c.metadata.get("timestamp"), tz=tz)
         lines.append(f"Document {i}:\n  Title: {subject}\n  Date: {timestamp_str}\n  Content: {body}\n")
     return "\n".join(lines)
 
 
-def _format_doc_timestamp(raw: Any) -> str:
-    """Render a ms-epoch ``timestamp`` as ``YYYY-MM-DD HH:MM UTC``; ``N/A`` on missing or invalid."""
+def _format_doc_timestamp(raw: Any, *, tz: tzinfo = UTC) -> str:
+    """Render a ms-epoch ``timestamp`` in ``tz`` as ``YYYY-MM-DD HH:MM UTC``; ``N/A`` on missing or invalid."""
     if isinstance(raw, bool) or not isinstance(raw, int | float) or not math.isfinite(raw) or raw <= 0:
         return "N/A"
-    return format_utc_time(int(raw))
+    return format_time(int(raw), tz=tz)

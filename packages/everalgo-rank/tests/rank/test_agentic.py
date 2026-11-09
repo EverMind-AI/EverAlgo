@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from typing import Any, Literal
 
 import pytest
 
-from everalgo.rank import AgenticDecision, aagentic_retrieve
+from everalgo.rank import AgenticDecision, aagentic_retrieve, agentic_retrieve
 from everalgo.rank.agentic import MultiQueryResponse, RefinedQueryResponse, SufficiencyCheckResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
@@ -429,7 +430,7 @@ async def test_agentic_schemas_are_importable() -> None:
 # ─── _format_docs Date row tests ────────────────────────────────────────────
 
 
-from datetime import UTC, datetime  # noqa: E402
+from datetime import UTC, datetime, timedelta, timezone  # noqa: E402
 
 from everalgo.rank.agentic import _format_docs  # noqa: E402
 
@@ -689,3 +690,45 @@ async def test_round2_cap_none_keeps_current_behavior() -> None:
         multi_query_count=1,
     )
     assert len(final) == 8  # 3 + 5
+
+
+# ─── tz: the Date row in the caller's zone ──────────────────────────────────
+
+
+_UTC_PLUS_14 = timezone(timedelta(hours=14))
+_SUNDAY_10_00_UTC = int(datetime(2024, 3, 10, 10, 0, tzinfo=UTC).timestamp() * 1000)
+_SUFFICIENT = {"is_sufficient": True, "reasoning": "", "key_information_found": [], "missing_information": []}
+_INSUFFICIENT = {**_SUFFICIENT, "is_sufficient": False, "missing_information": ["x"]}
+
+
+async def _dated_base(q: str, k: int) -> list[Candidate]:
+    episode = {"subject": "s", "content": "c"}
+    return [Candidate(id="d0", score=1.0, metadata={"episode": episode, "timestamp": _SUNDAY_10_00_UTC})]
+
+
+@pytest.mark.parametrize(
+    ("strategy", "round2_reply"),
+    [
+        pytest.param("multi_query", {"queries": ["round two query"], "reasoning": "x"}, id="multi_query"),
+        pytest.param("refined_query", {"text": "round two refined query"}, id="refined_query"),
+    ],
+)
+async def test_aagentic_retrieve_shows_every_date_row_in_the_zone_passed(
+    strategy: Literal["multi_query", "refined_query"], round2_reply: dict[str, Any]
+) -> None:
+    """10:00 UTC on Sunday is 00:00 on Monday in UTC+14: the date and clock move, the offset is labelled."""
+    fake = FakeLLMClient(responses=[json.dumps(_INSUFFICIENT), json.dumps(round2_reply)])
+
+    await aagentic_retrieve("q", base_retrieve=_dated_base, llm=fake, refinement_strategy=strategy, tz=_UTC_PLUS_14)
+
+    assert fake.call_count == 2
+    for call in fake.calls:
+        assert "  Date: 2024-03-11 00:00 UTC+14:00\n" in str(call.messages[1].content)
+
+
+def test_agentic_retrieve_sync_bridge_shows_the_date_row_in_the_zone_passed() -> None:
+    fake = FakeLLMClient(responses=[json.dumps(_SUFFICIENT)])
+
+    agentic_retrieve("q", base_retrieve=_dated_base, llm=fake, tz=_UTC_PLUS_14)
+
+    assert "  Date: 2024-03-11 00:00 UTC+14:00\n" in str(fake.calls[0].messages[1].content)

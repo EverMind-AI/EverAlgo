@@ -6,6 +6,14 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `tz=` (a `datetime.tzinfo`, default UTC) on `aagentic_retrieve` / `agentic_retrieve`: the `Date` row of each retrieved document, in the sufficiency, multi-query and refined-query prompts alike, shows its time in that zone with its offset, `2024-04-10 22:00 UTC+08:00`, through `everalgo.utils.format_time`; the date follows that zone. UTC renders exactly as before, and a missing or invalid timestamp still renders `N/A`. Requires `everalgo-core` with `format_time`.
+
+### Changed
+
+- The `Date` row is rendered with `everalgo.utils.format_time` instead of `format_utc_time`, which core deprecates (it warns `DeprecationWarning`); the rendered text is unchanged.
+
 ## [0.5.0rc4] - 2026-10-30
 
 ### Added
