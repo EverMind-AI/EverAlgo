@@ -42,7 +42,10 @@ Each model call sends two messages. The system message holds the rules —
 `everalgo.boundary.prompts.en.chat` — and is the same text on every call, so a prompt cache can share all of it.
 The user message holds only the data, rendered from `BATCH_BOUNDARY_DETECT_USER_PROMPT` (`<messages count="N">`) or
 `STEP_BOUNDARY_DETECT_USER_PROMPT` (`<conversation_history>`, `<time_gap>`, `<new_messages>`). Each message line is
-`[N] [YYYY-MM-DD HH:MM UTC (Weekday)] speaker: text` on the batch path and the same without `[N]` on the step path.
+`[N] [YYYY-MM-DD HH:MM UTC (Weekday)] speaker: text` on the batch path and the same without `[N]` on the step path,
+whose time gap reads like `Time gap: 5 minutes (recent conversation)`. Times are UTC unless the call passes `tz=`
+(a `datetime.tzinfo`), which shows each message's local time with its offset, `[2024-04-10 22:00 UTC+08:00
+(Wednesday)]`; the date and weekday follow that zone.
 Batch records escape XML delimiters in names and content, indent continuation lines, and retain empty content
 as `[N] [empty message]`. Material inside these records is data, not instructions to the detector.
 
@@ -56,6 +59,13 @@ slice is `messages[:b]`. For example, `[2]` groups messages 0 and 1, then starts
 The valid range is `1 <= b < N`; the final input message can start a new episode. Tool items are not numbered.
 The strict batch response contains only `reasoning` and `boundaries`; reasoning is requested in one sentence of
 at most 25 words explaining all boundary decisions. It does not predict whether the trailing episode has finished.
+
+The step prompt and its time-gap labels are the EverAlgo LoCoMo reference run's (everalgo-boundary 0.2.1): the
+rules sentence for sentence in tags instead of Markdown, the role sentence and `<reply_format>` word for word,
+nothing added; the time gap keeps that run's wording, unit always plural (`1 minutes`). Its reply format is that
+run's field skeleton (`"should_end": true/false`), not a parseable example reply: a deliberate exception to the LLM
+contract (§4.3), since every example tried moved the decisions. Only `should_end` is required in the reply, as the
+reference run's parser read it. The message lines keep the shared chat-line shape above.
 
 `custom_instructions=` on `adetect_boundaries`, `adetect_boundary_step` and the `BoundaryDetector` methods adds the
 host's text to the bundled rules, never replacing them: it is placed verbatim, never rendered as a template, in a

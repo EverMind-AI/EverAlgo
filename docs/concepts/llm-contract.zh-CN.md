@@ -291,6 +291,8 @@ check_business_rules(output)                       # 不过 → 抛 LLMOutputErr
 
 示例：reflect 的两个 prompt（`everalgo.user_memory.prompts.en.reflect`）都写了 "Reply with one JSON object, nothing else."
 
+例外：边界检测逐条判断 prompt 的 `<reply_format>`（`everalgo.boundary.prompts.en.chat.STEP_BOUNDARY_DETECT_SYSTEM_PROMPT`）逐字采用 EverAlgo LoCoMo 参考运行的写法，只有字段说明（`"should_end": true/false`），这段说明不能被解析。试过的每一种示例回复都会让逐条判断偏离参考运行；模块文档字符串写明了这一点，并有单元测试防止示例被加回去。
+
 ---
 
 ## 5. 谁重试：算子从不重试，宿主按错误类型决定
