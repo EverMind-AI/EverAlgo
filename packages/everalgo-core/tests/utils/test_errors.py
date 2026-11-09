@@ -8,7 +8,7 @@ import pytest
 
 import everalgo.utils as utils
 from everalgo.types import ChatMessage
-from everalgo.utils import InvalidInputError, fetch_uri, format_utc_date, render_chat_line
+from everalgo.utils import InvalidInputError, fetch_uri, format_date, render_chat_line
 
 
 def test_it_is_a_value_error_so_existing_handlers_keep_working() -> None:
@@ -28,7 +28,7 @@ def test_a_message_without_a_timestamp_is_invalid_input_that_names_its_id_and_th
 
 def test_a_naive_datetime_is_invalid_input() -> None:
     with pytest.raises(InvalidInputError, match="naive datetime"):
-        format_utc_date(datetime(2024, 4, 10))
+        format_date(datetime(2024, 4, 10))
 
 
 @pytest.mark.parametrize(("uri", "named"), [("", "empty uri"), ("file:///etc/passwd", "'file'")])

@@ -16,7 +16,7 @@ pip install everalgo-core
 |---|---|
 | `everalgo.types` | Key shared data types: `MemCell`, `ChatMessage`, `ConversationItem`, user / agent / knowledge memories, ranking contracts, parsed / raw content, modality helpers, tool-call types |
 | `everalgo.llm` | `LLMClient` Protocol, `LLMMessage` + content parts, `LLMOutputError`, `StrictOutputModel`, `parse_reply` / `describe_errors`, the request builders `to_openai_response_format` / `to_anthropic_response_format` / `to_gemini_response_format` / `to_ollama_response_format` |
-| `everalgo.utils` | General-purpose tools, one kind per module: `templates` (`render_prompt`), `markup` (`tagged`, `paragraphs`, `append_custom_instructions`), `chat_lines` (`render_chat_line`, `speaker`), `timestamps` (`format_utc_time`, `format_utc_date`, `parse_utc_date`), `tokens` (`encode`, `count_tokens`, `truncate_text`), `text` (`ascii_width`, `decode_bytes`), `json` (`json_default`), `http` (`fetch_uri`), `errors` (`InvalidInputError`) |
+| `everalgo.utils` | General-purpose tools, one kind per module: `templates` (`render_prompt`), `markup` (`tagged`, `paragraphs`, `append_custom_instructions`), `chat_lines` (`render_chat_line`, `speaker`), `timestamps` (`format_time`, `format_date`, `parse_utc_date`; `format_utc_time` / `format_utc_date` deprecated), `tokens` (`encode`, `count_tokens`, `truncate_text`), `text` (`ascii_width`, `decode_bytes`), `json` (`json_default`), `http` (`fetch_uri`), `errors` (`InvalidInputError`) |
 | `everalgo.llm.schema` | The `to_<api>_response_format` request builders — a `response_format` model to each API's structured-output request value, refusing structures outside the strict subset |
 | `everalgo.llm.openai_compat` | `OpenAICompatClient` — reference `LLMClient`, OpenAI Chat Completions over httpx with no provider SDK; `LLMError`, the error it raises (not part of the contract) |
 | `everalgo.testing` | `FakeLLMClient`, `CallRecord`, `assert_*_shape` structural assertion helpers, and the `LLMClient` conformance suite (`everalgo.testing.conformance`) |
@@ -95,10 +95,10 @@ print(fake.call_count)  # 0
 `everalgo.utils` holds the general-purpose tools every package may use, one kind per module. Timestamps take milliseconds since the epoch and render in UTC, to the minute, as `YYYY-MM-DD HH:MM UTC` — the one shape every prompt shows a model; token counts use OpenAI's `o200k_base` encoding via [`tiktoken`](https://github.com/openai/tiktoken), a budget estimate for any model.
 
 ```python
-from everalgo.utils import count_tokens, format_utc_time, render_prompt, truncate_text
+from everalgo.utils import count_tokens, format_time, render_prompt, truncate_text
 
 render_prompt("Summarise {{text}}", None, text="...")  # the default template unless the caller passes one
-format_utc_time(1_700_000_000_000)  # "2023-11-14 22:13 UTC"; weekday=True adds " (Tuesday)"
+format_time(1_700_000_000_000)  # "2023-11-14 22:13 UTC"; weekday=True adds " (Tuesday)"; tz=ZoneInfo("Asia/Shanghai") gives "2023-11-15 06:13 UTC+08:00"
 count_tokens("Hello, world!")  # 4
 truncate_text(long_text, max_tokens=500)  # head and tail around a "[... trimmed N tokens ...]" marker
 ```
@@ -126,13 +126,14 @@ truncate_text(long_text, max_tokens=500)  # head and tail around a "[... trimmed
 | `to_gemini_response_format` | `everalgo.llm` | `(model, mode)` → the Gemini `generationConfig` entries `responseMimeType` / `responseJsonSchema`; keywords Gemini does not list move into the description |
 | `to_ollama_response_format` | `everalgo.llm` | `(model, mode)` → the value of Ollama's `format`: the schema, `"json"`, or `None` |
 | `LLMError` | `everalgo.llm.openai_compat` | The reference client's error; not part of the contract |
-| `format_utc_time` | `everalgo.utils` | `YYYY-MM-DD HH:MM UTC` from a millisecond timestamp, seconds truncated; `weekday=True` appends ` (Wednesday)` where the model resolves relative times |
-| `format_utc_date` | `everalgo.utils` | `YYYY-MM-DD` UTC date from a millisecond timestamp or an aware datetime |
+| `format_time` | `everalgo.utils` | `YYYY-MM-DD HH:MM UTC` from a millisecond timestamp, seconds truncated; `tz=` shows it in another zone as `YYYY-MM-DD HH:MM UTC+08:00`; `weekday=True` appends the English weekday in that zone, ` (Wednesday)`, where the model resolves relative times |
+| `format_date` | `everalgo.utils` | `YYYY-MM-DD` date in `tz` (default UTC) from a millisecond timestamp or an aware datetime |
+| `format_utc_time` / `format_utc_date` | `everalgo.utils` | Deprecated aliases of `format_time` / `format_date` in UTC; they warn `DeprecationWarning` |
 | `parse_utc_date` | `everalgo.utils` | Strict `YYYY-MM-DD` → aware UTC midnight, or `None` when not that shape or not a real date |
 | `render_prompt` | `everalgo.utils` | Template substitution for `{{name}}` placeholders |
 | `tagged` / `paragraphs` | `everalgo.utils` | An XML-style prompt block, open and close tag each alone on its line / blocks joined by one blank line |
 | `append_custom_instructions` | `everalgo.utils` | Close a system message with the caller's `<custom_instructions>` block, verbatim; `None` or a blank string leaves it unchanged |
-| `render_chat_line` / `speaker` | `everalgo.utils` | One `ChatMessage` as `[YYYY-MM-DD HH:MM UTC (Wednesday)] speaker: text`, the line every operator shows a model / `sender_name`, else `sender_id` |
+| `render_chat_line` / `speaker` | `everalgo.utils` | One `ChatMessage` as `[YYYY-MM-DD HH:MM UTC (Wednesday)] speaker: text`, the line every operator shows a model, in `tz` when given / `sender_name`, else `sender_id` |
 | `encode` / `count_tokens` | `everalgo.utils` | Token ids / token count under `o200k_base`; special-token literals count as ordinary text |
 | `truncate_text` | `everalgo.utils` | Cut text to a token budget, keeping head and tail around a trim marker, or the head plus a suffix |
 | `ascii_width` | `everalgo.utils` | Text length in ASCII-equivalent units: East Asian wide characters count 2 |
