@@ -1,10 +1,10 @@
-"""The episode-summary prompt's system / user split, its language block, and the summary wording it shares with extraction.
+"""The episode-summary prompt's system / user split, its language block, and the one summary wording, its alone.
 
 - Split     — the user message is the ``<episode_text>`` element alone; the system message opens with ``<role>`` and
               closes with ``<custom_instructions>`` when a caller passes some; values are never scanned for placeholders
 - Language  — ``SOURCE_TEXT_LANGUAGE_RULE`` by default, ``CALLER_CHOSEN_LANGUAGE_RULE`` with the name filled when named
-- Wording   — the summary description is the one ``EPISODE_SYSTEM_PROMPT`` carries, byte for byte, taken from the
-              shared constant rather than a copy
+- Wording   — the summary description is ``EPISODE_SUMMARY_FIELD_RULE``, taken from the constant rather than a copy;
+              the extraction prompt asks for no summary and carries no description of one
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from everalgo.user_memory.episode._replies import _SummaryReply
 from everalgo.user_memory.prompts.en import episode_summary
 from everalgo.user_memory.prompts.en._language import CALLER_CHOSEN_LANGUAGE_RULE, SOURCE_TEXT_LANGUAGE_RULE
 from everalgo.user_memory.prompts.en.episode import EPISODE_SUMMARY_FIELD_RULE, EPISODE_SYSTEM_PROMPT
+from everalgo.user_memory.prompts.en.episode import assemble_system_prompt as assemble_episode_system_prompt
 from everalgo.user_memory.prompts.en.episode_summary import (
     EPISODE_SUMMARY_SYSTEM_PROMPT,
     EPISODE_SUMMARY_USER_PROMPT,
@@ -142,7 +143,7 @@ async def test_a_named_language_replaces_the_source_text_rule(output_language: O
 
 
 # ===========================================================================
-# Wording — one description of the summary, shared with extraction
+# Wording — one description of the summary, in this prompt only
 # ===========================================================================
 
 
@@ -152,27 +153,28 @@ def test_the_preview_opens_with_the_shared_summary_description() -> None:
     assert preview.splitlines()[0] == EPISODE_SUMMARY_FIELD_RULE
 
 
-def test_extraction_carries_the_same_summary_description() -> None:
-    what_to_write = _block(EPISODE_SYSTEM_PROMPT, "what_to_write")
+def test_extraction_asks_for_no_summary() -> None:
+    """The extraction reply is title and content; the Episode's summary is cut from the content in code."""
+    system = assemble_episode_system_prompt(custom_instructions=None, language_rule=None)
 
-    assert f"- summary: {EPISODE_SUMMARY_FIELD_RULE}" in what_to_write.splitlines()
+    assert "summary" not in system.lower()
 
 
 def test_the_preview_takes_the_description_from_the_constant_not_a_copy() -> None:
-    """An identical copy passes every comparison today and drifts the day extraction's wording changes."""
+    """An identical copy passes every comparison today and drifts the day the constant's wording changes."""
     source = Path(episode_summary.__file__).read_text(encoding="utf-8")
 
     assert "from everalgo.user_memory.prompts.en.episode import EPISODE_SUMMARY_FIELD_RULE" in source
     assert EPISODE_SUMMARY_FIELD_RULE[:40] not in source
 
 
-def test_the_summary_description_appears_once_in_each_prompt() -> None:
+def test_the_summary_description_appears_only_in_the_episode_summary_prompt() -> None:
     assert EPISODE_SUMMARY_SYSTEM_PROMPT.count(EPISODE_SUMMARY_FIELD_RULE) == 1
-    assert EPISODE_SYSTEM_PROMPT.count(EPISODE_SUMMARY_FIELD_RULE) == 1
+    assert EPISODE_SUMMARY_FIELD_RULE not in EPISODE_SYSTEM_PROMPT
 
 
 def test_the_preview_adds_only_the_faithfulness_and_time_format_line() -> None:
-    """Extraction holds the summary to the conversation through ``<stay_faithful>``; this prompt has no such block."""
+    """The one line this prompt adds to the shared description: no new fact, and the text's own time format."""
     preview = _block(EPISODE_SUMMARY_SYSTEM_PROMPT, "the_preview")
 
     assert preview.splitlines()[1:] == [

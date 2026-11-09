@@ -1,10 +1,10 @@
-"""Tests for EpisodeSummarizer: one call, a strict one-field reply, no retry, the extraction path's width guard.
+"""Tests for EpisodeSummarizer: one call, a strict one-field reply, no retry, a width guard on the summary.
 
 Coverage layers:
 - Contract  — the call requests ``_SummaryReply`` with a system and a user message; the sync bridge
 - Error path — an invalid reply or a blank summary raises LLMOutputError without the reply; client exceptions propagate
 - Input     — a blank ``episode_text`` or an unknown language is InvalidInputError before any call
-- Summary   — an over-wide summary is cut at a sentence boundary, never re-requested
+- Summary   — an over-wide summary is cut at a sentence boundary, never re-requested; the cut itself
 - Log lines — one INFO line of widths and the truncation flag, never text
 """
 
@@ -22,7 +22,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory import EpisodeSummarizer
 from everalgo.user_memory.episode import EpisodeSummarizer as PackageEpisodeSummarizer
 from everalgo.user_memory.episode._replies import _SummaryReply
-from everalgo.user_memory.episode._summary import _SUMMARY_WIDTH_CAP
+from everalgo.user_memory.episode._summary import _SUMMARY_WIDTH_CAP, _truncate_at_sentence_boundary
 from everalgo.utils import InvalidInputError, ascii_width
 
 _LOGGER = "everalgo.user_memory.episode"
@@ -181,7 +181,7 @@ async def test_long_text_is_sent_whole() -> None:
 
 
 # ===========================================================================
-# Summary width guard — the extraction path's, truncation in place
+# Summary width guard — truncation in place, never a second call
 # ===========================================================================
 
 _LONG_SUMMARY = "SUMMARY_ONLY_MARKER. The team met and decided many things. " * 30
@@ -213,6 +213,37 @@ async def test_overwide_cjk_summary_is_cut_at_a_sentence_boundary() -> None:
     assert ascii_width(summary) <= _SUMMARY_WIDTH_CAP
     assert summary.endswith("…")
     assert long_cjk.startswith(summary.removesuffix("…") + "。")
+
+
+def test_truncation_cuts_at_a_sentence_boundary_and_replaces_the_terminator() -> None:
+    text = "First sentence here. Second one follows! Third asks a question? " * 20
+
+    out = _truncate_at_sentence_boundary(text, 100)
+
+    assert out.endswith("…")
+    body = out.removesuffix("…")
+    assert not body.endswith((".", "!", "?"))
+    assert text.startswith(body) and text[len(body)] in ".!?"
+    assert len(out) <= 100
+
+
+def test_truncation_handles_cjk_width_and_terminators() -> None:
+    text = "他周六早上出发去看日出。" * 30
+
+    out = _truncate_at_sentence_boundary(text, 100)
+
+    assert out.endswith("…")
+    body = out.removesuffix("…")
+    assert not body.endswith("。")
+    assert text.startswith(body) and text[len(body)] == "。"
+    assert ascii_width(out) <= 100
+
+
+def test_truncation_without_any_sentence_end_hard_cuts_with_ellipsis() -> None:
+    out = _truncate_at_sentence_boundary("word " * 200, 60)
+
+    assert out.endswith("…")
+    assert len(out) <= 60
 
 
 # ===========================================================================

@@ -293,6 +293,8 @@ check_business_rules(output)                       # 不过 → 抛 LLMOutputErr
 
 例外：边界检测逐条判断 prompt 的 `<reply_format>`（`everalgo.boundary.prompts.en.chat.STEP_BOUNDARY_DETECT_SYSTEM_PROMPT`）逐字采用 EverAlgo LoCoMo 参考运行的写法，只有字段说明（`"should_end": true/false`），这段说明不能被解析。试过的每一种示例回复都会让逐条判断偏离参考运行；模块文档字符串写明了这一点，并有单元测试防止示例被加回去。
 
+例外：episode prompt（`everalgo.user_memory.prompts.en.episode`）发送的内容与 EverAlgo LoCoMo 参考运行一致，因此有四处与其他算子的 prompt 不同。不指定 `output_language` 时不带语言规则（没有 `<output_language>` 块），因为参考运行没有。回复是 `{"title", "content"}`，没有 `summary`：Episode 的 summary 由代码截取 content 的前 200 个字符。不传 `custom_instructions` 时，`<custom_instructions>` 里放参考运行的 5 条默认原则，而不是省略这个块。user 消息在数据之后以一个固定的 `<reminder>` 块收尾（按每条规则写 episode、每个相对时间给出绝对日期、保留每个事实），这是对「user 消息只放数据」的例外：规则只出现在数据之前时，模型遵守得更少（LoCoMo 上 80 段对话的试写）。system 消息不变，提示缓存的前缀也就不受影响。模块文档字符串写明了这四点，并有单元测试守住。
+
 ---
 
 ## 5. 谁重试：算子从不重试，宿主按错误类型决定

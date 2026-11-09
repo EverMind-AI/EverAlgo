@@ -131,17 +131,21 @@ async def _language_texts_sent(output_language: OutputLanguage | None) -> dict[s
     """The language text each prompt receives: the split prompts' ``<output_language>``, every profile stage's rule.
 
     Captured where each operator chooses it, so a prompt that went back to wording of its own is read, not assumed.
-    Boundary writes nothing in a language and carries no language rule.
+    Boundary writes nothing in a language and carries no language rule; nor does the episode when no language is
+    named, so it is read only when one is.
     """
     atomic = FakeLLMClient(responses=['{"atomic_facts": {"atomic_fact": []}}'])
     await AtomicFactExtractor(llm=atomic).aextract_from_text("t", timestamp=_TS_MS, output_language=output_language)
     episode = _render_episode_messages(conversation="c", custom_instructions=None, output_language=output_language)
     systems = {
-        "episode": str(episode[0].content),
         "atomic_fact_from_text": str(atomic.calls[0].messages[0].content),
         "reflect_init": await _reflect_system(output_language, update=False),
         "reflect_update": await _reflect_system(output_language, update=True),
     }
+    if output_language is None:
+        assert "<output_language>" not in str(episode[0].content)
+    else:
+        systems["episode"] = str(episode[0].content)
     stages = {
         f"profile{name}": stage.language_rule(output_language)
         for name, stage in vars(_stages).items()
@@ -152,11 +156,15 @@ async def _language_texts_sent(output_language: OutputLanguage | None) -> dict[s
 
 @pytest.mark.parametrize("output_language", [None, OutputLanguage.CHINESE], ids=["fallback", "named"])
 async def test_every_prompt_receives_a_shared_rule(output_language: OutputLanguage | None) -> None:
-    """Episode, atomic facts, reflect and all eight profile stages: one wording, defined once in this module."""
+    """Episode, atomic facts, reflect and all eight profile stages: one wording, defined once in this module.
+
+    With no language named the episode is left out: it sends no language rule at all, as the reference run it
+    reproduces sent none.
+    """
     shared = {getattr(rules_mod, name) for name in ALL_RULES} | {build_language_rule(OutputLanguage.CHINESE)}
     texts = await _language_texts_sent(output_language)
 
-    assert len(texts) == 12
+    assert len(texts) == (11 if output_language is None else 12)
     assert {name: text for name, text in texts.items() if text not in shared} == {}
 
 
@@ -277,3 +285,10 @@ def test_participant_rule_keeps_the_concrete_language_enumeration(clause: str) -
 def test_participant_rule_does_not_limit_itself_to_the_languages_it_names() -> None:
     """Naming Chinese and German only, with no open-ended clause, drifted 100% of Russian conversations."""
     assert "and so on for any language" in PARTICIPANT_LANGUAGE_RULE
+
+
+def test_participant_rule_asks_for_no_declaration() -> None:
+    """The rule asks only for the participants' language, never for it to be declared."""
+    assert "the language the participants use" in PARTICIPANT_LANGUAGE_RULE
+    assert "English name" not in PARTICIPANT_LANGUAGE_RULE
+    assert "in language" not in PARTICIPANT_LANGUAGE_RULE

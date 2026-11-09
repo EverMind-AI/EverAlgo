@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
@@ -17,9 +18,11 @@ from everalgo.user_memory.prompts.en.atomic_fact_from_text import (
     ATOMIC_FACT_FROM_TEXT_USER_PROMPT,
     assemble_system_prompt,
 )
-from everalgo.utils import format_utc_time, render_chat_line, render_prompt
+from everalgo.utils import format_time, render_chat_line, render_prompt
 
 if TYPE_CHECKING:
+    from datetime import tzinfo
+
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,7 @@ class AtomicFactExtractor:
         *,
         sender_id: str | None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> list[AtomicFact]:
         """Extract atomic facts for ``sender_id`` from ``memcell``.
 
@@ -60,6 +64,9 @@ class AtomicFactExtractor:
                 languages; leaving it ``None`` asks the model to follow the participants, which costs roughly
                 one extraction in thirteen and fails towards Chinese. See ``prompts/en/_language.py`` for
                 the measurements.
+            tz: The zone the times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC`` (the
+                default) or local time with its offset, ``UTC+08:00``. The weekday and the dates relative times
+                resolve against follow it.
 
         Raises:
             LLMOutputError: If the reply is not a valid atomic-fact output.
@@ -69,8 +76,8 @@ class AtomicFactExtractor:
         rendered = render_prompt(
             ATOMIC_FACT_PROMPT,
             None,
-            INPUT_TEXT=_render_input_text(memcell),
-            time=format_utc_time(memcell.items[0].timestamp, weekday=True),
+            INPUT_TEXT=_render_input_text(memcell, tz=tz),
+            time=format_time(memcell.items[0].timestamp, tz=tz, weekday=True),
             language_rule=build_language_rule(output_language),
         )
 
@@ -86,6 +93,7 @@ class AtomicFactExtractor:
         timestamp: int,
         custom_instructions: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> list[AtomicFact]:
         """Extract atomic facts from a piece of text.
 
@@ -96,7 +104,7 @@ class AtomicFactExtractor:
 
         Args:
             text: Source text, placed verbatim in the user message's ``<episode_text>`` element.
-            timestamp: Unix epoch milliseconds. Rendered as ``2024-03-10 14:00 UTC (Sunday)`` in the
+            timestamp: Unix epoch milliseconds. Rendered as ``2024-03-10 14:00 UTC (Sunday)`` (in ``tz``) in the
                 user message's ``<time>`` element, the anchor for resolving relative time expressions in
                 ``text`` (e.g. "yesterday" -> "yesterday (2024-03-09)").
             custom_instructions: The caller's instructions, placed verbatim in the system message's
@@ -107,6 +115,9 @@ class AtomicFactExtractor:
                 which is a far easier judgement than the one :meth:`aextract` faces — ``text`` is normally an
                 already-extracted single-language narrative, with no pasted material or second speaker to
                 adjudicate. Name a language to override that inheritance.
+            tz: The zone the times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC`` (the
+                default) or local time with its offset, ``UTC+08:00``. The weekday and the dates relative times
+                resolve against follow it.
 
         Returns:
             One AtomicFact per non-blank fact sentence, ``owner_id=None`` and ``timestamp`` as given. Empty list if
@@ -118,7 +129,7 @@ class AtomicFactExtractor:
         """
         messages = _render_from_text_messages(
             text,
-            time=format_utc_time(timestamp, weekday=True),
+            time=format_time(timestamp, tz=tz, weekday=True),
             custom_instructions=custom_instructions,
             language_rule=build_language_rule(output_language, fallback=SOURCE_TEXT_LANGUAGE_RULE),
         )
@@ -138,7 +149,7 @@ def _render_from_text_messages(
 
     Args:
         text: The caller's text, placed verbatim in ``<episode_text>``.
-        time: The ``<time>`` text, as :func:`~everalgo.utils.format_utc_time` renders it with ``weekday=True``.
+        time: The ``<time>`` text, as :func:`~everalgo.utils.format_time` renders it with ``weekday=True``.
         custom_instructions: The caller's instructions. Placed verbatim in ``<custom_instructions>``, never rendered as
             a template; None or a blank string leaves the block out.
         language_rule: The ``<output_language>`` text.
@@ -148,7 +159,7 @@ def _render_from_text_messages(
     return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=user)]
 
 
-def _render_input_text(memcell: MemCell) -> str:
+def _render_input_text(memcell: MemCell, *, tz: tzinfo = UTC) -> str:
     """Render the ChatMessage items for ``{INPUT_TEXT}``, one :func:`~everalgo.utils.render_chat_line` line each.
 
     Each message's own time anchors message-level time signals in the LLM context, so atomic_fact
@@ -157,7 +168,7 @@ def _render_input_text(memcell: MemCell) -> str:
     Raises:
         InvalidInputError: If a message with text carries no timestamp (0).
     """
-    return "\n".join(render_chat_line(message) for message in chat_messages(memcell) if message.content)
+    return "\n".join(render_chat_line(message, tz=tz) for message in chat_messages(memcell) if message.content)
 
 
 def _build_atomic_facts(reply: _AtomicFactsReply, *, sender_id: str | None, timestamp: int) -> list[AtomicFact]:

@@ -8,7 +8,7 @@ twice is kept once, F5 the ``### OUTPUT`` sentence became the ``<reply_format>``
 kept it from being valid JSON, F7 a ``---`` rule was dropped, F8 the example's input is shown as the user message
 carries it. (F3, a role sentence pointed at a tag, is not used: the sentences that name an input are C rewrites.)
 Lines rewritten for their content, the C class, are listed in ``_REWRITTEN`` with what replaced them: ``TIME`` moved
-to ``format_utc_time(..., weekday=True)`` and resolved dates to ISO; the reply lost its ``time`` echo; the inputs are
+to ``format_time(..., weekday=True)`` and resolved dates to ISO; the reply lost its ``time`` echo; the inputs are
 the snake_case ``<episode_text>`` and ``<time>`` elements, and every sentence that named ``EPISODE_TEXT`` or ``TIME``
 names the element instead; and the closing instruction, which repeated what ``<reply_format>`` asks, was dropped.
 """
@@ -25,7 +25,7 @@ from everalgo.user_memory.prompts.en.atomic_fact_from_text import (
     ATOMIC_FACT_FROM_TEXT_USER_PROMPT,
     assemble_system_prompt,
 )
-from everalgo.utils import format_utc_time
+from everalgo.utils import format_time
 
 # Verbatim from ``git show 4a6f5ea:packages/everalgo-user-memory/src/everalgo/user_memory/prompts/en/atomic_fact_from_text.py``
 # (``ATOMIC_FACT_FROM_TEXT_PROMPT_EN``, its three concatenated parts joined).
@@ -218,7 +218,7 @@ _REWRITTEN: dict[str, str | None] = {
 }
 # The old example's TIME, March 10, 2024(Sunday) at 2:00 PM, as epoch milliseconds.
 _EXAMPLE_INSTANT_MS = 1_710_079_200_000
-_EXAMPLE_TIME = format_utc_time(_EXAMPLE_INSTANT_MS, weekday=True)
+_EXAMPLE_TIME = format_time(_EXAMPLE_INSTANT_MS, weekday=True)
 
 _STATIC_BLOCK_ORDER = [
     "input",

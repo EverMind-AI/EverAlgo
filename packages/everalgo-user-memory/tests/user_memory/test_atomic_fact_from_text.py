@@ -233,6 +233,7 @@ def test_aextract_from_text_takes_no_prompt_override() -> None:
         "timestamp",
         "custom_instructions",
         "output_language",
+        "tz",
     ]
 
 

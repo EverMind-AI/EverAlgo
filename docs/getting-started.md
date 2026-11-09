@@ -44,7 +44,7 @@ from everalgo.user_memory import AtomicFactExtractor, EpisodeExtractor, Foresigh
 # ---------------------------------------------------------------------------
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": []})
-_EPISODE_JSON = json.dumps({"content": "Discussion on async retry.", "summary": "Alice asked about async retries.", "title": "Alice asks about Python async"})
+_EPISODE_JSON = json.dumps({"title": "Alice asks about Python async", "content": "Discussion on async retry."})
 _FORESIGHT_JSON = json.dumps({"foresights": [{"content": "Alice will read the follow-up doc", "evidence": "...", "start_time": "2023-11-14", "end_time": "2023-11-21", "duration_days": 7}]})
 _ATOMIC_FACT_JSON = json.dumps({"atomic_facts": {"atomic_fact": ["Alice is learning async retry semantics."]}})
 _PROFILE_JSON = json.dumps({"explicit_info": [{"evidence": "Asked about async retries.", "description": "Python developer.", "category": "Technical Skills"}], "implicit_traits": []})

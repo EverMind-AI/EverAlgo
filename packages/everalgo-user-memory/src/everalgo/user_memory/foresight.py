@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import timedelta
+from datetime import UTC, timedelta
 from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
@@ -18,9 +18,11 @@ from everalgo.user_memory.prompts.en.foresight import (
     FORESIGHT_USER_PROMPT,
     assemble_system_prompt,
 )
-from everalgo.utils import format_utc_date, parse_utc_date, render_chat_line, render_prompt
+from everalgo.utils import format_date, parse_utc_date, render_chat_line, render_prompt
 
 if TYPE_CHECKING:
+    from datetime import tzinfo
+
     from everalgo.llm.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,7 @@ class ForesightExtractor:
         *,
         sender_id: str,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> list[Foresight]:
         """Extract foresights for ``sender_id`` from ``memcell``.
 
@@ -60,6 +63,9 @@ class ForesightExtractor:
                 measured zero wrong languages; leaving it ``None`` asks the model to follow the
                 participants, which costs roughly one extraction in thirteen and fails towards Chinese.
                 See ``prompts/en/_language.py`` for the measurements.
+            tz: The zone the conversation's times are shown in, as :func:`everalgo.utils.format_time` renders
+                them: ``UTC`` (the default) or local time with its offset, ``UTC+08:00``. A foresight with no start
+                date takes the first message's date in this zone.
 
         Raises:
             LLMOutputError: If the reply is not a valid foresight output.
@@ -69,10 +75,10 @@ class ForesightExtractor:
         messages = _render_messages(
             user_id=sender_id,
             user_name=_resolve_user_name(memcell, sender_id),
-            conversation=_render_conversation(memcell),
+            conversation=_render_conversation(memcell, tz=tz),
             language_rule=build_language_rule(output_language),
         )
-        start_time_fallback = format_utc_date(memcell.items[0].timestamp)
+        start_time_fallback = format_date(memcell.items[0].timestamp, tz=tz)
 
         reply = await _call_llm_for_foresights(self._llm, messages, temperature=_FORESIGHT_TEMPERATURE)
         foresights = _build_foresights_from_items(
@@ -110,13 +116,13 @@ def _resolve_user_name(memcell: MemCell, sender_id: str) -> str:
     return sender_id
 
 
-def _render_conversation(memcell: MemCell) -> str:
+def _render_conversation(memcell: MemCell, *, tz: tzinfo = UTC) -> str:
     """Render ChatMessage items as :func:`~everalgo.utils.render_chat_line` lines; text-less ones are dropped.
 
     Raises:
         InvalidInputError: If a message with text carries no timestamp (0).
     """
-    return "\n".join(render_chat_line(message) for message in chat_messages(memcell) if message.content)
+    return "\n".join(render_chat_line(message, tz=tz) for message in chat_messages(memcell) if message.content)
 
 
 def _clean_date_string(date_str: str | None) -> str | None:
@@ -136,7 +142,7 @@ def _calculate_end_time_from_duration(start_time: str, duration_days: int) -> st
         end_date = start_date + timedelta(days=duration_days)
     except OverflowError:
         return None
-    return format_utc_date(end_date)
+    return format_date(end_date)
 
 
 def _calculate_duration_days(start_time: str, end_time: str) -> int | None:

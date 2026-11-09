@@ -1,8 +1,9 @@
-"""``EpisodeExtractor``: render the prompt, make the one call, guard the summary, assemble the Episode."""
+"""``EpisodeExtractor``: render the prompt, make the one call, assemble the Episode."""
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
@@ -11,15 +12,19 @@ from everalgo.types import Episode
 from everalgo.user_memory._language import OutputLanguage, resolve_output_language
 from everalgo.user_memory.episode._render import _render_conversation, _render_messages
 from everalgo.user_memory.episode._replies import _call_llm_for_episode, _EpisodeReply
-from everalgo.user_memory.episode._summary import _cap_summary
 from everalgo.utils import ascii_width
 
 if TYPE_CHECKING:
+    from datetime import tzinfo
+
     from everalgo.llm.protocols import LLMClient
     from everalgo.types import MemCell
 
 # The package's name rather than this module's: hosts collect the log contract under it.
 logger = logging.getLogger("everalgo.user_memory.episode")
+
+# The reference run's summary: the content cut at this many characters.
+_SUMMARY_CHARS = 200
 
 
 class EpisodeExtractor:
@@ -41,11 +46,13 @@ class EpisodeExtractor:
         sender_id: str | None,
         custom_instructions: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Episode:
         """Extract one Episode from ``memcell``.
 
-        The returned ``summary`` is no wider than 400 ASCII-equivalent units: an over-cap one is truncated at a
-        sentence boundary, never failed. Exceptions raised by the LLM client propagate unchanged.
+        The returned ``summary`` is the content's first 200 characters, as the EverAlgo LoCoMo reference run
+        (everalgo commit d9fe22e) filled it; the model writes no summary. Exceptions raised by the LLM client
+        propagate unchanged.
 
         Args:
             memcell: Source slice from boundary detection. Its messages are untrusted material to record, never
@@ -55,25 +62,27 @@ class EpisodeExtractor:
                 is the same either way — it narrates the whole memcell.
             custom_instructions: The host's instructions, placed verbatim in the system message's last block,
                 ``<custom_instructions>``, after the bundled rules and the language rule; they cannot change the
-                output shape. None or a blank string leaves the block out.
+                output shape. None or a blank string sends the reference run's default principles there instead.
             output_language: Language to write the episode in, as an :class:`OutputLanguage` member or equivalent
-                string in any casing. Naming one removes the decision from the model; leaving it ``None`` makes the
-                model write in the participants' language.
+                string in any casing. Naming one adds ``<output_language>``; leaving it ``None`` sends no language
+                rule, as the reference run sent none.
+            tz: The zone the conversation's times are shown in, as :func:`everalgo.utils.format_time` renders
+                them: ``UTC`` (the default) or local time with its offset, ``UTC+08:00``. The weekday and the dates
+                relative times resolve against follow it.
 
         Returns:
             The Episode: ``subject`` from the reply's ``title``, ``episode`` from its ``content`` verbatim,
-            ``summary`` from its ``summary`` after the width guard, ``timestamp`` from ``memcell``. It reports no
+            ``summary`` the content's first 200 characters, ``timestamp`` from ``memcell``. It reports no
             language, named or not: the model declares none, so a host that needs the episode's language judges it
             from the text.
 
         Raises:
             InvalidInputError: If ``output_language`` names no supported language, or a message in ``memcell`` has text but
                 no timestamp.
-            LLMOutputError: If the reply is not a valid episode output, or leaves ``content``, ``summary`` or
-                ``title`` blank.
+            LLMOutputError: If the reply is not a valid episode output, or leaves ``title`` or ``content`` blank.
         """
         named_language = resolve_output_language(output_language)
-        conversation = _render_conversation(memcell)
+        conversation = _render_conversation(memcell, tz=tz)
         logger.info(
             "extracting episode: %d items, %d rendered chars, output_language=%s",
             len(memcell.items),
@@ -100,17 +109,13 @@ class EpisodeExtractor:
 def _build_episode(reply: _EpisodeReply, *, sender_id: str | None, memcell: MemCell) -> Episode:
     """Assemble the :class:`Episode` from the reply and memcell.
 
-    The body carries the times the model wrote, with no code-built prefix in front of them. The prompt
-    pins how it writes them, which is what the prefix was introduced to guarantee: a relative date keeps
-    its wording and gains its ISO date, a clock time the conversation names stays as said with no zone
-    added, and only a clock time the model derives from a message timestamp carries ``UTC``. A prefix
-    would only restate when the segment's first message was sent (``items[0].timestamp``), which the
-    prompt tells the model is not an event.
+    The body carries the times the model wrote, with no code-built prefix. The summary is the content's first
+    :data:`_SUMMARY_CHARS` characters, as the reference run filled it.
     """
     return Episode(
         owner_id=sender_id,
         episode=reply.content,
         subject=reply.title,
-        summary=_cap_summary(reply.summary),
+        summary=reply.content[:_SUMMARY_CHARS],
         timestamp=memcell.timestamp,
     )
