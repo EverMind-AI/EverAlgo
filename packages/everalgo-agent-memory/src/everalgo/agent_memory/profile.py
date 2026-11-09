@@ -36,6 +36,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import UTC
 from typing import TYPE_CHECKING, Literal
 
 from asgiref.sync import async_to_sync
@@ -57,6 +58,7 @@ from everalgo.utils import count_tokens, render_chat_line, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import tzinfo
 
     from everalgo.agent_memory._replies import _ProfileCandidate, _ProfilePatch
     from everalgo.llm.protocols import LLMClient
@@ -125,6 +127,7 @@ class AgentProfileExtractor:
         soul_md: str,
         agents_md: str,
         pending_signals: Sequence[AgentProfileSignal] = (),
+        tz: tzinfo = UTC,
     ) -> AgentProfileUpdate:
         """Screen ``memcell``'s conversation for durable config signals; return validated patches + diffs.
 
@@ -136,6 +139,8 @@ class AgentProfileExtractor:
             agents_md: Current full text of AGENTS.md.
             pending_signals: Implicit signals persisted by the caller from previous runs; matched
                 recurrences accumulate toward the ``min_recurrence`` strength gate.
+            tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
+                (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
 
         Returns:
             An :class:`AgentProfileUpdate`. ``patches`` holds every applied patch — those with
@@ -154,7 +159,7 @@ class AgentProfileExtractor:
             logger.info("no items on memcell, noop")
             return noop
 
-        user_messages = _render_chat(memcell, roles=("user",))
+        user_messages = _render_chat(memcell, roles=("user",), tz=tz)
         if not user_messages:
             logger.info("no user messages with content on memcell, noop")
             return noop
@@ -168,7 +173,7 @@ class AgentProfileExtractor:
             soul_md=soul_md or "(empty)",
             agents_md=agents_md or "(empty)",
             pending_signals=_format_pending_signals(pending_signals),
-            conversation=_render_chat(memcell, roles=("user", "assistant")),
+            conversation=_render_chat(memcell, roles=("user", "assistant"), tz=tz),
         )
         reply = await _call_llm_for_profile_update(
             self._llm,
@@ -451,20 +456,20 @@ def _unified_diff(old: str, new: str, filename: str) -> str:
 # ── Prompt-input formatting ─────────────────────────────────────────────────────────────────────────
 
 
-def _render_chat(memcell: MemCell, *, roles: tuple[str, ...]) -> str:
+def _render_chat(memcell: MemCell, *, roles: tuple[str, ...], tz: tzinfo) -> str:
     """Render ChatMessage items with the given roles as ``(role) [time (weekday)] speaker: content`` lines.
 
-    Each line is :func:`~everalgo.utils.render_chat_line`'s, prefixed with the message's role: the prompt grants
-    config authority to user turns only, and a speaker label alone does not say which side spoke. Tool traffic
+    Each line is :func:`~everalgo.utils.render_chat_line`'s in ``tz``, prefixed with the message's role: the prompt
+    grants config authority to user turns only, and a speaker label alone does not say which side spoke. Tool traffic
     (``ToolCallRequest`` / ``ToolCallResult``) and messages with no text are skipped. Called with
     ``("user", "assistant")`` to build the prompt's conversation view and with ``("user",)`` to build the user-only
-    text that the evidence anti-hallucination check runs against.
+    text that the evidence anti-hallucination check runs against, both in the same zone.
 
     Raises:
         InvalidInputError: If a message with text carries no timestamp (0).
     """
     return "\n".join(
-        f"({item.role}) {render_chat_line(item)}"
+        f"({item.role}) {render_chat_line(item, tz=tz)}"
         for item in memcell.items
         if isinstance(item, ChatMessage) and item.role in roles and item.content
     )

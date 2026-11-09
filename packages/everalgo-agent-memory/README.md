@@ -69,12 +69,22 @@ See [`examples/04_agent_memory_case.py`](../../examples/04_agent_memory_case.py)
 class BoundaryDetector:  # everalgo.boundary.BoundaryDetector, re-exported
     def __init__(self, *, llm: LLMClient) -> None: ...
     async def adetect(
-        self, items: Sequence[ConversationItem], *, is_final: bool = False, prompt: str | None = None,
-        hard_token_limit: int = 65_536, hard_msg_limit: int = 500,
+        self, items: Sequence[ConversationItem], *, is_final: bool = False, custom_instructions: str | None = None,
+        hard_token_limit: int = 65_536, hard_msg_limit: int = 500, tz: tzinfo = UTC,
+    ) -> DetectionResult: ...
+    async def adetect_step(
+        self, history: list[ChatMessage], new: ChatMessage, *, smart_mask: bool = True, smart_mask_threshold: int = 5,
+        hard_token_limit: int = 65_536, hard_message_limit: int = 500, custom_instructions: str | None = None,
+        tz: tzinfo = UTC,
     ) -> DetectionResult: ...
 
 class AgentCaseExtractor:
-    def __init__(self, *, llm: LLMClient, gate: AgentCaseGate | None = None) -> None: ...
+    def __init__(
+        self, *, llm: LLMClient,
+        min_tool_call_rounds: int = 3,                    # fewer tool-call rounds: rejected before any LLM call; 0 disables
+        complex_task_tool_call_round_threshold: int = 20,  # more rounds than this: complex task, skips the LLM filter
+        gate: AgentCaseGate | None = None,
+    ) -> None: ...
     async def aextract(self, memcell: MemCell) -> list[AgentCase]: ...  # length 0 (filtered) or 1
 
 class AgentSkillExtractor:
@@ -109,6 +119,7 @@ class AgentProfileExtractor:
         soul_md: str,
         agents_md: str,
         pending_signals: Sequence[AgentProfileSignal] = (),
+        tz: tzinfo = UTC,  # the zone message times are shown in
     ) -> AgentProfileUpdate: ...
 ```
 
@@ -160,7 +171,7 @@ Cases with `quality_score < skip_quality_threshold` (default 0.2) short-circuit 
 
 ### AgentProfileExtractor contract
 
-SOUL.md / AGENTS.md are injected into every future system prompt and are self-reinforcing, so the operator is precision-first: it defaults to noop and a candidate signal must pass all four gates (persistence, directedness, evidence strength, novelty) before any patch is proposed. Routing follows one line: SOUL = who the agent is and how it speaks; AGENTS = global rules the agent must obey when acting; everything else (user facts, future intents, one-off task parameters, task solutions) is rejected at the gate. A single LLM call emits each candidate's gate verdicts together with its proposed patch; the prompt sees the full chat view (user + assistant text turns, tool traffic excluded) for context, but config authority stays user-only — every candidate must quote the user verbatim and the quote is re-checked in code against user messages alone. The gates are re-enforced in code.
+SOUL.md / AGENTS.md are injected into every future system prompt and are self-reinforcing, so the operator is precision-first: it defaults to noop and a candidate signal must pass all four gates (persistence, directedness, evidence strength, novelty) before any patch is proposed. Routing follows one line: SOUL = who the agent is and how it speaks; AGENTS = global rules the agent must obey when acting; everything else (user facts, future intents, one-off task parameters, task solutions) is rejected at the gate. A single LLM call emits each candidate's gate verdicts together with its proposed patch; the prompt sees the full chat view (user + assistant text turns, tool traffic excluded) for context, but config authority stays user-only — every candidate must quote the user verbatim and the quote is re-checked in code against user messages alone. The gates are re-enforced in code. Each conversation line is `(role) [YYYY-MM-DD HH:MM UTC (Weekday)] speaker: text`; times are UTC unless the call passes `tz=` (a `datetime.tzinfo`), which shows each message's local time with its offset, `(user) [2024-04-10 22:00 UTC+08:00 (Wednesday)] Alice: text`, the date and weekday following that zone. The user-only text the quote is checked against is rendered in the same zone.
 
 The returned `AgentProfileUpdate` carries section-level `patches` (never whole-file rewrites — human edits are preserved), `soul_diff` / `agents_diff` unified diffs, and `new_soul_md` / `new_agents_md` with all patches applied. Patches with `is_conflict=True` override an existing rule (the user changed their mind); they are applied like any other patch, and the flag lets the caller route them through a user-confirmation step or surface them in debugging. `signals` are implicit below-gate observations: persist them and pass them back as `pending_signals` on later runs so recurring corrections accumulate toward `min_recurrence`.
 
