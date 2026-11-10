@@ -64,8 +64,8 @@ class EpisodeExtractor:
                 ``<custom_instructions>``, after the bundled rules and the language rule; they cannot change the
                 output shape. None or a blank string sends the reference run's default principles there instead.
             output_language: Language to write the episode in, as an :class:`OutputLanguage` member or equivalent
-                string in any casing. Naming one adds ``<output_language>``; leaving it ``None`` sends no language
-                rule, as the reference run sent none.
+                string in any casing, which every output field is written in whatever language the conversation
+                is in. ``None`` has the model write in the language the participants use (the participant rule).
             tz: The zone the conversation's times are shown in, as :func:`everalgo.utils.format_time` renders
                 them: ``UTC`` (the default) or local time with its offset, ``UTC+08:00``. The weekday and the dates
                 relative times resolve against follow it.

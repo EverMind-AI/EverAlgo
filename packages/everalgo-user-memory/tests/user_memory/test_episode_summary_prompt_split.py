@@ -20,7 +20,11 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory import EpisodeSummarizer, OutputLanguage
 from everalgo.user_memory.episode._replies import _SummaryReply
 from everalgo.user_memory.prompts.en import episode_summary
-from everalgo.user_memory.prompts.en._language import CALLER_CHOSEN_LANGUAGE_RULE, SOURCE_TEXT_LANGUAGE_RULE
+from everalgo.user_memory.prompts.en._language import (
+    CALLER_CHOSEN_LANGUAGE_RULE,
+    PARTICIPANT_LANGUAGE_RULE,
+    SOURCE_TEXT_LANGUAGE_RULE,
+)
 from everalgo.user_memory.prompts.en.episode import EPISODE_SUMMARY_FIELD_RULE, EPISODE_SYSTEM_PROMPT
 from everalgo.user_memory.prompts.en.episode import assemble_system_prompt as assemble_episode_system_prompt
 from everalgo.user_memory.prompts.en.episode_summary import (
@@ -155,7 +159,7 @@ def test_the_preview_opens_with_the_shared_summary_description() -> None:
 
 def test_extraction_asks_for_no_summary() -> None:
     """The extraction reply is title and content; the Episode's summary is cut from the content in code."""
-    system = assemble_episode_system_prompt(custom_instructions=None, language_rule=None)
+    system = assemble_episode_system_prompt(custom_instructions=None, language_rule=PARTICIPANT_LANGUAGE_RULE)
 
     assert "summary" not in system.lower()
 

@@ -11,7 +11,8 @@ sentences in the operators' layout:
                  (``_REWORDED``).
 - Instructions — ``<custom_instructions>`` closes the system message: the caller's text, or the reference run's five
                  default principles when the caller passes none.
-- Language     — no ``<output_language>`` unless a language is named; a named one comes after ``<reply_format>``.
+- Language     — ``<output_language>`` after ``<reply_format>``: the named language, or the participant rule when
+                 none is named (the reference run had no language rule).
 - Data         — the user message is ``<conversation_start_time>`` and ``<conversation>``, each message laid out as
                  the reference run laid it out, every time in the shared shape with its weekday and in the caller's
                  zone, then the static ``<reminder>``.
@@ -156,10 +157,10 @@ def test_reference_braces_are_escapes_around_three_slots() -> None:
 
 
 def test_system_message_is_the_role_sentence_and_the_blocks_in_order() -> None:
-    role, blocks = _parts(assemble_system_prompt(custom_instructions=None, language_rule=None))
+    role, blocks = _parts(assemble_system_prompt(custom_instructions=None, language_rule=PARTICIPANT_LANGUAGE_RULE))
 
     assert role == _reference_text().strip().split("\n", 1)[0]
-    assert [tag for tag, _ in blocks] == [*_STATIC_BLOCKS, "custom_instructions"]
+    assert [tag for tag, _ in blocks] == [*_STATIC_BLOCKS, "output_language", "custom_instructions"]
 
 
 def test_every_static_block_is_reference_text_word_for_word() -> None:
@@ -199,7 +200,11 @@ def test_default_principles_are_the_reference_run_s() -> None:
 async def test_no_or_blank_custom_instructions_send_the_default_principles(custom_instructions: str | None) -> None:
     system, _ = await _sent(_memcell("hello"), custom_instructions=custom_instructions)
 
-    assert system == paragraphs(EPISODE_SYSTEM_PROMPT, tagged("custom_instructions", DEFAULT_CUSTOM_INSTRUCTIONS))
+    assert system == paragraphs(
+        EPISODE_SYSTEM_PROMPT,
+        tagged("output_language", PARTICIPANT_LANGUAGE_RULE),
+        tagged("custom_instructions", DEFAULT_CUSTOM_INSTRUCTIONS),
+    )
 
 
 async def test_custom_instructions_replace_the_default_principles_verbatim() -> None:
@@ -208,20 +213,24 @@ async def test_custom_instructions_replace_the_default_principles_verbatim() -> 
 
     system, user = await _sent(_memcell("hello"), custom_instructions=text)
 
-    assert system == f"{EPISODE_SYSTEM_PROMPT}\n\n<custom_instructions>\n{text}\n</custom_instructions>"
+    assert system == paragraphs(
+        EPISODE_SYSTEM_PROMPT, tagged("output_language", PARTICIPANT_LANGUAGE_RULE), tagged("custom_instructions", text)
+    )
     assert DEFAULT_CUSTOM_INSTRUCTIONS.splitlines()[0] not in system
     assert text not in user
 
 
-# ── Language: a rule only when the caller names one ─────────────────────────────────────────────────
+# ── Language: the named language, or the participant rule ─────────────────────────────────────────────────
 
 
-async def test_no_language_named_sends_no_language_rule() -> None:
-    """The reference run sent none, so the shared participant rule does not stand in for it."""
-    system, _ = await _sent(_memcell("hello"))
+async def test_no_language_named_sends_the_participant_rule() -> None:
+    """With no language named the episode is written in the participants' language, as every conversation reader is."""
+    system, user = await _sent(_memcell("hello"))
 
-    assert "<output_language>" not in system
-    assert PARTICIPANT_LANGUAGE_RULE not in system
+    _, blocks = _parts(system)
+    assert [tag for tag, _ in blocks] == [*_STATIC_BLOCKS, "output_language", "custom_instructions"]
+    assert dict(blocks)["output_language"] == PARTICIPANT_LANGUAGE_RULE
+    assert PARTICIPANT_LANGUAGE_RULE not in user
 
 
 @pytest.mark.parametrize("custom_instructions", [None, "Keep brand names in English."])

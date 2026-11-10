@@ -263,11 +263,11 @@ async def test_rendering_inherits_the_source_text_language_when_none_is_named() 
     """
     system, user = await _sent("li moved to Hangzhou last month.")
 
-    assert system.count("CRITICAL LANGUAGE RULE") == 1
-    assert "SAME language <episode_text> itself is written in" in system
+    assert system.count("Write every output field in the language <episode_text> is written in.") == 1
+    assert "<episode_text>" in user
     assert "dominate" not in system
     assert "{{LANGUAGE_RULE}}" not in system
-    assert "CRITICAL LANGUAGE RULE" not in user
+    assert "Write every output field" not in user
 
 
 async def test_rendering_injects_the_named_language() -> None:
@@ -281,7 +281,7 @@ async def test_rendering_injects_the_named_language() -> None:
     )
     assert "German, whatever language the input is in." not in system
     assert "CRITICAL LANGUAGE RULE" not in system
-    assert "SAME language <episode_text> itself is written in" not in system
+    assert "Write every output field in the language <episode_text> is written in." not in system
 
 
 async def test_an_unsupported_language_is_rejected_before_the_llm_is_called() -> None:

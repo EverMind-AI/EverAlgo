@@ -24,19 +24,11 @@ from everalgo.user_memory.prompts.en._language import (
 )
 
 ALL_RULES = [name for name in dir(rules_mod) if name.endswith("_LANGUAGE_RULE")]
-#: Rewritten in 2026-10 as plain two-sentence rules: what to write in, then the shared original-form sentence.
-PLAIN_RULES = [
-    "CALLER_CHOSEN_LANGUAGE_RULE",
-    "EPISODE_PROFILE_INIT_LANGUAGE_RULE",
-    "EXISTING_PROFILE_LANGUAGE_RULE",
-    "COMPACTED_PROFILE_LANGUAGE_RULE",
-    "REGROUPED_PROFILE_LANGUAGE_RULE",
-    "MEMCELL_EXISTING_PROFILE_LANGUAGE_RULE",
-    "MEMCELL_COMPACTED_PROFILE_LANGUAGE_RULE",
-    "MEMCELL_REGROUPED_PROFILE_LANGUAGE_RULE",
-]
-#: Measured or inherited texts, kept as they were.
-HEADED_RULES = [name for name in ALL_RULES if name not in PLAIN_RULES]
+#: The participant rule, and the profile INIT rule that extends it word for word, keep the measured text's own
+#: paragraphs and closing sentence (with its emphasis dropped in 2026-11).
+MEASURED_TEXT_RULES = ["PARTICIPANT_LANGUAGE_RULE", "PROFILE_INIT_LANGUAGE_RULE"]
+#: Every other rule is two sentences: what to write in, then the shared original-form sentence.
+TWO_SENTENCE_RULES = [name for name in ALL_RULES if name not in MEASURED_TEXT_RULES]
 
 # ==========================================================================
 # Properties every rule must hold
@@ -59,19 +51,13 @@ def test_no_rule_refers_to_its_own_position_in_the_prompt(name: str, word: str) 
     assert word not in getattr(rules_mod, name), f"{name} refers to {word!r}"
 
 
-@pytest.mark.parametrize("name", HEADED_RULES)
-def test_every_headed_rule_announces_itself_the_same_way(name: str) -> None:
-    """The header is what makes the rule findable in a long prompt; head and tail must match on it."""
-    assert getattr(rules_mod, name).startswith("**CRITICAL LANGUAGE RULE**")
+def test_the_measured_text_rules_are_rules_that_exist() -> None:
+    """A renamed measured rule would otherwise fall into the two-sentence set and fail there for the wrong reason."""
+    assert set(MEASURED_TEXT_RULES) <= set(ALL_RULES)
 
 
-def test_the_plain_rules_are_all_rules_that_exist() -> None:
-    """A renamed plain rule would otherwise drop out of the checks below and fall into the headed set."""
-    assert set(PLAIN_RULES) <= set(ALL_RULES)
-
-
-@pytest.mark.parametrize("name", PLAIN_RULES)
-def test_plain_rules_state_the_rule_without_emphasis(name: str) -> None:
+@pytest.mark.parametrize("name", ALL_RULES)
+def test_every_rule_states_the_rule_without_emphasis(name: str) -> None:
     """No bold, no capitals, no "mandatory": naming the language is what the measurements credit, not the shouting."""
     rule = getattr(rules_mod, name)
     assert rule.startswith("Write every output field in ")
@@ -79,9 +65,9 @@ def test_plain_rules_state_the_rule_without_emphasis(name: str) -> None:
         assert shouted not in rule, shouted
 
 
-@pytest.mark.parametrize("name", PLAIN_RULES)
-def test_plain_rules_close_with_the_one_shared_original_form_sentence(name: str) -> None:
-    """The second sentence is written once and joined on, so every plain rule ends with exactly that text."""
+@pytest.mark.parametrize("name", TWO_SENTENCE_RULES)
+def test_two_sentence_rules_close_with_the_one_shared_original_form_sentence(name: str) -> None:
+    """The second sentence is written once and joined on, so every two-sentence rule ends with exactly that text."""
     rule = getattr(rules_mod, name)
     assert rule.endswith(f". {_KEEP_ORIGINAL_FORM}")
     assert rule.count(_KEEP_ORIGINAL_FORM) == 1
@@ -131,8 +117,7 @@ async def _language_texts_sent(output_language: OutputLanguage | None) -> dict[s
     """The language text each prompt receives: the split prompts' ``<output_language>``, every profile stage's rule.
 
     Captured where each operator chooses it, so a prompt that went back to wording of its own is read, not assumed.
-    Boundary writes nothing in a language and carries no language rule; nor does the episode when no language is
-    named, so it is read only when one is.
+    Boundary writes nothing in a language and carries no language rule.
     """
     atomic = FakeLLMClient(responses=['{"atomic_facts": {"atomic_fact": []}}'])
     await AtomicFactExtractor(llm=atomic).aextract_from_text("t", timestamp=_TS_MS, output_language=output_language)
@@ -141,11 +126,8 @@ async def _language_texts_sent(output_language: OutputLanguage | None) -> dict[s
         "atomic_fact_from_text": str(atomic.calls[0].messages[0].content),
         "reflect_init": await _reflect_system(output_language, update=False),
         "reflect_update": await _reflect_system(output_language, update=True),
+        "episode": str(episode[0].content),
     }
-    if output_language is None:
-        assert "<output_language>" not in str(episode[0].content)
-    else:
-        systems["episode"] = str(episode[0].content)
     stages = {
         f"profile{name}": stage.language_rule(output_language)
         for name, stage in vars(_stages).items()
@@ -156,15 +138,11 @@ async def _language_texts_sent(output_language: OutputLanguage | None) -> dict[s
 
 @pytest.mark.parametrize("output_language", [None, OutputLanguage.CHINESE], ids=["fallback", "named"])
 async def test_every_prompt_receives_a_shared_rule(output_language: OutputLanguage | None) -> None:
-    """Episode, atomic facts, reflect and all eight profile stages: one wording, defined once in this module.
-
-    With no language named the episode is left out: it sends no language rule at all, as the reference run it
-    reproduces sent none.
-    """
+    """Episode, atomic facts, reflect and all eight profile stages: one wording, defined once in this module."""
     shared = {getattr(rules_mod, name) for name in ALL_RULES} | {build_language_rule(OutputLanguage.CHINESE)}
     texts = await _language_texts_sent(output_language)
 
-    assert len(texts) == (11 if output_language is None else 12)
+    assert len(texts) == 12
     assert {name: text for name, text in texts.items() if text not in shared} == {}
 
 

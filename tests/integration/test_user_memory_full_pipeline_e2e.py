@@ -199,9 +199,10 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     assert '"speaker": assistant,' in episode_prompt, "episode conversation missing the assistant's block"
     assert "Python async" in episode_prompt
     # sender_id is a required keyword argument (no default) that only sets owner_id: the prompt narrates the whole
-    # memcell, with no user-centred variant. No output_language, so the prompt carries no language rule.
+    # memcell, with no user-centred variant. No output_language, so the participant rule decides the language.
     assert "User name:" not in episode_prompt, "episode prompt must not be user-centred"
-    assert "<output_language>" not in episode_prompt, "episode prompt must carry no language rule by default"
+    participant_rule = "<output_language>\nWrite every output field in the language the participants use"
+    assert participant_rule in episode_prompt, "episode prompt must carry the participant rule by default"
 
     # --- 3. Foresight ----------------------------------------------------------
     foresights = await ForesightExtractor(llm=fake).aextract(mc, sender_id="u_alice")

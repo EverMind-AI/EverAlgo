@@ -6,7 +6,7 @@ Coverage layers (the prompt text itself, against the reference run's, is ``test_
                exceptions propagate unchanged
 - Signature — ``prompt=`` is gone; ``custom_instructions`` replaces the default principles in their block;
               ``sender_id`` only sets ``owner_id``
-- Language  — ``<output_language>`` only for a named language; the Episode reports none
+- Language  — ``<output_language>``: the named language, or the participant rule; the Episode reports none
 - Rendering — the start time and the reference run's message blocks in the user message
 - Stored record — the body verbatim, the summary the content's first 200 characters, the memcell's timestamp
 - Log lines — entry and exit
@@ -354,23 +354,24 @@ async def test_default_call_sends_the_templates_filled() -> None:
     _, fake = await _extract()
 
     assert _sent(fake) == (
-        assemble_system_prompt(custom_instructions=None, language_rule=None),
+        assemble_system_prompt(custom_instructions=None, language_rule=PARTICIPANT_LANGUAGE_RULE),
         _MEMCELL_USER_MESSAGE,
     )
 
 
 # ===========================================================================
-# Language — a rule only for a named language; no declaration
+# Language — the named language or the participant rule; no declaration
 # ===========================================================================
 
 
-async def test_no_language_named_sends_no_language_rule() -> None:
-    """The reference run sent none, so the participant rule other operators fall back on is not sent either."""
+async def test_no_language_named_sends_the_participant_rule() -> None:
+    """The fallback every conversation reader uses: write in the language the participants use."""
     _, fake = await _extract()
 
     system, user = _sent(fake)
-    assert "<output_language>" not in system
-    assert PARTICIPANT_LANGUAGE_RULE not in system
+    output_language = system.split("<output_language>\n", 1)[1].split("\n</output_language>", 1)[0]
+    assert output_language == PARTICIPANT_LANGUAGE_RULE
+    assert system.count(PARTICIPANT_LANGUAGE_RULE) == 1
     assert PARTICIPANT_LANGUAGE_RULE not in user
 
 

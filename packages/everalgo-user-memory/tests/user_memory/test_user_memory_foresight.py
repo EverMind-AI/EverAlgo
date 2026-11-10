@@ -87,8 +87,7 @@ class _ClientError(Exception):
 async def test_system_carries_the_participant_rule_once_when_no_language_is_named() -> None:
     system, user = await _sent()
 
-    assert system.count("CRITICAL LANGUAGE RULE") == 1
-    assert PARTICIPANT_LANGUAGE_RULE in system
+    assert system.count(PARTICIPANT_LANGUAGE_RULE) == 1
     assert "{{language_rule}}" not in system + user
 
 
