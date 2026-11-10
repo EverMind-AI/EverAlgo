@@ -27,13 +27,15 @@ the current text keeps the naming, drops the emphasis, and has not been re-measu
 language covers anything already stored — a stored profile, a merged narrative — which is what every inheriting
 fallback would otherwise keep; it names no element, so it holds for an operator with nothing stored as well.
 
-Eight rules share a second sentence, ``_KEEP_ORIGINAL_FORM``: the caller-chosen rule, the four fallbacks of
-the Episode-path profile stages, and the three ``MEMCELL_*`` fallbacks of the MemCell-path profile maintenance
-stages. A profile fallback names the input it inherits from in the markup of its own prompt — ``<stored_profile>``
-and ``<group>`` on the Episode path, the 【Stored Profile】 and 【Items】 sections on the MemCell path — so the two
-paths cannot share one. The sentence is written once and joined onto each rule where it is defined, so
-``build_language_rule`` hands every operator a complete rule and appends nothing. Those eight state the rule
-plainly; the remaining rules keep their measured or inherited text and its ``CRITICAL LANGUAGE RULE`` header.
+Every rule is stated plainly — no bold ``CRITICAL LANGUAGE RULE`` header, no capitals, no "This is mandatory" —
+and opens with what to write every output field in. All but two are two sentences, closing with a shared second
+sentence, ``_KEEP_ORIGINAL_FORM``. A fallback names the input it inherits from in the markup of its own prompt —
+``<episode_text>``, ``<episodes>``, ``<current_narrative>``; ``<stored_profile>`` and ``<group>`` on the Episode
+path, the 【Stored Profile】 and 【Items】 sections on the MemCell path — so the operators cannot share one. The
+sentence is written once and joined onto each rule where it is defined, so ``build_language_rule`` hands every
+operator a complete rule and appends nothing. The two exceptions are ``PARTICIPANT_LANGUAGE_RULE`` and
+``PROFILE_INIT_LANGUAGE_RULE``, which extends it word for word: they keep the measured text's paragraphs and its
+own closing sentence, with only the emphasis dropped.
 
 ``PARTICIPANT_LANGUAGE_RULE`` asks the model to work the language out. That costs roughly one wrong
 language in thirteen, and no rewriting closed the gap: five wordings and one structural variant all landed
@@ -44,7 +46,10 @@ Chinese conversation does not pull back. Six mirrored scenario pairs across eigh
 The residual failures therefore skew one way: a conversation that should yield English is the one at risk.
 
 This rule is nonetheless the best of the self-judging variants, and the only one that never drifted on
-plain single-language conversations, which is why it is the fallback rather than one of the others.
+plain single-language conversations, which is why it is the fallback rather than one of the others. The text
+measured then opened with a bold ``CRITICAL LANGUAGE RULE`` header and "Write ALL output fields" and closed its
+first paragraph with "This is mandatory."; the current text drops those three and keeps every other word, and
+has not been re-measured.
 
 The measurements behind those two texts are recorded internally; the corpus and runner live outside the
 repository because they need real models and five-figure call counts.
@@ -118,8 +123,8 @@ MEMCELL_REGROUPED_PROFILE_LANGUAGE_RULE = (
 """MemCell path only: the REGROUP fallback, ``REGROUPED_PROFILE_LANGUAGE_RULE`` named for the 【Items】 section."""
 
 MERGED_EPISODES_LANGUAGE_RULE = (
-    "**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the episodes you are "
-    "merging. Merging never changes the language — do not translate. This is mandatory."
+    "Write every output field in the language of the episodes in <episodes>; do not translate them. "
+    + _KEEP_ORIGINAL_FORM
 )
 """Fallback for merging episodes into one narrative.
 
@@ -130,9 +135,8 @@ language should name the output language rather than leave the pick to the model
 """
 
 EXISTING_NARRATIVE_LANGUAGE_RULE = (
-    "**CRITICAL LANGUAGE RULE**: You MUST write ALL output in the SAME language as the existing narrative "
-    "you are updating. Updating never changes the language — do not translate, even if the new episodes are "
-    "written in a different language. This is mandatory."
+    "Write every output field in the language of the narrative in <current_narrative>; do not translate it, even "
+    "when the episodes in <new_episodes> are written in another language. " + _KEEP_ORIGINAL_FORM
 )
 """Fallback for updating a merged narrative. Same shape as the profile update rule.
 
@@ -142,16 +146,18 @@ equally unrecoverable when the language it pins is already wrong. Naming a langu
 """
 
 SOURCE_TEXT_LANGUAGE_RULE = (
-    "**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language <episode_text> itself is written in. "
-    "ALL output MUST match that language. This is mandatory."
+    "Write every output field in the language <episode_text> is written in. " + _KEEP_ORIGINAL_FORM
 )
 """Fallback for the operators whose input is already-extracted memory text rather than a conversation.
 
-Deliberately one sentence where ``PARTICIPANT_LANGUAGE_RULE`` is three paragraphs. Everything those
-paragraphs deal with — pasted documents, participants writing different languages, an identifier
-contradicting the conversation — is a property of a live multi-party conversation. That text has
-already been through extraction, so it is a single-language narrative and there is nothing to adjudicate:
-the language was settled upstream and this layer inherits it.
+Deliberately short where ``PARTICIPANT_LANGUAGE_RULE`` is three paragraphs. Everything those paragraphs deal
+with — pasted documents, participants writing different languages, an identifier contradicting the
+conversation — is a property of a live multi-party conversation. That text has already been through
+extraction, so it is a single-language narrative and there is nothing to adjudicate: the language was settled
+upstream and this layer inherits it. Both prompts that take it, atomic facts from text and the episode summary,
+carry that text in an ``<episode_text>`` element of the user message. The rule is stated plainly and closes with
+the shared original-form sentence, as the other two-sentence rules do; neither it nor the earlier emphatic text
+was measured.
 """
 
 EPISODE_PROFILE_INIT_LANGUAGE_RULE = (
@@ -165,9 +171,9 @@ and says the choice sticks; "every output field" covers the category and trait l
 """
 
 PARTICIPANT_LANGUAGE_RULE = (
-    "**CRITICAL LANGUAGE RULE**: Write ALL output fields in the language the participants use when they "
-    "talk to each other. If they talk in Chinese, write in Chinese; if in English, write in English; if in "
-    "Japanese, write in Japanese; and so on for any language. This is mandatory.\n\n"
+    "Write every output field in the language the participants use when they talk to each other. If they talk "
+    "in Chinese, write in Chinese; if in English, write in English; if in Japanese, write in Japanese; and so on "
+    "for any language.\n\n"
     "To find that language, read only the message contents — the sentences the participants address to "
     "one another: their questions, answers, opinions, decisions and reactions. Text they merely bring "
     "into the conversation is not theirs: a pasted document, a code block, an error message, a quoted "

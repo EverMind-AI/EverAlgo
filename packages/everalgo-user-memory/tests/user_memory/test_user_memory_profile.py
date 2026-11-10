@@ -905,8 +905,7 @@ def test_all_four_prompts_carry_the_language_placeholder_at_both_ends() -> None:
 async def test_init_rendering_injects_the_participant_rule_when_no_language_is_named() -> None:
     rendered = await _render_init_prompt()
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
-    assert "the language the participants use" in rendered
+    assert rendered.count("Write every output field in the language the participants use") == 2
     assert "{{language_rule}}" not in rendered
 
 

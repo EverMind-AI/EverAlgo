@@ -42,12 +42,10 @@ def _render_messages(
         conversation: The user message, as :func:`_render_conversation` renders it.
         custom_instructions: The caller's instructions. Placed verbatim in ``<custom_instructions>``, never rendered as
             a template; None or a blank string sends the reference run's default principles there instead.
-        output_language: The language the caller named, sent as ``<output_language>``; None sends no language rule,
-            as the reference run sent none.
+        output_language: The language the caller named, sent as ``<output_language>``; None sends the participant rule
+            there, so the episode is written in the language the participants use.
     """
-    language_rule = (
-        None if output_language is None else build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE)
-    )
+    language_rule = build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE)
     system = assemble_system_prompt(custom_instructions=custom_instructions, language_rule=language_rule)
     return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=conversation)]
 

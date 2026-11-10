@@ -293,8 +293,7 @@ async def test_default_prompt_renders_with_no_placeholder_left_behind() -> None:
 async def test_rendering_injects_the_participant_rule_when_no_language_is_named() -> None:
     rendered = await _render_atomic_fact_prompt()
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 2
-    assert "the language the participants use" in rendered
+    assert rendered.count("Write every output field in the language the participants use") == 2
     assert "{{language_rule}}" not in rendered
 
 

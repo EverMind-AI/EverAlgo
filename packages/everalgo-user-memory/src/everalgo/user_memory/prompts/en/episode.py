@@ -24,10 +24,10 @@ absolute date in parentheses, keep every fact, name, number, date and stated rea
 the data, the model followed them less (an 80-memcell LoCoMo probe: shorter episodes, fewer resolved dates); the
 system message, and so its prompt-cache prefix, is unchanged.
 
-Three deliberate exceptions to the operator conventions: no ``<output_language>`` block unless the caller names a
-language (the reference run had no language rule); no ``summary`` field in the reply, the episode's summary being the
-content's first 200 characters, as the reference run filled it; and the ``<reminder>`` after the data, so the user
-message does not hold data only.
+Two deliberate exceptions to the operator conventions: no ``summary`` field in the reply, the episode's summary being
+the content's first 200 characters, as the reference run filled it; and the ``<reminder>`` after the data, so the user
+message does not hold data only. ``<output_language>`` follows the convention, though the reference run had no
+language rule: the named language, or the participant rule when the caller names none.
 
 Constants:
     - ``EPISODE_SUMMARY_FIELD_RULE`` — what a summary is, used by ``prompts.en.episode_summary`` for the summary
@@ -149,8 +149,8 @@ EPISODE_USER_PROMPT = paragraphs(
 )
 
 
-def assemble_system_prompt(*, custom_instructions: str | None, language_rule: str | None) -> str:
-    """Build the system message: the static rules, the language rule when a language is named, then the instructions.
+def assemble_system_prompt(*, custom_instructions: str | None, language_rule: str) -> str:
+    """Build the system message: the static rules, the language rule, then the instructions.
 
     Both values are placed verbatim and are never scanned for placeholders, so braces in them stay literal.
 
@@ -158,15 +158,13 @@ def assemble_system_prompt(*, custom_instructions: str | None, language_rule: st
         custom_instructions: The caller's instructions for the ``<custom_instructions>`` block, the message's last;
             ``None`` or a blank string sends :data:`DEFAULT_CUSTOM_INSTRUCTIONS` there instead, as the reference run
             did.
-        language_rule: The ``<output_language>`` text for a language the caller named, as
-            ``user_memory._language.build_language_rule`` returns it; ``None`` leaves the block out.
+        language_rule: The ``<output_language>`` text, as ``user_memory._language.build_language_rule`` returns it:
+            the named language, or the participant rule when the caller names none.
 
     Returns:
         The system message.
     """
-    system = EPISODE_SYSTEM_PROMPT
-    if language_rule is not None:
-        system = paragraphs(system, tagged("output_language", language_rule))
+    system = paragraphs(EPISODE_SYSTEM_PROMPT, tagged("output_language", language_rule))
     if custom_instructions is None or not custom_instructions.strip():
         custom_instructions = DEFAULT_CUSTOM_INSTRUCTIONS
     return append_custom_instructions(system, custom_instructions)

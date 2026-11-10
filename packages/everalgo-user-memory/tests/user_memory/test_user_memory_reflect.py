@@ -14,6 +14,7 @@ from everalgo.llm import LLMMessage, LLMOutputError, StrictOutputModel, to_opena
 from everalgo.testing import FakeLLMClient
 from everalgo.types import Episode
 from everalgo.user_memory._replies import _ReflectOutput
+from everalgo.user_memory.prompts.en._language import EXISTING_NARRATIVE_LANGUAGE_RULE, MERGED_EPISODES_LANGUAGE_RULE
 
 
 class _ClientError(Exception):
@@ -373,22 +374,22 @@ async def test_the_language_rule_closes_the_system_message_once(old_episode: Epi
 
     assert rendered.count("<output_language>") == 1
     assert rendered.endswith("\n</output_language>")
-    assert rendered.split("<output_language>\n", 1)[1].count("CRITICAL LANGUAGE RULE") == 1
+    assert rendered.split("<output_language>\n", 1)[1].count("Write every output field") == 1
 
 
 async def test_init_inherits_the_merged_episodes_language_when_none_is_named() -> None:
     rendered = await _render_reflect_prompt()
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 1
-    assert "as the episodes you are merging" in rendered
+    assert rendered.count(MERGED_EPISODES_LANGUAGE_RULE) == 1
+    assert "the episodes in <episodes>" in rendered
     assert "{{language_rule}}" not in rendered
 
 
 async def test_update_inherits_the_existing_narratives_language_when_none_is_named() -> None:
     rendered = await _render_reflect_prompt(old_episode=_ep(500, "existing narrative"))
 
-    assert rendered.count("CRITICAL LANGUAGE RULE") == 1
-    assert "as the existing narrative you are updating" in rendered
+    assert rendered.count(EXISTING_NARRATIVE_LANGUAGE_RULE) == 1
+    assert "the narrative in <current_narrative>" in rendered
     assert "{{language_rule}}" not in rendered
 
 
