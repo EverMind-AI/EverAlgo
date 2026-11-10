@@ -9,7 +9,7 @@ alone.
 
 Pipeline stages:
 
-1. ``BoundaryDetector.adetect(messages)``                    → ``MemCell``
+1. ``BoundaryDetector.adetect_batch(messages)``              → ``Cuts`` → ``to_memcells`` → ``MemCell``
 2. ``EpisodeExtractor.aextract(mc, sender_id=...)``          → single ``Episode``
 3. ``ForesightExtractor.aextract(mc, sender_id=...)``        → list[Foresight]
 4. ``AtomicFactExtractor.aextract(mc, sender_id=...)``       → list[AtomicFact]
@@ -36,7 +36,7 @@ from everalgo.testing.assertions import (
 )
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
-from everalgo.user_memory import BoundaryDetector
+from everalgo.user_memory import BoundaryDetector, to_memcells
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.episode import EpisodeExtractor
 from everalgo.user_memory.foresight import ForesightExtractor
@@ -167,10 +167,12 @@ async def test_user_memory_full_pipeline_e2e() -> None:
     fake, captured = _make_capturing_client()
 
     # --- 1. Boundary detection -------------------------------------------------
-    boundary_output = await BoundaryDetector(llm=fake).adetect(_conversation(), is_final=True)
-    assert boundary_output.tail == []
-    assert len(boundary_output.cells) == 1
-    mc = boundary_output.cells[0]
+    conversation = _conversation()
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(conversation, is_final=True)
+    assert conversation[cuts.tail_start :] == []
+    cells = to_memcells(conversation, cuts)
+    assert len(cells) == 1
+    mc = cells[0]
 
     boundary_prompt = captured["boundary"]
     assert "Alice" in boundary_prompt, "boundary prompt missing sender_name"

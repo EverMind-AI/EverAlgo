@@ -23,10 +23,10 @@ class MemCell(BaseModel):
 
     ``items`` is ordered; chat scenarios contain only ``ChatMessage`` while agent scenarios may also carry
     ``ToolCallRequest`` / ``ToolCallResult``. User-memory extractors silently skip non-``ChatMessage`` items.
-    ``timestamp`` is Unix epoch ms of the closing item in the slice.
+    ``timestamp`` is the Unix epoch ms of the slice's last ``ChatMessage``; tool items after it do not move it.
     """
 
     items: list[ConversationItem]
-    timestamp: int  # Unix epoch ms — closing time of the slice
+    timestamp: int  # Unix epoch ms of the slice's last ChatMessage
 
     model_config = ConfigDict(extra="ignore")

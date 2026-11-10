@@ -1,16 +1,13 @@
-"""Boundary detection — cut a conversation into MemCells.
+"""Boundary detection — where to cut a conversation into MemCells.
 
 Public surface:
-- BoundaryDetector      — class binding an LLM client: ``adetect`` / ``detect`` (batch), ``adetect_step`` /
-                          ``detect_step`` (incremental, one message at a time)
-- adetect_boundaries    — async function: the batch path over ``ConversationItem`` (tool items are kept in the
-                          cells but never shown to the model)
-- detect_boundaries     — sync bridge over ``adetect_boundaries``; non-event-loop contexts only
-- DetectionResult       — ``(cells, tail)`` NamedTuple returned by all of the above
-- adetect_boundary_step — async function: the single LLM decision under ``adetect_step``
-- BoundaryDecision      — NamedTuple returned by ``adetect_boundary_step``
+- BoundaryDetector — the only entry, binding an LLM client: ``adetect_batch`` / ``detect_batch`` (one window of
+                     ``ConversationItem``; tool items are kept in place but never shown to the model) and
+                     ``adetect_step`` / ``detect_step`` (the judged history plus one new ``ChatMessage``)
+- Cuts             — ``(ends, tail_start)`` NamedTuple both methods return: indices into the caller's input
+- to_memcells      — pure function: the caller's input and its ``Cuts`` → one ``MemCell`` per closed segment
 
-``everalgo.user_memory`` and ``everalgo.agent_memory`` re-export ``BoundaryDetector`` unchanged.
+``everalgo.user_memory`` and ``everalgo.agent_memory`` re-export all three unchanged.
 
 ``WorkspaceMemCellExtractor`` (Jira / Email / Confluence) is NOT YET IMPLEMENTED and is
 deliberately omitted from the public API — its methods raise ``NotImplementedError``. Import it
@@ -19,22 +16,13 @@ directly from ``everalgo.boundary.workspace`` if you need the reserved placehold
 
 import logging
 
-from everalgo.boundary._detector import (
-    BoundaryDecision,
-    BoundaryDetector,
-    DetectionResult,
-    adetect_boundaries,
-    adetect_boundary_step,
-    detect_boundaries,
-)
+from everalgo.boundary._cuts import Cuts, to_memcells
+from everalgo.boundary._detector import BoundaryDetector
 
 __all__ = [
-    "BoundaryDecision",
     "BoundaryDetector",
-    "DetectionResult",
-    "adetect_boundaries",
-    "adetect_boundary_step",
-    "detect_boundaries",
+    "Cuts",
+    "to_memcells",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

@@ -8,7 +8,12 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `Cuts` and `to_memcells`, re-exported unchanged from `everalgo.boundary` beside `BoundaryDetector`: the indices `adetect_batch` returns count the tool items of a trajectory, and `to_memcells` keeps them in the cells. Requires `everalgo-boundary` with `Cuts`.
 - `tz=` (a `datetime.tzinfo`, default UTC) on `AgentProfileExtractor.aextract` / `extract`: each conversation line shows its message's time in that zone with its offset, `(user) [2024-04-10 22:00 UTC+08:00 (Wednesday)] Alice: text`, through `everalgo.utils.render_chat_line`, and the user-only text the evidence quote is checked against is rendered in the same zone. UTC renders exactly as before. Requires `everalgo-core` with `format_time`.
+
+### Changed
+
+- **BREAKING:** the re-exported `BoundaryDetector` changed: `adetect` / `detect` are `adetect_batch` / `detect_batch`, `adetect_step` takes `items`, and both return `Cuts` instead of `DetectionResult`. See `everalgo-boundary`'s changelog.
 
 ## [0.6.0rc3] - 2026-10-22
 

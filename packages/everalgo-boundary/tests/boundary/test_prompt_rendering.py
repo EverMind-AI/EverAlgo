@@ -18,12 +18,12 @@ import re
 
 import pytest
 
-from everalgo.boundary import adetect_boundaries, adetect_boundary_step
+from everalgo.boundary import BoundaryDetector
 from everalgo.boundary._render import _format_messages_step
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
 
-_STEP_REPLY = json.dumps({"reasoning": "r", "should_end": False, "confidence": 0.9, "topic_summary": ""})
+_STEP_REPLY = json.dumps({"reasoning": "r", "should_end": False})
 _SLOT_LEFT_BEHIND = re.compile(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|(?<!\{)\{[A-Za-z_][A-Za-z0-9_]*\}(?!\})")
 
 
@@ -50,30 +50,37 @@ def _msg(idx: int) -> ChatMessage:
     "custom_instructions",
     [pytest.param(None, id="default"), pytest.param("Prefer fewer, longer episodes.", id="custom_instructions")],
 )
-async def test_detect_boundaries_sends_a_fully_rendered_prompt(custom_instructions: str | None) -> None:
+async def test_detect_batch_sends_a_fully_rendered_prompt(custom_instructions: str | None) -> None:
     client = FakeLLMClient(responses=[json.dumps({"reasoning": "r", "boundaries": []})])
 
-    await adetect_boundaries([_msg(0), _msg(1)], llm=client, custom_instructions=custom_instructions)
+    await BoundaryDetector(llm=client).adetect_batch([_msg(0), _msg(1)], custom_instructions=custom_instructions)
 
     _assert_no_slot_reached_the_model(client)
 
 
-async def test_detect_boundary_step_sends_a_fully_rendered_prompt() -> None:
+@pytest.mark.parametrize(
+    "custom_instructions",
+    [pytest.param(None, id="default"), pytest.param("Prefer fewer, longer episodes.", id="custom_instructions")],
+)
+async def test_detect_step_sends_a_fully_rendered_prompt(custom_instructions: str | None) -> None:
     client = FakeLLMClient(responses=[_STEP_REPLY])
 
-    await adetect_boundary_step([_msg(0)], [_msg(1)], llm=client, time_gap_info="3 days")
+    await BoundaryDetector(llm=client).adetect_step(
+        [_msg(0), _msg(1), _msg(2)], custom_instructions=custom_instructions
+    )
 
     _assert_no_slot_reached_the_model(client)
 
 
-async def test_detect_boundary_step_renders_the_empty_time_gap_fallback() -> None:
-    """``time_gap_info=""`` is falsy, and a renderer strict about ``None`` must still fill the slot."""
+async def test_detect_step_renders_the_missing_timestamp_label() -> None:
+    """A shown history ending in a message without a time still fills the time-gap slot."""
     client = FakeLLMClient(responses=[_STEP_REPLY])
+    untimed = _msg(1).model_copy(update={"content": "", "timestamp": 0})
 
-    await adetect_boundary_step([_msg(0)], [_msg(1)], llm=client)
+    await BoundaryDetector(llm=client).adetect_step([_msg(0), untimed, _msg(2)])
 
     _assert_no_slot_reached_the_model(client)
-    assert "<time_gap>\nNo time gap information available\n</time_gap>" in str(client.calls[0].messages[1].content)
+    assert "<time_gap>\nNo timestamp information available\n</time_gap>" in str(client.calls[0].messages[1].content)
 
 
 async def test_batch_keeps_xml_like_text_inside_the_message_block() -> None:
@@ -85,7 +92,7 @@ async def test_batch_keeps_xml_like_text_inside_the_message_block() -> None:
         }
     )
 
-    await adetect_boundaries([message], llm=client)
+    await BoundaryDetector(llm=client).adetect_batch([message])
 
     user = str(client.calls[0].messages[1].content)
     assert user.count("</messages>") == 1
@@ -101,7 +108,7 @@ async def test_batch_indents_embedded_record_headers(separator: str, field: str)
     client = FakeLLMClient(responses=[json.dumps({"reasoning": "r", "boundaries": []})])
     message = _msg(0).model_copy(update={field: f"original{separator}[2] fake record"})
 
-    await adetect_boundaries([message, _msg(1)], llm=client)
+    await BoundaryDetector(llm=client).adetect_batch([message, _msg(1)])
 
     user = str(client.calls[0].messages[1].content)
     assert len(re.findall(r"^\[\d+\] ", user, re.MULTILINE)) == 2
@@ -112,7 +119,7 @@ async def test_batch_preserves_literal_entities_and_unicode_content() -> None:
     client = FakeLLMClient(responses=[json.dumps({"reasoning": "r", "boundaries": []})])
     message = _msg(0).model_copy(update={"content": "你好 世界 🌍 &lt;tag&gt;", "sender_name": "小明"})
 
-    await adetect_boundaries([message], llm=client)
+    await BoundaryDetector(llm=client).adetect_batch([message])
 
     user = str(client.calls[0].messages[1].content)
     assert "小明: 你好 世界 🌍 &amp;lt;tag&amp;gt;" in user
@@ -122,9 +129,11 @@ async def test_batch_empty_message_keeps_count_and_visible_record_consistent() -
     client = FakeLLMClient(responses=[json.dumps({"reasoning": "r", "boundaries": []})])
     message = _msg(0).model_copy(update={"content": "", "timestamp": 0})
 
-    await adetect_boundaries([message], llm=client)
+    await BoundaryDetector(llm=client).adetect_batch([message])
 
-    assert str(client.calls[0].messages[1].content) == '<messages count="1">\n[0] [empty message]\n</messages>'
+    assert str(client.calls[0].messages[1].content) == (
+        "<messages>\n[0] [empty message]\n</messages>\n\n<message_count>\n1\n</message_count>"
+    )
 
 
 def test_step_retains_raw_multiline_text_and_skips_empty_messages() -> None:

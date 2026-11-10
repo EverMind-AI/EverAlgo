@@ -36,12 +36,12 @@ everalgo/                              # monorepo, uv virtual workspace
 ├── examples/                          # runnable quickstart scripts (01–07, use FakeLLMClient)
 ├── packages/
 │   ├── everalgo-core/                 # llm (contract), types, utils, testing
-│   ├── everalgo-boundary/             # BoundaryDetector + adetect_boundaries / detect_boundaries + DetectionResult + workspace stub
+│   ├── everalgo-boundary/             # BoundaryDetector (adetect_batch / adetect_step → Cuts) + to_memcells + workspace stub
 │   ├── everalgo-clustering/           # cluster_by_geometry / acluster_by_llm over list[Cluster]
 │   ├── everalgo-rank/                 # retrieval strategies + business rankers + ranking toolkit
 │   ├── everalgo-parser/               # multimodal raw-file → ParsedContent (video deferred)
-│   ├── everalgo-user-memory/          # Episode / Foresight / AtomicFact / Profile + BoundaryDetector re-export
-│   ├── everalgo-agent-memory/         # AgentCase / AgentSkill / AgentProfileUpdate + BoundaryDetector re-export
+│   ├── everalgo-user-memory/          # Episode / Foresight / AtomicFact / Profile + boundary re-exports
+│   ├── everalgo-agent-memory/         # AgentCase / AgentSkill / AgentProfileUpdate + boundary re-exports
 │   └── everalgo-knowledge/            # KnowledgeExtractor + aclassify_category (file-based knowledge extraction)
 ├── benchmarks/                        # internal LoCoMo benchmark suite ([tool.uv] package = false, not published)
 └── tests/
@@ -183,8 +183,8 @@ Reference: [uv workspace documentation](https://docs.astral.sh/uv/concepts/proje
 
 The full rationale lives in `docs/concepts/architecture.md`. Hard rules:
 
-- **Naming contract — an `a` prefix always means async.** Methods named `aextract` / `arank` / `adetect` / `aparse` are **native async**; call them with `await`. Most names without the prefix are synchronous: `count_tokens` / `rrf` / `cluster_by_geometry` are pure compute, while `extract` / `rank` / `detect` / `parse` may be blocking `async_to_sync` bridges over I/O. `LLMClient.achat`, `adetect_boundaries` and `acluster_by_llm` follow the rule like every operator. Never call a sync bridge from a running event loop.
-- **I/O operators: async-first; sync bridge where exposed.** Native async implementations use `asyncio`. Most high-level class operators and retrieval functions derive a sync convenience method through `asgiref.async_to_sync`, and low-level `adetect_boundaries` / `acluster_by_llm` have `detect_boundaries` / `cluster_by_llm` bridges. The `LLMClient` protocol has only `achat`: hosts implement it, and operators call it from async code. Never call a sync bridge from inside a running event loop.
+- **Naming contract — an `a` prefix always means async.** Methods named `aextract` / `arank` / `adetect_batch` / `aparse` are **native async**; call them with `await`. Most names without the prefix are synchronous: `count_tokens` / `rrf` / `cluster_by_geometry` / `to_memcells` are pure compute, while `extract` / `rank` / `detect_batch` / `parse` may be blocking `async_to_sync` bridges over I/O. `LLMClient.achat` and `acluster_by_llm` follow the rule like every operator. Never call a sync bridge from a running event loop.
+- **I/O operators: async-first; sync bridge where exposed.** Native async implementations use `asyncio`. Most high-level class operators and retrieval functions derive a sync convenience method through `asgiref.async_to_sync`, and the low-level `acluster_by_llm` has a `cluster_by_llm` bridge. The `LLMClient` protocol has only `achat`: hosts implement it, and operators call it from async code. Never call a sync bridge from inside a running event loop.
 - **Pure-compute operators: sync only.** No async wrapper for `fusion.rrf`, `everalgo.utils.count_tokens`, clustering distances, etc. Mirrors numpy / scipy / sklearn / pandas conventions.
 - **Prompts as Python string modules.** Concrete prompt strings live in `<subpkg>/prompts/{en,zh}/<name>.py` as module-level constants. Editing a prompt = editing a `.py` file. No external `.md` / `.yaml` / `.toml` prompt stores. Caller customisation: per-call `custom_instructions=` (fine-grained; the text is sent verbatim as a `<custom_instructions>` block that closes the system message, appended to the bundled rules, never rendered as a template) or monkey-patching the module constant at startup (coarse-grained). No operator takes a `prompt=` that replaces the bundled rules, because a replacement would also drop the reply shape the operator parses; the one `prompt=` left is `arerank`'s, a required rules template with no bundled default. The operator always renders the data into the user message.
 - **Prompt 文本审核。** 新建或修改 Prompt、动态输入组装、附加指令或模型可见输出约束时，必须遵循 [Prompt 文本审核标准](docs/prompt-review-standard.md)，审核受影响的完整请求并记录结论；本文件只引用该标准，不复制规则正文。未修改的历史 Prompt 不要求批量迁移。文本审核不能替代目标模型的效果、输出 token 和耗时验证。

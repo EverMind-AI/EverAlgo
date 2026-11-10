@@ -1,6 +1,6 @@
 # everalgo-agent-memory
 
-Agent-side memory products for EverAlgo — `AgentCaseExtractor` distils an agent trajectory `MemCell` into one `AgentCase`; `AgentSkillExtractor` maintains a cluster's reusable skill set from accumulated cases; `AgentProfileExtractor` proposes precision-first section-level patches to the agent's injected config files (SOUL.md / AGENTS.md). `BoundaryDetector`, re-exported unchanged from `everalgo-boundary`, cuts mixed `ConversationItem` trajectories (chat + tool calls) into `MemCell`s.
+Agent-side memory products for EverAlgo — `AgentCaseExtractor` distils an agent trajectory `MemCell` into one `AgentCase`; `AgentSkillExtractor` maintains a cluster's reusable skill set from accumulated cases; `AgentProfileExtractor` proposes precision-first section-level patches to the agent's injected config files (SOUL.md / AGENTS.md). `BoundaryDetector`, re-exported unchanged from `everalgo-boundary` with `Cuts` and `to_memcells`, cuts mixed `ConversationItem` trajectories (chat + tool calls): its `Cuts` index the whole trajectory, and `to_memcells` turns them into `MemCell`s.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -17,7 +17,8 @@ pip install everalgo-agent-memory
 |---|---|
 | `AgentCaseExtractor` | Distils one agent-trajectory `MemCell` into `[] \| [AgentCase]` (11-step pipeline) |
 | `AgentSkillExtractor` | Aggregates one new `AgentCase` into incremental skill operations for a cluster; returns add / update / retire entries |
-| `BoundaryDetector` | `everalgo.boundary.BoundaryDetector`, re-exported: boundary detection on agent trajectories; only chat messages reach the model, tool items stay in the cells |
+| `BoundaryDetector` | `everalgo.boundary.BoundaryDetector`, re-exported: boundary detection on agent trajectories; only chat messages reach the model, and the returned `Cuts` index every item, tool items included |
+| `Cuts` / `to_memcells` | `everalgo.boundary`'s result type and helper, re-exported: `to_memcells(items, cuts)` builds the cells, tool items kept in place |
 | `AgentProfileExtractor` | Screens one trajectory `MemCell` for durable agent-config signals (four-gate, default noop) and returns validated section-level SOUL.md / AGENTS.md patches + unified diffs |
 
 ## Quick start
@@ -68,15 +69,21 @@ See [`examples/04_agent_memory_case.py`](../../examples/04_agent_memory_case.py)
 ```python
 class BoundaryDetector:  # everalgo.boundary.BoundaryDetector, re-exported
     def __init__(self, *, llm: LLMClient) -> None: ...
-    async def adetect(
+    async def adetect_batch(
         self, items: Sequence[ConversationItem], *, is_final: bool = False, custom_instructions: str | None = None,
-        hard_token_limit: int = 65_536, hard_msg_limit: int = 500, tz: tzinfo = UTC,
-    ) -> DetectionResult: ...
+        tz: tzinfo = UTC, hard_token_limit: int = 65_536, hard_message_limit: int = 500,
+    ) -> Cuts: ...
     async def adetect_step(
-        self, history: list[ChatMessage], new: ChatMessage, *, smart_mask: bool = True, smart_mask_threshold: int = 5,
-        hard_token_limit: int = 65_536, hard_message_limit: int = 500, custom_instructions: str | None = None,
-        tz: tzinfo = UTC,
-    ) -> DetectionResult: ...
+        self, items: Sequence[ChatMessage], *, custom_instructions: str | None = None, tz: tzinfo = UTC,
+        warmup_messages: int = 2, smart_mask: bool = True, smart_mask_threshold: int = 5,
+        hard_token_limit: int = 8_192, hard_message_limit: int = 50,
+    ) -> Cuts: ...
+
+class Cuts(NamedTuple):  # everalgo.boundary.Cuts, re-exported
+    ends: list[int]  # segment i is items[ends[i-1]:ends[i]], the first starting at 0
+    tail_start: int  # carry items[tail_start:] into the next call
+
+def to_memcells(items: Sequence[ConversationItem], cuts: Cuts) -> list[MemCell]: ...  # everalgo.boundary, re-exported
 
 class AgentCaseExtractor:
     def __init__(
@@ -192,7 +199,7 @@ There is no per-call prompt override.
 
 ## Related distributions
 
-- [`everalgo-boundary`](../everalgo-boundary/) — defines `BoundaryDetector`
+- [`everalgo-boundary`](../everalgo-boundary/) — defines `BoundaryDetector`, `Cuts` and `to_memcells`
 - [`everalgo-clustering`](../everalgo-clustering/) — `acluster_by_llm` for skill-cluster assignment
 - [`everalgo-rank`](../everalgo-rank/) — `CaseRanker` / `SkillRanker` for read-time ranking
 

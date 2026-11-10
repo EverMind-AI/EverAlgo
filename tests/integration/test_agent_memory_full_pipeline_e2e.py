@@ -10,7 +10,7 @@ across 5 stages and asserts:
    the cluster's supporting_cases fan-in
 
 Pipeline stages:
-1. BoundaryDetector.adetect(items)         → MemCell          (1 LLM call: boundary)
+1. BoundaryDetector.adetect_batch(items)   → Cuts → MemCell   (1 LLM call: boundary)
 2. AgentCaseExtractor.aextract(mc)         → [AgentCase]      (2 LLM calls: case_filter + case_compress)
    [acluster_by_llm step — no LLM call; both invocations fast-path past LLM]
 3. AgentSkillExtractor.aextract(case, ...) → [AgentSkill]     (2 LLM calls: skill_extract + skill_maturity)
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from everalgo.agent_memory import AgentCaseExtractor, AgentSkillExtractor, BoundaryDetector
+from everalgo.agent_memory import AgentCaseExtractor, AgentSkillExtractor, BoundaryDetector, to_memcells
 from everalgo.clustering import Cluster, acluster_by_llm
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import (
@@ -184,10 +184,12 @@ async def test_agent_memory_full_pipeline_e2e() -> None:
     fake, captured = _make_capturing_client()
 
     # --- 1. Boundary -------------------------------------------------------
-    boundary_output = await BoundaryDetector(llm=fake).adetect(_agent_trajectory(), is_final=True)
-    assert boundary_output.tail == [], "expected no tail in is_final=True mode"
-    assert len(boundary_output.cells) == 1, "expected exactly one MemCell from a single-topic trajectory"
-    mc = boundary_output.cells[0]
+    trajectory = _agent_trajectory()
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(trajectory, is_final=True)
+    assert trajectory[cuts.tail_start :] == [], "expected no tail in is_final=True mode"
+    cells = to_memcells(trajectory, cuts)
+    assert len(cells) == 1, "expected exactly one MemCell from a single-topic trajectory"
+    mc = cells[0]
 
     # MemCell preserves ALL 4 items (user_chat + tool_call + tool_result + assistant_chat)
     assert len(mc.items) == 4, "MemCell must preserve the full trajectory, including tool calls"

@@ -1,24 +1,31 @@
-"""Tests for BoundaryDetector.adetect_step — the incremental path (93 incremental mirror).
+"""Tests for BoundaryDetector.adetect_step — the step path (the EverAlgo LoCoMo reference run's incremental loop).
 
-``adetect_step`` returns :class:`DetectionResult` (``cells, tail``):
+``adetect_step(items)`` judges the last item against the history before it and returns one of three ``Cuts``:
 
-- ``cells`` carries the 0-or-1 closed MemCell.
-- ``tail`` carries the new history the caller must feed back into the next call,
-  encapsulating the cut-and-bridge (``[history[-1], new]`` under smart-mask,
-  ``[new]`` for a clean cut) or the accumulation (``[*history, new]``).
+- ``Cuts([], 0)`` — no cut: the new message joins the history (warmup and an empty shown history included);
+- ``Cuts([n], n)`` — the ``n``-message history closes, the new message starts the next segment;
+- ``Cuts([n], n - 1)`` — the history closes and its last message, which the model was not shown, is bridged into
+  the next segment as well.
+
+A model cut and a hard-limit cut have the same shape.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic import ValidationError
 
-from everalgo.boundary import BoundaryDetector
-from everalgo.boundary._segments import _calculate_time_gap
+from everalgo.boundary import BoundaryDetector, Cuts, to_memcells
+from everalgo.boundary._render import _calculate_time_gap
+from everalgo.boundary._replies import _StepReply
+from everalgo.llm import LLMOutputError
 from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.types import ChatMessage, MemCell
+from everalgo.types import ChatMessage, ToolCallResult
+from everalgo.utils import InvalidInputError
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMMessage
@@ -35,151 +42,274 @@ def _msg(idx: int, content: str = "hello world") -> ChatMessage:
     )
 
 
-def _ok_response(*, should_end: bool = False, topic_summary: str = "") -> str:
-    return json.dumps(
-        {
-            "should_end": should_end,
-            "reasoning": "ok",
-            "confidence": 1.0,
-            "topic_summary": topic_summary,
-        }
-    )
+def _items(count: int) -> list[ChatMessage]:
+    """``count - 1`` history messages followed by the new one."""
+    return [_msg(i, f"text {i}") for i in range(count)]
 
 
-async def test_force_split_on_msg_limit_no_llm_call() -> None:
-    """93 :416-470 — total messages >= hard_message_limit → cut without LLM.
-
-    With smart_mask active (default), force-split tail bridges ``[history[-1], new]``;
-    pass ``smart_mask=False`` for a clean cut.
-    """
-    detector = BoundaryDetector(llm=FakeLLMClient(responses=[]))
-    history = [_msg(i) for i in range(60)]
-    new = _msg(99)
-    result = await detector.adetect_step(history, new, hard_message_limit=50)
-    assert len(result.cells) == 1
-    assert isinstance(result.cells[0], MemCell)
-    assert result.tail == [history[-1], new]
-
-    # smart_mask=False → clean cut, no bridge.
-    detector_no_mask = BoundaryDetector(llm=FakeLLMClient(responses=[]))
-    result_no_mask = await detector_no_mask.adetect_step(history, new, smart_mask=False, hard_message_limit=50)
-    assert result_no_mask.tail == [new]
+def _reply(*, should_end: bool) -> str:
+    return json.dumps({"reasoning": "ok", "should_end": should_end})
 
 
-async def test_force_split_when_history_too_short_falls_through_to_llm() -> None:
-    """93 :472-478 — needs_force_split but history < 2 → still call LLM, not force-cut.
+async def _step(items: list[ChatMessage], *replies: str, **kwargs: Any) -> tuple[Cuts, FakeLLMClient]:
+    fake = FakeLLMClient(responses=list(replies))
+    return await BoundaryDetector(llm=fake).adetect_step(items, **kwargs), fake
 
-    With ``should_end=False`` from the LLM, tail accumulates ``[*history, new]``.
-    """
-    payload = _ok_response(should_end=False)
-    fake = FakeLLMClient(responses=[payload])
-    detector = BoundaryDetector(llm=fake)
-    # history has 1 huge message, would trip token limit but len(history) < 2
-    huge = ChatMessage(
-        id="big",
-        role="user",
-        content="x" * 100_000,
-        timestamp=1_700_000_000_000,
-        sender_id="u0",
-        sender_name=None,
-    )
-    new = _msg(1)
-    result = await detector.adetect_step([huge], new, hard_token_limit=100)
-    # Falls through to LLM because len(history) == 1 < 2; LLM says not should_end
-    assert result.cells == []
-    assert result.tail == [huge, new]
+
+def _shown_history(fake: FakeLLMClient) -> str:
+    user = str(fake.calls[0].messages[1].content)
+    return user.split("<conversation_history>\n", 1)[1].split("\n</conversation_history>", 1)[0]
+
+
+# ── The three outcomes ───────────────────────────────────────────────────────────────────────────────
+
+
+async def test_no_cut_keeps_everything_for_the_next_call() -> None:
+    items = _items(3)
+
+    cuts, fake = await _step(items, _reply(should_end=False))
+
+    assert cuts == Cuts(ends=[], tail_start=0)
+    assert to_memcells(items, cuts) == []
+    assert items[cuts.tail_start :] == items
     assert fake.call_count == 1
 
 
-async def test_smart_mask_excludes_last_history_message_from_prompt() -> None:
-    """93 :481-485 — smart-mask sends history[:-1] to LLM, cut bridges history[-1] forward.
+async def test_cut_without_bridge_closes_the_history_and_starts_at_the_new_message() -> None:
+    items = _items(4)
 
-    With ``len(history) = 4 > smart_mask_threshold=3`` smart-mask is active.
-    On ``should_end`` the tail must be ``[history[-1], new]`` (bridge), not ``[new]``.
-    """
+    cuts, fake = await _step(items, _reply(should_end=True))
+
+    assert cuts == Cuts(ends=[3], tail_start=3)
+    assert [cell.items for cell in to_memcells(items, cuts)] == [items[:3]]
+    assert items[cuts.tail_start :] == [items[3]]
+    assert _shown_history(fake).count("\n") == 2, "the whole history is shown"
+
+
+async def test_cut_with_bridge_carries_the_masked_message_into_the_next_segment() -> None:
+    """Above the threshold the model is not shown the history's last message; a cut bridges it forward."""
+    items = _items(8)
+
+    cuts, fake = await _step(items, _reply(should_end=True))
+
+    assert cuts == Cuts(ends=[7], tail_start=6)
+    assert [cell.items for cell in to_memcells(items, cuts)] == [items[:7]]
+    assert items[cuts.tail_start :] == [items[6], items[7]]
+    shown = _shown_history(fake)
+    assert "text 5" in shown
+    assert "text 6" not in shown
+
+
+@pytest.mark.parametrize(("count", "expected"), [(6, Cuts([5], 5)), (7, Cuts([6], 5))], ids=["n=5", "n=6"])
+async def test_the_bridge_starts_above_the_threshold(count: int, expected: Cuts) -> None:
+    cuts, _ = await _step(_items(count), _reply(should_end=True))
+
+    assert cuts == expected
+
+
+async def test_without_smart_mask_the_model_sees_everything_and_nothing_is_bridged() -> None:
+    items = _items(8)
+
+    cuts, fake = await _step(items, _reply(should_end=True), smart_mask=False)
+
+    assert cuts == Cuts(ends=[7], tail_start=7)
+    assert "text 6" in _shown_history(fake)
+
+
+async def test_the_masked_history_sets_the_time_gap() -> None:
+    """The gap runs from the last message the model is shown to the new one."""
+    items = [_msg(i) for i in range(7)]
+    items[-1] = items[-1].model_copy(update={"timestamp": items[-2].timestamp + 30_000})
+
+    _, fake = await _step(items, _reply(should_end=False))
+
+    assert "<time_gap>\nTime gap: 1 minutes (recent conversation)\n</time_gap>" in str(
+        fake.calls[0].messages[1].content
+    )
+
+
+# ── Warmup ───────────────────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("count", [1, 2])
+async def test_a_history_shorter_than_the_warmup_takes_the_new_message_without_the_model(count: int) -> None:
+    cuts, fake = await _step(_items(count))
+
+    assert cuts == Cuts(ends=[], tail_start=0)
+    assert fake.call_count == 0
+
+
+async def test_the_first_judgement_comes_at_the_warmup_length() -> None:
+    _, fake = await _step(_items(3), _reply(should_end=False))
+
+    assert fake.call_count == 1
+
+
+async def test_the_warmup_is_a_keyword() -> None:
+    _, fake = await _step(_items(2), _reply(should_end=False), warmup_messages=1)
+
+    assert fake.call_count == 1
+
+
+async def test_an_empty_shown_history_is_never_put_to_the_model() -> None:
+    """Masking a one-message history leaves nothing to show; the first message cannot end an episode."""
+    cuts, fake = await _step(_items(2), warmup_messages=0, smart_mask_threshold=0)
+
+    assert cuts == Cuts(ends=[], tail_start=0)
+    assert fake.call_count == 0
+
+
+# ── Hard limits ──────────────────────────────────────────────────────────────────────────────────────
+
+
+async def test_force_split_on_message_limit_cuts_without_the_model() -> None:
+    items = _items(11)
+
+    cuts, fake = await _step(items, hard_message_limit=10)
+    no_mask, _ = await _step(items, hard_message_limit=10, smart_mask=False)
+
+    assert cuts == Cuts(ends=[10], tail_start=9), "bridged: the history is longer than the threshold"
+    assert no_mask == Cuts(ends=[10], tail_start=10)
+    assert fake.call_count == 0
+
+
+async def test_force_split_on_token_limit_cuts_without_the_model() -> None:
+    items = [*_items(2), _msg(2, "word " * 200)]
+
+    cuts, fake = await _step(items, hard_token_limit=100)
+
+    assert cuts == Cuts(ends=[2], tail_start=2)
+    assert fake.call_count == 0
+
+
+async def test_force_split_with_a_too_short_history_falls_through_to_the_model() -> None:
+    """A single oversized history message is never cut alone: the model still decides."""
+    items = [_msg(0, "x" * 100_000), _msg(1)]
+
+    cuts, fake = await _step(items, _reply(should_end=False), warmup_messages=1, hard_token_limit=100)
+
+    assert cuts == Cuts(ends=[], tail_start=0)
+    assert fake.call_count == 1
+
+
+# ── Input contract ───────────────────────────────────────────────────────────────────────────────────
+
+
+async def test_empty_items_are_refused() -> None:
+    with pytest.raises(InvalidInputError, match=r"^adetect_step got no items: "):
+        await _step([])
+
+
+@pytest.mark.parametrize("position", [0, 2])
+async def test_a_tool_item_is_refused_wherever_it_is(position: int) -> None:
+    items: list[Any] = _items(3)
+    items[position] = ToolCallResult(tool_call_id="c1", content="result", timestamp=1_700_000_000_000)
+    fake = FakeLLMClient(responses=[])
+
+    with pytest.raises(
+        InvalidInputError, match=rf"^adetect_step item {position} is a ToolCallResult, not a ChatMessage"
+    ):
+        await BoundaryDetector(llm=fake).adetect_step(items)
+
+    assert fake.call_count == 0
+
+
+# ── The model call ───────────────────────────────────────────────────────────────────────────────────
+
+
+async def test_the_call_requests_the_step_reply_model() -> None:
+    _, fake = await _step(_items(3), _reply(should_end=False))
+
+    assert [call.response_format for call in fake.calls] == [_StepReply]
+
+
+async def test_a_prompt_only_reply_with_only_should_end_is_accepted() -> None:
+    """Only ``should_end`` decides a cut; ``reasoning`` defaults to ``""`` as the measured parser filled it."""
+    cuts, _ = await _step(_items(3), json.dumps({"should_end": True}))
+
+    assert cuts == Cuts(ends=[2], tail_start=2)
+
+
+_SECRET = "STEP-SECRET-9b2d"
+_VALID = {"reasoning": _SECRET, "should_end": False}
+
+
+class _ClientError(Exception):
+    """A host's own call-failure type, which the operator must neither wrap nor retype."""
+
+
+@pytest.mark.parametrize(
+    ("reply", "failing_location"),
+    [
+        pytest.param(f"junk {_SECRET}", "<root>", id="not-json"),
+        pytest.param(json.dumps({**_VALID, "note": "x"}), "note:", id="extra-field-forbidden"),
+        pytest.param(json.dumps({**_VALID, "confidence": 0.7}), "confidence:", id="removed-confidence-forbidden"),
+        pytest.param(
+            json.dumps({**_VALID, "topic_summary": ""}), "topic_summary:", id="removed-topic-summary-forbidden"
+        ),
+        pytest.param(
+            json.dumps({k: v for k, v in _VALID.items() if k != "should_end"}),
+            "should_end:",
+            id="should-end-missing",
+        ),
+        pytest.param(json.dumps({**_VALID, "should_end": "false"}), "should_end:", id="string-bool-not-coerced"),
+    ],
+)
+async def test_fails_loud_on_bad_llm_response(reply: str, failing_location: str) -> None:
+    """Algorithm fails loud on first bad response — caller owns retry/fallback policy."""
+    fake = FakeLLMClient(responses=[reply])
+
+    with pytest.raises(LLMOutputError) as excinfo:
+        await BoundaryDetector(llm=fake).adetect_step(_items(3))
+
+    assert isinstance(excinfo.value.__cause__, ValidationError)
+    assert "boundary step reply is not a valid _StepReply" in str(excinfo.value)
+    assert failing_location in str(excinfo.value)
+    assert _SECRET not in str(excinfo.value)
+    assert fake.call_count == 1
+
+
+async def test_client_exception_propagates_unchanged() -> None:
+    error = _ClientError("upstream down")
+
+    with pytest.raises(_ClientError) as excinfo:
+        await BoundaryDetector(llm=FakeLLMClient(responses=[error])).adetect_step(_items(3))
+
+    assert excinfo.value is error
+
+
+async def test_step_reply_is_logged_without_content(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO, logger="everalgo.boundary"):
+        await _step(_items(3), json.dumps(_VALID))
+
+    assert caplog.messages == ["boundary step reply: should_end=False"]
+    assert _SECRET not in caplog.text
+
+
+async def test_a_cut_logs_one_info_line_and_no_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """The reply carries no topic summary any more, so nothing warns about a missing one."""
+    with caplog.at_level(logging.INFO, logger="everalgo.boundary"):
+        await _step(_items(3), json.dumps({"should_end": True}))
+
+    assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
+        ("INFO", "boundary step reply: should_end=True"),
+    ]
+
+
+async def test_the_shown_history_is_rendered_into_the_prompt() -> None:
     captured: dict[str, Any] = {}
 
     def handler(messages: list[LLMMessage], **_: Any) -> str:
         captured["content"] = messages[1].content
-        return json.dumps(
-            {
-                "should_end": True,
-                "reasoning": "topic shift",
-                "confidence": 0.9,
-                "topic_summary": "Discussion",
-            }
-        )
+        return _reply(should_end=False)
 
-    fake = FakeLLMClient(handler=handler)
-    detector = BoundaryDetector(llm=fake)
-    history = [_msg(0, "alpha"), _msg(1, "beta"), _msg(2, "gamma"), _msg(3, "delta")]
-    new = _msg(4, "epsilon")
-    result = await detector.adetect_step(history, new, smart_mask=True, smart_mask_threshold=3)
-    # The closed cell covers the full history (smart-mask only masks the prompt, not the cell).
-    assert len(result.cells) == 1
-    assert len(result.cells[0].items) == 4
-    # Smart-mask cut-and-bridge: tail starts with history[-1] ("delta") then the new msg ("epsilon").
-    assert result.tail == [history[-1], new]
-    # User message verification: history[:-1] = [m0,m1,m2]; "delta" is excluded.
+    await BoundaryDetector(llm=FakeLLMClient(handler=handler)).adetect_step(
+        [_msg(0, "alpha"), _msg(1, "beta"), _msg(2, "gamma")]
+    )
+
     assert "alpha" in captured["content"]
     assert "beta" in captured["content"]
-    assert "gamma" in captured["content"]
-    assert "delta" not in captured["content"]
-
-
-async def test_keep_waiting_returns_empty_cells_and_accumulated_tail() -> None:
-    """``not should_end`` → no cells emitted; tail accumulates ``[*history, new]``.
-
-    Threshold high enough to disable smart-mask (clean path).
-    """
-    payload = _ok_response(should_end=False)
-    fake = FakeLLMClient(responses=[payload])
-    detector = BoundaryDetector(llm=fake)
-    history = [_msg(0), _msg(1)]
-    new = _msg(2)
-    result = await detector.adetect_step(history, new, smart_mask=True, smart_mask_threshold=100)
-    assert result.cells == []
-    assert result.tail == [*history, new]
-    assert fake.call_count == 1
-
-
-async def test_should_end_without_smart_mask_clean_cut_tail() -> None:
-    """``should_end`` without smart-mask → tail is just ``[new]`` (no history bridge).
-
-    ``smart_mask=False`` bypasses the threshold entirely.
-    """
-    payload = _ok_response(should_end=True, topic_summary="Discussion topic")
-    fake = FakeLLMClient(responses=[payload])
-    detector = BoundaryDetector(llm=fake)
-    history = [_msg(0), _msg(1), _msg(2)]
-    new = _msg(3)
-    result = await detector.adetect_step(history, new, smart_mask=False)
-    assert len(result.cells) == 1
-    # Cell carries the full history; bridge happens in tail only.
-    assert len(result.cells[0].items) == 3
-    assert result.tail == [new]
-
-
-def test_sync_bridge_exists() -> None:
-    """detect_step = async_to_sync(adetect_step) — usable from non-event-loop callers."""
-    detector = BoundaryDetector(llm=FakeLLMClient(responses=[]))
-    assert hasattr(detector, "detect_step")
-    assert callable(detector.detect_step)
-
-
-@pytest.mark.parametrize("should_end", [False, True])
-async def test_step_result_contains_only_cells_and_tail(*, should_end: bool) -> None:
-    detector = BoundaryDetector(llm=FakeLLMClient(responses=[_ok_response(should_end=should_end, topic_summary="T")]))
-    history = [_msg(0), _msg(1)]
-    new = _msg(2)
-
-    result = await detector.adetect_step(history, new)
-    cells, tail = result
-
-    assert result._fields == ("cells", "tail")
-    assert not hasattr(result, "tail_complete")
-    assert [cell.items for cell in cells] == ([history] if should_end else [])
-    assert tail == ([new] if should_end else [*history, new])
+    assert "<new_messages>\n[2023-11-14 22:14 UTC (Tuesday)] u2: gamma\n</new_messages>" in captured["content"]
 
 
 # ===========================================================================
@@ -198,10 +328,17 @@ async def test_step_result_contains_only_cells_and_tail(*, should_end: bool) -> 
         (86_399_999, "Time gap: 23 hours (same day, but significant pause)"),
         (93_600_000, "Time gap: 1 days (long gap, likely new conversation)"),
         (172_800_000, "Time gap: 2 days (long gap, likely new conversation)"),
+        (-1_000, "Time gap: Messages appear to be out of order"),
     ],
 )
 def test_time_gap_uses_the_reference_labels(gap_ms: int, expected: str) -> None:
     """The step prompt keeps the reference run's wording byte for byte, ``1 minutes`` included."""
     before, after = _msg(0), _msg(1)
     after = after.model_copy(update={"timestamp": before.timestamp + gap_ms})
-    assert _calculate_time_gap([before], [after]) == expected
+    assert _calculate_time_gap(before, after) == expected
+
+
+def test_time_gap_reads_a_zero_timestamp_as_missing() -> None:
+    assert _calculate_time_gap(_msg(0).model_copy(update={"timestamp": 0}), _msg(1)) == (
+        "No timestamp information available"
+    )

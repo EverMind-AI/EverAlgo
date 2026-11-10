@@ -1,7 +1,8 @@
 """Checks that the ``everalgo.boundary`` modules import one another in one direction only.
 
-``_detector`` sits over ``_segments``, ``_render``, ``_replies`` and the prompts; ``_segments`` over ``_render``;
-``_render`` and ``_replies`` over no sibling; ``__init__`` re-exports from ``_detector`` alone.
+``_detector`` sits over ``_cuts``, ``_segments``, ``_render``, ``_replies`` and the prompts; ``_segments`` over
+``_render``; ``_cuts``, ``_render`` and ``_replies`` over no sibling; ``__init__`` re-exports from ``_cuts`` and
+``_detector``.
 
 Imports are read from the source with ``ast``, so a check needs nothing importable beyond the package's location.
 """
@@ -18,8 +19,9 @@ _PACKAGE_DIR = Path(boundary_package.__file__).parent
 
 #: The sibling modules each top-level module may import.
 _ALLOWED_SIBLINGS: dict[str, frozenset[str]] = {
-    "__init__": frozenset({"_detector"}),
-    "_detector": frozenset({"_segments", "_render", "_replies", "prompts.en.chat"}),
+    "__init__": frozenset({"_cuts", "_detector"}),
+    "_cuts": frozenset(),
+    "_detector": frozenset({"_cuts", "_segments", "_render", "_replies", "prompts.en.chat"}),
     "_segments": frozenset({"_render"}),
     "_render": frozenset(),
     "_replies": frozenset(),

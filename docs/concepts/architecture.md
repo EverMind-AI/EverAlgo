@@ -45,8 +45,8 @@ Every product operator in EverAlgo contributes to one of two axes. Both axes are
 
 **Extract** has several composable product flows rather than one universal two-stage pipeline:
 
-- User conversations: `BoundaryDetector.adetect` produces `MemCell` segments; user-memory extractors produce `Episode`, `Foresight`, `AtomicFact`, or `Profile`, `EpisodeReflector` can merge episodes, and `EpisodeSummarizer` writes the summary of an episode text already stored.
-- Agent trajectories: the same `BoundaryDetector.adetect` produces mixed-item `MemCell` segments, keeping tool calls and results in the cells while only chat messages reach the model. `AgentCaseExtractor` distils one segment into an `AgentCase`; `AgentSkillExtractor` combines a case with caller-supplied existing skills and supporting cases; `AgentProfileExtractor` screens a segment for config updates.
+- User conversations: `BoundaryDetector.adetect_batch` (one window) or `adetect_step` (one message at a time) returns `Cuts`, indices into the caller's input, and `to_memcells` turns them into `MemCell` segments; user-memory extractors produce `Episode`, `Foresight`, `AtomicFact`, or `Profile`, `EpisodeReflector` can merge episodes, and `EpisodeSummarizer` writes the summary of an episode text already stored.
+- Agent trajectories: the same `BoundaryDetector.adetect_batch` cuts mixed-item trajectories, its `Cuts` indexing the tool calls and results too, so `to_memcells` keeps them in the cells while only chat messages reach the model. `AgentCaseExtractor` distils one segment into an `AgentCase`; `AgentSkillExtractor` combines a case with caller-supplied existing skills and supporting cases; `AgentProfileExtractor` screens a segment for config updates.
 - Raw files and URLs: `everalgo.parser.aparse` produces `ParsedContent`; `KnowledgeExtractor` produces `KnowledgeMemory`.
 
 **Retrieve / Rank** has two public layers that coexist:
@@ -107,7 +107,7 @@ Sibling distributions at the same layer do not depend on each other (e.g. `user-
 
 | Subpackage | Role |
 |---|---|
-| `boundary` | `BoundaryDetector` (batch and incremental paths) and its function primitives, plus an unimplemented workspace placeholder; `user_memory` and `agent_memory` re-export the class |
+| `boundary` | `BoundaryDetector` (batch and step paths, both returning `Cuts`) and the `to_memcells` helper, plus an unimplemented workspace placeholder; `user_memory` and `agent_memory` re-export all three |
 | `clustering` | `cluster_by_geometry` / `acluster_by_llm` operating on caller-owned `list[Cluster]` |
 | `rank` | 4 retrieval strategies (`hybrid` / `agentic` / `cluster` / `maxsim`) + category-aware retrieval + 4 business facades (`episodic` / `profile` / `case` / `skill`) + algorithm tools (`fusion` / `weight` / `rerank`) |
 | `parser` | Multimodal raw-file → `ParsedContent` (OCR, ASR, document layout, URL fetch) |
@@ -125,18 +125,18 @@ Sibling distributions at the same layer do not depend on each other (e.g. `user-
 
 ## 4. Product facades and low-level primitives
 
-Physical layout follows algorithm responsibility. Product packages expose scenario-specific facade classes, while tool packages expose lower-level primitives. Boundary detection is one algorithm for both scenarios, so it is one class, `BoundaryDetector`, defined in the boundary package next to the function primitives it binds; both product packages re-export it with no logic of their own:
+Physical layout follows algorithm responsibility. Product packages expose scenario-specific facade classes, while tool packages expose lower-level primitives. Boundary detection is one algorithm for both scenarios, so it is one class, `BoundaryDetector`, defined in the boundary package and the only way into it: one method per path, each implementing its whole algorithm, with the single model calls kept private. Both product packages re-export it, its `Cuts` result type and the `to_memcells` helper with no logic of their own:
 
 ```python
-# Defining package: the class and its function primitives.
-from everalgo.boundary import BoundaryDetector, adetect_boundaries
+# Defining package: the only entry, its result type and the helper that builds MemCells.
+from everalgo.boundary import BoundaryDetector, Cuts, to_memcells
 
-# Product re-exports — the same class object.
-from everalgo.user_memory import BoundaryDetector
-from everalgo.agent_memory import BoundaryDetector
+# Product re-exports — the same objects.
+from everalgo.user_memory import BoundaryDetector, Cuts, to_memcells
+from everalgo.agent_memory import BoundaryDetector, Cuts, to_memcells
 ```
 
-`BoundaryDetector.adetect` forwards to `adetect_boundaries`, which takes any `ConversationItem` list: only the `ChatMessage` items reach the model, and tool calls and tool results stay in the returned `MemCell`s, so agent trajectories need no separate facade. `BoundaryDetector.adetect_step` is the incremental path over `ChatMessage` only, built on the `adetect_boundary_step` primitive.
+Both methods return `Cuts(ends, tail_start)`: indices into the input the caller passed, half-open like Python slices, never the content itself. `BoundaryDetector.adetect_batch` takes any `ConversationItem` list: only the `ChatMessage` items reach the model, and the indices count tool calls and tool results too, so `to_memcells` keeps them in the cells and agent trajectories need no separate facade. `BoundaryDetector.adetect_step` is the step path over `ChatMessage` only: it judges the last message against the history before it and owns the whole strategy (warmup, masking, the bridge into the next segment, hard limits); the caller only slices by the returned indices.
 
 ---
 

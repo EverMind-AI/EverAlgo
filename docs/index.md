@@ -14,12 +14,12 @@ EverAlgo provides two symmetric algorithm axes:
 **Extract (write path)** — Turn raw conversation messages or structured inputs into typed memories.
 
 ```python
-from everalgo.user_memory import BoundaryDetector, EpisodeExtractor
+from everalgo.user_memory import BoundaryDetector, EpisodeExtractor, to_memcells
 from everalgo.testing.fake_llm import FakeLLMClient
 
 fake = FakeLLMClient(responses=["..."])
-result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
-episode = await EpisodeExtractor(llm=fake).aextract(result.cells[0], sender_id="u_alice")
+cuts = await BoundaryDetector(llm=fake).adetect_batch(messages, is_final=True)
+episode = await EpisodeExtractor(llm=fake).aextract(to_memcells(messages, cuts)[0], sender_id="u_alice")
 ```
 
 **Retrieve / Rank (read path)** — Compose caller-provided recall functions or rank already-fetched business candidates.
@@ -57,7 +57,7 @@ Install only what your use case needs:
 | Distribution | Purpose |
 |---|---|
 | `everalgo-core` | Types, LLM client + providers, prompt validators, testing helpers |
-| `everalgo-boundary` | `BoundaryDetector` (batch and incremental) and its function primitives + unimplemented workspace placeholder |
+| `everalgo-boundary` | `BoundaryDetector` (batch and step, both returning `Cuts`: indices into the input) + `to_memcells` + unimplemented workspace placeholder |
 | `everalgo-clustering` | `Cluster` value object + `cluster_by_geometry` / `acluster_by_llm` operators |
 | `everalgo-rank` | 4 retrieval strategies (hybrid / agentic / cluster / maxsim) + category-aware retrieval + 4 business rankers (episodic / profile / case / skill) + fusion / weight / rerank tools |
 | `everalgo-parser` | Multimodal raw-file → `ParsedContent` |

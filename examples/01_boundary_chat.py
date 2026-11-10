@@ -1,8 +1,9 @@
 """BoundaryDetector — chat messages → MemCell segmentation.
 
 Demonstrates how a sequence of ``ChatMessage`` objects flows through
-``BoundaryDetector.adetect(...)`` to produce one or more ``MemCell``
-boundary-detection outputs.  Uses ``FakeLLMClient`` so no API key is needed.
+``BoundaryDetector.adetect_batch(...)``, which returns ``Cuts`` (indices into
+the input), and how ``to_memcells`` turns those indices into ``MemCell``
+objects.  Uses ``FakeLLMClient`` so no API key is needed.
 
 Run:
     uv run python examples/01_boundary_chat.py
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, ConversationItem
-from everalgo.user_memory import BoundaryDetector
+from everalgo.user_memory import BoundaryDetector, to_memcells
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMMessage
@@ -77,13 +78,16 @@ async def main() -> None:
     fake = _make_fake()
     messages = _make_messages()
 
-    result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(messages, is_final=True)
+    cells = to_memcells(messages, cuts)
+    tail = messages[cuts.tail_start :]
 
-    print(f"cells produced : {len(result.cells)}")
-    print(f"tail (held back): {len(result.tail)} messages")
+    print(f"cuts           : ends={cuts.ends} tail_start={cuts.tail_start}")
+    print(f"cells produced : {len(cells)}")
+    print(f"tail (held back): {len(tail)} messages")
 
-    if result.cells:
-        first_cell = result.cells[0]
+    if cells:
+        first_cell = cells[0]
         print(f"first cell timestamp : {first_cell.timestamp}")
         print(f"first cell item count: {len(first_cell.items)}")
         item: ConversationItem

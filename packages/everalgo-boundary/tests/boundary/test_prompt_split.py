@@ -1,7 +1,8 @@
-"""Request contracts for episode-only batch detection and the unchanged incremental step path.
+"""Request contracts for the batch and incremental step paths.
 
-The batch prompt and strict schema are frozen to the evaluated release candidate. Step rules retain their
-historical sentence-by-sentence checks. Both paths exercise the assembled system and data messages.
+Both paths judge by the step rule blocks, which keep their historical sentence-by-sentence checks; the batch prompt
+and strict schema are frozen to the version measured on LoCoMo. Both paths exercise the assembled system and data
+messages.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from everalgo.boundary import BoundaryDetector, adetect_boundaries, adetect_boundary_step, detect_boundaries
+from everalgo.boundary import BoundaryDetector
 from everalgo.boundary._replies import Reply, _StepReply
 from everalgo.boundary.prompts.en.chat import (
     BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT,
@@ -124,7 +125,6 @@ _ISO_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}Z")
 _SENTENCE_BREAK = re.compile(r"(?<=\.)\s+(?=[A-Z])")
 _SLOT = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
 _REPLY = re.compile(r"<reply>\n(.*?)\n</reply>", re.DOTALL)
-_EXAMPLE_MESSAGES = re.compile(r'<messages count="(\d+)">\n(.*?)\n</messages>', re.DOTALL)
 _BATCH_LINE = re.compile(r"\[\d+\] \[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \([A-Z][a-z]+day\)\] ")
 _STEP_LINE = re.compile(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \([A-Z][a-z]+day\)\] ")
 
@@ -164,8 +164,7 @@ def _batch_client() -> FakeLLMClient:
 
 
 def _step_client() -> FakeLLMClient:
-    reply = {"reasoning": "r", "should_end": False, "confidence": 0.9, "topic_summary": ""}
-    return FakeLLMClient(responses=[json.dumps(reply)])
+    return FakeLLMClient(responses=[json.dumps({"reasoning": "r", "should_end": False})])
 
 
 def test_step_keeps_its_historical_rule_sentences() -> None:
@@ -184,7 +183,7 @@ def test_step_keeps_its_historical_rule_sentences() -> None:
 def test_batch_request_uses_the_evaluated_prompt_and_schema() -> None:
     """Guard the evaluated contract, including schema metadata visible to the model."""
     assert hashlib.sha256(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT.encode()).hexdigest() == (
-        "9944f7f61b9c1fa444f35b9c878e327fb1249d9dc2eaf555c38534fc93f98d35"
+        "bb78874505b8f0e2c117a643687bf1664ce20acc8bfc83d538f205990fe1a5d2"
     )
     assert to_openai_response_format(Reply) == {
         "type": "json_schema",
@@ -206,13 +205,21 @@ def test_batch_request_uses_the_evaluated_prompt_and_schema() -> None:
     }
 
 
-def test_batch_example_preserves_a_revision_across_days() -> None:
-    """A revision is allowed to retain its original episode even after a completed exchange."""
-    examples = _EXAMPLE_MESSAGES.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
-    replies = [Reply.model_validate_json(block) for block in _REPLY.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)]
-    assert len(examples) == len(replies) == 1
-    assert replies[0].boundaries == []
-    assert len(set(re.findall(r"\d{4}-\d{2}-\d{2}", examples[0][1]))) == 2
+def _block(path: str, tag: str) -> str:
+    """The text inside one of a system prompt's tagged blocks."""
+    return _SYSTEM[path].split(f"<{tag}>\n", 1)[1].split(f"\n</{tag}>", 1)[0]
+
+
+@pytest.mark.parametrize("tag", ["analysis_aspects", "special_rules_for_common_patterns", "decision_principles"])
+def test_batch_judges_by_the_step_rule_blocks_verbatim(tag: str) -> None:
+    assert _block("batch", tag) == _block("step", tag)
+
+
+def test_batch_notes_replace_only_the_first_step_note() -> None:
+    batch, step = _block("batch", "notes").splitlines(), _block("step", "notes").splitlines()
+
+    assert batch[0] == "- Message [0] always belongs to the current episode, so it is never a boundary"
+    assert batch[1:] == step[1:]
 
 
 # ── Structure: rules in system, data in user ────────────────────────────────────────────────────────
@@ -261,45 +268,42 @@ def test_user_prompt_carries_only_data_slots(path: str) -> None:
     assert re.sub(r"</?[a-z_]+[^>]*>|\{\{[a-z_]+\}\}", "", user).strip() == ""
 
 
-def test_every_batch_reply_shown_validates_against_the_reply_model() -> None:
-    """The worked examples are what the model imitates; each must pass the model requested."""
-    shown = _REPLY.findall(_SYSTEM["batch"])
-    assert shown
-    for block in shown:
-        _REPLY_MODEL["batch"].model_validate(json.loads(block))
+def test_the_batch_reply_skeleton_parses_reasoning_first_and_validates() -> None:
+    """The skeleton is what the model imitates; it must parse and pass the model requested (llm-contract §4.3)."""
+    skeleton = _block("batch", "reply_format").splitlines()[1]
+
+    assert list(json.loads(skeleton)) == ["reasoning", "boundaries"]
+    _REPLY_MODEL["batch"].model_validate_json(skeleton)
 
 
-_STEP_REFERENCE_REPLY_FORMAT = """\
+_STEP_REPLY_FORMAT = """\
 Please return your judgment in JSON format:
 {
     "reasoning": "One sentence summary of your reasoning process",
-    "should_end": true/false,
-    "confidence": 0.0-1.0,
-    "topic_summary": "If should_end = true, summarize the core meaningful topic of the current episode, otherwise leave it blank"
+    "should_end": true/false
 }"""
 
 
-def test_the_step_reply_format_is_the_reference_skeleton_and_shows_no_example_reply() -> None:
-    """The reference run's field skeleton stays and no example reply is added (llm-contract §4.3 exception).
+def test_the_step_reply_format_is_the_measured_two_field_skeleton_and_shows_no_example_reply() -> None:
+    """Exactly the measured text, and no example reply is added (llm-contract §4.3 exception).
 
     Every example reply tried moved the step decisions away from the reference run's.
     """
-    block = _SYSTEM["step"].split("<reply_format>\n", 1)[1].split("\n</reply_format>", 1)[0]
+    block = _block("step", "reply_format")
 
-    assert block == _STEP_REFERENCE_REPLY_FORMAT
+    assert block == _STEP_REPLY_FORMAT
     with pytest.raises(json.JSONDecodeError):
         json.loads(block.split("\n", 1)[1])
     assert not _REPLY.findall(_SYSTEM["step"])
 
 
-def test_every_batch_example_counts_its_messages() -> None:
-    examples = _EXAMPLE_MESSAGES.findall(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
+def test_the_step_reply_format_is_the_reference_skeleton_cut_to_its_first_two_fields() -> None:
+    """The departure from the reference run is the two dropped fields, ``confidence`` and ``topic_summary``, only."""
+    reference = _OLD_STEP_PROMPT.split("Please return your judgment in JSON format:\n{\n", 1)[1].split("\n}", 1)[0]
+    reasoning, should_end, *dropped = reference.splitlines()
 
-    assert len(examples) == 1
-    for count, body in examples:
-        lines = body.splitlines()
-        assert len(lines) == int(count)
-        assert all(line.startswith(f"[{index}] ") and _BATCH_LINE.match(line) for index, line in enumerate(lines))
+    assert _block("step", "reply_format").splitlines()[2:] == [reasoning, should_end.rstrip(","), "}"]
+    assert [line.split(":", 1)[0].strip() for line in dropped] == ['"confidence"', '"topic_summary"']
 
 
 # ── What the model receives ─────────────────────────────────────────────────────────────────────────
@@ -309,30 +313,48 @@ def test_every_batch_example_counts_its_messages() -> None:
 async def test_batch_call_sends_the_rules_then_the_counted_messages(message_count: int) -> None:
     client = _batch_client()
 
-    await adetect_boundaries(_dialogue(message_count), llm=client)
+    await BoundaryDetector(llm=client).adetect_batch(_dialogue(message_count))
 
     system, user = client.calls[0].messages
-    lines = str(user.content).splitlines()[1:-1]
+    body, count = str(user.content).split("\n</messages>\n\n", 1)
+    lines = body.removeprefix("<messages>\n").splitlines()
+    records = [line for line in lines if not line.startswith("<time_gap>")]
     assert (system.role, system.content) == ("system", BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT)
     assert user.role == "user"
-    assert str(user.content).startswith(f'<messages count="{len(lines)}">\n')
-    assert len(lines) == message_count
+    assert str(user.content).startswith("<messages>\n[0] ")
+    assert count == f"<message_count>\n{message_count}\n</message_count>"
+    assert len(records) == message_count
+    assert [line.startswith("<time_gap>") for line in lines] == [i % 2 == 1 for i in range(2 * message_count - 1)]
 
 
 async def test_batch_count_is_the_window_the_model_sees_after_the_pre_cut() -> None:
     client = _batch_client()
 
-    await adetect_boundaries(_dialogue(10), llm=client, hard_msg_limit=5)
+    await BoundaryDetector(llm=client).adetect_batch(_dialogue(10), hard_message_limit=5)
 
     user = str(client.calls[0].messages[1].content)
-    assert user.startswith('<messages count="2">\n[0] ')
-    assert user.endswith("[1] [2024-03-10 10:09 UTC (Sunday)] Speaker9: text 9\n</messages>")
+    assert user.startswith("<messages>\n[0] ")
+    assert user.endswith(
+        "[1] [2024-03-10 10:09 UTC (Sunday)] Speaker9: text 9\n</messages>\n\n<message_count>\n2\n</message_count>"
+    )
+
+
+async def test_a_window_that_only_grew_keeps_its_request_prefix() -> None:
+    """The count follows the records, so a longer window opens with the shorter one's records (prompt caching)."""
+    short, long = _batch_client(), _batch_client()
+
+    await BoundaryDetector(llm=short).adetect_batch(_dialogue(3))
+    await BoundaryDetector(llm=long).adetect_batch(_dialogue(5))
+
+    short_records = str(short.calls[0].messages[1].content).split("\n</messages>", 1)[0]
+    assert short.calls[0].messages[0] == long.calls[0].messages[0]
+    assert str(long.calls[0].messages[1].content).startswith(short_records + "\n")
 
 
 async def test_step_call_sends_the_rules_then_three_data_blocks() -> None:
     client = _step_client()
 
-    await adetect_boundary_step(_dialogue(2), [_msg(2, "text 2", minutes=2)], llm=client, time_gap_info="1 minute")
+    await BoundaryDetector(llm=client).adetect_step([*_dialogue(2), _msg(2, "text 2", minutes=2)])
 
     system, user = client.calls[0].messages
     assert (system.role, system.content) == ("system", STEP_BOUNDARY_DETECT_SYSTEM_PROMPT)
@@ -342,7 +364,7 @@ async def test_step_call_sends_the_rules_then_three_data_blocks() -> None:
         "[2024-03-10 10:00 UTC (Sunday)] Speaker0: text 0\n"
         "[2024-03-10 10:01 UTC (Sunday)] Speaker1: text 1\n"
         "</conversation_history>\n\n"
-        "<time_gap>\n1 minute\n</time_gap>\n\n"
+        "<time_gap>\nTime gap: 1 minutes (recent conversation)\n</time_gap>\n\n"
         "<new_messages>\n[2024-03-10 10:02 UTC (Sunday)] Speaker2: text 2\n</new_messages>",
     )
 
@@ -351,9 +373,7 @@ async def test_step_call_sends_the_rules_then_three_data_blocks() -> None:
 
 _CUSTOM = "Treat a switch between {{project}} names as a topic change.\nKeep  it short."
 _ENTRY_PATH = {
-    "adetect_boundaries": "batch",
-    "BoundaryDetector.adetect": "batch",
-    "adetect_boundary_step": "step",
+    "BoundaryDetector.adetect_batch": "batch",
     "BoundaryDetector.adetect_step": "step",
 }
 _ENTRIES = list(_ENTRY_PATH)
@@ -363,14 +383,10 @@ async def _sent(entry: str, **kwargs: Any) -> tuple[str, str]:
     """Drive one async entry point over a fixed conversation; return the system and user messages it sent."""
     client = _batch_client() if _ENTRY_PATH[entry] == "batch" else _step_client()
     history, new = _dialogue(2), _msg(2, "text 2", minutes=2)
-    if entry == "adetect_boundaries":
-        await adetect_boundaries(history, llm=client, **kwargs)
-    elif entry == "BoundaryDetector.adetect":
-        await BoundaryDetector(llm=client).adetect(history, **kwargs)
-    elif entry == "adetect_boundary_step":
-        await adetect_boundary_step(history, [new], llm=client, time_gap_info="1 minute", **kwargs)
+    if entry == "BoundaryDetector.adetect_batch":
+        await BoundaryDetector(llm=client).adetect_batch(history, **kwargs)
     else:
-        await BoundaryDetector(llm=client).adetect_step(history, new, **kwargs)
+        await BoundaryDetector(llm=client).adetect_step([*history, new], **kwargs)
     system, user = client.calls[0].messages
     assert (system.role, user.role) == ("system", "user")
     return str(system.content), str(user.content)
@@ -402,7 +418,7 @@ async def test_no_or_blank_custom_instructions_send_the_bundled_rules_byte_for_b
 
 @pytest.mark.parametrize(
     "operator",
-    [adetect_boundaries, adetect_boundary_step, BoundaryDetector.adetect, BoundaryDetector.adetect_step],
+    [BoundaryDetector.adetect_batch, BoundaryDetector.adetect_step],
     ids=lambda operator: operator.__qualname__,
 )
 def test_custom_instructions_is_keyword_only_and_prompt_is_gone(operator: Callable[..., Any]) -> None:
@@ -420,20 +436,17 @@ async def test_passing_prompt_raises_type_error(entry: str) -> None:
 
 
 def test_sync_bridges_forward_custom_instructions_and_reject_prompt() -> None:
-    batch, detector_batch, detector_step = _batch_client(), _batch_client(), _step_client()
+    detector_batch, detector_step = _batch_client(), _step_client()
     block = f"<custom_instructions>\n{_CUSTOM}\n</custom_instructions>"
 
-    detect_boundaries(_dialogue(2), llm=batch, custom_instructions=_CUSTOM)
-    BoundaryDetector(llm=detector_batch).detect(_dialogue(2), custom_instructions=_CUSTOM)
-    BoundaryDetector(llm=detector_step).detect_step(
-        _dialogue(2), _msg(2, "text 2", minutes=2), custom_instructions=_CUSTOM
-    )
+    BoundaryDetector(llm=detector_batch).detect_batch(_dialogue(2), custom_instructions=_CUSTOM)
+    BoundaryDetector(llm=detector_step).detect_step(_dialogue(3), custom_instructions=_CUSTOM)
 
-    for client in (batch, detector_batch, detector_step):
+    for client in (detector_batch, detector_step):
         assert str(client.calls[0].messages[0].content).endswith(block)
     with pytest.raises(TypeError, match="prompt"):
         # The removed keyword, on purpose: a type checker rejects it too.
-        detect_boundaries(_dialogue(2), llm=_batch_client(), prompt="CUSTOM RULES")  # type: ignore[call-arg]
+        BoundaryDetector(llm=_batch_client()).detect_batch(_dialogue(2), prompt="CUSTOM RULES")  # type: ignore[call-arg]
 
 
 # ── Time shape ──────────────────────────────────────────────────────────────────────────────────────
@@ -444,27 +457,24 @@ _UTC_PLUS_14 = timezone(timedelta(hours=14))
 
 async def test_every_entry_point_shows_message_times_in_the_zone_passed() -> None:
     """10:00 UTC on Sunday is 00:00 on Monday in UTC+14: the date, clock and weekday move, the offset is labelled."""
-    batch, detector_batch, step, detector_step = _batch_client(), _batch_client(), _step_client(), _step_client()
+    batch, step = _batch_client(), _step_client()
 
-    await adetect_boundaries(_dialogue(1), llm=batch, tz=_UTC_PLUS_14)
-    await BoundaryDetector(llm=detector_batch).adetect(_dialogue(1), tz=_UTC_PLUS_14)
-    await adetect_boundary_step(_dialogue(1), [_msg(1, "text 1", minutes=1)], llm=step, tz=_UTC_PLUS_14)
-    await BoundaryDetector(llm=detector_step).adetect_step(_dialogue(2), _msg(2, "text 2", minutes=2), tz=_UTC_PLUS_14)
+    await BoundaryDetector(llm=batch).adetect_batch(_dialogue(1), tz=_UTC_PLUS_14)
+    await BoundaryDetector(llm=step).adetect_step(_dialogue(3), tz=_UTC_PLUS_14)
 
-    for client in (batch, detector_batch):
-        assert "[0] [2024-03-11 00:00 UTC+14:00 (Monday)] Speaker0: text 0" in str(client.calls[0].messages[1].content)
+    assert "[0] [2024-03-11 00:00 UTC+14:00 (Monday)] Speaker0: text 0" in str(batch.calls[0].messages[1].content)
     assert "[2024-03-11 00:01 UTC+14:00 (Monday)] Speaker1: text 1" in str(step.calls[0].messages[1].content)
-    assert "[2024-03-11 00:02 UTC+14:00 (Monday)] Speaker2: text 2" in str(detector_step.calls[0].messages[1].content)
+    assert "[2024-03-11 00:02 UTC+14:00 (Monday)] Speaker2: text 2" in str(step.calls[0].messages[1].content)
 
 
 async def test_rendered_lines_show_minutes_and_the_utc_label() -> None:
     """Seconds are truncated, not rounded: every timestamp here sits at :59 seconds."""
     batch, step = _batch_client(), _step_client()
 
-    await adetect_boundaries(_dialogue(3), llm=batch)
-    await adetect_boundary_step(_dialogue(2), [_msg(2, "text 2", minutes=2)], llm=step)
+    await BoundaryDetector(llm=batch).adetect_batch(_dialogue(3))
+    await BoundaryDetector(llm=step).adetect_step(_dialogue(3))
 
-    batch_lines = str(batch.calls[0].messages[1].content).splitlines()[1:-1]
+    batch_lines = [line for line in str(batch.calls[0].messages[1].content).splitlines() if line.startswith("[")]
     step_lines = [line for line in str(step.calls[0].messages[1].content).splitlines() if line.startswith("[")]
     assert batch_lines and all(_BATCH_LINE.match(line) for line in batch_lines)
     assert len(step_lines) == 3 and all(_STEP_LINE.match(line) for line in step_lines)

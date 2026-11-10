@@ -21,12 +21,12 @@ This repo is a **monorepo** of 8 distributions sharing the `everalgo.*` namespac
 | Distribution | What it provides |
 |---|---|
 | [`everalgo-core`](packages/everalgo-core/) | Types, LLM client + providers, prompt helpers, testing utilities |
-| [`everalgo-boundary`](packages/everalgo-boundary/) | `BoundaryDetector` + `adetect_boundaries` / `detect_boundaries` + `DetectionResult` |
+| [`everalgo-boundary`](packages/everalgo-boundary/) | `BoundaryDetector` (`adetect_batch` / `adetect_step`, both returning `Cuts`: indices into the input) + `to_memcells` |
 | [`everalgo-clustering`](packages/everalgo-clustering/) | `Cluster` value object + `cluster_by_geometry` / `acluster_by_llm` operators |
 | [`everalgo-rank`](packages/everalgo-rank/) | 4 composable retrieval strategies + category-aware retrieval + 4 business rankers + fusion / weight / rerank toolkit |
 | [`everalgo-parser`](packages/everalgo-parser/) | Multimodal raw-file → `ParsedContent` (image, audio, PDF, HTML, email, office, URL; video deferred) |
-| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors + `BoundaryDetector` (re-exported from boundary) |
-| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentCaseExtractor` / `AgentSkillExtractor` / `AgentProfileExtractor` + `BoundaryDetector` (re-exported from boundary) |
+| [`everalgo-user-memory`](packages/everalgo-user-memory/) | `Episode` / `Foresight` / `AtomicFact` / `Profile` extractors + `BoundaryDetector` / `Cuts` / `to_memcells` (re-exported from boundary) |
+| [`everalgo-agent-memory`](packages/everalgo-agent-memory/) | `AgentCaseExtractor` / `AgentSkillExtractor` / `AgentProfileExtractor` + `BoundaryDetector` / `Cuts` / `to_memcells` (re-exported from boundary) |
 | [`everalgo-knowledge`](packages/everalgo-knowledge/) | `KnowledgeExtractor` pipeline + `aclassify_category` (file-based knowledge extraction) |
 
 ## 60-second quickstart
@@ -63,7 +63,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
 from everalgo.user_memory import (
     BoundaryDetector, EpisodeExtractor, ForesightExtractor,
-    AtomicFactExtractor, ProfileExtractor,
+    AtomicFactExtractor, ProfileExtractor, to_memcells,
 )
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "single topic", "boundaries": []})
@@ -82,9 +82,9 @@ async def main() -> None:
         ChatMessage(id="m2", role="assistant",  content="Sure — I'll send a follow-up doc next week.", timestamp=1_700_000_001_000, sender_id="assistant"),
     ]
 
-    # Step 1 — boundary detection
-    result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
-    mc = result.cells[0]
+    # Step 1 — boundary detection: indices into `messages`, then the cells they cut
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(messages, is_final=True)
+    mc = to_memcells(messages, cuts)[0]
 
     # Steps 2–4 — extract user-memory products (sender_id is required, not inferred)
     episode    = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")

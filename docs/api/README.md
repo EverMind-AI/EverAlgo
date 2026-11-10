@@ -9,12 +9,12 @@ Each EverAlgo distribution has its own README with a quick-start, public API sur
 | Distribution | README | What it provides |
 |---|---|---|
 | `everalgo-core` | [`packages/everalgo-core/README.md`](../../packages/everalgo-core/README.md) | `ChatMessage`, `MemCell`, `Episode`, `RankInput`/`RankOutput`, `LLMClient`, `OpenAICompatClient`, `FakeLLMClient` |
-| `everalgo-boundary` | [`packages/everalgo-boundary/README.md`](../../packages/everalgo-boundary/README.md) | `adetect_boundaries`, `detect_boundaries`, `DetectionResult`, `adetect_boundary_step`, `BoundaryDecision` |
+| `everalgo-boundary` | [`packages/everalgo-boundary/README.md`](../../packages/everalgo-boundary/README.md) | `BoundaryDetector` (`adetect_batch` / `detect_batch`, `adetect_step` / `detect_step`), `Cuts`, `to_memcells` |
 | `everalgo-clustering` | [`packages/everalgo-clustering/README.md`](../../packages/everalgo-clustering/README.md) | `Cluster`, `cluster_by_geometry`, `acluster_by_llm`, `cluster_by_llm` |
 | `everalgo-rank` | [`packages/everalgo-rank/README.md`](../../packages/everalgo-rank/README.md) | `hybrid`, `agentic`, `cluster`, `maxsim`, `category`, business rankers, `fusion`, `weight`, `rerank` |
 | `everalgo-parser` | [`packages/everalgo-parser/README.md`](../../packages/everalgo-parser/README.md) | `aparse`, `parse`, `ParsedContent`, `Modality`, `RawFile`; image / audio / document / URL parsers (video deferred) |
-| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `EpisodeExtractor`, `EpisodeReflector`, `EpisodeSummarizer`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `OutputLanguage` |
-| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `BoundaryDetector` (re-exported from `everalgo-boundary`), three extractors, extraction result / skip reason types, `OpOutcome` |
+| `everalgo-user-memory` | [`packages/everalgo-user-memory/README.md`](../../packages/everalgo-user-memory/README.md) | `BoundaryDetector`, `Cuts`, `to_memcells` (re-exported from `everalgo-boundary`), `EpisodeExtractor`, `EpisodeReflector`, `EpisodeSummarizer`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`, `OutputLanguage` |
+| `everalgo-agent-memory` | [`packages/everalgo-agent-memory/README.md`](../../packages/everalgo-agent-memory/README.md) | `BoundaryDetector`, `Cuts`, `to_memcells` (re-exported from `everalgo-boundary`), three extractors, extraction result / skip reason types, `OpOutcome` |
 | `everalgo-knowledge` | [`packages/everalgo-knowledge/README.md`](../../packages/everalgo-knowledge/README.md) | `KnowledgeExtractor`, `aclassify_category`, `classify_category`; `KnowledgeMemory` / `CategorySpec` live in `everalgo.types` |
 
 ---

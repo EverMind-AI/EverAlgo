@@ -1,8 +1,12 @@
-"""Agent-side memory extractors — 3 Extractors + the re-exported ``everalgo.boundary.BoundaryDetector``."""
+"""Agent-side memory extractors — 3 Extractors + boundary re-exports.
+
+:class:`BoundaryDetector`, :class:`Cuts` and :func:`to_memcells` are ``everalgo.boundary``'s own, re-exported
+unchanged; ``everalgo.user_memory`` re-exports the same three.
+"""
 
 import logging
 
-from everalgo.agent_memory.boundary import BoundaryDetector
+from everalgo.agent_memory.boundary import BoundaryDetector, Cuts, to_memcells
 from everalgo.agent_memory.case import AgentCaseExtractor
 from everalgo.agent_memory.gate import (
     AgentCaseGate,
@@ -34,10 +38,12 @@ __all__ = [
     "CaseGateQuestion",
     "CaseJudge",
     "CaseSkipReason",
+    "Cuts",
     "OpOutcome",
     "SkillExtractionResult",
     "SkillSkipReason",
     "should_extract_skill",
+    "to_memcells",
 ]
 
 # Library logging setup (ADR-013): NullHandler on each subpackage logger.

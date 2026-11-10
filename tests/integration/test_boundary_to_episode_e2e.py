@@ -17,7 +17,7 @@ from everalgo.testing.assertions import (
 )
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
-from everalgo.user_memory import BoundaryDetector
+from everalgo.user_memory import BoundaryDetector, to_memcells
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.episode import EpisodeExtractor
 from everalgo.user_memory.foresight import ForesightExtractor
@@ -66,10 +66,10 @@ async def test_boundary_to_episode_pipeline_e2e() -> None:
         return content
 
     fake = FakeLLMClient(handler=handler)
-    output = await BoundaryDetector(llm=fake).adetect(_two_msg_dialogue(), is_final=True)
-    assert output.tail == []
-    assert len(output.cells) == 1
-    mc = output.cells[0]
+    dialogue = _two_msg_dialogue()
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(dialogue, is_final=True)
+    assert dialogue[cuts.tail_start :] == []
+    (mc,) = to_memcells(dialogue, cuts)
 
     episode = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_test")
 
@@ -99,10 +99,10 @@ async def test_boundary_to_foresight_pipeline_e2e() -> None:
         return content
 
     fake = FakeLLMClient(handler=handler)
-    output = await BoundaryDetector(llm=fake).adetect(_two_msg_dialogue(), is_final=True)
-    assert output.tail == []
-    assert len(output.cells) == 1
-    mc = output.cells[0]
+    dialogue = _two_msg_dialogue()
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(dialogue, is_final=True)
+    assert dialogue[cuts.tail_start :] == []
+    (mc,) = to_memcells(dialogue, cuts)
 
     foresights = await ForesightExtractor(llm=fake).aextract(mc, sender_id="u_test")
     assert len(foresights) == 1
@@ -134,10 +134,10 @@ async def test_boundary_to_atomic_fact_pipeline_e2e() -> None:
         return content
 
     fake = FakeLLMClient(handler=handler)
-    output = await BoundaryDetector(llm=fake).adetect(_two_msg_dialogue(), is_final=True)
-    assert output.tail == []
-    assert len(output.cells) == 1
-    mc = output.cells[0]
+    dialogue = _two_msg_dialogue()
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(dialogue, is_final=True)
+    assert dialogue[cuts.tail_start :] == []
+    (mc,) = to_memcells(dialogue, cuts)
 
     facts = await AtomicFactExtractor(llm=fake).aextract(mc, sender_id="u_test")
     assert len(facts) == 2

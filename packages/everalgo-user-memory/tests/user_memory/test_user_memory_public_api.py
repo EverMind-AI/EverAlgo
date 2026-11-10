@@ -8,17 +8,18 @@ from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_public_symbols_exported() -> None:
-    """4 Extractors + EpisodeReflector + EpisodeSummarizer + BoundaryDetector + OutputLanguage + DetectionResult."""
+    """4 Extractors + EpisodeReflector + EpisodeSummarizer + OutputLanguage + the boundary re-exports."""
     for name in (
         "AtomicFactExtractor",
         "BoundaryDetector",
-        "DetectionResult",
+        "Cuts",
         "EpisodeExtractor",
         "EpisodeReflector",
         "EpisodeSummarizer",
         "ForesightExtractor",
         "OutputLanguage",
         "ProfileExtractor",
+        "to_memcells",
     ):
         assert hasattr(everalgo.user_memory, name)
 
@@ -29,13 +30,14 @@ def test_dunder_all_lists_exactly_the_public_symbols() -> None:
         [
             "AtomicFactExtractor",
             "BoundaryDetector",
-            "DetectionResult",
+            "Cuts",
             "EpisodeExtractor",
             "EpisodeReflector",
             "EpisodeSummarizer",
             "ForesightExtractor",
             "OutputLanguage",
             "ProfileExtractor",
+            "to_memcells",
         ]
     )
 
@@ -66,11 +68,17 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
     assert ProfileExtractor(llm=fake).__class__.__name__ == "ProfileExtractor"
 
 
-def test_boundary_detector_is_the_boundary_package_class() -> None:
-    """The product package re-exports ``everalgo.boundary.BoundaryDetector`` itself, not a wrapper or subclass."""
+def test_boundary_names_are_the_boundary_package_objects() -> None:
+    """The product package re-exports ``everalgo.boundary``'s objects themselves, not wrappers or subclasses."""
     import everalgo.boundary
 
     assert everalgo.user_memory.BoundaryDetector is everalgo.boundary.BoundaryDetector
+    assert everalgo.user_memory.Cuts is everalgo.boundary.Cuts
+    assert everalgo.user_memory.to_memcells is everalgo.boundary.to_memcells
+
+
+def test_detection_result_is_gone() -> None:
+    assert not hasattr(everalgo.user_memory, "DetectionResult")
 
 
 def test_boundary_module_holds_nothing_but_the_re_export() -> None:
@@ -80,8 +88,8 @@ def test_boundary_module_holds_nothing_but_the_re_export() -> None:
 
     assert statements == [
         "from __future__ import annotations",
-        "__all__ = ['BoundaryDetector']",
-        "from everalgo.boundary import BoundaryDetector",
+        "__all__ = ['BoundaryDetector', 'Cuts', 'to_memcells']",
+        "from everalgo.boundary import BoundaryDetector, Cuts, to_memcells",
     ]
 
 

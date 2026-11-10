@@ -18,7 +18,7 @@ import json
 import logging
 import time
 import traceback
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from tqdm import tqdm as _tqdm
 
@@ -30,8 +30,7 @@ from benchmarks.common.stages.types import StageStats
 from everalgo.clustering.algorithm import cluster_by_geometry
 from everalgo.clustering.state import Cluster
 from everalgo.types import ChatMessage as EverAlgoMemMessage
-from everalgo.types import ConversationItem, MemCell
-from everalgo.user_memory import BoundaryDetector
+from everalgo.user_memory import BoundaryDetector, Cuts, to_memcells
 from everalgo.user_memory.episode import EpisodeExtractor
 
 if TYPE_CHECKING:
@@ -41,6 +40,7 @@ if TYPE_CHECKING:
     from benchmarks.common.services import EmbeddingClient
     from benchmarks.common.stages.types import StageContext
     from everalgo.llm.openai_compat import OpenAICompatClient
+    from everalgo.types import MemCell
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +157,14 @@ async def _detect_all_boundaries(
     smart_mask: bool = True,
     max_attempts: int = 5,
     pbar: _tqdm[Any] | None = None,
-) -> list[Any]:
-    """Incremental boundary detection: front-2-buffer + ``adetect_step`` loop + final-tail flush.
+) -> list[MemCell]:
+    """Incremental boundary detection: one ``adetect_step`` per message, then the final-tail flush.
+
+    Each step judges ``history + [message]`` and returns ``Cuts``; this loop only slices by them. The warmup (no
+    model call until a history holds two messages), the smart mask with its cut-and-bridge and the hard limits all
+    live in ``adetect_step`` at everalgo-boundary's step defaults. The hard limits are therefore 8,192 tokens / 50
+    messages, the values the EverOS LoCoMo step runs used; before the ``Cuts`` API this stage ran at the 65,536 /
+    500 defaults that everalgo-boundary 0.4.0 to 0.4.2 shared between both paths.
 
     Args:
         mem_messages: Ordered messages for one conversation.
@@ -173,43 +179,25 @@ async def _detect_all_boundaries(
     detector = BoundaryDetector(llm=llm)
 
     @llm_retry(max_attempts=max_attempts)
-    async def _step(
-        hist: list[EverAlgoMemMessage],
-        m: EverAlgoMemMessage,
-    ) -> Any:
-        return await detector.adetect_step(hist, m, smart_mask=smart_mask)
+    async def _step(items: list[EverAlgoMemMessage]) -> Cuts:
+        return await detector.adetect_step(items, smart_mask=smart_mask)
 
-    cells: list[Any] = []
+    cells: list[MemCell] = []
     history: list[EverAlgoMemMessage] = []
 
     for msg in mem_messages:
         if pbar is not None:
             pbar.update(1)
-        # Front-2 buffer: no LLM until history has >=2 msgs.
-        if len(history) < 2:
-            history.append(msg)
-            continue
+        items = [*history, msg]
+        cuts = await _step(items)
+        cells.extend(to_memcells(items, cuts))
+        history = items[cuts.tail_start :]
 
-        result = await _step(history, msg)
-        cells.extend(result.cells)
-        history = list(result.tail)
-
-    # Flush remaining history as final MemCell.
+    # The conversation is over: whatever history is left closes as the last cell.
     if history:
-        cells.append(_make_final_cell(history))
+        cells.extend(to_memcells(history, Cuts(ends=[len(history)], tail_start=len(history))))
 
     return cells
-
-
-def _make_final_cell(slice_msgs: list[EverAlgoMemMessage]) -> Any:
-    """Wrap leftover messages as the final MemCell at conversation end.
-
-    Uses ``slice_msgs[-1].timestamp`` as the segment's last-message timestamp.
-    """
-    return MemCell(
-        items=cast("list[ConversationItem]", slice_msgs),
-        timestamp=slice_msgs[-1].timestamp,
-    )
 
 
 async def _extract_one_conversation(
