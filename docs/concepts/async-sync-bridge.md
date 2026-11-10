@@ -6,14 +6,14 @@ EverAlgo operators follow a strict naming convention that identifies the calling
 
 ## The `a`-prefix rule
 
-**Methods with an `a` prefix** — `aextract`, `adetect`, `arank`, `aparse` — are **native async**.
+**Methods with an `a` prefix** — `aextract`, `adetect_batch`, `arank`, `aparse` — are **native async**.
 They may perform or orchestrate I/O (LLM calls, caller-injected retrieval, OCR, ASR, URL fetch) and must be called with `await`.
 
 **Most methods without an `a` prefix** — `extract`, `rank`, `count_tokens`, `rrf` — are **synchronous**.
 Call those without `await`, then distinguish two categories:
 
-- Pure compute such as `count_tokens`, `rrf`, and `cluster_by_geometry` returns directly and performs no I/O.
-- Sync bridges such as `extract`, `detect`, `rank`, and `parse` block while running a native async implementation through `asgiref.async_to_sync`; use them only outside a running event loop.
+- Pure compute such as `count_tokens`, `rrf`, `cluster_by_geometry` and `to_memcells` returns directly and performs no I/O.
+- Sync bridges such as `extract`, `detect_batch`, `rank`, and `parse` block while running a native async implementation through `asgiref.async_to_sync`; use them only outside a running event loop.
 
 ```python
 # ✅ Correct — async I/O method, use await
@@ -31,7 +31,7 @@ episode = EpisodeExtractor(llm=client).extract(memcell, sender_id="u_alice")
 An `a` prefix always tells you to use `await`; operators and the `LLMClient` contract have no prefix-less async names. For synchronous names, the name alone does not tell you whether the implementation is pure compute or a blocking bridge.
 This is the same convention used by `dspy.acall` / `dspy.aforward`, `litellm.acompletion`, and `instructor.AsyncInstructor`.
 
-**No historical exceptions.** `LLMClient.achat`, `adetect_boundaries` and `acluster_by_llm` once lacked the prefix (`chat`, `detect_boundaries`, `cluster_by_llm`); all three now carry it. The two functions keep their old names as sync bridges. The protocol method gets no bridge: `LLMClient` is what a host implements, a sync twin would double that work, and operators only ever call it from async code.
+**No historical exceptions.** `LLMClient.achat` and `acluster_by_llm` once lacked the prefix (`chat`, `cluster_by_llm`); both now carry it. The function keeps its old name as a sync bridge. The protocol method gets no bridge: `LLMClient` is what a host implements, a sync twin would double that work, and operators only ever call it from async code.
 
 ---
 
@@ -80,12 +80,11 @@ Calling the sync bridge from within a running event loop will raise a `RuntimeEr
 |---|---|---|---|
 | `EpisodeExtractor` | `aextract` | async I/O | `await extractor.aextract(mc, sender_id=...)` |
 | `EpisodeExtractor` | `extract` | sync bridge | `extractor.extract(mc, sender_id=...)` — non-event-loop only |
-| `BoundaryDetector` | `adetect` | async I/O | `await detector.adetect(messages, is_final=True)` |
-| `BoundaryDetector` | `detect` | sync bridge | `detector.detect(messages, is_final=True)` — non-event-loop only |
-| `BoundaryDetector` | `adetect_step` | async I/O | `await detector.adetect_step(history, new)` |
-| `BoundaryDetector` | `detect_step` | sync bridge | `detector.detect_step(history, new)` — non-event-loop only |
-| `adetect_boundaries` | `adetect_boundaries` | async I/O | `await adetect_boundaries(messages, llm=..., is_final=True)` |
-| `detect_boundaries` | `detect_boundaries` | sync bridge | `detect_boundaries(messages, llm=..., is_final=True)` — non-event-loop only |
+| `BoundaryDetector` | `adetect_batch` | async I/O | `await detector.adetect_batch(items, is_final=True)` |
+| `BoundaryDetector` | `detect_batch` | sync bridge | `detector.detect_batch(items, is_final=True)` — non-event-loop only |
+| `BoundaryDetector` | `adetect_step` | async I/O | `await detector.adetect_step([*history, new])` |
+| `BoundaryDetector` | `detect_step` | sync bridge | `detector.detect_step([*history, new])` — non-event-loop only |
+| `to_memcells` | `to_memcells` | sync pure-compute | `to_memcells(items, cuts)` |
 | `cluster_by_geometry` | `cluster_by_geometry` | sync pure-compute | `cluster_by_geometry(new_cluster, existing_clusters)` |
 | `acluster_by_llm` | `acluster_by_llm` | async I/O | `await acluster_by_llm(new_cluster, existing_clusters, llm=...)` |
 | `cluster_by_llm` | `cluster_by_llm` | sync bridge | `cluster_by_llm(new_cluster, existing_clusters, llm=...)` — non-event-loop only |
@@ -103,9 +102,9 @@ Calling the sync bridge from within a running event loop will raise a `RuntimeEr
 A typical pipeline has both kinds of calls:
 
 ```python
-# All I/O operators — use await
-result   = await BoundaryDetector(llm=llm).adetect(messages, is_final=True)
-mc       = result.cells[0]
+# I/O operators — use await (to_memcells between them is pure compute: no await)
+cuts     = await BoundaryDetector(llm=llm).adetect_batch(messages, is_final=True)
+mc       = to_memcells(messages, cuts)[0]
 episode  = await EpisodeExtractor(llm=llm).aextract(mc, sender_id="u_alice")
 
 # Pure-compute — no await
@@ -114,4 +113,4 @@ fused    = rank.fusion.rrf(vec_hits, keyword_hits)
 n_tokens = everalgo.utils.count_tokens(text)
 ```
 
-The convention covers the current high-level APIs; consult the quick-reference exceptions for the two legacy function names.
+The convention covers the current high-level APIs; consult the quick reference for the one legacy function name, `cluster_by_llm`.

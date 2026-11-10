@@ -1,9 +1,12 @@
-"""Boundary detection: cut a conversation into MemCells, in one batch or one message at a time.
+"""Boundary detection: where to cut a conversation, in one batch or one message at a time.
 
-Batch (:func:`adetect_boundaries`): keep the chat messages → hard-limit pre-cut → render → one model call →
-cut → carry the cuts back to the full item list. The hard limits count chat messages only, so the filter comes
-first. Incremental (:meth:`BoundaryDetector.adetect_step`): one model
-call over ``history`` and one new message, then the cut-and-bridge transition the caller feeds into its next step.
+:class:`BoundaryDetector` is the only entry, one method per path, and both return :class:`~everalgo.boundary.Cuts`:
+indices into the caller's input, which the caller slices itself or hands to :func:`~everalgo.boundary.to_memcells`.
+
+Batch (:meth:`BoundaryDetector.adetect_batch`): keep the chat messages → hard-limit pre-cut → render → one model call
+→ carry the cuts back to the full item list. The hard limits count chat messages only, so the filter comes first.
+Step (:meth:`BoundaryDetector.adetect_step`): judge the last message against the history before it — warmup,
+hard-limit cut, or one model call — and decide where the next history starts.
 
 Every model call sends two messages: a system message with the rules, closed by a caller's
 ``custom_instructions=`` when given, and a user message with the rendered conversation, which the operator always
@@ -14,20 +17,14 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 
-from everalgo.boundary._render import _format_messages_step, _format_messages_with_indices
+from everalgo.boundary._cuts import Cuts
+from everalgo.boundary._render import _calculate_time_gap, _format_messages_step, _format_messages_with_indices
 from everalgo.boundary._replies import _call_llm_for_batch, _call_llm_for_step
-from everalgo.boundary._segments import (
-    _calculate_time_gap,
-    _chat_view,
-    _close_step,
-    _cut_items,
-    _force_split_cuts,
-    _needs_force_split,
-)
+from everalgo.boundary._segments import _chat_view, _force_split_cuts, _item_cuts, _needs_force_split
 from everalgo.boundary.prompts.en.chat import (
     BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT,
     BATCH_BOUNDARY_DETECT_USER_PROMPT,
@@ -36,69 +33,30 @@ from everalgo.boundary.prompts.en.chat import (
     assemble_system_prompt,
 )
 from everalgo.llm import LLMMessage
-from everalgo.utils import render_prompt
+from everalgo.types import ChatMessage
+from everalgo.utils import InvalidInputError, render_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import tzinfo
 
     from everalgo.llm.protocols import LLMClient
-    from everalgo.types import ChatMessage, ConversationItem, MemCell
+    from everalgo.types import ConversationItem
 
 
 logger = logging.getLogger("everalgo.boundary")
-
-DEFAULT_HARD_TOKEN_LIMIT = 65_536
-DEFAULT_HARD_MSG_LIMIT = 500
-
-
-class DetectionResult(NamedTuple):
-    """Return type of :func:`adetect_boundaries` and :class:`BoundaryDetector`.
-
-    NamedTuple subclass of ``tuple`` — named access and index access::
-
-        result = await adetect_boundaries(items, llm=client)
-        result.cells  # list[MemCell]
-        result.tail  # list[ConversationItem]
-        result[0], result[1]
-
-    Attributes:
-        cells: Zero or more :class:`~everalgo.types.MemCell` instances the algorithm has confidently
-            closed.  Caller persists immediately.
-        tail: Trailing items the algorithm did NOT close — the LLM cannot judge whether the
-            conversation continues beyond the last seen message, so the trailing segment is left as a
-            tail for the caller's state machine.  When ``is_final=True``, tail is forced into the final
-            MemCell and this field is guaranteed empty.
-    """
-
-    cells: list[MemCell]
-    tail: list[ConversationItem]
-
-
-class BoundaryDecision(NamedTuple):
-    """Single-step boundary decision returned by :func:`adetect_boundary_step`.
-
-    Attributes:
-        should_end: Whether the current episode should end (i.e. the LLM is ready to commit a cut between
-            ``conversation_history`` and ``new_messages``). ``True`` means the segment is ready to commit;
-            ``False`` means keep buffering (the current episode is not yet closed).
-        reasoning: One-sentence LLM rationale.
-        confidence: LLM-reported confidence in [0.0, 1.0].
-        topic_summary: Topic label when ``should_end=True``; empty string otherwise.
-    """
-
-    should_end: bool
-    reasoning: str
-    confidence: float
-    topic_summary: str
 
 
 class BoundaryDetector:
     """Boundary detection with the LLM client bound once. Native-async with sync bridges.
 
-    - :meth:`adetect` — batch path over a list of ``ConversationItem``; forwards to :func:`adetect_boundaries`.
-    - :meth:`adetect_step` — incremental path over ``ChatMessage`` only; one LLM call plus the cut-and-bridge
-      state transition for the caller.
+    - :meth:`adetect_batch` — one window of a conversation, ``ConversationItem`` with tool items mixed in; one
+      model call places every cut in it.
+    - :meth:`adetect_step` — the judged history plus one new ``ChatMessage``; one decision on whether the new
+      message starts a new segment.
+
+    Both return :class:`~everalgo.boundary.Cuts` over the input they were given. Every strategy parameter is a
+    keyword with the recommended value as its default.
 
     Args:
         llm: LLM client every call goes through.
@@ -107,242 +65,148 @@ class BoundaryDetector:
     def __init__(self, *, llm: LLMClient) -> None:
         self._llm = llm
 
-    async def adetect(
+    async def adetect_batch(
         self,
         items: Sequence[ConversationItem],
         *,
         is_final: bool = False,
         custom_instructions: str | None = None,
-        hard_token_limit: int = DEFAULT_HARD_TOKEN_LIMIT,
-        hard_msg_limit: int = DEFAULT_HARD_MSG_LIMIT,
         tz: tzinfo = UTC,
-    ) -> DetectionResult:
-        """Detect boundaries in ``items`` with the bound client; :func:`adetect_boundaries` documents the behaviour.
+        hard_token_limit: int = 65_536,
+        hard_message_limit: int = 500,
+    ) -> Cuts:
+        """Cut one window of a conversation — typically the prior tail plus the new items — in one model call.
+
+        Only the ``ChatMessage`` items reach the model; ``ToolCallRequest`` / ``ToolCallResult`` items keep their
+        place. Tool items between two chat messages go with the earlier one, tool items ahead of the first chat
+        message with the first segment, and trailing tool items into the tail (or into the last segment when
+        ``is_final``). Leading segments are first cut off without the model until the chat messages left are under
+        both hard limits; the model then places the cuts in what is left. Nothing overlaps: the tail starts at the
+        last cut.
 
         Args:
             items: Ordered conversation items; tool items may be mixed in.
-            is_final: When ``True``, forces the trailing segment into a cell so ``tail == []``.
+            is_final: When ``True``, the trailing segment is closed too: ``len(items)`` is the last cut and the tail
+                is empty.
             custom_instructions: The caller's instructions, appended verbatim after the bundled rules as the system
                 message's last block, ``<custom_instructions>``. They add to the rules, never replace them, and are
                 never rendered as a template, so ``{{`` stays literal. ``None`` or a blank string leaves the system
                 message unchanged. The user message always carries the data.
-            hard_token_limit: Token count at which leading cells are force-split off without the model.
-            hard_msg_limit: Chat-message count at which leading cells are force-split off without the model.
             tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
                 (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
+            hard_token_limit: Leading segments are cut off, without the model, until the chat messages left hold
+                fewer tokens than this.
+            hard_message_limit: Likewise, until fewer chat messages than this are left.
 
         Returns:
-            :class:`DetectionResult` ``(cells, tail)``.
+            :class:`~everalgo.boundary.Cuts` over ``items``, with ``tail_start`` at the last cut (0 without one).
+            Without any ``ChatMessage`` no model is called and the result is ``Cuts([], 0)``. The caller owns idle
+            or end-of-session flushing.
 
         Raises:
-            LLMOutputError: If the LLM reply is not a valid batch output.
-            InvalidInputError: If a message the prompt shows has no timestamp (0).
+            LLMOutputError: If the LLM reply is not a valid batch output. The client's own exceptions propagate
+                unchanged; retry policy is the caller's concern.
+            InvalidInputError: If a chat message the prompt shows has text but no timestamp (0).
         """
-        return await adetect_boundaries(
-            items,
-            llm=self._llm,
-            is_final=is_final,
-            custom_instructions=custom_instructions,
-            hard_token_limit=hard_token_limit,
-            hard_msg_limit=hard_msg_limit,
-            tz=tz,
-        )
+        chat_positions, messages = _chat_view(items)
+        if not messages:
+            return Cuts(ends=[], tail_start=0)
 
-    detect = async_to_sync(adetect)
+        chat_cuts = _force_split_cuts(messages, hard_token_limit, hard_message_limit)
+        window_start = chat_cuts[-1] if chat_cuts else 0
+        boundaries = await _ask_for_boundaries(messages[window_start:], self._llm, custom_instructions, tz=tz)
+        chat_cuts += [window_start + boundary for boundary in boundaries]
+        if is_final:
+            chat_cuts.append(len(messages))
+
+        ends = _item_cuts(chat_cuts, chat_positions, len(items))
+        return Cuts(ends=ends, tail_start=ends[-1] if ends else 0)
+
+    detect_batch = async_to_sync(adetect_batch)
     """Sync bridge — only callable from non-event-loop contexts."""
 
     async def adetect_step(
         self,
-        history: list[ChatMessage],
-        new: ChatMessage,
+        items: Sequence[ChatMessage],
         *,
-        smart_mask: bool = True,
-        smart_mask_threshold: int = 5,
-        hard_token_limit: int = DEFAULT_HARD_TOKEN_LIMIT,
-        hard_message_limit: int = DEFAULT_HARD_MSG_LIMIT,
         custom_instructions: str | None = None,
         tz: tzinfo = UTC,
-    ) -> DetectionResult:
-        """Single-step incremental boundary detection — one LLM call + state transition.
+        warmup_messages: int = 2,
+        smart_mask: bool = True,
+        smart_mask_threshold: int = 5,
+        hard_token_limit: int = 8_192,
+        hard_message_limit: int = 50,
+    ) -> Cuts:
+        """Judge whether the last of ``items`` starts a new segment.
 
-        Takes ``ChatMessage`` only; tool items are not filtered on this path. The caller owns only the outer
-        loop (front-buffer + final-tail flush); this method encapsulates the smart-mask threshold check,
-        masking, force-split short-circuit, LLM call, and the cut-and-bridge transition.
+        ``items`` is the history already judged — what the previous call left at ``items[tail_start:]`` — followed
+        by one new message. With ``n`` history messages the decision is made in this order:
+
+        1. ``n < warmup_messages``: no cut, and no model call.
+        2. ``history + [new]`` reaches a hard limit and ``n >= 2``: cut, without the model.
+        3. Otherwise one model call. Once ``n`` exceeds ``smart_mask_threshold`` (and ``smart_mask`` is on), the
+           model is not shown the history's last message, and a cut carries that message into the next segment
+           as well (the bridge).
 
         Args:
-            history: Prior accumulated messages.
-            new: The single newly-arrived message whose boundary status is judged against ``history``.
-            smart_mask: When ``True`` (default), enables the smart-mask path. Mask is only actually applied
-                when ``len(history) > smart_mask_threshold``; otherwise the LLM sees the full history.
-            smart_mask_threshold: Smart-mask only fires when ``len(history)`` exceeds this value.
-            hard_token_limit: Force-split without an LLM call when ``history + [new]`` holds at least this
-                many tokens and ``len(history) >= 2``.
-            hard_message_limit: Force-split without an LLM call when ``len(history) + 1`` reaches this value
-                and ``len(history) >= 2``.
+            items: The judged history, then the new message; ``ChatMessage`` only.
             custom_instructions: The caller's instructions, appended verbatim after the bundled rules as the system
                 message's last block, ``<custom_instructions>``. They add to the rules, never replace them, and are
                 never rendered as a template, so ``{{`` stays literal. ``None`` or a blank string leaves the system
                 message unchanged. The user message always carries the data.
             tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
                 (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
+            warmup_messages: A history shorter than this is extended without asking the model.
+            smart_mask: Whether a long history is masked and bridged; see ``smart_mask_threshold``.
+            smart_mask_threshold: The history length the mask and the bridge start above.
+            hard_token_limit: Cut without the model once ``history + [new]`` holds at least this many tokens.
+            hard_message_limit: Cut without the model once ``history + [new]`` holds at least this many messages.
 
         Returns:
-            :class:`DetectionResult`:
-
-            - ``cells`` — exactly one closed :class:`~everalgo.types.MemCell` (built from ``history`` only)
-              when the episode ends; empty otherwise.
-            - ``tail`` — the new history the caller must feed into the next call:
-
-              * episode ends with smart-mask active: ``[history[-1], new]`` (bridge).
-              * episode ends without smart-mask: ``[new]`` (clean cut).
-              * episode continues: ``[*history, new]`` (accumulate).
+            One of three :class:`~everalgo.boundary.Cuts` over ``items``: ``Cuts([], 0)`` when the new message
+            continues the history; ``Cuts([n], n)`` when the history closes and the new message starts the next
+            segment; ``Cuts([n], n - 1)`` when the history closes and its last message is bridged into the next.
 
         Raises:
-            LLMOutputError: If the LLM reply is not a valid step output.
-            InvalidInputError: If a message the prompt shows has no timestamp (0).
+            InvalidInputError: If ``items`` is empty or holds anything but ``ChatMessage``, or a message the prompt
+                shows has text but no timestamp (0).
+            LLMOutputError: If the LLM reply is not a valid step output. The client's own exceptions propagate
+                unchanged; retry policy is the caller's concern.
         """
-        bridge = smart_mask and len(history) > smart_mask_threshold
-        if _needs_force_split(history, new, hard_token_limit, hard_message_limit):
-            return _closed_step(history, new, bridge=bridge)
+        _check_step_items(items)
+        n = len(items) - 1
+        history, new = items[:n], items[n]
+        if n < warmup_messages:
+            return Cuts(ends=[], tail_start=0)
 
-        shown_history = history[:-1] if bridge else history
-        decision = await adetect_boundary_step(
-            shown_history,
-            [new],
-            llm=self._llm,
-            custom_instructions=custom_instructions,
-            time_gap_info=_calculate_time_gap(shown_history, [new]),
-            tz=tz,
-        )
-        if not decision.should_end:
-            return DetectionResult(cells=[], tail=[*history, new])
-        if not decision.topic_summary:
-            logger.warning("BoundaryDetector: should_end=True but topic_summary is empty; using fallback")
-        return _closed_step(history, new, bridge=bridge)
+        bridge = smart_mask and n > smart_mask_threshold
+        closed = Cuts(ends=[n], tail_start=n - 1 if bridge else n)
+        if _needs_force_split(history, new, hard_token_limit, hard_message_limit):
+            return closed
+        shown = history[:-1] if bridge else history
+        # An empty history cannot end an episode, so it is never put to the model.
+        if shown and await _ask_should_end(shown, new, self._llm, custom_instructions, tz=tz):
+            return closed
+        return Cuts(ends=[], tail_start=0)
 
     detect_step = async_to_sync(adetect_step)
     """Sync bridge — only callable from non-event-loop contexts."""
 
 
-async def adetect_boundaries(
-    items: Sequence[ConversationItem],
-    *,
-    llm: LLMClient,
-    is_final: bool = False,
-    custom_instructions: str | None = None,
-    hard_token_limit: int = DEFAULT_HARD_TOKEN_LIMIT,
-    hard_msg_limit: int = DEFAULT_HARD_MSG_LIMIT,
-    tz: tzinfo = UTC,
-) -> DetectionResult:
-    """Detect MemCell boundaries in a conversation, in one LLM call.
-
-    Only the ``ChatMessage`` items reach the model; ``ToolCallRequest`` / ``ToolCallResult`` items stay in the
-    output cells at their place. Tool items between two chat messages go with the earlier one, tool items ahead
-    of the first chat message with the first cell, and trailing tool items into the tail (or into the last cell
-    when ``is_final``). For a chat-only input every item maps to itself. Every item lands exactly once:
-    ``sum(len(c.items) for c in cells) + len(tail) == len(items)``.
-
-    Args:
-        items: Ordered conversation items, typically ``prior_tail + new_items``.
-        llm: LLM client. Algorithm always requires an LLM; the caller must supply one.
-        is_final: When ``True``, forces the trailing segment into a cell so ``tail == []``.
-        custom_instructions: The caller's instructions, appended verbatim after the bundled rules as the system
-            message's last block, ``<custom_instructions>``. They add to the rules, never replace them, and are never
-            rendered as a template, so ``{{`` stays literal. ``None`` or a blank string leaves the system message
-            unchanged. The user message always carries the data.
-        hard_token_limit: Leading cells are force-split off, without the model, until the chat messages left
-            hold fewer tokens than this.
-        hard_msg_limit: Likewise, until fewer chat messages than this are left.
-        tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
-            (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
-
-    Returns:
-        :class:`DetectionResult`. Without any ``ChatMessage`` no LLM is called: ``cells`` is empty, ``tail``
-        holds every item. The caller owns idle or end-of-session flushing.
+def _check_step_items(items: Sequence[object]) -> None:
+    """Raise unless ``items`` is a non-empty run of chat messages.
 
     Raises:
-        LLMOutputError: If the LLM reply is not a valid batch output. The client's own exceptions propagate
-            unchanged; retry policy is the caller's concern.
-        InvalidInputError: If a chat message the prompt shows has text but no timestamp (0).
+        InvalidInputError: If ``items`` is empty or holds anything but ``ChatMessage``.
     """
-    chat_positions, messages = _chat_view(items)
-    if not messages:
-        return DetectionResult(cells=[], tail=list(items))
-
-    cuts = _force_split_cuts(messages, hard_token_limit, hard_msg_limit)
-    window_start = cuts[-1] if cuts else 0
-    boundaries = await _ask_for_boundaries(messages[window_start:], llm, custom_instructions, tz=tz)
-    cuts += [window_start + boundary for boundary in boundaries]
-    if is_final:
-        cuts.append(len(messages))
-
-    cells, tail = _cut_items(items, chat_positions, cuts)
-    return DetectionResult(cells=cells, tail=tail)
-
-
-detect_boundaries = async_to_sync(adetect_boundaries)
-"""Sync bridge — only callable from non-event-loop contexts."""
-
-
-async def adetect_boundary_step(
-    conversation_history: list[ChatMessage],
-    new_messages: list[ChatMessage],
-    *,
-    llm: LLMClient,
-    custom_instructions: str | None = None,
-    time_gap_info: str = "",
-    tz: tzinfo = UTC,
-) -> BoundaryDecision:
-    """Single-step LLM boundary decision over ``history + new_messages``.
-
-    Caller is responsible for the outer accumulation loop (front-2-buffer / smart_mask / cut-and-bridge)
-    and the force-split short-circuit; :meth:`BoundaryDetector.adetect_step` is that caller. This primitive
-    only owns the LLM call.
-
-    Args:
-        conversation_history: Prior accumulated messages (may be empty).
-        new_messages: Newly arrived messages whose boundary status is being judged.
-        llm: LLM client. Algorithm always requires an LLM; the caller must supply one.
-        custom_instructions: The caller's instructions, appended verbatim after the bundled rules as the system
-            message's last block, ``<custom_instructions>``. They add to the rules, never replace them, and are never
-            rendered as a template, so ``{{`` stays literal. ``None`` or a blank string leaves the system message
-            unchanged. The user message always carries the data.
-        time_gap_info: Pre-computed time-gap label rendered into the user message's ``<time_gap>``; an empty
-            string renders as "No time gap information available".
-        tz: The zone message times are shown in, as :func:`everalgo.utils.format_time` renders them: ``UTC``
-            (the default) or local time with its offset, ``UTC+08:00``; the date and weekday follow it.
-
-    Returns:
-        :class:`BoundaryDecision` with the LLM's verdict.
-
-    Raises:
-        LLMOutputError: If the LLM reply is not a valid step output. The client's own exceptions propagate
-            unchanged; retry/fallback policy is the caller's concern.
-        InvalidInputError: If a chat message the prompt shows has text but no timestamp (0).
-    """
-    if not conversation_history:
-        return BoundaryDecision(
-            should_end=False,
-            reasoning="First messages in conversation",
-            confidence=1.0,
-            topic_summary="",
-        )
-
-    request = _step_request(conversation_history, new_messages, time_gap_info, custom_instructions, tz=tz)
-    reply = await _call_llm_for_step(llm, request)
-    logger.info("boundary step reply: should_end=%s confidence=%.2f", reply.should_end, reply.confidence)
-    return BoundaryDecision(
-        should_end=reply.should_end,
-        reasoning=reply.reasoning,
-        confidence=reply.confidence,
-        topic_summary=reply.topic_summary,
-    )
-
-
-def _closed_step(history: list[ChatMessage], new: ChatMessage, *, bridge: bool) -> DetectionResult:
-    """The step result that closes ``history`` into a cell."""
-    cell, next_history = _close_step(history, new, bridge=bridge)
-    return DetectionResult(cells=[cell], tail=next_history)
+    if not items:
+        raise InvalidInputError("adetect_step got no items: pass the judged history followed by the new message")
+    for index, item in enumerate(items):
+        if not isinstance(item, ChatMessage):
+            raise InvalidInputError(
+                f"adetect_step item {index} is a {type(item).__name__}, not a ChatMessage: the step path judges "
+                "chat messages only; send trajectories with tool items through adetect_batch"
+            )
 
 
 async def _ask_for_boundaries(
@@ -373,6 +237,25 @@ async def _ask_for_boundaries(
     return boundaries
 
 
+async def _ask_should_end(
+    history: Sequence[ChatMessage],
+    new: ChatMessage,
+    llm: LLMClient,
+    custom_instructions: str | None,
+    *,
+    tz: tzinfo,
+) -> bool:
+    """Call the LLM once: does ``new`` end the episode ``history`` holds and start the next?
+
+    Raises:
+        LLMOutputError: If the LLM reply is not a valid step output.
+        InvalidInputError: If a message the prompt shows has no timestamp (0).
+    """
+    reply = await _call_llm_for_step(llm, _step_request(history, new, custom_instructions, tz=tz))
+    logger.info("boundary step reply: should_end=%s", reply.should_end)
+    return reply.should_end
+
+
 def _batch_request(messages: Sequence[ChatMessage], custom_instructions: str | None, *, tz: tzinfo) -> list[LLMMessage]:
     """The batch call's ``[system, user]`` pair; ``count`` is the window size, so it bounds the indices.
 
@@ -397,14 +280,13 @@ def _batch_request(messages: Sequence[ChatMessage], custom_instructions: str | N
 
 
 def _step_request(
-    conversation_history: list[ChatMessage],
-    new_messages: list[ChatMessage],
-    time_gap_info: str,
+    history: Sequence[ChatMessage],
+    new: ChatMessage,
     custom_instructions: str | None,
     *,
     tz: tzinfo,
 ) -> list[LLMMessage]:
-    """The step call's ``[system, user]`` pair.
+    """The step call's ``[system, user]`` pair over a non-empty ``history``; the time gap runs from its last message.
 
     Raises:
         InvalidInputError: If a message the prompt shows has no timestamp (0).
@@ -412,9 +294,9 @@ def _step_request(
     user = render_prompt(
         STEP_BOUNDARY_DETECT_USER_PROMPT,
         None,
-        conversation_history=_format_messages_step(conversation_history, tz=tz),
-        time_gap_info=time_gap_info or "No time gap information available",
-        new_messages=_format_messages_step(new_messages, tz=tz),
+        conversation_history=_format_messages_step(history, tz=tz),
+        time_gap_info=_calculate_time_gap(history[-1], new),
+        new_messages=_format_messages_step([new], tz=tz),
     )
     return [
         LLMMessage(

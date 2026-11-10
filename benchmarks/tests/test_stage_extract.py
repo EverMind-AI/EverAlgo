@@ -24,8 +24,10 @@ from benchmarks.common.stages.extract import (
     run_extract_base_stage,
 )
 from benchmarks.common.stages.types import StageContext
-from everalgo.boundary import DetectionResult
+from everalgo.boundary import Cuts
 from everalgo.clustering.state import Cluster
+from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.types import ChatMessage
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -377,10 +379,8 @@ async def test_memcell_to_episode_mapping_is_identity(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_chat_msg(idx: int) -> Any:
-    """Return a minimal ChatMessage-compatible MagicMock for boundary tests."""
-    from everalgo.types import ChatMessage
-
+def _make_chat_msg(idx: int) -> ChatMessage:
+    """Return a minimal ChatMessage for boundary tests."""
     return ChatMessage(
         id=f"m{idx}",
         role="user",
@@ -391,129 +391,75 @@ def _make_chat_msg(idx: int) -> Any:
     )
 
 
+def _scripted_step(*cuts: Cuts) -> tuple[AsyncMock, list[list[str]]]:
+    """An ``adetect_step`` stand-in returning ``cuts`` in order and recording the ids of each ``items`` it gets."""
+    seen: list[list[str]] = []
+    script = iter(cuts)
+
+    async def step(items: list[ChatMessage], **_: Any) -> Cuts:
+        seen.append([m.id for m in items])
+        return next(script)
+
+    return AsyncMock(side_effect=step), seen
+
+
 @pytest.mark.asyncio
 async def test_detect_all_boundaries_empty_messages_returns_empty() -> None:
     """Zero messages must return an empty cell list without calling adetect_step."""
-    mock_llm = AsyncMock()
-    mock_step = AsyncMock()
+    mock_step, _ = _scripted_step()
     with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
         mock_cls.return_value.adetect_step = mock_step
-        cells = await _detect_all_boundaries([], llm=mock_llm)
+        cells = await _detect_all_boundaries([], llm=AsyncMock())
     assert cells == []
     mock_step.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_detect_all_boundaries_buffers_first_two_messages() -> None:
-    """Front-2 buffer: adetect_step must not be called for the first 2 messages.
-
-    With only 2 messages the loop never reaches the algo; the residual history
-    is flushed as a single final-tail MemCell.
-    """
-    mock_llm = AsyncMock()
-    mock_step = AsyncMock()
-    msgs = [_make_chat_msg(i) for i in range(2)]
+async def test_detect_all_boundaries_judges_every_message_without_a_warmup_of_its_own() -> None:
+    """The warmup lives in ``adetect_step``: the stage hands it every message, history first."""
+    msgs = [_make_chat_msg(i) for i in range(3)]
+    mock_step, seen = _scripted_step(Cuts([], 0), Cuts([], 0), Cuts([], 0))
     with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
         mock_cls.return_value.adetect_step = mock_step
-        cells = await _detect_all_boundaries(msgs, llm=mock_llm)
-    assert len(cells) == 1  # only the final-flush cell
-    assert mock_step.await_count == 0  # front-2 buffer: algo never called
+        cells = await _detect_all_boundaries(msgs, llm=AsyncMock(), smart_mask=False)
+    assert seen == [["m0"], ["m0", "m1"], ["m0", "m1", "m2"]]
+    assert all(call.kwargs == {"smart_mask": False} for call in mock_step.await_args_list)
+    assert [cell.items for cell in cells] == [msgs]  # only the final-flush cell
 
 
 @pytest.mark.asyncio
-async def test_detect_all_boundaries_accumulates_without_emit() -> None:
-    """When every adetect_step returns empty cells, only the final-flush cell is emitted.
-
-    Each accumulating call returns ``DetectionResult(cells=[], tail=[*history, new])``.
-    The outer loop replaces history with the returned tail.
-    """
-    mock_llm = AsyncMock()
+async def test_detect_all_boundaries_closes_cut_segments_and_flushes_the_rest() -> None:
+    """A clean cut closes ``items[:3]``; the next history starts at ``tail_start``; the rest is flushed at the end."""
     msgs = [_make_chat_msg(i) for i in range(6)]
-
-    async def step_wait(history: list[Any], new: Any, **_: Any) -> DetectionResult:
-        return DetectionResult(cells=[], tail=[*history, new])
-
-    mock_step = AsyncMock(side_effect=step_wait)
+    mock_step, seen = _scripted_step(Cuts([], 0), Cuts([], 0), Cuts([], 0), Cuts([3], 3), Cuts([], 0), Cuts([], 0))
     with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
         mock_cls.return_value.adetect_step = mock_step
-        cells = await _detect_all_boundaries(msgs, llm=mock_llm)
-    # 6 msgs: first 2 buffered, 4 algo calls all accumulating → 1 final flush
-    assert len(cells) == 1
-    assert mock_step.await_count == 4
+        cells = await _detect_all_boundaries(msgs, llm=AsyncMock())
+    assert seen[4] == ["m3", "m4"]
+    assert [cell.items for cell in cells] == [msgs[:3], msgs[3:]]
+    assert [cell.timestamp for cell in cells] == [msgs[2].timestamp, msgs[5].timestamp]
 
 
 @pytest.mark.asyncio
-async def test_detect_all_boundaries_flushes_final_tail() -> None:
-    """One closed cell from algo + remaining msgs form the final-tail flush."""
-    from typing import cast
-
-    from everalgo.types import ConversationItem, MemCell
-
-    mock_llm = AsyncMock()
-    msgs = [_make_chat_msg(i) for i in range(6)]
-    closed_cell = MemCell(items=cast("list[ConversationItem]", msgs[:3]), timestamp=msgs[2].timestamp)
-
-    # msg 2 → wait; msg 3 → cut (clean cut, tail=[msg3]); msgs 4-5 → wait.
-    side_effects = [
-        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]]),
-        DetectionResult(cells=[closed_cell], tail=[msgs[3]]),
-        DetectionResult(cells=[], tail=[msgs[3], msgs[4]]),
-        DetectionResult(cells=[], tail=[msgs[3], msgs[4], msgs[5]]),
-    ]
-    mock_step = AsyncMock(side_effect=side_effects)
-
-    with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
-        mock_cls.return_value.adetect_step = mock_step
-        cells = await _detect_all_boundaries(msgs, llm=mock_llm, smart_mask=False)
-
-    # 1 closed cell + 1 final-tail flush = 2 total
-    assert len(cells) == 2
-    assert cells[0] is closed_cell
-
-
-@pytest.mark.asyncio
-async def test_detect_all_boundaries_threads_returned_tail_into_next_call() -> None:
-    """Outer loop must feed ``DetectionResult.tail`` as the next call's history.
-
-    Records the ``history`` argument each call sees; verifies the post-cut call
-    receives the bridged tail (smart-mask path is owned by the algo, so the
-    outer loop just trusts the returned tail).
-    """
-    from typing import cast
-
-    from everalgo.types import ConversationItem, MemCell
-
-    mock_llm = AsyncMock()
+async def test_detect_all_boundaries_threads_a_bridged_tail_into_the_next_call() -> None:
+    """A bridged cut (``tail_start = n - 1``) carries the closed segment's last message into the next history."""
     msgs = [_make_chat_msg(i) for i in range(5)]
-    # msgs 0,1 buffered. Call sequence (history shown is what algo SHOULD see):
-    #   call0: history=[0,1],   new=2 → wait, tail=[0,1,2]
-    #   call1: history=[0,1,2], new=3 → cut, tail=[2,3]   (algo decided to bridge)
-    #   call2: history=[2,3],   new=4 → wait, tail=[2,3,4]
-    closed_cell = MemCell(items=cast("list[ConversationItem]", msgs[:3]), timestamp=msgs[2].timestamp)
-    side_effects = [
-        DetectionResult(cells=[], tail=[msgs[0], msgs[1], msgs[2]]),
-        DetectionResult(cells=[closed_cell], tail=[msgs[2], msgs[3]]),
-        DetectionResult(cells=[], tail=[msgs[2], msgs[3], msgs[4]]),
-    ]
-
-    captured_histories: list[list[Any]] = []
-    call_idx = {"i": 0}
-
-    async def recording_step(history: list[Any], _new: Any, **_: Any) -> DetectionResult:
-        captured_histories.append(list(history))
-        result = side_effects[call_idx["i"]]
-        call_idx["i"] += 1
-        return result
-
+    mock_step, seen = _scripted_step(Cuts([], 0), Cuts([], 0), Cuts([], 0), Cuts([3], 2), Cuts([], 0))
     with patch("benchmarks.common.stages.extract.BoundaryDetector") as mock_cls:
-        mock_cls.return_value.adetect_step = recording_step
-        cells = await _detect_all_boundaries(msgs, llm=mock_llm, smart_mask=True)
+        mock_cls.return_value.adetect_step = mock_step
+        cells = await _detect_all_boundaries(msgs, llm=AsyncMock(), smart_mask=True)
+    assert seen == [["m0"], ["m0", "m1"], ["m0", "m1", "m2"], ["m0", "m1", "m2", "m3"], ["m2", "m3", "m4"]]
+    assert [cell.items for cell in cells] == [msgs[:3], msgs[2:]]
 
-    # Validate histories passed to algo on each call.
-    assert captured_histories[0] == [msgs[0], msgs[1]]
-    assert captured_histories[1] == [msgs[0], msgs[1], msgs[2]]
-    # After cut: call2 must see the returned tail [msgs[2], msgs[3]].
-    assert captured_histories[2] == [msgs[2], msgs[3]]
-    # 1 closed cell + 1 final-tail flush.
-    assert len(cells) == 2
-    assert cells[0] is closed_cell
+
+@pytest.mark.asyncio
+async def test_detect_all_boundaries_warms_up_once_with_the_real_detector() -> None:
+    """With everalgo's own warmup of two messages, five messages and no cut cost three model calls."""
+    reply = json.dumps({"reasoning": "same", "should_end": False})
+    fake = FakeLLMClient(handler=lambda *_, **__: reply)
+    msgs = [_make_chat_msg(i) for i in range(5)]
+
+    cells = await _detect_all_boundaries(msgs, llm=fake)  # type: ignore[arg-type]
+
+    assert fake.call_count == 3
+    assert [cell.items for cell in cells] == [msgs]

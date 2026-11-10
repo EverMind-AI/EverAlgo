@@ -7,11 +7,14 @@ import everalgo.agent_memory
 from everalgo.testing.fake_llm import FakeLLMClient
 
 _EXPECTED_EXPORTS = [
-    # 3 Extractors + the re-exported everalgo.boundary.BoundaryDetector
+    # 3 Extractors
     "AgentCaseExtractor",
     "AgentProfileExtractor",
     "AgentSkillExtractor",
+    # everalgo.boundary's public surface, re-exported unchanged
     "BoundaryDetector",
+    "Cuts",
+    "to_memcells",
     # Optional correctness admission; the host supplies the CaseJudge
     "AgentCaseGate",
     "CaseGateConfig",
@@ -57,11 +60,13 @@ def test_skill_config_not_in_public_api() -> None:
     assert not hasattr(pkg, "SkillConfig")
 
 
-def test_boundary_detector_is_the_boundary_package_class() -> None:
-    """The product package re-exports ``everalgo.boundary.BoundaryDetector`` itself, not a wrapper or subclass."""
+def test_boundary_names_are_the_boundary_package_objects() -> None:
+    """The product package re-exports ``everalgo.boundary``'s objects themselves, not wrappers or subclasses."""
     import everalgo.boundary
 
     assert everalgo.agent_memory.BoundaryDetector is everalgo.boundary.BoundaryDetector
+    assert everalgo.agent_memory.Cuts is everalgo.boundary.Cuts
+    assert everalgo.agent_memory.to_memcells is everalgo.boundary.to_memcells
 
 
 def test_boundary_module_holds_nothing_but_the_re_export() -> None:
@@ -71,8 +76,8 @@ def test_boundary_module_holds_nothing_but_the_re_export() -> None:
 
     assert statements == [
         "from __future__ import annotations",
-        "__all__ = ['BoundaryDetector']",
-        "from everalgo.boundary import BoundaryDetector",
+        "__all__ = ['BoundaryDetector', 'Cuts', 'to_memcells']",
+        "from everalgo.boundary import BoundaryDetector, Cuts, to_memcells",
     ]
 
 

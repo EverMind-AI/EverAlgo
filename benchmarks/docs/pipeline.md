@@ -74,7 +74,7 @@ Episode { subject, episode }   ← episode 是叙述正文（字段名为 episod
 [4] Clustering             ← cluster_by_geometry，基于 episode embedding + 时间窗
 ```
 
-1. **`BoundaryDetector`**（everalgo-user-memory）：把消息序列切成多个 MemCell，每个是 1~N 条消息的语义连续块。**逐消息增量检测**：调 `adetect_step` 一条条喂（`extract.py:_detect_all_boundaries`），caller 侧只负责 front-2-buffer（前 2 条不触发 LLM）和流末把残余 `tail` flush 成最后一个 cell；smart-mask 阈值门控、masking、force-split（`hard_token_limit=65536` / `hard_message_limit=500`，everalgo.boundary 默认值）与 cut-and-bridge 状态转移都封装在 `adetect_step` 内。注意 500 是内部 force-split 的硬上限，**不是批大小**。
+1. **`BoundaryDetector`**（everalgo-user-memory）：把消息序列切成多个 MemCell，每个是 1~N 条消息的语义连续块。**逐消息增量检测**：每来一条消息，把「历史 + 这条」交给 `adetect_step`（`extract.py:_detect_all_boundaries`），它返回 `Cuts`（输入里的下标）；caller 侧只按下标切片（`to_memcells(items, cuts)` 得到切好的段，`items[cuts.tail_start:]` 作为下一步的历史），并在流末把剩下的历史 flush 成最后一个 cell。front-2 预热（历史不足 2 条不问 LLM）、smart-mask 阈值门控、masking、force-split（`hard_token_limit=8192` / `hard_message_limit=50`，everalgo.boundary 逐条路径的默认值）与 cut-and-bridge 都封装在 `adetect_step` 内。注意 50 是单段的 force-split 硬上限，**不是批大小**；改用 `Cuts` 接口之前这一阶段跑的是两条路径共用的 65536 / 500。
 2. **`EpisodeExtractor`**：对每个 MemCell 生成叙述 —— `subject`（短标题）+ `episode`（长叙述正文）+ `summary`（展示摘要）。模型回复按 `{language, content, summary, title}` 四字段严格校验，不合格或 `content` / `summary` / `title` 为空即抛 `LLMOutputError`，算子内不重试；`summary` 超 400 宽度按句截断，不再发第二次调用。
 3. **Embedding**：对 episode text 和 subject 分别做 embedding，结果存入 `episodes_conv_<i>.json`。
 4. **Clustering**：对每个 Episode 用其 embedding 增量调 `everalgo.clustering.cluster_by_geometry`（cosine + 时间窗，`cluster_similarity_threshold=0.70` / `cluster_max_time_gap_days=7.0`）分簇，落 `clusters_conv_<i>.json`。

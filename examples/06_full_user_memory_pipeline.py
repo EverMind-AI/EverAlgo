@@ -2,7 +2,7 @@
 
 Chains all five pipeline stages end-to-end:
 
-1. ``BoundaryDetector.adetect``          → ``MemCell``
+1. ``BoundaryDetector.adetect_batch``    → ``Cuts`` → ``to_memcells`` → ``MemCell``
 2. ``EpisodeExtractor.aextract``         → single ``Episode``
 3. ``ForesightExtractor.aextract``       → list of ``Foresight``
 4. ``AtomicFactExtractor.aextract``      → list of ``AtomicFact``
@@ -27,7 +27,7 @@ import numpy as np
 from everalgo.clustering import Cluster, cluster_by_geometry
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import AtomicFact, ChatMessage, Episode, Foresight, MemCell, Profile
-from everalgo.user_memory import BoundaryDetector
+from everalgo.user_memory import BoundaryDetector, to_memcells
 from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.episode import EpisodeExtractor
 from everalgo.user_memory.foresight import ForesightExtractor
@@ -163,9 +163,11 @@ async def main() -> None:
     fake = _make_fake()
 
     # --- 1. Boundary detection -----------------------------------------------
-    boundary_output = await BoundaryDetector(llm=fake).adetect(_conversation(), is_final=True)
-    mc = boundary_output.cells[0]
-    print(f"[boundary]  cells={len(boundary_output.cells)}  tail={len(boundary_output.tail)}")
+    conversation = _conversation()
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(conversation, is_final=True)
+    cells = to_memcells(conversation, cuts)
+    mc = cells[0]
+    print(f"[boundary]  cells={len(cells)}  tail={len(conversation[cuts.tail_start :])}")
 
     # --- 2. Episode ----------------------------------------------------------
     episode: Episode = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")

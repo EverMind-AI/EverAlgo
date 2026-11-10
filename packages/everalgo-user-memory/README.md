@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, an `EpisodeSummarizer` that writes the summary of an episode text already stored, plus `BoundaryDetector`, re-exported unchanged from `everalgo-boundary`.
+User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, an `EpisodeSummarizer` that writes the summary of an episode text already stored, plus `BoundaryDetector`, its `Cuts` result and the `to_memcells` helper, re-exported unchanged from `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -27,6 +27,7 @@ from everalgo.user_memory import (
     ForesightExtractor,
     AtomicFactExtractor,
     ProfileExtractor,
+    to_memcells,
 )
 
 _BOUNDARY_JSON = json.dumps({"reasoning": "Explanation pending", "boundaries": []})
@@ -50,9 +51,9 @@ async def main() -> None:
         _PROFILE_JSON,
     ])
 
-    # Step 1: boundary detection → MemCell
-    result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
-    mc = result.cells[0]
+    # Step 1: boundary detection → Cuts (indices into `messages`) → MemCell
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(messages, is_final=True)
+    mc = to_memcells(messages, cuts)[0]
 
     # Step 2–4: user-memory extractors
     episode   = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
@@ -149,15 +150,21 @@ nobody has to translate a prompt into.
 ```python
 class BoundaryDetector:  # everalgo.boundary.BoundaryDetector, re-exported
     def __init__(self, *, llm: LLMClient) -> None: ...
-    async def adetect(
-        self, items: Sequence[ConversationItem], *, is_final: bool = False, prompt: str | None = None,
-        hard_token_limit: int = 65_536, hard_msg_limit: int = 500,
-    ) -> DetectionResult: ...
+    async def adetect_batch(
+        self, items: Sequence[ConversationItem], *, is_final: bool = False, custom_instructions: str | None = None,
+        tz: tzinfo = UTC, hard_token_limit: int = 65_536, hard_message_limit: int = 500,
+    ) -> Cuts: ...
     async def adetect_step(
-        self, history: list[ChatMessage], new: ChatMessage, *, smart_mask: bool = True,
-        smart_mask_threshold: int = 5, hard_token_limit: int = 65_536, hard_message_limit: int = 500,
-        prompt: str | None = None,
-    ) -> DetectionResult: ...
+        self, items: Sequence[ChatMessage], *, custom_instructions: str | None = None, tz: tzinfo = UTC,
+        warmup_messages: int = 2, smart_mask: bool = True, smart_mask_threshold: int = 5,
+        hard_token_limit: int = 8_192, hard_message_limit: int = 50,
+    ) -> Cuts: ...
+
+class Cuts(NamedTuple):  # everalgo.boundary.Cuts, re-exported
+    ends: list[int]  # segment i is items[ends[i-1]:ends[i]], the first starting at 0
+    tail_start: int  # carry items[tail_start:] into the next call
+
+def to_memcells(items: Sequence[ConversationItem], cuts: Cuts) -> list[MemCell]: ...  # everalgo.boundary, re-exported
 
 class EpisodeExtractor:
     def __init__(self, *, llm: LLMClient) -> None: ...
@@ -281,6 +288,6 @@ See the integration test pattern in [`tests/integration/`](../../tests/integrati
 
 ## Related distributions
 
-- [`everalgo-boundary`](../everalgo-boundary/) — defines `BoundaryDetector` and the `adetect_boundaries` primitive it forwards to
+- [`everalgo-boundary`](../everalgo-boundary/) — defines `BoundaryDetector`, `Cuts` and `to_memcells`
 - [`everalgo-clustering`](../everalgo-clustering/) — geometry / LLM clustering for grouping MemCells before `ProfileExtractor`
 - [`everalgo-rank`](../everalgo-rank/) — ranks `Episode`, `AtomicFact`, `Profile` candidates at read time

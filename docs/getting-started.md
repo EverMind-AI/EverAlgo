@@ -36,7 +36,7 @@ from everalgo.clustering import Cluster, cluster_by_geometry
 from everalgo.llm import LLMMessage
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
-from everalgo.user_memory import BoundaryDetector
+from everalgo.user_memory import BoundaryDetector, to_memcells
 from everalgo.user_memory import AtomicFactExtractor, EpisodeExtractor, ForesightExtractor, ProfileExtractor
 
 # ---------------------------------------------------------------------------
@@ -78,10 +78,11 @@ async def main() -> None:
         ChatMessage(id="m2", role="assistant", content="Sure — I'll send a follow-up doc next week.", timestamp=1_700_000_001_000, sender_id="assistant"),
     ]
 
-    # 1. Boundary detection — splits messages into MemCell segments.
-    result = await BoundaryDetector(llm=fake).adetect(messages, is_final=True)
-    mc = result.cells[0]
-    print(f"[boundary]  cells={len(result.cells)}  tail={len(result.tail)}")
+    # 1. Boundary detection — where to cut `messages` (indices), then the MemCell segments those cuts make.
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(messages, is_final=True)
+    cells = to_memcells(messages, cuts)
+    mc = cells[0]
+    print(f"[boundary]  cells={len(cells)}  tail={len(messages[cuts.tail_start:])}")
 
     # 2. Episode — a narrative summary of what happened.
     episode = await EpisodeExtractor(llm=fake).aextract(mc, sender_id="u_alice")
@@ -184,20 +185,20 @@ episode = await EpisodeExtractor(llm=client).aextract(memcell, sender_id="u_alic
 
 The `llm=` argument is bound at construction time. There is no global default — each operator instance holds its own client.
 
-### Boundary class and low-level primitive
+### Boundary detection: one class, indices back
 
-`BoundaryDetector` is defined in the boundary package, next to the lower-level function it forwards to; both product packages re-export it:
+`BoundaryDetector` is defined in the boundary package and is its only entry; both product packages re-export it, its `Cuts` result type and the `to_memcells` helper:
 
 ```python
-# Defining package — the class and its function primitive
-from everalgo.boundary import BoundaryDetector, adetect_boundaries
+# Defining package
+from everalgo.boundary import BoundaryDetector, Cuts, to_memcells
 
-# Product re-exports — the same class object
-from everalgo.user_memory import BoundaryDetector
-from everalgo.agent_memory import BoundaryDetector
+# Product re-exports — the same objects
+from everalgo.user_memory import BoundaryDetector, Cuts, to_memcells
+from everalgo.agent_memory import BoundaryDetector, Cuts, to_memcells
 ```
 
-All three `BoundaryDetector` imports resolve to the same class. `adetect_boundaries` (with its sync bridge `detect_boundaries`) is what `BoundaryDetector.adetect` calls; it accepts agent trajectories with tool calls as well as plain chat.
+`adetect_batch` cuts one window of a conversation — agent trajectories with tool calls as well as plain chat — and `adetect_step` judges one new message against the history before it. Both return `Cuts(ends, tail_start)`: segment `i` is `items[ends[i-1]:ends[i]]` and the part to carry into the next call is `items[tail_start:]`. `to_memcells(items, cuts)` builds the `MemCell`s when you need them.
 
 ---
 

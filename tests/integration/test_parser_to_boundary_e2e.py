@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import everalgo.parser as parser_pkg
-from everalgo.boundary import adetect_boundaries
+from everalgo.boundary import BoundaryDetector, to_memcells
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, Modality, RawFile
 
@@ -69,11 +69,12 @@ async def test_txt_to_boundary_pipeline() -> None:
         ),
     ]
 
-    result = await adetect_boundaries(msgs, llm=fake, is_final=True)
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(msgs, is_final=True)
     # Boundary stub said "no cut" + is_final=True → all msgs land in single cell.
-    assert len(result.cells) == 1
-    assert result.tail == []
-    assert len(result.cells[0].items) == 2
+    cells = to_memcells(msgs, cuts)
+    assert len(cells) == 1
+    assert msgs[cuts.tail_start :] == []
+    assert len(cells[0].items) == 2
     assert fake.call_count == 1  # only boundary called LLM
 
 
@@ -118,6 +119,6 @@ async def test_pdf_to_boundary_pipeline() -> None:
             )
         )
 
-    result = await adetect_boundaries(msgs, llm=fake, is_final=True)
-    assert len(result.cells) >= 1
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(msgs, is_final=True)
+    assert len(to_memcells(msgs, cuts)) >= 1
     assert fake.call_count >= 2  # parser OCR + boundary

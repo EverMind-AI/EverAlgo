@@ -1,7 +1,7 @@
 """Tests for the batch path over mixed agent trajectories (``ChatMessage`` + ``ToolCallRequest`` + ``ToolCallResult``).
 
-Only chat messages reach the model; the cuts it makes over them are carried back to the full item list, so every
-tool item lands in exactly one cell or in the tail. All LLM calls use
+Only chat messages reach the model; the cuts it makes over them are carried back to the full item list, so the
+``Cuts`` index the full list and every tool item lands in exactly one cell or in the tail. All LLM calls use
 :class:`everalgo.testing.fake_llm.FakeLLMClient` — no real network calls.
 
 LLM reply format (``everalgo.boundary._replies.Reply``):
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from everalgo.boundary import BoundaryDetector, adetect_boundaries
+from everalgo.boundary import BoundaryDetector, Cuts, to_memcells
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, ConversationItem, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 
@@ -46,15 +46,20 @@ def _boundary_response(boundaries: list[int]) -> str:
     return json.dumps({"reasoning": "test boundary decision", "boundaries": boundaries})
 
 
+async def _detect(items: list[ConversationItem], boundaries: list[int], *, is_final: bool = False) -> Cuts:
+    fake = FakeLLMClient(responses=[_boundary_response(boundaries)])
+    return await BoundaryDetector(llm=fake).adetect_batch(items, is_final=is_final)
+
+
 # ── Chat-only input maps to itself ───────────────────────────────────────────────────────────────────
 
 
 async def test_chat_only_trajectory_closes_into_one_cell() -> None:
     items: list[ConversationItem] = [_chat("user", "hello", idx=0), _chat("assistant", "hi there", idx=1)]
-    result = await BoundaryDetector(llm=FakeLLMClient(responses=[_boundary_response([])])).adetect(items, is_final=True)
+    cuts = await _detect(items, [], is_final=True)
 
-    assert [cell.items for cell in result.cells] == [items]
-    assert result.tail == []
+    assert cuts == Cuts(ends=[2], tail_start=2)
+    assert [cell.items for cell in to_memcells(items, cuts)] == [items]
 
 
 # ── Tool items never reach the model ─────────────────────────────────────────────────────────────────
@@ -80,17 +85,19 @@ async def test_tool_items_are_filtered_from_the_llm_prompt() -> None:
         captured.extend(messages)
         return _boundary_response([])
 
-    await adetect_boundaries(items, llm=FakeLLMClient(handler=_capture_handler), is_final=True)
+    await BoundaryDetector(llm=FakeLLMClient(handler=_capture_handler)).adetect_batch(items, is_final=True)
 
     prompt_text = " ".join(str(m.content) for m in captured)
     assert tool_func_name not in prompt_text
     assert tool_result_content not in prompt_text
     assert captured[-1].content == (
-        '<messages count="2">\n'
+        "<messages>\n"
         "[0] [2023-11-14 22:13 UTC (Tuesday)] user: do something\n"
+        "<time_gap>Time gap: 0 seconds (immediate response)</time_gap>\n"
         "[1] [2023-11-14 22:13 UTC (Tuesday)] assistant: done\n"
-        "</messages>"
-    ), "chat messages are numbered among themselves"
+        "</messages>\n\n"
+        "<message_count>\n2\n</message_count>"
+    ), "chat messages are numbered among themselves, and the gap runs from one chat message to the next"
 
 
 # ── Where tool items land ────────────────────────────────────────────────────────────────────────────
@@ -104,10 +111,10 @@ async def test_tool_items_between_chat_messages_stay_with_the_earlier_one() -> N
     chat_2 = _chat("user", "task B", idx=4, ts=_TS + 4)
     items: list[ConversationItem] = [chat_0, tool_req, tool_res, chat_1, chat_2]
 
-    result = await adetect_boundaries(items, llm=FakeLLMClient(responses=[_boundary_response([1])]), is_final=True)
+    cuts = await _detect(items, [1], is_final=True)
 
-    assert [cell.items for cell in result.cells] == [[chat_0, tool_req, tool_res], [chat_1, chat_2]]
-    assert result.tail == []
+    assert cuts == Cuts(ends=[3, 5], tail_start=5)
+    assert [cell.items for cell in to_memcells(items, cuts)] == [[chat_0, tool_req, tool_res], [chat_1, chat_2]]
 
 
 async def test_tool_items_ahead_of_the_first_chat_message_join_the_first_cell() -> None:
@@ -116,10 +123,11 @@ async def test_tool_items_ahead_of_the_first_chat_message_join_the_first_cell() 
     chat_1 = _chat("user", "B", idx=3, ts=_TS + 3)
     items: list[ConversationItem] = [lead_req, lead_res, chat_0, chat_1]
 
-    result = await adetect_boundaries(items, llm=FakeLLMClient(responses=[_boundary_response([1])]))
+    cuts = await _detect(items, [1])
 
-    assert [cell.items for cell in result.cells] == [[lead_req, lead_res, chat_0]]
-    assert result.tail == [chat_1]
+    assert cuts == Cuts(ends=[3], tail_start=3)
+    assert [cell.items for cell in to_memcells(items, cuts)] == [[lead_req, lead_res, chat_0]]
+    assert items[cuts.tail_start :] == [chat_1]
 
 
 async def test_trailing_tool_items_join_the_last_cell_when_final() -> None:
@@ -128,10 +136,10 @@ async def test_trailing_tool_items_join_the_last_cell_when_final() -> None:
     trailing = _tool_req(ts=_TS + 2)
     items: list[ConversationItem] = [chat_0, chat_1, trailing]
 
-    result = await adetect_boundaries(items, llm=FakeLLMClient(responses=[_boundary_response([1])]), is_final=True)
+    cuts = await _detect(items, [1], is_final=True)
 
-    assert [cell.items for cell in result.cells] == [[chat_0], [chat_1, trailing]]
-    assert result.tail == []
+    assert cuts == Cuts(ends=[1, 3], tail_start=3)
+    assert [cell.items for cell in to_memcells(items, cuts)] == [[chat_0], [chat_1, trailing]]
 
 
 async def test_trailing_tool_items_stay_in_the_tail_when_not_final() -> None:
@@ -140,10 +148,10 @@ async def test_trailing_tool_items_stay_in_the_tail_when_not_final() -> None:
     trailing = _tool_req(ts=_TS + 2)
     items: list[ConversationItem] = [chat_0, chat_1, trailing]
 
-    result = await adetect_boundaries(items, llm=FakeLLMClient(responses=[_boundary_response([1])]))
+    cuts = await _detect(items, [1])
 
-    assert [cell.items for cell in result.cells] == [[chat_0]]
-    assert result.tail == [chat_1, trailing]
+    assert cuts == Cuts(ends=[1], tail_start=1)
+    assert items[cuts.tail_start :] == [chat_1, trailing]
 
 
 async def test_cell_timestamp_is_its_last_chat_message() -> None:
@@ -151,9 +159,9 @@ async def test_cell_timestamp_is_its_last_chat_message() -> None:
     trailing = _tool_res(ts=_TS + 99)
     items: list[ConversationItem] = [chat_0, trailing]
 
-    result = await adetect_boundaries(items, llm=FakeLLMClient(responses=[_boundary_response([])]), is_final=True)
+    cuts = await _detect(items, [], is_final=True)
 
-    assert [(cell.items, cell.timestamp) for cell in result.cells] == [(items, _TS)]
+    assert [(cell.items, cell.timestamp) for cell in to_memcells(items, cuts)] == [(items, _TS)]
 
 
 # ── Every item lands exactly once ────────────────────────────────────────────────────────────────────
@@ -184,12 +192,11 @@ async def test_every_item_lands_exactly_once_and_in_order(layout: str, boundarie
     """Cells then tail, concatenated, give back ``items`` — nothing dropped, duplicated or reordered."""
     items = _layouts()[layout]
 
-    result = await adetect_boundaries(
-        items, llm=FakeLLMClient(responses=[_boundary_response(boundaries)]), is_final=is_final
-    )
+    cuts = await _detect(items, boundaries, is_final=is_final)
+    cells, tail = to_memcells(items, cuts), items[cuts.tail_start :]
 
-    assert sum(len(cell.items) for cell in result.cells) + len(result.tail) == len(items)
-    assert [item for cell in result.cells for item in cell.items] + result.tail == items
+    assert sum(len(cell.items) for cell in cells) + len(tail) == len(items)
+    assert [item for cell in cells for item in cell.items] + tail == items
 
 
 # ── No chat message, no model ────────────────────────────────────────────────────────────────────────
@@ -200,8 +207,7 @@ async def test_tool_only_trajectory_reaches_no_llm_and_goes_to_the_tail(is_final
     items: list[ConversationItem] = [_tool_req(), _tool_res()]
     fake = FakeLLMClient(responses=[])
 
-    result = await adetect_boundaries(items, llm=fake, is_final=is_final)
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(items, is_final=is_final)
 
-    assert result.cells == []
-    assert result.tail == items
+    assert cuts == Cuts(ends=[], tail_start=0)
     assert fake.call_count == 0

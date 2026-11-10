@@ -13,7 +13,7 @@ dataset conversation
 convert messages to everalgo.types.ChatMessage
         │
         ▼
-incremental BoundaryDetector.adetect_step
+incremental BoundaryDetector.adetect_step → Cuts → to_memcells
         │
         ▼
 list[MemCell]
@@ -34,7 +34,7 @@ cluster artifacts + reverse Episode-to-cluster map
 
 ## 1. Incremental boundary detection
 
-`_detect_all_boundaries` in `benchmarks/common/stages/extract.py` keeps a per-conversation `history` buffer. The first two messages are buffered without an LLM call. Each later message is passed with the current history to `BoundaryDetector.adetect_step`; closed cells are appended and the returned tail becomes the next history. After input is exhausted, any remaining history is force-closed as the final MemCell with the last message timestamp.
+`_detect_all_boundaries` in `benchmarks/common/stages/extract.py` keeps a per-conversation `history` buffer. Every message is passed, after the current history, to `BoundaryDetector.adetect_step`, which returns `Cuts`; `to_memcells` builds the closed cells and `items[cuts.tail_start:]` becomes the next history. The strategy is all `adetect_step`'s, at everalgo-boundary's step defaults: no model call until a history holds two messages, the smart mask with its cut-and-bridge, and the hard limits of 8,192 tokens / 50 messages (65,536 / 500 before the `Cuts` API, when both paths shared the batch defaults). After input is exhausted, any remaining history is force-closed as the final MemCell with the last message timestamp.
 
 The result is an ordered `list[MemCell]`. At this point a MemCell contains only boundary-segmented conversation items and a timestamp; it does not embed an Episode or AtomicFacts.
 

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from everalgo.testing.assertions import assert_profile_shape
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
-from everalgo.user_memory import BoundaryDetector
+from everalgo.user_memory import BoundaryDetector, to_memcells
 from everalgo.user_memory.profile import ProfileExtractor
 
 if TYPE_CHECKING:
@@ -104,10 +104,9 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
         ),
     ]
 
-    output = await BoundaryDetector(llm=fake).adetect(new_msgs, is_final=True)
-    assert output.tail == []
-    assert len(output.cells) == 1
-    mc = output.cells[0]
+    cuts = await BoundaryDetector(llm=fake).adetect_batch(new_msgs, is_final=True)
+    assert new_msgs[cuts.tail_start :] == []
+    (mc,) = to_memcells(new_msgs, cuts)
 
     profile = await ProfileExtractor(llm=fake).aextract([*_prior_cluster(), mc], sender_id="u_alice")
 

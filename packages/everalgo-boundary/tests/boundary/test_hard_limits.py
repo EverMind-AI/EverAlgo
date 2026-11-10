@@ -1,7 +1,9 @@
-"""The default hard limits: 65536 tokens / 500 messages, on both the batch and the step path.
+"""The default hard limits: 65536 tokens / 500 messages on the batch path, 8192 tokens / 50 messages on the step path.
 
-Each limit is pinned by what it does at the edge — an input one below it reaches the model whole, an input at it
-is cut without the model — rather than by comparing the default constants with themselves.
+The two limits share a name but bound different things: on the batch path the window sent to the model, which holds
+several segments; on the step path one segment, which every step call sends whole. Each limit is pinned by what it
+does at the edge — an input one below it reaches the model, an input at it is cut without the model — rather than by
+comparing the default constants with themselves.
 """
 
 from __future__ import annotations
@@ -9,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from everalgo.boundary import BoundaryDetector, adetect_boundaries
+from everalgo.boundary import BoundaryDetector, Cuts
 from everalgo.boundary._render import _count_history_tokens
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage
@@ -18,10 +20,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 _TS = 1_700_000_000_000
-_TOKEN_LIMIT = 65_536
-_MESSAGE_LIMIT = 500
+_BATCH_TOKEN_LIMIT = 65_536
+_BATCH_MESSAGE_LIMIT = 500
+_STEP_TOKEN_LIMIT = 8_192
+_STEP_MESSAGE_LIMIT = 50
 _BATCH_REPLY = json.dumps({"reasoning": "r", "boundaries": []})
-_STEP_REPLY = json.dumps({"reasoning": "r", "should_end": False, "confidence": 0.5, "topic_summary": ""})
+_STEP_REPLY = json.dumps({"reasoning": "r", "should_end": False})
 
 
 def _message(index: int, words: int = 1) -> ChatMessage:
@@ -44,62 +48,49 @@ def _messages_totalling(tokens: int, *, count: int) -> list[ChatMessage]:
     return messages
 
 
-async def _batch_cell_sizes(messages: Sequence[ChatMessage]) -> list[int]:
-    result = await adetect_boundaries(messages, llm=FakeLLMClient(responses=[_BATCH_REPLY]), is_final=True)
-    return [len(cell.items) for cell in result.cells]
+async def _batch_cuts(messages: Sequence[ChatMessage]) -> Cuts:
+    return await BoundaryDetector(llm=FakeLLMClient(responses=[_BATCH_REPLY])).adetect_batch(messages, is_final=True)
 
 
-async def _step_calls_llm(history: list[ChatMessage], new: ChatMessage) -> bool:
+async def _step_calls_llm(items: Sequence[ChatMessage]) -> tuple[bool, Cuts]:
     fake = FakeLLMClient(responses=[_STEP_REPLY])
-    await BoundaryDetector(llm=fake).adetect_step(history, new)
-    return fake.call_count == 1
+    cuts = await BoundaryDetector(llm=fake).adetect_step(items, smart_mask=False)
+    return fake.call_count == 1, cuts
 
 
 # ── Batch ────────────────────────────────────────────────────────────────────────────────────────────
 
 
 async def test_batch_keeps_one_message_below_the_default_message_limit_whole() -> None:
-    assert await _batch_cell_sizes(_messages(_MESSAGE_LIMIT - 1)) == [_MESSAGE_LIMIT - 1]
+    assert await _batch_cuts(_messages(_BATCH_MESSAGE_LIMIT - 1)) == Cuts([499], 499)
 
 
 async def test_batch_pre_cuts_at_the_default_message_limit() -> None:
-    assert await _batch_cell_sizes(_messages(_MESSAGE_LIMIT)) == [_MESSAGE_LIMIT - 1, 1]
+    assert await _batch_cuts(_messages(_BATCH_MESSAGE_LIMIT)) == Cuts([499, 500], 500)
 
 
 async def test_batch_keeps_one_token_below_the_default_token_limit_whole() -> None:
-    assert await _batch_cell_sizes(_messages_totalling(_TOKEN_LIMIT - 1, count=2)) == [2]
+    assert await _batch_cuts(_messages_totalling(_BATCH_TOKEN_LIMIT - 1, count=2)) == Cuts([2], 2)
 
 
 async def test_batch_pre_cuts_at_the_default_token_limit() -> None:
-    assert await _batch_cell_sizes(_messages_totalling(_TOKEN_LIMIT, count=2)) == [1, 1]
-
-
-async def test_the_class_shares_the_batch_defaults() -> None:
-    fake = FakeLLMClient(responses=[_BATCH_REPLY])
-
-    result = await BoundaryDetector(llm=fake).adetect(_messages(_MESSAGE_LIMIT), is_final=True)
-
-    assert [len(cell.items) for cell in result.cells] == [_MESSAGE_LIMIT - 1, 1]
+    assert await _batch_cuts(_messages_totalling(_BATCH_TOKEN_LIMIT, count=2)) == Cuts([1, 2], 2)
 
 
 # ── Step ─────────────────────────────────────────────────────────────────────────────────────────────
 
 
 async def test_step_asks_the_model_one_message_below_the_default_message_limit() -> None:
-    *history, new = _messages(_MESSAGE_LIMIT - 1)
-    assert await _step_calls_llm(history, new)
+    assert await _step_calls_llm(_messages(_STEP_MESSAGE_LIMIT - 1)) == (True, Cuts([], 0))
 
 
 async def test_step_force_splits_at_the_default_message_limit() -> None:
-    *history, new = _messages(_MESSAGE_LIMIT)
-    assert not await _step_calls_llm(history, new)
+    assert await _step_calls_llm(_messages(_STEP_MESSAGE_LIMIT)) == (False, Cuts([49], 49))
 
 
 async def test_step_asks_the_model_one_token_below_the_default_token_limit() -> None:
-    *history, new = _messages_totalling(_TOKEN_LIMIT - 1, count=3)
-    assert await _step_calls_llm(history, new)
+    assert await _step_calls_llm(_messages_totalling(_STEP_TOKEN_LIMIT - 1, count=3)) == (True, Cuts([], 0))
 
 
 async def test_step_force_splits_at_the_default_token_limit() -> None:
-    *history, new = _messages_totalling(_TOKEN_LIMIT, count=3)
-    assert not await _step_calls_llm(history, new)
+    assert await _step_calls_llm(_messages_totalling(_STEP_TOKEN_LIMIT, count=3)) == (False, Cuts([2], 2))

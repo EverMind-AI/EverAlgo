@@ -9,7 +9,7 @@ uv run python examples/01_boundary_chat.py
 
 | # | File | What it shows |
 |---|---|---|
-| 01 | [`01_boundary_chat.py`](01_boundary_chat.py) | Chat → MemCell via `BoundaryDetector` |
+| 01 | [`01_boundary_chat.py`](01_boundary_chat.py) | Chat → `Cuts` → MemCell via `BoundaryDetector.adetect_batch` + `to_memcells` |
 | 02 | [`02_clustering_geometry.py`](02_clustering_geometry.py) | Online incremental clustering with `cluster_by_geometry` |
 | 03 | [`03_user_memory_episode.py`](03_user_memory_episode.py) | MemCell → `Episode` via `EpisodeExtractor` |
 | 04 | [`04_agent_memory_case.py`](04_agent_memory_case.py) | Agent trajectory → `AgentCase` via `AgentCaseExtractor` |
