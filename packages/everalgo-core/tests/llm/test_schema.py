@@ -1,13 +1,15 @@
 """Tests for ``_to_strict_json_schema`` and the ``to_<api>_response_format`` builders on top of it.
 
 Inside the strict subset the result is pinned, key order included, to what openai SDK 2.35.1's
-``openai.lib._pydantic.to_strict_json_schema`` returns for the same model; outside it, the function raises where the
-SDK emits a schema the API rejects.
+``openai.lib._pydantic.to_strict_json_schema`` returns for the same model less every ``title`` / ``description``
+keyword, which the SDK keeps and this function drops; outside it, the function raises where the SDK emits a schema the
+API rejects.
 """
 
 from __future__ import annotations
 
 import json
+from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import pytest
@@ -44,9 +46,9 @@ class _Nested(BaseModel):
 
 
 class _DecoratedRef(BaseModel):
-    """Model whose sub-model field carries a description, so pydantic emits a ``$ref`` with siblings."""
+    """Model whose sub-model field has a default, so pydantic emits a ``$ref`` with a sibling ``default``."""
 
-    child: _Leaf = Field(description="the child")
+    child: _Leaf = _Leaf(label="x", weight=1.0)
 
 
 class _Optional(BaseModel):
@@ -79,12 +81,8 @@ class _StrictRoot(StrictOutputModel):
         pytest.param(
             _Flat,
             {
-                "properties": {
-                    "title": {"title": "Title", "type": "string"},
-                    "score": {"title": "Score", "type": "integer"},
-                },
+                "properties": {"title": {"type": "string"}, "score": {"type": "integer"}},
                 "required": ["title", "score"],
-                "title": "_Flat",
                 "type": "object",
                 "additionalProperties": False,
             },
@@ -95,23 +93,17 @@ class _StrictRoot(StrictOutputModel):
             {
                 "$defs": {
                     "_Leaf": {
-                        "properties": {
-                            "label": {"title": "Label", "type": "string"},
-                            "weight": {"title": "Weight", "type": "number"},
-                        },
+                        "properties": {"label": {"type": "string"}, "weight": {"type": "number"}},
                         "required": ["label", "weight"],
-                        "title": "_Leaf",
                         "type": "object",
                         "additionalProperties": False,
                     }
                 },
-                "description": "Model whose field is a list of sub-models, so the schema carries ``$defs`` and ``$ref``.",
                 "properties": {
-                    "name": {"title": "Name", "type": "string"},
-                    "leaves": {"items": {"$ref": "#/$defs/_Leaf"}, "title": "Leaves", "type": "array"},
+                    "name": {"type": "string"},
+                    "leaves": {"items": {"$ref": "#/$defs/_Leaf"}, "type": "array"},
                 },
                 "required": ["name", "leaves"],
-                "title": "_Nested",
                 "type": "object",
                 "additionalProperties": False,
             },
@@ -120,18 +112,12 @@ class _StrictRoot(StrictOutputModel):
         pytest.param(
             _Optional,
             {
-                "description": "Model with ``X | None`` fields, both with and without a default.",
                 "properties": {
-                    "required_note": {"title": "Required Note", "type": "string"},
-                    "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Note"},
-                    "tag": {
-                        "anyOf": [{"type": "string"}, {"type": "null"}],
-                        "description": "a ref-free nullable with a description",
-                        "title": "Tag",
-                    },
+                    "required_note": {"type": "string"},
+                    "note": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "tag": {"anyOf": [{"type": "string"}, {"type": "null"}]},
                 },
                 "required": ["required_note", "note", "tag"],
-                "title": "_Optional",
                 "type": "object",
                 "additionalProperties": False,
             },
@@ -142,34 +128,24 @@ class _StrictRoot(StrictOutputModel):
             {
                 "$defs": {
                     "_Leaf": {
-                        "properties": {
-                            "label": {"title": "Label", "type": "string"},
-                            "weight": {"title": "Weight", "type": "number"},
-                        },
+                        "properties": {"label": {"type": "string"}, "weight": {"type": "number"}},
                         "required": ["label", "weight"],
-                        "title": "_Leaf",
                         "type": "object",
                         "additionalProperties": False,
                     }
                 },
-                "description": "Model whose sub-model field carries a description, so pydantic emits a ``$ref`` with siblings.",
                 "properties": {
                     "child": {
-                        "description": "the child",
-                        "properties": {
-                            "label": {"title": "Label", "type": "string"},
-                            "weight": {"title": "Weight", "type": "number"},
-                        },
+                        "default": {"label": "x", "weight": 1.0},
+                        "properties": {"label": {"type": "string"}, "weight": {"type": "number"}},
                         "required": ["label", "weight"],
-                        "title": "_Leaf",
                         "type": "object",
                         "additionalProperties": False,
                     }
                 },
-                "required": ["child"],
-                "title": "_DecoratedRef",
                 "type": "object",
                 "additionalProperties": False,
+                "required": ["child"],
             },
             id="_DecoratedRef",
         ),
@@ -179,21 +155,19 @@ class _StrictRoot(StrictOutputModel):
                 "$defs": {
                     "_Tree": {
                         "properties": {
-                            "label": {"title": "Label", "type": "string"},
-                            "children": {"items": {"$ref": "#/$defs/_Tree"}, "title": "Children", "type": "array"},
+                            "label": {"type": "string"},
+                            "children": {"items": {"$ref": "#/$defs/_Tree"}, "type": "array"},
                         },
                         "required": ["label", "children"],
-                        "title": "_Tree",
                         "type": "object",
                         "additionalProperties": False,
                     }
                 },
                 "properties": {
-                    "label": {"title": "Label", "type": "string"},
-                    "children": {"items": {"$ref": "#/$defs/_Tree"}, "title": "Children", "type": "array"},
+                    "label": {"type": "string"},
+                    "children": {"items": {"$ref": "#/$defs/_Tree"}, "type": "array"},
                 },
                 "required": ["label", "children"],
-                "title": "_Tree",
                 "type": "object",
                 "additionalProperties": False,
             },
@@ -205,27 +179,26 @@ class _StrictRoot(StrictOutputModel):
                 "$defs": {
                     "_StrictLeaf": {
                         "additionalProperties": False,
-                        "properties": {"kind": {"enum": ["a", "b"], "title": "Kind", "type": "string"}},
+                        "properties": {"kind": {"enum": ["a", "b"], "type": "string"}},
                         "required": ["kind"],
-                        "title": "_StrictLeaf",
                         "type": "object",
                     }
                 },
                 "additionalProperties": False,
-                "description": 'A model written the recommended way: ``extra="forbid"`` already yields ``additionalProperties: false``.',
                 "properties": {
-                    "leaves": {"items": {"$ref": "#/$defs/_StrictLeaf"}, "title": "Leaves", "type": "array"},
-                    "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Note"},
+                    "leaves": {"items": {"$ref": "#/$defs/_StrictLeaf"}, "type": "array"},
+                    "note": {"anyOf": [{"type": "string"}, {"type": "null"}]},
                 },
                 "required": ["leaves", "note"],
-                "title": "_StrictRoot",
                 "type": "object",
             },
             id="_StrictRoot",
         ),
     ],
 )
-def test_models_inside_the_subset_match_the_sdk_baseline(model: type[BaseModel], sdk_baseline: dict[str, Any]) -> None:
+def test_models_inside_the_subset_match_the_sdk_baseline_less_annotations(
+    model: type[BaseModel], sdk_baseline: dict[str, Any]
+) -> None:
     schema = _to_strict_json_schema(model)
 
     assert json.dumps(schema) == json.dumps(sdk_baseline)
@@ -283,6 +256,99 @@ def test_an_inline_one_of_arm_is_made_strict_like_an_any_of_arm() -> None:
 def test_the_model_is_not_mutated_between_calls() -> None:
     """``model_json_schema`` hands out a fresh dict; rewriting it in place must not leak into a second call."""
     assert _to_strict_json_schema(_Nested) == _to_strict_json_schema(_Nested)
+
+
+# ---------------------------------------------------------------------------
+# Annotations: the schema carries structure; the prompt carries the instructions, and docstrings are for developers
+# ---------------------------------------------------------------------------
+
+
+class _Colour(Enum):
+    """Enum docstring, written for developers."""
+
+    RED = "red"
+
+
+class _DocumentedInner(StrictOutputModel):
+    """Nested model docstring, written for developers."""
+
+    value: int
+
+
+class _Documented(StrictOutputModel):
+    """Class docstring, written for developers."""
+
+    code: Annotated[str, Field(title="Explicit title", description="Field description, written for developers.")]
+    colour: _Colour
+    inner: _DocumentedInner
+
+
+_BUILDERS = [
+    pytest.param(lambda model: to_openai_response_format(model), id="openai"),
+    pytest.param(lambda model: to_anthropic_response_format(model), id="anthropic"),
+    pytest.param(lambda model: to_gemini_response_format(model), id="gemini"),
+    pytest.param(lambda model: to_ollama_response_format(model), id="ollama"),
+]
+
+
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_no_builder_sends_a_title_or_description_derived_from_the_model(
+    build: Callable[[type[BaseModel]], object],
+) -> None:
+    """Plain substrings, so a docstring that reached a description, or a title anywhere, counts too."""
+    raw = json.dumps(_Documented.model_json_schema())
+    assert raw.count("written for developers") == 4
+    assert "Explicit title" in raw
+
+    sent = json.dumps(build(_Documented))
+
+    assert "written for developers" not in sent
+    assert "Explicit title" not in sent
+    assert '"title"' not in sent
+    assert '"description"' not in sent
+
+
+def test_definitions_carry_no_nested_model_or_enum_docstring() -> None:
+    assert _to_strict_json_schema(_Documented)["$defs"] == {
+        "_Colour": {"enum": ["red"], "type": "string"},
+        "_DocumentedInner": {
+            "additionalProperties": False,
+            "properties": {"value": {"type": "integer"}},
+            "required": ["value"],
+            "type": "object",
+        },
+    }
+
+
+def test_names_and_data_called_title_or_description_are_kept() -> None:
+    """Only keywords go: property names are names, and a ``default`` is data."""
+
+    class _Heading(BaseModel):
+        title: str
+        description: Annotated[str, Field(description="dropped")]
+
+    class _Page(BaseModel):
+        heading: _Heading = _Heading(title="kept", description="kept")
+
+    schema = _to_strict_json_schema(_Page)
+    names = {"title": {"type": "string"}, "description": {"type": "string"}}
+
+    assert schema["$defs"]["_Heading"]["properties"] == names
+    assert schema["$defs"]["_Heading"]["required"] == ["title", "description"]
+    assert schema["properties"]["heading"]["properties"] == names
+    assert schema["properties"]["heading"]["default"] == {"title": "kept", "description": "kept"}
+
+
+def test_a_ref_whose_only_sibling_was_a_description_stays_a_bare_ref() -> None:
+    """The annotations go before the strict rewrite, so such a ``$ref`` has no sibling left to be inlined for."""
+
+    class _Described(BaseModel):
+        child: _Leaf = Field(description="the child")
+
+    raw = _Described.model_json_schema()["properties"]["child"]
+    assert raw == {"$ref": "#/$defs/_Leaf", "description": "the child"}
+
+    assert _to_strict_json_schema(_Described)["properties"]["child"] == {"$ref": "#/$defs/_Leaf"}
 
 
 # ---------------------------------------------------------------------------
@@ -451,8 +517,8 @@ def test_openai_discriminated_union_becomes_any_of_without_the_discriminator() -
     assert schema["properties"]["edits"]["items"] == {"anyOf": arms}
     assert schema["properties"]["last"]["anyOf"] == [{"anyOf": arms}, {"type": "null"}]
     assert [schema["$defs"][name]["properties"]["action"] for name in ("_Add", "_Drop")] == [
-        {"const": "add", "title": "Action", "type": "string"},
-        {"const": "drop", "title": "Action", "type": "string"},
+        {"const": "add", "type": "string"},
+        {"const": "drop", "type": "string"},
     ]
 
 
@@ -469,6 +535,8 @@ def test_openai_other_modes_never_build_a_schema(mode: Literal["json_object", "p
 
 
 class _Constrained(StrictOutputModel):
+    """Class docstring: the moved-keyword notes must not pick it up."""
+
     code: Annotated[str, Field(pattern=r"^[A-Z]{3}$", description="Airport code")]
     score: Annotated[int, Field(ge=0, le=10)]
     tags: Annotated[list[str], Field(min_length=2)]
@@ -501,15 +569,13 @@ def test_anthropic_prompt_only_leaves_the_parameter_out() -> None:
 
 
 def test_anthropic_moves_what_it_does_not_take_into_the_description() -> None:
+    """The note is the whole description: neither the class docstring nor the field's description is in it."""
     result = to_anthropic_response_format(_Constrained)
     assert result is not None
     properties = _properties(result["schema"])
 
-    assert properties["code"] == {
-        "type": "string",
-        "title": "Code",
-        "description": "Airport code\n\n{pattern: ^[A-Z]{3}$}",
-    }
+    assert "description" not in result["schema"]
+    assert properties["code"] == {"type": "string", "description": "{pattern: ^[A-Z]{3}$}"}
     assert properties["score"]["description"] == "{maximum: 10, minimum: 0}"
     assert properties["tags"]["description"] == "{minItems: 2}"
     assert properties["note"]["description"] == "{maxLength: 20}"
@@ -534,11 +600,7 @@ def test_anthropic_moves_an_unlisted_string_format() -> None:
 
     result = to_anthropic_response_format(_Address)
     assert result is not None
-    assert _properties(result["schema"])["host"] == {
-        "type": "string",
-        "title": "Host",
-        "description": "{format: ipvanyaddress}",
-    }
+    assert _properties(result["schema"])["host"] == {"type": "string", "description": "{format: ipvanyaddress}"}
 
 
 def test_anthropic_turns_one_of_into_any_of() -> None:
@@ -550,19 +612,11 @@ def test_anthropic_turns_one_of_into_any_of() -> None:
     assert len(animal["anyOf"]) == 2
 
 
-@pytest.mark.parametrize(
-    "build",
-    [
-        pytest.param(lambda model: to_openai_response_format(model), id="openai"),
-        pytest.param(lambda model: to_anthropic_response_format(model), id="anthropic"),
-        pytest.param(lambda model: to_gemini_response_format(model), id="gemini"),
-        pytest.param(lambda model: to_ollama_response_format(model), id="ollama"),
-    ],
-)
+@pytest.mark.parametrize("build", _BUILDERS)
 def test_no_builder_sends_one_of_or_the_discriminator(build: Callable[[type[BaseModel]], object]) -> None:
     """The rewrite happens in the strict schema every builder starts from, not in any one builder.
 
-    Plain substrings, so a keyword a builder moves into a description counts too; ``_Pet`` has no docstring to trip them.
+    Plain substrings, so a keyword a builder moves into a description counts too.
     """
     sent = json.dumps(build(_Pet))
 
@@ -587,11 +641,14 @@ def test_gemini_prompt_only_adds_no_entries() -> None:
 
 
 def test_gemini_moves_what_it_does_not_list_and_keeps_what_it_does() -> None:
-    properties = _properties(to_gemini_response_format(_Constrained)["responseJsonSchema"])
+    """As for Anthropic, the note is the whole description, with no docstring or field description in it."""
+    schema = to_gemini_response_format(_Constrained)["responseJsonSchema"]
+    properties = _properties(schema)
 
-    assert properties["code"]["description"] == "Airport code\n\n{pattern: ^[A-Z]{3}$}"
+    assert "description" not in schema
+    assert properties["code"] == {"type": "string", "description": "{pattern: ^[A-Z]{3}$}"}
     assert properties["note"]["description"] == "{maxLength: 20}"
-    assert properties["kind"] == {"type": "string", "title": "Kind", "description": "{const: a}"}
+    assert properties["kind"] == {"type": "string", "description": "{const: a}"}
     assert (properties["score"]["minimum"], properties["score"]["maximum"]) == (0, 10)
     assert properties["tags"]["minItems"] == 2
 

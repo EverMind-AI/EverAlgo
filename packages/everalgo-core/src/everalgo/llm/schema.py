@@ -1,9 +1,11 @@
 """Strict-mode JSON Schema derivation for ``response_format`` models, and the request parameters built from it.
 
 There is one ``to_<api>_response_format`` builder per mainstream API. Each translates the format: it returns what
-that API expects in its request and leaves placing it there to the caller. Where an API takes only part of JSON
-Schema, the other keywords move into the description, as the Anthropic SDK does; the reply is still validated
-against the full model (``docs/concepts/llm-contract.md`` §3.2, §8.4).
+that API expects in its request and leaves placing it there to the caller. The schema carries structure only, none
+of the ``title`` / ``description`` keywords pydantic derives from class and field names, docstrings and
+``Field(description=...)``: the prompt carries the instructions, and docstrings are written for developers. Where an
+API takes only part of JSON Schema, the other keywords move into a description, as the Anthropic SDK does; the reply
+is still validated against the full model (``docs/concepts/llm-contract.md`` §3.2, §8.1, §8.4).
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ __all__ = [
     "to_openai_response_format",
 ]
 
+from functools import partial
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from pydantic import BaseModel, RootModel
@@ -75,6 +78,9 @@ _GEMINI_KEYWORDS: Final = frozenset(
     }
 )
 
+# The annotation keywords pydantic derives from class and field names, docstrings and ``Field(description=...)``.
+_ANNOTATIONS: Final = frozenset({"title", "description"})
+
 _SUB_SCHEMA_MAPS: Final = frozenset({"properties", "$defs", "definitions"})
 _SUB_SCHEMA_LISTS: Final = frozenset({"anyOf", "allOf", "prefixItems"})
 
@@ -85,10 +91,12 @@ def _to_strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
     The result is ``model.model_json_schema()`` rewritten as openai SDK 2.35.1's ``to_strict_json_schema`` rewrites
     it: every object without a declared ``additionalProperties`` forbids extra keys and requires all its
     properties, a ``$ref`` with sibling keys is inlined, a single-arm ``allOf`` is flattened and ``None``
-    defaults are dropped. Beyond the SDK, which passes them through, a discriminated union's ``oneOf`` becomes
-    ``anyOf`` and its ``discriminator`` is dropped: strict mode rejects ``oneOf``, and ``discriminator`` is OpenAPI
-    vocabulary no JSON Schema validator reads. A structure strict mode cannot express raises here rather than failing
-    upstream with a 400. See ``docs/concepts/llm-contract.md`` §8.
+    defaults are dropped. Two changes go beyond the SDK, which passes the keywords involved through. The ``title`` /
+    ``description`` keywords are dropped at every level, before the rewrite: the prompt carries the instructions and
+    docstrings are written for developers, and a ``$ref`` whose only siblings they were is left bare, not inlined.
+    A discriminated union's ``oneOf`` becomes ``anyOf`` and its ``discriminator`` is dropped: strict mode rejects
+    ``oneOf``, and ``discriminator`` is OpenAPI vocabulary no JSON Schema validator reads. A structure strict mode
+    cannot express raises here rather than failing upstream with a 400. See ``docs/concepts/llm-contract.md`` §8.
 
     Args:
         model: The ``response_format`` model; its top level must be an object.
@@ -107,7 +115,7 @@ def _to_strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
             f"{model.__name__}: a RootModel cannot be a response_format — its top level is not an object, so "
             f"a truncated reply may still parse; wrap the value in a field of a StrictOutputModel instead"
         )
-    schema = model.model_json_schema()
+    schema = _without_annotations(model.model_json_schema())
     top_level_type = _top_level_type(schema, path=model.__name__)
     if top_level_type != "object":
         raise ValueError(
@@ -131,7 +139,8 @@ def to_openai_response_format(
             ``prompt_only`` for nothing beyond the prompt.
 
     Returns:
-        The parameter value, or ``None`` when ``mode`` is ``prompt_only`` and the parameter is left out.
+        The parameter value, or ``None`` when ``mode`` is ``prompt_only`` and the parameter is left out. The
+        ``name`` is the model's class name; the schema itself carries no title or description derived from the model.
 
     Raises:
         TypeError: If ``mode`` is ``json_schema`` and ``model`` is a ``RootModel``.
@@ -159,7 +168,8 @@ def to_anthropic_response_format(
 
     As the Anthropic SDK's ``transform_schema`` does, the schema keeps only what Anthropic structured outputs take:
     other keywords (numeric bounds, string length, ``pattern``, a ``minItems`` above 1, an unlisted string format)
-    move into the description, where the model can still read them.
+    move into a description, where the model can still read them. That note is the only description the schema
+    carries; none is derived from the model's docstrings.
 
     Args:
         model: The ``response_format`` model of the call.
@@ -188,7 +198,8 @@ def to_gemini_response_format(
     Gemini spreads this setting over two sibling fields, so both come back, under their REST names (the
     ``google-genai`` SDK accepts them as well). Add them to ``generationConfig`` with ``update``: no other entry
     there shares their keys. Keywords ``responseJsonSchema`` does not list (``pattern``, string length,
-    ``multipleOf``, ``const`` and the like) move into the description.
+    ``multipleOf``, ``const`` and the like) move into a description, the only one the schema carries; none is
+    derived from the model's docstrings.
 
     Args:
         model: The ``response_format`` model of the call.
@@ -217,7 +228,7 @@ def to_ollama_response_format(
 ) -> dict[str, Any] | str | None:
     """Build the value of the Ollama ``format`` parameter (``/api/chat``, ``/api/generate``) for ``model``.
 
-    Ollama takes the schema itself, with no envelope around it.
+    Ollama takes the schema itself, with no envelope around it and no title or description derived from the model.
 
     Args:
         model: The ``response_format`` model of the call.
@@ -239,6 +250,24 @@ def to_ollama_response_format(
             return "json"
         case "prompt_only":
             return None
+
+
+def _without_annotations(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``schema`` without ``title`` / ``description`` at any schema level.
+
+    Only keywords go: the keys of ``properties`` / ``$defs`` / ``definitions`` are names, and a field may itself be
+    called ``title`` or ``description``. Values such as ``default`` or ``enum`` are data and are kept as they are.
+    """
+    return {
+        key: _map_children(key, value, _without_annotations_node)
+        for key, value in schema.items()
+        if key not in _ANNOTATIONS
+    }
+
+
+def _without_annotations_node(value: object) -> object:
+    node = _as_dict(value)
+    return _without_annotations(node) if node is not None else value
 
 
 def _top_level_type(schema: dict[str, Any], *, path: str) -> object:
@@ -373,34 +402,32 @@ def _restrict(
     keywords: frozenset[str],
     keeps: Callable[[str, object], bool] = lambda _key, _value: True,
 ) -> dict[str, Any]:
-    """Return ``schema`` holding only ``keywords`` at every level; the rest is appended to the description.
+    """Return ``schema`` holding only ``keywords`` at every level; the rest is noted in a description.
 
-    ``keeps`` can still turn a listed keyword's value away. The note follows the Anthropic SDK's format:
-    ``{key: value, ...}`` after a blank line.
+    ``keeps`` can still turn a listed keyword's value away. The note follows the Anthropic SDK's format,
+    ``{key: value, ...}``; it is the node's whole description, as the strict schema carries none of its own.
     """
+    restrict_child = partial(_restrict_node, keywords=keywords, keeps=keeps)
     kept: dict[str, Any] = {}
     moved: dict[str, Any] = {}
     for key, value in schema.items():
         if key in keywords and keeps(key, value):
-            kept[key] = _restrict_children(key, value, keywords=keywords, keeps=keeps)
+            kept[key] = _map_children(key, value, restrict_child)
         else:
             moved[key] = value
     if moved:
-        note = "{" + ", ".join(f"{key}: {value}" for key, value in moved.items()) + "}"
-        kept["description"] = f"{kept['description']}\n\n{note}" if "description" in kept else note
+        kept["description"] = "{" + ", ".join(f"{key}: {value}" for key, value in moved.items()) + "}"
     return kept
 
 
-def _restrict_children(
-    key: str, value: object, *, keywords: frozenset[str], keeps: Callable[[str, object], bool]
-) -> object:
-    """Apply ``_restrict`` to the sub-schemas ``value`` holds under ``key``, and return anything else unchanged."""
+def _map_children(key: str, value: object, transform: Callable[[object], object]) -> object:
+    """Apply ``transform`` to each sub-schema ``value`` holds under ``key``, and return anything else unchanged."""
     if key in _SUB_SCHEMA_MAPS and (mapping := _as_dict(value)) is not None:
-        return {name: _restrict_node(sub, keywords=keywords, keeps=keeps) for name, sub in mapping.items()}
+        return {name: transform(sub) for name, sub in mapping.items()}
     if key in _SUB_SCHEMA_LISTS and (arms := _as_list(value)) is not None:
-        return [_restrict_node(arm, keywords=keywords, keeps=keeps) for arm in arms]
+        return [transform(arm) for arm in arms]
     if key == "items":
-        return _restrict_node(value, keywords=keywords, keeps=keeps)
+        return transform(value)
     return value
 
 

@@ -508,9 +508,11 @@ return text
 
 ### 8.1 strict schema：所有构造函数的起点
 
-每个构造函数（8.4）的 `json_schema` 档都从同一套改写出发，取 `model.model_json_schema()` 后做改造：每个已有 `type: "object"` 且**未声明** `additionalProperties` 的节点补 `additionalProperties: false`、`required` 填成全部 property 名，剥掉值为 `null` 的 `default`，展开带兄弟键的 `$ref`，把判别联合的 `oneOf` 改成 `anyOf` 并删掉 `discriminator`（8.2），并递归处理 `$defs` / `definitions` / `properties` / `items` / `anyOf` / `allOf`。
+每个构造函数（8.4）的 `json_schema` 档都从同一套改写出发，取 `model.model_json_schema()` 后做改造：先在每一层删掉 `title` 和 `description` 关键字；再给每个已有 `type: "object"` 且**未声明** `additionalProperties` 的节点补 `additionalProperties: false`、`required` 填成全部 property 名，剥掉值为 `null` 的 `default`，展开带兄弟键的 `$ref`，把判别联合的 `oneOf` 改成 `anyOf` 并删掉 `discriminator`（8.2），并递归处理 `$defs` / `definitions` / `properties` / `items` / `anyOf` / `allOf`。
 
 这些改写让它比默认配置的 pydantic 模型更严。只有模型按 2.2 配置时，它和本地校验才接受同一批输入。
+
+**schema 只带结构，不带文字。** pydantic 从类名和字段名生成 `title`，从文档字符串和 `Field(description=...)` 生成 `description`；这些一概不发。strict schema 是模型读到的内容的一部分：对一条录制下来的 boundary 逐条判断请求，经 OpenRouter 发给 OpenAI `gpt-4.1-mini`，计费的 prompt token 在不带 schema 时是 851，带去掉 title 和 description 的 schema 时是 884，带着它们时是 1009，多出的 125 个 token 就是这些 title 和回复模型的文档字符串。模型该写什么由 prompt 负责（4.3）。文档字符串是写给开发者看的，把它发出去，每改一次代码文档就等于改了一次模型的输入；schema 只补充格式，不再提供第二套指令。strict 模式也不需要它们：OpenAI 对 strict schema 的要求是每个对象都有 `required` 和 `additionalProperties: false`，并不要求 description（Structured Outputs 指南「Supported schemas」一节）；同一次测量里，不带它们的 schema 也被接受了。同一份指南的「Tips for your JSON Schema」确实建议给重要的键写清楚 title 和 description；但在这里，各个键由 prompt 负责讲解（4.3），而 pydantic 生成的只是类名或文档字符串，并不是写给模型的说明。删掉的只是关键字：`properties` / `$defs` / `definitions` 下面的键是名字，保持不动，所以名叫 `title` 或 `description` 的字段照样保留自己的 schema；`default`、`enum` 这类取值是数据，原样保留。因为这些注解在其余改写之前就被删掉，原本只带注解作兄弟键的 `$ref` 会保持为裸 `$ref`，不再展开。某家 API 只接受 JSON Schema 的一部分时，它不接受的关键字仍会写进描述作为说明（8.4）。
 
 这套改写是 `everalgo.llm.schema` 的私有函数，不对外导出：各家 API 包装 schema 的方式不同，每个构造函数又已经返回整个请求取值，实现方用不到裸 schema。还没有构造函数的 API，在补上构造函数（8.4）之前，实现方可以先取 `to_openai_response_format(model)["json_schema"]["schema"]`。
 
@@ -538,7 +540,7 @@ openai_response_format = to_openai_response_format(response_format, "json_schema
 | `list[子模型]` | ✅ |
 | `Literal["a", "b"]` | ✅ |
 | 带默认值的字段 | ✅（默认值被剥掉，字段仍进 `required`） |
-| `Field(description=...)` 的子模型（产生带兄弟键的 `$ref`） | ✅ 展开后通过 |
+| `Field(description=...)` 的子模型 | ✅ 2026-09-22 那批实测里，带 `description` 兄弟键的 `$ref` 展开后通过；现在注解会被删掉（8.1），这个字段就是裸 `$ref`，与「嵌套子模型」一行相同 |
 | 自引用递归模型 | ✅ |
 | 判别联合（`Field(discriminator=...)`） | ✅ 改写后：`oneOf` 改成 `anyOf`，删掉 `discriminator`；不在 2026-09-22 那批实测里，见下文 |
 | **`dict[str, int]`（动态键）** | **❌ 400** |
@@ -581,7 +583,7 @@ openai_response_format = to_openai_response_format(response_format, "json_schema
 | `to_gemini_response_format` | `generationConfig` 里的 `responseMimeType` 和 `responseJsonSchema` 两个条目（Gemini `generateContent`） | `json_schema` / `json_object` / `prompt_only` |
 | `to_ollama_response_format` | `format` 的值（Ollama `/api/chat`、`/api/generate`）：schema 本体、`"json"` 或 `None` | `json_schema` / `json_object` / `prompt_only` |
 
-`json_schema` 一律从 strict schema（8.1）出发。某家只接受 JSON Schema 的一部分时，构造函数只保留这家列出支持的关键字，**其余关键字一律挪进描述**（`描述\n\n{key: value, ...}`），模型仍然看得到：Anthropic 挪走数值范围、字符串长度、`pattern`、大于 1 的 `minItems` 和不在列表里的字符串格式；Gemini 挪走 `pattern`、字符串长度、`multipleOf` 和 `const`。OpenAI 和 Ollama 原样保留。`prompt_only` 表示不发这个字段。
+`json_schema` 一律从 strict schema（8.1）出发。某家只接受 JSON Schema 的一部分时，构造函数只保留这家列出支持的关键字，**其余关键字一律挪进该节点的描述**（`{key: value, ...}`），模型仍然看得到；strict schema 本身不带描述，所以这条说明就是整个描述：Anthropic 挪走数值范围、字符串长度、`pattern`、大于 1 的 `minItems` 和不在列表里的字符串格式；Gemini 挪走 `pattern`、字符串长度、`multipleOf` 和 `const`。OpenAI 和 Ollama 原样保留。`prompt_only` 表示不发这个字段。
 
 | 选择 | 为什么 |
 |---|---|

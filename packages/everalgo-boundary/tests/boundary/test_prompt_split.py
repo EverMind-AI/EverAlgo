@@ -1,8 +1,8 @@
 """Request contracts for the batch and incremental step paths.
 
 Both paths judge by the step rule blocks, which keep their historical sentence-by-sentence checks; the batch prompt
-and strict schema are frozen to the version measured on LoCoMo. Both paths exercise the assembled system and data
-messages.
+and the strict schema's structure are frozen to the version measured on LoCoMo. Both paths exercise the assembled
+system and data messages.
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ def test_step_keeps_its_historical_rule_sentences() -> None:
 
 
 def test_batch_request_uses_the_evaluated_prompt_and_schema() -> None:
-    """Guard the evaluated contract, including schema metadata visible to the model."""
+    """Guard the evaluated prompt and the schema the model sees: structure only, no docstring or derived title."""
     assert hashlib.sha256(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT.encode()).hexdigest() == (
         "bb78874505b8f0e2c117a643687bf1664ce20acc8bfc83d538f205990fe1a5d2"
     )
@@ -191,13 +191,11 @@ def test_batch_request_uses_the_evaluated_prompt_and_schema() -> None:
             "name": "Reply",
             "schema": {
                 "additionalProperties": False,
-                "description": "Strict internal-cut response shared by both variants.",
                 "properties": {
-                    "reasoning": {"title": "Reasoning", "type": "string"},
-                    "boundaries": {"items": {"type": "integer"}, "title": "Boundaries", "type": "array"},
+                    "reasoning": {"type": "string"},
+                    "boundaries": {"items": {"type": "integer"}, "type": "array"},
                 },
                 "required": ["reasoning", "boundaries"],
-                "title": "Reply",
                 "type": "object",
             },
             "strict": True,

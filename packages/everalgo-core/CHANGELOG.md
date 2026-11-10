@@ -12,6 +12,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- In `json_schema` mode the four `to_<api>_response_format` builders send the schema without the `title` / `description` keywords pydantic derives from class and field names, docstrings and `Field(description=...)`: the schema is part of what the model reads, the prompt carries the instructions, and docstrings are written for developers. Property and definition names, `default` values and every structural keyword are unchanged; a `$ref` whose only siblings were those annotations is now sent bare instead of expanded, and Anthropic and Gemini still note the keywords they do not take in a description, which now holds only that note. On one recorded boundary step request to OpenAI `gpt-4.1-mini`, made with the four-field step reply of the time, billed prompt tokens fell from 1009 to 884 (851 with no schema). No API change.
 - Weekday names are written from a fixed English list instead of `strftime("%A")`, so a host that calls `locale.setlocale` no longer changes the prompt (`(星期三)` instead of `(Wednesday)` under a Chinese `LC_TIME`).
 
 ### Deprecated
