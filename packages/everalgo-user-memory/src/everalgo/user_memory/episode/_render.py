@@ -22,6 +22,10 @@ from everalgo.user_memory._render import chat_messages
 from everalgo.user_memory.prompts.en.episode import EPISODE_USER_PROMPT, assemble_system_prompt
 from everalgo.user_memory.prompts.en.episode_summary import EPISODE_SUMMARY_USER_PROMPT
 from everalgo.user_memory.prompts.en.episode_summary import assemble_system_prompt as assemble_summary_system_prompt
+from everalgo.user_memory.prompts.en.episode_summary_from_memcell import EPISODE_SUMMARY_FROM_MEMCELL_USER_PROMPT
+from everalgo.user_memory.prompts.en.episode_summary_from_memcell import (
+    assemble_system_prompt as assemble_memcell_summary_system_prompt,
+)
 from everalgo.utils import InvalidInputError, format_time, render_prompt, speaker
 
 if TYPE_CHECKING:
@@ -53,6 +57,45 @@ def _render_messages(
 def _render_conversation(memcell: MemCell, *, tz: tzinfo = UTC) -> str:
     """The user message: the conversation start time and the ChatMessage items, as the reference run laid them out.
 
+    Raises:
+        InvalidInputError: If a message with text carries no timestamp (0). The error names the message's id only,
+            never its text.
+    """
+    return render_prompt(EPISODE_USER_PROMPT, None, **_conversation_fields(memcell, tz=tz))
+
+
+def _render_memcell_summary_messages(
+    memcell: MemCell,
+    *,
+    custom_instructions: str | None,
+    output_language: OutputLanguage | None,
+    tz: tzinfo = UTC,
+) -> list[LLMMessage]:
+    """The ``[system, user]`` pair that asks for a summary of the episode ``memcell`` holds.
+
+    The user message is the conversation as episode extraction renders it, without that prompt's ``<reminder>``.
+
+    Args:
+        memcell: The source slice, rendered as :func:`_render_conversation` renders it.
+        custom_instructions: The caller's instructions. Placed verbatim in ``<custom_instructions>``, never rendered as
+            a template; None or a blank string leaves the block out.
+        output_language: The language the caller named, or None to send the participant rule, as extraction does.
+        tz: The zone the conversation's times are shown in.
+
+    Raises:
+        InvalidInputError: If a message with text carries no timestamp (0).
+    """
+    system = assemble_memcell_summary_system_prompt(
+        custom_instructions=custom_instructions,
+        language_rule=build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE),
+    )
+    user = render_prompt(EPISODE_SUMMARY_FROM_MEMCELL_USER_PROMPT, None, **_conversation_fields(memcell, tz=tz))
+    return [LLMMessage(role="system", content=system), LLMMessage(role="user", content=user)]
+
+
+def _conversation_fields(memcell: MemCell, *, tz: tzinfo) -> dict[str, str]:
+    """The ``conversation_start_time`` and ``conversation`` values both conversation prompts are filled with.
+
     The start time is the first item's. Each message with text is the reference run's pseudo-JSON block, its values
     unquoted and indented as that run's template indented them; a message with no text is dropped. Times are in ``tz``.
 
@@ -61,12 +104,10 @@ def _render_conversation(memcell: MemCell, *, tz: tzinfo = UTC) -> str:
             never its text.
     """
     blocks = [_message_block(message, tz=tz) for message in chat_messages(memcell) if message.content]
-    return render_prompt(
-        EPISODE_USER_PROMPT,
-        None,
-        conversation_start_time=format_time(memcell.items[0].timestamp, tz=tz, weekday=True),
-        conversation="\n".join(blocks).removeprefix("\n"),
-    )
+    return {
+        "conversation_start_time": format_time(memcell.items[0].timestamp, tz=tz, weekday=True),
+        "conversation": "\n".join(blocks).removeprefix("\n"),
+    }
 
 
 def _message_block(message: ChatMessage, *, tz: tzinfo = UTC) -> str:

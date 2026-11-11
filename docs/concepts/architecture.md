@@ -45,7 +45,7 @@ Every product operator in EverAlgo contributes to one of two axes. Both axes are
 
 **Extract** has several composable product flows rather than one universal two-stage pipeline:
 
-- User conversations: `BoundaryDetector.adetect_batch` (one window) or `adetect_step` (one message at a time) returns `Cuts`, indices into the caller's input, and `to_memcells` turns them into `MemCell` segments; user-memory extractors produce `Episode`, `Foresight`, `AtomicFact`, or `Profile`, `EpisodeReflector` can merge episodes, and `EpisodeSummarizer` writes the summary of an episode text already stored.
+- User conversations: `BoundaryDetector.adetect_batch` (one window) or `adetect_step` (one message at a time) returns `Cuts`, indices into the caller's input, and `to_memcells` turns them into `MemCell` segments; user-memory extractors produce `Episode`, `Foresight`, `AtomicFact`, or `Profile`, `EpisodeReflector` can merge episodes, and `EpisodeSummarizer` writes an episode's summary from its memcell, beside extraction, or from an episode text already stored.
 - Agent trajectories: the same `BoundaryDetector.adetect_batch` cuts mixed-item trajectories, its `Cuts` indexing the tool calls and results too, so `to_memcells` keeps them in the cells while only chat messages reach the model. `AgentCaseExtractor` distils one segment into an `AgentCase`; `AgentSkillExtractor` combines a case with caller-supplied existing skills and supporting cases; `AgentProfileExtractor` screens a segment for config updates.
 - Raw files and URLs: `everalgo.parser.aparse` produces `ParsedContent`; `KnowledgeExtractor` produces `KnowledgeMemory`.
 
