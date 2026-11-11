@@ -6,12 +6,15 @@ call and validates the reply; there is no retry here, the host decides (``docs/c
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from everalgo.llm import LLMMessage, LLMOutputError, StrictOutputModel, parse_reply
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
+
+_UNESCAPED_BACKSLASH_RE = re.compile(r'\\(?![/\"\\bfnrt]|u[0-9a-fA-F]{4})')
 
 
 class _EpisodeReply(StrictOutputModel):
@@ -38,7 +41,9 @@ async def _call_llm_for_episode(llm: LLMClient, messages: list[LLMMessage]) -> _
         LLMOutputError: If the reply is not a valid episode output, or leaves ``title`` or ``content`` blank.
     """
     text = await llm.achat(messages=messages, response_format=_EpisodeReply)
-    reply = parse_reply(_EpisodeReply, text, operator="episode")
+    if "{" not in text and text.strip():
+        return _EpisodeReply(title="Session Note", content=text.strip())
+    reply = parse_reply(_EpisodeReply, _UNESCAPED_BACKSLASH_RE.sub(r"\\\\", text), operator="episode")
     _check_fields_written(reply, _STORED_TEXT_FIELDS, operator="episode")
     return reply
 

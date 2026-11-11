@@ -210,7 +210,7 @@ def test_sync_bridge_returns_the_episode() -> None:
 @pytest.mark.parametrize(
     ("reply", "failing_location"),
     [
-        pytest.param(f"not json {_SECRET}", "<root>", id="not-json"),
+        pytest.param(f"{{not json {_SECRET}", "<root>", id="not-json"),
         pytest.param(json.dumps({"content": _SECRET}), "title:", id="title-missing"),
         pytest.param(
             json.dumps({"title": "t", "content": _SECRET, "summary": "s"}),
@@ -278,6 +278,20 @@ async def test_client_exception_propagates_unchanged() -> None:
 
     assert excinfo.value is error
     assert fake.call_count == 1
+
+
+async def test_aextract_plain_text_fallback_and_windows_backslash_sanitizer() -> None:
+    r"""Plain text without braces falls back to Session Note; unescaped Windows backslashes in JSON are sanitized."""
+    plain_fake = FakeLLMClient(responses=["Plain narrative summary"])
+    ep_plain = await EpisodeExtractor(llm=plain_fake).aextract(_memcell(), sender_id="u_alice")
+    assert ep_plain.subject == "Session Note"
+    assert ep_plain.episode == "Plain narrative summary"
+
+    win_json = r'{"title": "Edited C:\Users\demo\app.py", "content": "Updated C:\workspace\project\main.py"}'
+    win_fake = FakeLLMClient(responses=[win_json])
+    ep_win = await EpisodeExtractor(llm=win_fake).aextract(_memcell(), sender_id="u_alice")
+    assert r"C:\Users\demo\app.py" in ep_win.subject
+    assert r"C:\workspace\project\main.py" in ep_win.episode
 
 
 # ===========================================================================
