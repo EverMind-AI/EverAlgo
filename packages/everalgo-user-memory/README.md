@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, an `EpisodeSummarizer` that writes the summary of an episode text already stored, plus `BoundaryDetector`, its `Cuts` result and the `to_memcells` helper, re-exported unchanged from `everalgo-boundary`.
+User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, an `EpisodeSummarizer` that writes an episode's summary from its memcell (beside extraction) or from an episode text already stored, plus `BoundaryDetector`, its `Cuts` result and the `to_memcells` helper, re-exported unchanged from `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -234,6 +234,12 @@ class EpisodeSummarizer:
         output_language: OutputLanguage | str | None = None,   # None → inherited from the text
         custom_instructions: str | None = None,   # host's instructions, the closing block
     ) -> str: ...
+    async def asummarize_memcell(
+        self, memcell: MemCell, *,       # the memcell EpisodeExtractor reads; no chat text → InvalidInputError
+        output_language: OutputLanguage | str | None = None,   # None → the participant rule, as extraction
+        custom_instructions: str | None = None,   # host's instructions, the closing block
+        tz: tzinfo = UTC,                # zone the conversation's times are shown in
+    ) -> str: ...
 ```
 
 Every episode from `EpisodeExtractor` carries two model-written fields, `subject` (the title) and `episode` (the full
@@ -244,7 +250,28 @@ reference run cut it; the model writes none, and the cut can end mid-word.
 `EpisodeReflector` has the model write all three fields, so a merged episode has a written preview of the merged
 narrative.
 
-`EpisodeSummarizer` writes the preview alone, for an episode text already stored — a body a user edited, or an
+`EpisodeSummarizer.asummarize_memcell` writes the preview from the memcell itself, so a host can make it beside
+`EpisodeExtractor.aextract` and store the model's preview in place of the 200-character cut without waiting for the
+narrative. The user message is the conversation exactly as extraction renders it (`<conversation_start_time>` and
+`<conversation>`), without extraction's `<reminder>`; the system message is `<role>`, `<the_preview>` — only
+`prompts.en.episode.EPISODE_SUMMARY_PREVIEW_RULE`, the first sentence of the summary description —, `<reply_format>`,
+`<output_language>` (the named language, or extraction's participant rule) and, when the host passes some,
+`<custom_instructions>`. The reply is held to `{"summary"}` and the 400-unit guard applies; a memcell with no chat
+message text raises `InvalidInputError` before any call.
+
+```python
+import asyncio
+
+from everalgo.user_memory import EpisodeExtractor, EpisodeSummarizer
+
+episode, summary = await asyncio.gather(
+    EpisodeExtractor(llm=client).aextract(memcell, sender_id=user_id),
+    EpisodeSummarizer(llm=client).asummarize_memcell(memcell),
+)
+episode = episode.model_copy(update={"summary": summary})
+```
+
+`EpisodeSummarizer.asummarize` writes the preview alone, for an episode text already stored — a body a user edited, or an
 extracted episode whose 200-character cut should give way to a written preview. It asks for the summary in the words
 of `prompts.en.episode.EPISODE_SUMMARY_FIELD_RULE`, adds that the preview may state no fact the text does not and
 keeps the text's time format, and cuts a summary wider than 400 units at a sentence boundary. One call —
@@ -272,7 +299,7 @@ episode = episode.model_copy(update={"summary": summary})
 
 The merge is time-aware. Every profile item carries `observed_at`, the observation date of the narrative that last established it, and `Profile.timestamp` never moves backwards. An Episode observed before an item was established may add facts and evidence but cannot rewrite or delete that item — the rule is stated in the UPDATE prompt and enforced in code — so a backfilled older Episode arriving after a newer one cannot turn the profile back in time. Callers pass only the Episodes new to the profile; a batch that straddles the stored `Profile.timestamp` is split into a historical pass and a current pass. See the [Episode integration contract](../../docs/api/profile-from-episode-texts.md).
 
-All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, the Episode Profile method is exposed as `extract_from_episodes(...)`, and `EpisodeSummarizer.asummarize` as `summarize(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
+All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, the Episode Profile method is exposed as `extract_from_episodes(...)`, and `EpisodeSummarizer.asummarize` / `asummarize_memcell` as `summarize(...)` / `summarize_memcell(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
 
 ## Testing
 

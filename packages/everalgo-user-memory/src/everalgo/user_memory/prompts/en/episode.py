@@ -30,6 +30,8 @@ message does not hold data only. ``<output_language>`` follows the convention, t
 language rule: the named language, or the participant rule when the caller names none.
 
 Constants:
+    - ``EPISODE_SUMMARY_PREVIEW_RULE`` — the first sentence of what a summary is, alone: the whole description
+      ``prompts.en.episode_summary_from_memcell`` sends, and the opening of ``EPISODE_SUMMARY_FIELD_RULE``.
     - ``EPISODE_SUMMARY_FIELD_RULE`` — what a summary is, used by ``prompts.en.episode_summary`` for the summary
       written for an edited or backfilled episode. The extraction prompt no longer asks for a summary.
     - ``DEFAULT_CUSTOM_INSTRUCTIONS`` — the reference run's default principles, sent when the caller passes none.
@@ -46,6 +48,7 @@ from __future__ import annotations
 __all__ = [
     "DEFAULT_CUSTOM_INSTRUCTIONS",
     "EPISODE_SUMMARY_FIELD_RULE",
+    "EPISODE_SUMMARY_PREVIEW_RULE",
     "EPISODE_SYSTEM_PROMPT",
     "EPISODE_USER_PROMPT",
     "assemble_system_prompt",
@@ -53,8 +56,12 @@ __all__ = [
 
 from everalgo.utils import append_custom_instructions, paragraphs, tagged
 
+EPISODE_SUMMARY_PREVIEW_RULE = (
+    "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters)."
+)
+
 EPISODE_SUMMARY_FIELD_RULE = (
-    "A faithful preview of this episode in 1-3 short sentences (at most ~50 English words / ~100 Chinese characters). "
+    EPISODE_SUMMARY_PREVIEW_RULE + " "
     "Compress, never restate: do not reuse content's sentences — write shorter new ones that name the main participants "
     "and what actually happened, including the outcome or decision reached. You may omit minor details. Do not refer "
     "to the record itself — no 'this conversation', 'the above', 'the user asked'."

@@ -1,10 +1,11 @@
 """Write one Episode — a titled third-person narrative with a short summary — from a MemCell, or just its summary.
 
 Modules, each importing only those below it: ``_extractor`` (:class:`EpisodeExtractor`) and ``_summarizer``
-(:class:`EpisodeSummarizer`, the summary of an episode text already stored) each wire ``_render`` (the system and user
-messages the model is shown), ``_replies`` (the reply models and the LLM callsites held to them); ``_summarizer`` also uses ``_summary``
-(the width guard on the summary the model writes). Extraction's summary is the content's first 200 characters, as
-the EverAlgo LoCoMo reference run (everalgo commit d9fe22e) filled it, so it needs no guard.
+(:class:`EpisodeSummarizer`: the summary from the memcell, beside extraction, or from an episode text already stored)
+each wire ``_render`` (the system and user messages the model is shown), ``_replies`` (the reply models and the LLM
+callsites held to them); ``_summarizer`` also uses ``_summary`` (the width guard on the summary the model writes).
+Extraction's summary is the content's first 200 characters, as the EverAlgo LoCoMo reference run (everalgo commit
+d9fe22e) filled it, so it needs no guard.
 
 Log lines, all on ``everalgo.user_memory.episode`` whichever module writes them; none carries a prompt or model text:
 
@@ -15,8 +16,11 @@ Log lines, all on ``everalgo.user_memory.episode`` whichever module writes them;
     ``episode extracted: content <n> units, summary <n> units`` (INFO)
         Once per :class:`EpisodeExtractor` call that returns an Episode, widths in ASCII-equivalent units.
     ``episode summarized: text <n> units, summary <n> units, truncated=<bool>`` (INFO)
-        Once per :class:`EpisodeSummarizer` call that returns a summary: the input text's width, the summary's width
+        Once per :meth:`EpisodeSummarizer.asummarize` call that returns a summary: the input text's width, the summary's width
         after the guard, and whether the guard cut it.
+    ``episode summarized from memcell: <n> items, summary <n> units, truncated=<bool>`` (INFO)
+        Once per :meth:`EpisodeSummarizer.asummarize_memcell` call that returns a summary: the memcell's item count,
+        the summary's width after the guard, and whether the guard cut it.
     ``episode summary over cap (<n> > <cap> units)`` (WARNING)
         The model wrote a summary wider than the cap on the :class:`EpisodeSummarizer` path; its rate is the
         production model's violation rate.
