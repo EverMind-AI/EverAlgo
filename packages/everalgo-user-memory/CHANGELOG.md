@@ -6,6 +6,18 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Episode-path item checks (`ProfileExtractor.aextract_from_episodes`), switched by the new keyword `ProfileExtractor(item_checks=True)`: every item the model writes carries a `quote` found in the batch's narratives (punctuation, case and width folded; a run covering nine tenths counts; under 6 Han units does not), or it is dropped. An item the model flags `pattern` (a habit, preference, hobby, way of working, trait) whose quote shows no regularity (a Chinese or English word list, else the model's `regular` words checked against the quote) waits on the profile's `pending` extra until a later batch repeats it, through UPDATE's new `confirm` operation or a matching add; entries expire after 120 days and at most the newest 30 are kept. The check fields never reach a stored item.
+- Episode-path do-not-record list: INIT's reply has a required `do_not_record` field and UPDATE a `forget` operation naming a matter this person asked not to be recorded; the list is returned as the profile's `do_not_record` extra and shown to every UPDATE, whose rules keep any item about a listed matter out. The host stores both extras with the profile and passes them back in `old_profile`.
+
+### Changed
+
+- **BREAKING:** on the Episode path an INIT reply without `do_not_record` raises `LLMOutputError`, and COMPACT / REGROUP reply with operations on the indexed items (`merge`, `split`, `update`, `delete`, and COMPACT's `move` of a trait into `explicit_info`) instead of rewriting them; an item no operation names keeps its host keys and `observed_at`.
+- No new `implicit_traits` item on either path unless the extractor is built with the new keyword `new_traits=True` (default `False`): INIT keeps none of the reply's traits and an UPDATE add into `implicit_traits` is refused; a stored trait can still be updated or deleted. What a person states about their values, situation and habits goes to `explicit_info`.
+- An item whose description carries an identification or account number (12 or more digits) is dropped, and such a number in `evidence` / `basis` is masked as `***`. An UPDATE operation shaped for the other bucket is dropped alone with a warning instead of failing the batch.
+- The Episode prompts add rules for what never enters the profile (jokes and hypotheticals, one-off self-assessments, habits just started, others' views of the person, matters the person asked not to record, identification numbers, team rules, family members' arrangements, work an assistant did) and for announced changes, which stay plans until a narrative says they happened. The `pending` entries' `first_seen` dates and the item checks' batch days follow `tz=`.
+
 ## [0.9.0rc5] - 2026-11-11
 
 ### Added

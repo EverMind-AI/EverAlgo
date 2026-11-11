@@ -8,14 +8,18 @@ This document defines the contract between EverOS and EverAlgo for extracting on
 
 ```python
 from collections.abc import Sequence
+from datetime import UTC, tzinfo
 
 from asgiref.sync import async_to_sync
 
+from everalgo.llm import LLMClient
 from everalgo.types import Episode, Profile
 from everalgo.user_memory import OutputLanguage
 
 
 class ProfileExtractor:
+    def __init__(self, *, llm: LLMClient, item_checks: bool = True, new_traits: bool = False) -> None: ...
+
     async def aextract_from_episodes(
         self,
         episodes: Sequence[Episode],
@@ -26,6 +30,7 @@ class ProfileExtractor:
         categories: Sequence[str] | None = None,
         custom_instructions: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
         ...
 
@@ -68,7 +73,9 @@ The name is a target-selection hint only. The returned Profile is owned by `owne
 - `None` selects INIT mode and creates a new Profile.
 - A `Profile` selects UPDATE mode and applies additions, updates, and deletions to that Profile.
 
-`old_profile.timestamp` is read as the observation date the stored profile reflects; see [Time-aware merge](#time-aware-merge). After UPDATE the profile is brought back inside its caps in the same call: past 60 items in total it is compacted, and then every group holding more than 8 items under one category or trait name is regrouped. The group check reads COMPACT's result when COMPACT ran, so a group COMPACT leaves over its cap is regrouped too.
+`old_profile.timestamp` is read as the observation date the stored profile reflects; see [Time-aware merge](#time-aware-merge). After UPDATE the profile is brought back inside its caps in the same call: past 60 items in total it is compacted, and then every group holding more than 8 items under one category or trait name is regrouped (see [Compaction and regrouping](#compaction-and-regrouping)). The group check reads COMPACT's result when COMPACT ran, so a group COMPACT leaves over its cap is regrouped too.
+
+Besides its two buckets, `old_profile` may carry two extra fields EverAlgo keeps for itself: `do_not_record` ([Do-not-record list](#do-not-record-list)) and `pending` ([Item checks](#item-checks)). The returned Profile carries them the same way, as extras (`Profile.model_extra`), and `model_dump()` includes them. The host stores them with the profile, never shows them to the end user, and passes them back unchanged; a host that copies only the declared fields loses them, and with them the person's requests and every pattern waiting to be confirmed.
 
 Both buckets hold typed items from `everalgo.types`:
 
@@ -101,6 +108,10 @@ The text is the host's own, not an end user's. It reaches the model as an instru
 ### `output_language`
 
 The requested output language as an `OutputLanguage` value or equivalent case-insensitive string. `None` lets INIT follow the Episode narrative language and lets UPDATE, COMPACT and REGROUP keep the language most of the existing Profile is written in, so a Profile that is already mixed converges on one language. A named language applies to every field in every stage, whatever language the input is in, including anything already stored: it takes precedence over a stored Profile written in another language, and the UPDATE prompt asks for a stored item written in another language to be rewritten in it even when no narrative mentions that item.
+
+### `tz`
+
+The zone every time shown to the model is rendered in, as a `datetime.tzinfo` (default UTC): each narrative's `time` attribute, each stored item's `observed_at`, and each pending entry's `first_seen` day, rendered by `everalgo.utils.format_time` / `format_date` with the zone's offset (`2024-03-11 00:00 UTC+14:00`). The [item checks](#item-checks) read a date the model writes in its grounding as a day in the same zone. Stored values stay epoch milliseconds; only what the model is shown changes, and UTC renders as before.
 
 ## Target-owner validation
 
@@ -137,9 +148,9 @@ A profile is a portrait of the person *now*. EverOS may deliver Episodes out of 
 **Dates**
 
 - `Profile.timestamp` is the newest observation date the profile reflects. INIT sets it to the newest selected Episode; UPDATE sets it to `max(old_profile.timestamp, newest Episode in the batch)`. It never moves backwards.
-- Every `explicit_info` and `implicit_traits` item carries `observed_at` (Unix epoch milliseconds): the observation date of the narrative that last established its `description`. INIT stamps every item with the batch's newest date. UPDATE stamps every added item and every rewritten description with the batch's newest date; an update that only changes grounding (`evidence` / `basis`) or the category keeps the item's date. Items rewritten by COMPACT or REGROUP take `Profile.timestamp`. Items stored before this field existed are read as `old_profile.timestamp`.
+- Every `explicit_info` and `implicit_traits` item carries `observed_at` (Unix epoch milliseconds): the observation date of the narrative that last established its `description`. INIT stamps every item with the batch's newest date. UPDATE stamps every added item and every rewritten description with the batch's newest date; an update that only changes grounding (`evidence` / `basis`) or the category keeps the item's date. COMPACT and REGROUP reply with operations, so an item no operation names keeps its date; a merged item takes the newest date of the items it merges, an updated item and every piece of a split keep the item's date, and a trait moved into `explicit_info` keeps its own. Items stored before this field existed are read as `old_profile.timestamp`.
 
-`observed_at` is written by EverAlgo only. The model sees it inside each stored item's JSON as a UTC minute (`2024-04-10 14:00 UTC`), the same shape as each narrative's `time` attribute; a reply whose operation writes `observed_at` fails validation and raises `LLMOutputError`.
+`observed_at` is written by EverAlgo only. The model sees it inside each stored item's JSON as a minute in `tz` (`2024-04-10 14:00 UTC` by default), the same shape as each narrative's `time` attribute; a reply whose operation writes `observed_at` fails validation and raises `LLMOutputError`.
 
 **Rule**
 
@@ -148,6 +159,10 @@ An Episode observed *before* an item's `observed_at` is older knowledge about th
 **Two passes**
 
 The rule is judged per batch, against the batch's newest date. A batch that straddles `old_profile.timestamp` is therefore split: Episodes observed before it run first as a historical pass (they can only fill gaps), then Episodes observed after it run as a normal pass. Both passes send the same system message; the model applies the rule per item from the times it is shown, so the split exists only to give each pass one observation date. Real-time ingestion never has a historical half, so it pays no extra LLM call; only backfill and out-of-order delivery do, and only when one batch contains both kinds.
+
+## Compaction and regrouping
+
+COMPACT (past 60 items in total) and REGROUP (a group past 8 items under one label) show the items with their indices, as UPDATE does, and the reply is a list of operations on them: `merge` (several indices into one item, in the first one's place), `split` (one item into several), `update`, `delete`, and, in COMPACT only, `move` (a trait into `explicit_info`). The model never rewrites the profile wholesale, so every item no operation names passes through as stored, host keys such as ids and provenance included; the date rules are in [Time-aware merge](#time-aware-merge). A merge keeps the first named item's host keys; a split's first piece keeps the item's, the others arrive without; a moved item arrives without, so the host gives it an id of its new bucket. Each index may be named once: an operation naming an index twice or out of range, or carrying an item shaped for the other bucket, is refused alone with a warning and the rest apply. A profile still past its caps afterwards is logged and kept; neither stage runs twice in one call.
 
 ## Extraction behavior
 
@@ -160,9 +175,12 @@ The returned Profile must satisfy all of the following:
 - Every item carries an integer `observed_at` as defined above.
 - No item established by a later Episode is rewritten or deleted on the strength of an earlier one.
 - The target owner's facts and traits are not mixed with those of other participants.
+- No new `implicit_traits` item is created unless the extractor is built with `new_traits=True`: INIT keeps none of the reply's traits, an UPDATE add into `implicit_traits` is refused with a warning, and a stored trait may still be updated, deleted, or moved into `explicit_info` by COMPACT. What the person says about their own values, principles, priorities, standing situation, hobbies and habits is stated rather than inferred, and becomes an `explicit_info` item.
 - A single action (or one restated as a capability, skill, duty, interest or attitude), a passing state or what the person is working on right now, a rule that would hold for whoever sat in their seat, a decision taken once for one project, a single question, anything the assistant or another participant said, a fact about anyone other than the owner even when the owner tells it or it sits inside an item about the relationship (a relationship enters only as a standing feature of the owner's own life, such as a partner or someone they live with, and carries nothing about the other person; a bare relationship is not an item), and a one-off request about format or procedure never become items; an item whose attribution, durability or grounding is uncertain is left out.
+- Nor do jokes and hypotheticals, a one-off self-assessment or a trial kept up for days, a habit just started, just resumed or only planned, a view of the person they did not accept or that others hold, a matter they asked not to be recorded ([Do-not-record list](#do-not-record-list)), identification or card numbers and one-off health readings ([Identification numbers](#identification-numbers)), working rules set for a team or a document, family members' and colleagues' arrangements, and work an assistant or agent did for them.
+- A change the person announces (leaving a job tomorrow, moving next month) leaves the items describing the current state as they are until a narrative says it happened; until then it is at most a plan.
 - An `explicit_info` item is a fact a narrative explicitly attributes to the owner. An `implicit_traits` item is a stable pattern no single narrative states but several show, and its `basis` names the concrete signals — choices or requests the narratives record, not operations the owner carried out.
-- INIT and UPDATE use the same merge and compaction semantics as `aextract`.
+- INIT and UPDATE use the same merge semantics as `aextract`; COMPACT and REGROUP reply with operations rather than `aextract`'s rewrite ([Compaction and regrouping](#compaction-and-regrouping)).
 - No partial Profile is returned when validation or extraction fails.
 
 The INIT and UPDATE system messages show where these lines fall with worked examples, in an `<examples>` block right after `<never_in_the_profile>`: INIT two and UPDATE one, each in its stage's reply shape and about made-up people. COMPACT and REGROUP carry none.
@@ -187,13 +205,32 @@ Incorrect:
 The Episode path does not have access to raw conversation turns. Its evidence contract therefore differs from the `MemCell` path:
 
 - `explicit_info[].evidence` contains a verifiable narrative excerpt or faithful paraphrase from the supplied Episode narratives.
-- Evidence does not require an Episode number or synthetic identifier. Each narrative is shown to the model as `<narrative time="YYYY-MM-DD HH:MM UTC">…</narrative>`, its observation time in the attribute; the model may cite that date but must not invent others. Narrative text is not XML-escaped: only a literal closing tag of the prompt's own elements (`</narrative>`, `</episode_narratives>`, `</item>`, `</explicit_info>`, `</implicit_traits>`, `</stored_profile>`, `</group>`, in any case) has its `<` replaced by the fullwidth `＜` (U+FF1C), in narratives and in stored items alike, so it cannot close an element early.
+- Evidence does not require an Episode number or synthetic identifier. Each narrative is shown to the model as `<narrative time="YYYY-MM-DD HH:MM UTC">…</narrative>`, its observation time in `tz` in the attribute; the model may cite that date but must not invent others. Narrative text is not XML-escaped: only a literal closing tag of the prompt's own elements (`</narrative>`, `</episode_narratives>`, `</item>`, `</explicit_info>`, `</implicit_traits>`, `</stored_profile>`, `</group>`, `</matter>`, `</do_not_record>`, `</entry>`, `</pending_patterns>`, in any case) has its `<` replaced by the fullwidth `＜` (U+FF1C), in narratives and in stored items alike, so it cannot close an element early.
 - Evidence must not be presented as a direct user quotation unless the supplied Episode narrative itself contains that quotation.
 - The model must not invent user wording, dates, or speaker attribution.
 - `implicit_traits[].basis` names the signals behind the trait — which choices or requests, in which narratives — and must not invent user quotations; restating the requirement ("several signals") is not a basis.
 - Both `evidence` and `basis` are scalar JSON strings, not arrays; faithful narrative paraphrases are allowed when they preserve the source meaning and attribution.
+- Every item the model writes also carries a `quote` copied from one narrative of the batch, which the program checks ([Item checks](#item-checks)); the quote is a check field and never reaches a stored item.
 
 EverOS must treat this evidence as Episode-derived evidence, not raw-conversation evidence.
+
+## Item checks
+
+Two checks run on the model's one reply, in code and without another model call; `ProfileExtractor(item_checks=...)` switches both, on by default. Off, every item is written as the reply has it and nothing is held, while `confirm` is still read as an add and the check fields are still dropped; the prompts are the same either way.
+
+**Quote.** Every item the reply writes — each INIT item, each UPDATE add or `confirm`, and each update that changes a description — carries `quote`: words copied from one narrative of the batch. The program looks for it in the batch's narratives, comparing in NFKC form, casefolded, with punctuation and spacing taken out; pieces separated by an ellipsis are found one by one, and a contiguous run covering nine tenths of the quote counts. A quote shorter than 6 Han-character units (three letters count as one) does not count. An item whose quote is missing or not found is dropped; a dropped update leaves the stored item as it was.
+
+**Pending patterns.** An item that claims a standing pattern of the person — every `implicit_traits` item, an item under a habit, hobby or emotion category, or one the model flags `"pattern": true` (habits, preferences, hobbies, ways of working; not identity, family, work, skills, health, history or goals) — is written at once only when its quote shows regularity: a Chinese quote by a Chinese word list (每周, 一直, 通常, 以后 ...), an English one by an English list (every week, usually, three times a week, from now on ...) and, when that list misses, by the words the model copies out of its quote into `regular`; a quote in any other language only by `regular`, whose words must be in the quote. Any other pattern item waits on the profile's `pending` extra, one entry per item with its model-facing fields plus `bucket` and `observed_at` (the batch's newest date). Every later UPDATE shows the entries as `<pending_patterns>`, each with its `first_seen` day; when a batch shows the same pattern again, the model replies with a `confirm` operation naming the entry (`{"action": "confirm", "type", "pending": <index>, "data": <item>}`), and the item is written and the entry leaves the list. An add that points at an entry with `"pending"`, or restates one nearly word for word, counts too, unless its grounding names only dates outside the batch. Entries older than 120 days are dropped before the model sees the list, and at most the newest 30 are kept.
+
+The returned `pending` is the whole list as it now stands: an empty list means every entry was confirmed or dropped, and a host that kept the old value would let a written item be confirmed a second time. The check fields `pattern`, `quote`, `regular` and `pending` never reach a stored item.
+
+## Do-not-record list
+
+INIT's reply has a required `do_not_record` field, and UPDATE a `forget` operation (`{"action": "forget", "topic", "evidence"}`), naming a matter the person asked not to be recorded. The matters are kept as the profile's `do_not_record` extra, `[{"topic", "evidence", "observed_at"}]`, oldest first, and every UPDATE shows their topics as `<matter>` elements in `<do_not_record>`; the rules keep any item about a listed matter out of the profile in any wording and remove one already stored. The list only grows: the program has no operation that takes a matter off it.
+
+## Identification numbers
+
+An item whose description carries an identification or account number — 12 or more digits, ASCII or fullwidth, optionally separated by spaces or hyphens, with an optional trailing X — is dropped, on both paths and in every stage, pending entries included. Such a number in `evidence` or `basis` is masked as `***` and the item kept. A phone number with a country code, a landline with its area code, or years written together can match the pattern and are treated the same way.
 
 ## Exceptions
 
@@ -211,7 +248,7 @@ The method raises `InvalidInputError` (a `ValueError` subclass, from `everalgo.u
 - `old_profile.owner_id` differs from `owner_id`; or
 - `output_language` is unsupported.
 
-The method raises `LLMOutputError` (from `everalgo.llm`) when an LLM reply is not a valid output of its stage: not parseable JSON, not the INIT, UPDATE, COMPACT or REGROUP shape, or an item shaped for the other bucket (an UPDATE operation whose `data` does not match its `type`, a REGROUP item not shaped for its group's bucket). Its message names each failing location, never the reply's content.
+The method raises `LLMOutputError` (from `everalgo.llm`) when an LLM reply is not a valid output of its stage: not parseable JSON, or not the INIT, UPDATE, COMPACT or REGROUP shape — an INIT reply without `do_not_record` included. Its message names each failing location, never the reply's content. An operation whose item is shaped for the other bucket (an UPDATE add or update whose `data` does not match its `type`, a COMPACT or REGROUP operation on the other bucket) is not an error: it is dropped alone with a warning and the rest of the reply applies.
 
 Exceptions raised by the injected LLM client propagate unchanged.
 
@@ -226,9 +263,10 @@ Before calling EverAlgo, EverOS must:
 3. Map each to an `everalgo.types.Episode` with its narrative and its observation `timestamp`. Order is irrelevant.
 4. Resolve the authoritative `owner_id` and, when available, `owner_name` from participant metadata.
 5. Supply the exact `owner_name` when one is available, or rely on `owner_id` otherwise; EverAlgo filters narratives that do not contain the resolved value.
-6. Load the existing owner Profile, if any, and pass it as `old_profile`, items and `observed_at` values included.
+6. Load the existing owner Profile, if any, and pass it as `old_profile`, items, `observed_at` values and the `do_not_record` and `pending` extras included.
 7. Assemble and pass the complete current `explicit_info` category snapshot as `categories`, or pass `None` when no category is currently available.
-8. Persist the returned Profile — `timestamp` and per-item `observed_at` included, since the next call reads them — and advance the watermark only after the persist succeeds; EverAlgo remains stateless.
+8. Persist the returned Profile — `timestamp`, per-item `observed_at` and both extras included, since the next call reads them — and advance the watermark only after the persist succeeds; EverAlgo remains stateless. Replace the stored extras with the returned ones, an empty list included.
+9. Keep `do_not_record` and `pending` out of anything shown to the end user, and clear, export or delete them together with the profile: `pending` holds content read from the conversations that is not yet in the profile.
 
 The current EverOS Episode row already carries the Episode identifier, narrative text, observation timestamp, and `owner_id`. It does not carry `owner_name`, so the upstream integration should resolve the name from participant metadata when available and otherwise rely on the `owner_id` fallback.
 
@@ -253,6 +291,7 @@ profile = await ProfileExtractor(llm=llm).aextract_from_episodes(
     categories=available_profile_categories,
     output_language=OutputLanguage.CHINESE,
 )
+await profile_repository.save(owner_id="user-123", profile=profile.model_dump())  # do_not_record and pending ride along
 ```
 
 When language selection is intentionally delegated to the model, omit `output_language` or pass `None`:
@@ -286,6 +325,8 @@ The EverOS integration is ready when all of the following are covered by tests:
 - Duplicate Episode IDs are removed upstream before the batch is built.
 - Only Episodes not yet consumed by the stored profile are passed, and the watermark advances only after the returned Profile is persisted.
 - The persisted Profile round-trips `timestamp` and every item's `observed_at` unchanged into the next call's `old_profile`.
+- The persisted Profile round-trips the `do_not_record` and `pending` extras into the next call's `old_profile`; a returned empty `pending` replaces the stored list, and neither extra is shown to the end user.
+- Deleting or exporting a profile deletes or exports its `do_not_record` and `pending` with it.
 - An Episode observed before the stored state adds facts but leaves later-established items' descriptions in place, and `Profile.timestamp` does not move backwards.
 - Two owners fanned out from one generic Episode are extracted in separate calls and produce separately owned Profiles.
 - Evidence is traceable to Episode narratives and contains no fabricated user quotation.
@@ -293,4 +334,4 @@ The EverOS integration is ready when all of the following are covered by tests:
 
 ## Why this interface
 
-Accepting `Sequence[Episode]` rather than bare strings keeps each narrative's observation date attached to it, which is what lets the merge tell older knowledge from newer state; the core `Episode` type already exists, so no new type is needed. `owner_id` always controls Profile ownership, while optional `owner_name` locates the person in model-written narratives that may not contain IDs. Resolving one target reference and filtering independently before extraction prevents unrelated narratives from influencing the Profile without discarding a usable batch because of one unrelated Episode; rejecting an all-unmatched batch still prevents extraction without owner evidence. The temporal rule lives in code rather than only in the prompt because it is deterministic: a model that ignores the instruction still cannot turn the profile back in time. Deciding *which* Episodes are new stays with EverOS, which owns the storage and the watermark; deciding *what* those Episodes may change stays with EverAlgo, which owns the merge. Accepting the current category snapshot separately keeps classification policy caller-owned while allowing the stateless extraction and maintenance stages to apply one consistent semantic rule. `custom_instructions` appends rather than replaces: a replacement also discards the rules that define the output shape and what may enter the profile, while an appended block leaves every bundled rule — and the shared cache prefix — intact.
+Accepting `Sequence[Episode]` rather than bare strings keeps each narrative's observation date attached to it, which is what lets the merge tell older knowledge from newer state; the core `Episode` type already exists, so no new type is needed. `owner_id` always controls Profile ownership, while optional `owner_name` locates the person in model-written narratives that may not contain IDs. Resolving one target reference and filtering independently before extraction prevents unrelated narratives from influencing the Profile without discarding a usable batch because of one unrelated Episode; rejecting an all-unmatched batch still prevents extraction without owner evidence. The temporal rule lives in code rather than only in the prompt because it is deterministic: a model that ignores the instruction still cannot turn the profile back in time. Deciding *which* Episodes are new stays with EverOS, which owns the storage and the watermark; deciding *what* those Episodes may change stays with EverAlgo, which owns the merge. Accepting the current category snapshot separately keeps classification policy caller-owned while allowing the stateless extraction and maintenance stages to apply one consistent semantic rule. `custom_instructions` appends rather than replaces: a replacement also discards the rules that define the output shape and what may enter the profile, while an appended block leaves every bundled rule — and the shared cache prefix — intact. The quote and pending checks, the identification-number filter and the refusal of new traits are code for the same reason the temporal rule is: in long-run evaluation the costly errors were items that give a wrong picture of the person — inferred traits, unfounded items, one-off behaviour read as a habit — and a check the model cannot skip removes them without a second model call. COMPACT and REGROUP answer with operations because a rewritten item cannot be traced to the stored one it came from: it lost its host keys and its date.

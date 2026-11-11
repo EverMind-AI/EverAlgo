@@ -1,4 +1,8 @@
-"""Tests for Profile extraction from dated generic or reflected Episodes."""
+"""Tests for Profile extraction from dated generic or reflected Episodes.
+
+The scripted replies here carry no quotes, so every extractor runs with ``item_checks=False``; the item checks have
+their own tests in ``test_profile_item_checks.py``.
+"""
 
 from __future__ import annotations
 
@@ -30,9 +34,9 @@ from everalgo.user_memory.profile._render import _render_episodes, _render_item,
 from everalgo.user_memory.profile._replies import (
     _call_llm_for_profile_init,
     _call_llm_for_profile_update,
+    _EpisodeInitOutput,
     _ExplicitItem,
     _ImplicitTrait,
-    _ProfileItems,
     _UpdateOutput,
 )
 from everalgo.user_memory.prompts.en.profile import _PORTRAIT as _MEMCELL_PORTRAIT
@@ -103,6 +107,7 @@ _DATA_PLACEHOLDERS = (
     "{{label}}",
     "{{label_field}}",
     "{{bucket}}",
+    "{{do_not_record}}",
 )
 #: The rule texts of the system message; none may reach a user message.
 _RULE_BLOCKS = (
@@ -131,6 +136,8 @@ _RENDER_FIELDS = {
     "label_field": "category",
     "label": "L",
     "items_text": "IT",
+    "do_not_record": "<matter>M</matter>",
+    "pending": '<entry index="0" first_seen="2026-01-01">{"description": "D"}</entry>',
 }
 #: A block delimiter stands alone on its line, so a rule that mentions a tag inline ("the
 #: <never_in_the_profile> list") is prose and is not counted as a second delimiter.
@@ -138,7 +145,9 @@ _BLOCK_OPEN = re.compile(r'^<([a-z_]+)(?: [a-z_]+="[^"]*")*>$', re.MULTILINE)
 _BLOCK_CLOSE = re.compile(r"^</([a-z_]+)>$", re.MULTILINE)
 #: The blocks each system message opens: what the profile holds, what never enters it, worked examples (INIT and
 #: UPDATE only), the stage's own way of working (INIT has none), the reply format, then the blocks that vary
-#: between requests, least-variable first. A worked example's own elements nest inside <examples>.
+#: between requests, least-variable first. A worked example's own elements nest inside <examples>. INIT and UPDATE
+#: close with the item checks (<item_checks>: the pattern flag, the pending rule, the quote, announced changes),
+#: after the per-request blocks, where they were evaluated.
 _SYSTEM_BLOCK_ORDER: dict[str, tuple[str, ...]] = {
     "init": (
         "what_the_profile_holds",
@@ -147,6 +156,7 @@ _SYSTEM_BLOCK_ORDER: dict[str, tuple[str, ...]] = {
         "reply_format",
         "output_language",
         "available_categories",
+        "item_checks",
     ),
     "update": (
         "what_the_profile_holds",
@@ -156,6 +166,7 @@ _SYSTEM_BLOCK_ORDER: dict[str, tuple[str, ...]] = {
         "reply_format",
         "output_language",
         "available_categories",
+        "item_checks",
     ),
     "compact": (
         "what_the_profile_holds",
@@ -179,7 +190,9 @@ _SYSTEM_BLOCK_ORDER["update-historical"] = _SYSTEM_BLOCK_ORDER["update"]
 #: The data blocks each user message opens. <target_person> sits inline on one line, so it opens no block.
 _USER_BLOCK_ORDER: dict[str, tuple[str, ...]] = {
     "init": ("episode_narratives",),
-    "update": ("stored_profile", "episode_narratives"),
+    # The matters this person asked not to be recorded come first, ahead of what they govern; the pattern items held
+    # for a second occasion close the message.
+    "update": ("do_not_record", "stored_profile", "episode_narratives", "pending_patterns"),
     "compact": ("stored_profile",),
     "regroup": ("group",),
 }
@@ -242,29 +255,21 @@ def _dated(text: str, *, timestamp: int = _TIMESTAMP) -> str:
 
 
 def _profile_payload(*, description: str = "Works mainly in Python.", evidence: str = "Alice works in Python.") -> str:
+    """An Episode INIT reply; the reply now always carries the do-not-record list, empty here."""
     return json.dumps(
         {
             "explicit_info": [
                 {"category": "Technical stack", "description": description, "evidence": evidence},
             ],
             "implicit_traits": [],
+            "do_not_record": [],
         }
     )
 
 
 def _compact_payload() -> str:
-    return json.dumps(
-        {
-            "explicit_info": [
-                {
-                    "category": "Technical stack",
-                    "description": "Works mainly in Python.",
-                    "evidence": "Alice chose Ruff.",
-                },
-            ],
-            "implicit_traits": [],
-        }
-    )
+    """An Episode COMPACT reply: COMPACT now answers with operations, here deleting the first stored item."""
+    return _operations({"action": "delete", "type": "explicit_info", "index": 0, "reason": "trivial"})
 
 
 def _operations(*operations: dict[str, Any]) -> str:
@@ -342,7 +347,7 @@ def _expected_category_snapshot(categories: Sequence[str] = _AVAILABLE_CATEGORIE
 async def test_init_uses_owner_name_and_preserves_authoritative_owner_fields() -> None:
     fake = FakeLLMClient(responses=[_profile_payload(evidence="Alice selected Python for the service.")])
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Python for the service.")],
         owner_id=_OWNER_ID,
         owner_name="  Alice  ",
@@ -358,7 +363,7 @@ async def test_init_falls_back_to_owner_id_when_name_is_missing_or_blank() -> No
     for owner_name in (None, "   "):
         fake = FakeLLMClient(responses=[_profile_payload(evidence=f"{_OWNER_ID} selected Python.")])
 
-        profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+        profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode(f"{_OWNER_ID} selected Python.")],
             owner_id=_OWNER_ID,
             owner_name=owner_name,
@@ -384,7 +389,9 @@ async def test_invalid_episode_batches_fail_before_llm(episodes: Sequence[Episod
     fake = FakeLLMClient(responses=[_profile_payload()])
 
     with pytest.raises(ValueError, match=error):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(episodes, owner_id=_OWNER_ID, owner_name=_OWNER_NAME)
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
+            episodes, owner_id=_OWNER_ID, owner_name=_OWNER_NAME
+        )
 
     assert fake.call_count == 0
 
@@ -393,7 +400,7 @@ async def test_non_episode_items_fail_before_llm() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
     with pytest.raises(TypeError, match=r"episodes\[0\] must be an Episode"):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             cast("Sequence[Episode]", ["Alice selected Python."]),
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -406,7 +413,7 @@ async def test_blank_owner_id_fails_before_llm() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
     with pytest.raises(ValueError, match="owner_id is blank"):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice selected Python.")],
             owner_id="   ",
             owner_name=_OWNER_NAME,
@@ -419,7 +426,7 @@ async def test_owner_name_takes_precedence_over_owner_id_during_validation() -> 
     fake = FakeLLMClient(responses=[_profile_payload()])
 
     with pytest.raises(ValueError, match="no episode narrative mentions target user 'Alice'"):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode(f"{_OWNER_ID} selected Python.")],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -431,7 +438,7 @@ async def test_owner_name_takes_precedence_over_owner_id_during_validation() -> 
 async def test_init_skips_episodes_that_do_not_reference_the_resolved_target() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [
             _episode("Alice selected Python.", timestamp=_EARLIER),
             _episode("UNRELATED_EPISODE selected Ruff."),
@@ -451,7 +458,7 @@ async def test_init_skips_episodes_that_do_not_reference_the_resolved_target() -
 async def test_update_skips_episodes_that_do_not_reference_the_resolved_target() -> None:
     fake = FakeLLMClient(responses=[_operations({"action": "none"})])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("UNRELATED_EPISODE selected Ruff."), _episode("Alice adopted uv.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -467,7 +474,7 @@ async def test_existing_profile_owner_must_match_before_llm() -> None:
     fake = FakeLLMClient(responses=[_operations({"action": "none"})])
 
     with pytest.raises(ValueError, match="does not match owner_id"):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice selected Python.")],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -481,7 +488,7 @@ async def test_unsupported_output_language_fails_before_llm() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
     with pytest.raises(ValueError, match="names no supported language"):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice selected Python.")],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -497,7 +504,7 @@ async def test_none_or_empty_categories_allow_extraction_with_an_empty_snapshot(
 ) -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Python.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -510,7 +517,7 @@ async def test_none_or_empty_categories_allow_extraction_with_an_empty_snapshot(
 async def test_categories_are_stripped_deduplicated_and_rendered_in_first_seen_order() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Python.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -537,22 +544,48 @@ async def test_category_snapshot_is_not_an_output_whitelist_and_does_not_filter_
                     "basis": "Alice independently compared constraints in two Episodes.",
                 }
             ],
+            "do_not_record": [],
         }
     )
-    fake = FakeLLMClient(responses=[payload])
+    # INIT creates no trait any more, so the trait half is checked on a stored trait an UPDATE renames.
+    stored = Profile.model_validate(
+        {
+            "owner_id": _OWNER_ID,
+            "summary": "s",
+            "timestamp": _TIMESTAMP - 1,
+            "implicit_traits": [
+                {"trait": "Careful", "description": "Approaches decisions methodically.", "basis": "B."}
+            ],
+        }
+    )
+    rename = {
+        "action": "update",
+        "type": "implicit_traits",
+        "index": 0,
+        "data": {"basis": "B.", "description": "Approaches decisions methodically.", "trait": "Methodical"},
+    }
+    fake = FakeLLMClient(responses=[payload, _operations(rename)])
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await extractor.aextract_from_episodes(
         [_episode("Alice consistently uses an uncommon build tool.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
         categories=["Communication preferences"],
     )
+    updated = await extractor.aextract_from_episodes(
+        [_episode("Alice compared constraints again.")],
+        owner_id=_OWNER_ID,
+        owner_name=_OWNER_NAME,
+        old_profile=stored,
+        categories=["Communication preferences"],
+    )
 
     profile_data = profile.model_dump()
     explicit_info = cast("list[dict[str, Any]]", profile_data["explicit_info"])
-    implicit_traits = cast("list[dict[str, Any]]", profile_data["implicit_traits"])
     assert explicit_info[0]["category"] == "Specialized tooling"
-    assert implicit_traits[0]["trait"] == "Methodical"
+    assert profile.implicit_traits == []
+    assert [trait.trait for trait in updated.implicit_traits] == ["Methodical"]
 
 
 @pytest.mark.parametrize(
@@ -567,7 +600,7 @@ async def test_invalid_categories_fail_before_llm(categories: Sequence[str], err
     fake = FakeLLMClient(responses=[_profile_payload()])
 
     with pytest.raises(TypeError, match=error):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice selected Python.")],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -582,7 +615,7 @@ async def test_init_prompt_receives_target_and_dated_unnumbered_narratives_oldes
     marker_two = "Alice documented marker-two-preferences."
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode(marker_two, timestamp=_LATER), _episode(marker_one, timestamp=_EARLIER)],
         owner_id="internal-owner-id",
         owner_name=_OWNER_NAME,
@@ -609,7 +642,7 @@ async def test_explicit_output_language_and_additional_requirements_are_both_ren
     """The caller's requirements are added to the bundled rules; they replace none of them, nor the data message."""
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Python.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -631,7 +664,7 @@ async def test_explicit_output_language_and_additional_requirements_are_both_ren
 async def test_init_items_are_stamped_with_the_newest_episode_date() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Python.", timestamp=_EARLIER), _episode("Alice adopted uv.", timestamp=_LATER)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -646,7 +679,7 @@ async def test_update_applies_operations_and_dates_every_item() -> None:
         responses=[_operations(_add("Prefers concise answers.", category="Communication", evidence="Alice asked."))]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice requested concise answers.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -677,7 +710,7 @@ async def test_stored_items_show_observed_at_as_a_date_the_model_can_compare() -
         "observed_at": _TIMESTAMP,
     }
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice adopted uv.", timestamp=_LATER)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -692,7 +725,7 @@ async def test_stored_items_show_observed_at_as_a_date_the_model_can_compare() -
 async def test_narrative_time_attribute_is_the_utc_minute_seconds_truncated() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Python.", timestamp=_WEDNESDAY_14_00_59)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -713,7 +746,7 @@ async def test_stored_observed_at_is_shown_as_the_utc_minute_seconds_truncated()
         "observed_at": _WEDNESDAY_14_00_59,
     }
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice adopted uv.", timestamp=_WEDNESDAY_14_00_59 + 86_400_000)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -738,7 +771,7 @@ async def test_newer_episode_rewrites_a_description_and_restamps_it() -> None:
         ]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice moved to Shanghai.", timestamp=_LATER)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -771,7 +804,7 @@ async def test_grounding_only_update_keeps_the_item_date() -> None:
         ]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice commutes in Shanghai.", timestamp=_LATER)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -813,7 +846,7 @@ async def test_older_episode_adds_and_grounds_but_never_rewrites_or_deletes_newe
         ]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice lived in Beijing, grew up in Chengdu and wrote a Python script.", timestamp=_EARLIER)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -858,7 +891,7 @@ async def test_older_episode_may_add_history_after_the_current_value_but_never_r
     )
 
     with caplog.at_level(logging.INFO, logger=_PROFILE_LOGGER):
-        profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+        profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice lived in Chongqing.", timestamp=_EARLIER)],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -906,7 +939,7 @@ async def test_older_episode_history_is_the_stored_value_then_a_parenthesis(
     )
 
     with caplog.at_level(logging.INFO, logger=_PROFILE_LOGGER):
-        profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+        profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice lived in Chongqing.", timestamp=_EARLIER)],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -932,7 +965,7 @@ async def test_newer_episode_extending_a_description_is_a_rewrite_and_restamps_i
     )
 
     with caplog.at_level(logging.INFO, logger=_PROFILE_LOGGER):
-        profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+        profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice moved to the Gaoxin district.", timestamp=_LATER)],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -950,7 +983,7 @@ async def test_legacy_items_without_a_date_are_protected_by_the_profile_date() -
         responses=[_operations(_update(0, category="Stack", description="Works mainly in Rust.", evidence="Alice."))]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice wrote Rust.", timestamp=_EARLIER)],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -976,7 +1009,7 @@ async def test_mixed_batch_runs_the_historical_pass_before_the_current_pass() ->
         ]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [
             _episode("Alice relocated to Hangzhou.", timestamp=_LATER),
             _episode("Alice grew up in Chengdu.", timestamp=_EARLIER),
@@ -1036,7 +1069,7 @@ async def test_model_written_observed_at_raises_llm_output_error() -> None:
     )
 
     with pytest.raises(LLMOutputError):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice grew up in Chengdu and uses Python daily.")],
             owner_id=_OWNER_ID,
             owner_name=_OWNER_NAME,
@@ -1061,7 +1094,7 @@ async def test_episode_update_uses_episode_specific_compact_prompt() -> None:
         ]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice chose Ruff.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -1071,8 +1104,9 @@ async def test_episode_update_uses_episode_specific_compact_prompt() -> None:
 
     compact_system, compact_user = _system_and_user(fake, 1)
     assert fake.call_count == 2
-    # COMPACT points at the one statement of the grounding form instead of restating it.
-    assert "Keep every kept item's grounding in the form <what_the_profile_holds> gives." in compact_system
+    # COMPACT now writes operations: a merged or split item keeps the grounding of the items it names, and no
+    # grounding is written from anywhere else. (It used to point at the grounding form of a rewritten item.)
+    assert "every claim and grounding you write comes from the items you were given" in compact_system
     assert "<how_an_item_is_written>" not in compact_system
     assert "use a direct user quotation only where the source itself contains that quotation" not in compact_system
     assert "Episode-narrative form" not in compact_system
@@ -1081,14 +1115,17 @@ async def test_episode_update_uses_episode_specific_compact_prompt() -> None:
     assert compact_user.startswith(
         f'<target_person>{_OWNER_NAME}</target_person>\n\n<stored_profile total_items="61">\n'
     )
-    assert "observed_at" not in compact_user
+    # Operations name items by index, so COMPACT shows the stored items indexed and dated, as UPDATE does.
+    assert '<explicit_info>\n<item index="0">' in compact_user
+    assert "observed_at" in compact_user
     assert all(
         _rendered_category_snapshot(_system_prompt(fake, call)) == _expected_category_snapshot() for call in range(2)
     )
     assert profile.owner_id == _OWNER_ID
     assert profile.timestamp == _TIMESTAMP
-    # Rewritten items have no traceable origin, so they take the profile's own date.
-    assert [item["observed_at"] for item in _explicit_items(profile)] == [_TIMESTAMP]
+    # The deleted item is gone; every item no operation named keeps its own date.
+    assert "Stored fact 0." not in [item["description"] for item in _explicit_items(profile)]
+    assert [item["observed_at"] for item in _explicit_items(profile)] == [_EARLIER] * 59 + [_TIMESTAMP]
 
 
 async def test_episode_update_uses_episode_specific_regroup_prompt() -> None:
@@ -1101,16 +1138,24 @@ async def test_episode_update_uses_episode_specific_regroup_prompt() -> None:
         }
         for index in range(8)
     ]
-    regroup = json.dumps(
+    # REGROUP answers with operations: two restatements merged into one item.
+    regroup = _operations(
         {
-            "items": [{"category": "Environment", "description": "Uses Ruff.", "evidence": "Alice selected Ruff."}],
+            "action": "merge",
+            "type": "explicit_info",
+            "indices": [0, 1],
+            "data": {
+                "evidence": "Narrative evidence.",
+                "description": "Environment facts 0 and 1.",
+                "category": "Environment",
+            },
         }
     )
     fake = FakeLLMClient(
         responses=[_operations(_add("Uses Ruff.", category="Environment", evidence="Alice selected Ruff.")), regroup]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Ruff.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -1120,22 +1165,30 @@ async def test_episode_update_uses_episode_specific_regroup_prompt() -> None:
 
     regroup_system, regroup_user = _system_and_user(fake, 1)
     assert fake.call_count == 2
-    assert "Reorganise this group only." in regroup_system
+    # The role now says the group is changed by operations and everything else stays (it used to say "Reorganise
+    # this group only."); the rest of the profile is still not shown.
+    assert "every item you do not name stays exactly as it is" in regroup_system
+    assert "The rest of the profile is not shown; work from the items in <group> alone." in regroup_system
     assert "the grounding in the form <what_the_profile_holds> gives" in regroup_system
     assert "<how_an_item_is_written>" not in regroup_system
     assert "Episode-narrative evidence excerpts" not in regroup_system
-    # One element carries the group's attributes, its bucket first, and wraps its items; no separate <items> block.
+    # One element carries the group's attributes, its bucket first, and wraps its items, indexed in their bucket's
+    # element as UPDATE shows them; no separate <items> block.
     assert regroup_user.startswith(
         f"<target_person>{_OWNER_NAME}</target_person>\n\n"
-        '<group bucket="explicit_info" label_field="category" label="Environment" count="9">\n['
+        '<group bucket="explicit_info" label_field="category" label="Environment" count="9">\n'
+        '<explicit_info>\n<item index="0">'
     )
-    assert regroup_user.endswith("]\n</group>")
+    assert regroup_user.endswith("</explicit_info>\n</group>")
     assert "items>" not in regroup_user
-    assert "observed_at" not in regroup_user
+    assert "observed_at" in regroup_user
     assert all(
         _rendered_category_snapshot(_system_prompt(fake, call)) == _expected_category_snapshot() for call in range(2)
     )
-    assert [item["observed_at"] for item in _explicit_items(profile)] == [_TIMESTAMP]
+    # The merged item keeps the newest date of the two it replaces; untouched items keep theirs.
+    items = _explicit_items(profile)
+    assert items[0]["description"] == "Environment facts 0 and 1."
+    assert [item["observed_at"] for item in items] == [_EARLIER] * 7 + [_TIMESTAMP]
 
 
 def _labelled_items(label: str, count: int) -> list[dict[str, Any]]:
@@ -1153,19 +1206,25 @@ def _distinct_items(count: int) -> list[dict[str, Any]]:
 
 
 async def _update_past_the_total_cap(
-    compacted: list[dict[str, Any]], *later_replies: str
+    stored_items: list[dict[str, Any]], *later_replies: str
 ) -> tuple[FakeLLMClient, Profile]:
-    """UPDATE adds one item to 69 stored ones, so 70 breach the total cap and COMPACT answers with ``compacted``."""
-    stored = [{**item, "observed_at": _EARLIER} for item in _distinct_items(69)]
+    """UPDATE adds one item to 69 stored ones, so 70 breach the total cap and COMPACT deletes the last 19 stored.
+
+    COMPACT answers with operations on the indexed items, so the test states which items go rather than the
+    whole result; every item it does not name comes back as stored.
+    """
+    stored = [{**item, "observed_at": _EARLIER} for item in stored_items]
+    assert len(stored) == 69
     assert len(stored) + 1 > _PROFILE_MAX_ITEMS
+    compact = _operations(*({**_delete(index), "reason": "trivial"} for index in range(50, 69)))
     fake = FakeLLMClient(
         responses=[
             _operations(_add("Plays chess.", category="new-dimension", evidence="Alice plays chess.")),
-            json.dumps({"explicit_info": compacted, "implicit_traits": []}),
+            compact,
             *later_replies,
         ]
     )
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice plays chess.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -1181,16 +1240,23 @@ async def test_a_group_compact_leaves_over_its_cap_is_regrouped_in_the_same_call
     """COMPACT meets the total cap but leaves one group at 11; that group gets one REGROUP before the call returns."""
     hobbies = _labelled_items("Hobbies", 11)
     assert len(hobbies) > _PROFILE_MAX_PER_CATEGORY
-    regrouped = json.dumps({"items": [*hobbies[:6], *({**item, "category": "Sports"} for item in hobbies[6:])]})
+    # REGROUP answers with operations on the group's indexed items: the last five filed under a better name.
+    regrouped = _operations(
+        *(
+            _update(index, category="Sports", description=hobbies[index]["description"], evidence="Narrative evidence.")
+            for index in range(6, 11)
+        )
+    )
 
     with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
-        fake, profile = await _update_past_the_total_cap([*hobbies, *_distinct_items(40)], regrouped)
+        fake, profile = await _update_past_the_total_cap([*hobbies, *_distinct_items(58)], regrouped)
 
     assert fake.call_count == 3  # UPDATE, COMPACT, one REGROUP
     _, compact_user = _system_and_user(fake, 1)
     assert '<stored_profile total_items="70">' in compact_user
     _, regroup_user = _system_and_user(fake, 2)
     assert '<group bucket="explicit_info" label_field="category" label="Hobbies" count="11">' in regroup_user
+    assert any(item["description"] == "Stored fact 0." for item in _explicit_items(profile))  # COMPACT kept it
     assert "Stored fact 0." not in regroup_user  # the groups COMPACT left within their caps are not shown
     assert "group_items=11" in caplog.text
     labels = Counter(item["category"] for item in _explicit_items(profile))
@@ -1203,7 +1269,7 @@ async def test_a_compact_result_within_every_group_cap_is_not_regrouped() -> Non
     """A group COMPACT leaves at exactly its cap is within it: COMPACT's result is returned as it came back."""
     at_cap = _labelled_items("Hobbies", _PROFILE_MAX_PER_CATEGORY)
 
-    fake, profile = await _update_past_the_total_cap([*at_cap, *_distinct_items(43)])
+    fake, profile = await _update_past_the_total_cap([*at_cap, *_distinct_items(61)])
 
     assert fake.call_count == 2  # UPDATE, COMPACT
     labels = Counter(item["category"] for item in _explicit_items(profile))
@@ -1219,7 +1285,7 @@ async def test_same_generic_episode_is_extracted_separately_for_each_owner() -> 
             _profile_payload(description="Works mainly in Rust.", evidence="Bob selected Rust."),
         ]
     )
-    extractor = ProfileExtractor(llm=fake)
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
 
     alice = await extractor.aextract_from_episodes([generic_episode], owner_id="alice-id", owner_name="Alice")
     bob = await extractor.aextract_from_episodes([generic_episode], owner_id="bob-id", owner_name="Bob")
@@ -1234,7 +1300,7 @@ async def test_same_generic_episode_is_extracted_separately_for_each_owner() -> 
 def test_sync_bridge_extracts_profile() -> None:
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    profile = ProfileExtractor(llm=fake).extract_from_episodes(
+    profile = ProfileExtractor(llm=fake, item_checks=False).extract_from_episodes(
         [_episode("Alice selected Python.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -1251,7 +1317,7 @@ async def test_episode_stages_send_a_data_free_system_message_and_a_target_led_u
     owner = "Zaphod"
     narrative = "Zaphod chose marker-one-tooling."
     fake = FakeLLMClient(responses=[_profile_payload(), _operations({"action": "none"})])
-    extractor = ProfileExtractor(llm=fake)
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
 
     await extractor.aextract_from_episodes([_episode(narrative)], owner_id=_OWNER_ID, owner_name=owner)
     await extractor.aextract_from_episodes(
@@ -1273,7 +1339,7 @@ async def test_episode_stages_send_a_data_free_system_message_and_a_target_led_u
 async def test_system_message_is_identical_across_owners() -> None:
     """Two owners, same categories: the system message is byte-identical, only the user message differs."""
     fake = FakeLLMClient(responses=[_profile_payload(), _profile_payload()])
-    extractor = ProfileExtractor(llm=fake)
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
 
     for owner in ("Zaphod", "Trillian"):
         await extractor.aextract_from_episodes(
@@ -1363,11 +1429,14 @@ def test_init_never_in_the_profile_has_no_stored_item_sentence() -> None:
     assert exclusions == f"{_NEVER_IN_THE_PROFILE_LIST}\n\n{_LEAVE_UNCERTAIN_OUT}"
 
 
-def test_never_in_the_profile_lists_six_exclusions_one_per_line() -> None:
+def test_never_in_the_profile_lists_sixteen_exclusions_one_per_line() -> None:
     lines = _NEVER_IN_THE_PROFILE_LIST.splitlines()
 
     assert lines[0] == "Whatever the wording and whatever evidence is attached, these never become items:"
-    assert len(lines) == 7
+    # Six exclusions grew to sixteen: agent work credited to the person, jokes and what-ifs, one-off self-descriptions
+    # and days-long attempts, routines just started, other people's tastes, rejected labels, do-not-record matters,
+    # ID and account numbers and single readings, work standards set for a team, other people's arrangements.
+    assert len(lines) == 17
     assert all(line.startswith("- ") for line in lines[1:])
 
 
@@ -1388,7 +1457,9 @@ def test_never_in_the_profile_excludes_what_the_target_person_tells_about_someon
     )
 
     assert lines[4] == told
-    assert lines[5] == other_person
+    # The exclusion of agent work credited to the person now sits between the two.
+    assert lines[5].startswith("- Work the assistant or an agent carried out at this person's request")
+    assert lines[6] == other_person
 
 
 @pytest.mark.parametrize(("stage", "prompt"), list(zip(_STAGE_IDS, _SYSTEM_PROMPTS, strict=True)), ids=_STAGE_IDS)
@@ -1398,7 +1469,8 @@ def test_episode_system_prompts_put_the_static_rules_first_and_the_per_request_b
     """Role sentence, the static rule blocks, then the per-request blocks, <available_categories> last.
 
     Prompt caches match on a prefix, so the blocks that vary between requests close the template, least
-    variable first: the language rule (a few fixed texts), the category snapshot (supplied per request).
+    variable first: the language rule (a few fixed texts), the category snapshot (supplied per request). INIT and
+    UPDATE then close with <item_checks>, static text placed where it was evaluated.
     """
     order = _SYSTEM_BLOCK_ORDER[stage]
     positions = [prompt.index(f"\n\n<{tag}>\n") for tag in order]
@@ -1406,8 +1478,15 @@ def test_episode_system_prompts_put_the_static_rules_first_and_the_per_request_b
     assert role.startswith(_ROLE_PREFIX)
     assert _BLOCK_OPEN.findall(role) == []
     assert all(earlier < later for earlier, later in pairwise(positions))
-    assert order[-3:] == ("reply_format", "output_language", "available_categories")
-    assert prompt.endswith("<available_categories>\n{{available_categories}}\n</available_categories>")
+    rules = tuple(tag for tag in order if tag != "item_checks")
+    assert rules[-3:] == ("reply_format", "output_language", "available_categories")
+    categories = "<available_categories>\n{{available_categories}}\n</available_categories>"
+    if stage in ("init", "update", "update-historical"):
+        assert order[-1] == "item_checks"
+        assert prompt.endswith("\n</item_checks>")
+        assert f"{categories}\n\n<item_checks>\n" in prompt
+    else:
+        assert prompt.endswith(categories)
 
 
 @pytest.mark.parametrize("rule", list(_LANGUAGE_RULES.values()), ids=list(_LANGUAGE_RULES))
@@ -1441,7 +1520,7 @@ def test_episode_system_prefix_before_the_language_rule_is_the_same_for_every_la
 
 async def test_system_messages_of_two_languages_differ_only_after_the_static_prefix() -> None:
     fake = FakeLLMClient(responses=[_profile_payload(), _profile_payload()])
-    extractor = ProfileExtractor(llm=fake)
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
 
     for language in (OutputLanguage.CHINESE, OutputLanguage.GERMAN):
         await extractor.aextract_from_episodes(
@@ -1812,6 +1891,14 @@ def test_system_prompts_carry_no_stray_angle_brackets() -> None:
         "explicit_info",
         "implicit_traits",
         "item",
+        # UPDATE's rule naming the do-not-record list the user message carries.
+        "do_not_record",
+        # The item checks, and UPDATE's rule naming the pending list the user message carries.
+        "item_checks",
+        "pending_patterns",
+        # The confirm skeleton's placeholders as evaluated: "pending": <entry index>, "data": <the item in full, ...>.
+        "entry",
+        "the",
     }
     for prompt in _SYSTEM_PROMPTS:
         for tag in re.findall(r"</?([A-Za-z_][A-Za-z0-9_]*)", prompt):
@@ -1841,10 +1928,18 @@ def test_episode_prompts_demand_one_bare_json_object_and_every_shown_json_parses
     ("bucket", "item_model"), [("explicit_info", _ExplicitItem), ("implicit_traits", _ImplicitTrait)]
 )
 def test_regroup_reply_skeleton_shows_the_group_bucket_item_shape(bucket: str, item_model: type[Any]) -> None:
-    """A group's items come back in their bucket's shape, so the skeleton shows exactly that shape, in field order."""
-    (item,) = json.loads(REGROUP_REPLY_SKELETONS[bucket])["items"]
+    """A group's items come back in their bucket's shape, so the skeleton shows exactly that shape, in field order.
 
-    assert list(item) == list(item_model.model_fields)
+    The skeleton is now operations on the group's items: every operation names the group's bucket, and every item
+    it shows (a merge's or update's data, a split's pieces) has that bucket's fields.
+    """
+    operations = json.loads(REGROUP_REPLY_SKELETONS[bucket])["operations"]
+    items = _items_in({"operations": operations})
+
+    assert {op["type"] for op in operations} == {bucket}
+    assert {op["action"] for op in operations} == {"merge", "update", "split", "delete"}
+    assert len(items) == 4
+    assert all(list(item) == list(item_model.model_fields) for item in items)
 
 
 @pytest.mark.parametrize("prompt", _SYSTEM_PROMPTS, ids=_STAGE_IDS)
@@ -1857,10 +1952,11 @@ def test_every_item_skeleton_lists_grounding_first_and_label_last(prompt: str) -
 
 
 def _items_in(reply: dict[str, Any]) -> list[dict[str, Any]]:
-    """The item objects a reply skeleton shows: bucket lists, regroup items, operation data."""
+    """The item objects a reply skeleton shows: bucket lists, regroup items, operation data, a split's pieces."""
     items: list[dict[str, Any]] = [*reply.get("explicit_info", []), *reply.get("implicit_traits", [])]
     items += reply.get("items", [])
     items += [op["data"] for op in reply.get("operations", []) if "data" in op]
+    items += [piece for op in reply.get("operations", []) for piece in op.get("items", [])]
     return items
 
 
@@ -1870,10 +1966,16 @@ def test_output_item_models_declare_grounding_first() -> None:
     assert list(_ImplicitTrait.model_fields) == ["basis", "description", "trait"]
 
 
-def test_how_to_update_holds_six_unnumbered_requirements() -> None:
+def test_how_to_update_holds_eight_unnumbered_requirements() -> None:
     paragraphs = _HOW_TO_UPDATE.split("\n\n")
 
-    assert len(paragraphs) == 6
+    # Six grew to eight: a change in a standing situation sweeps every stored item it makes untrue, and a request
+    # not to record something is a forget operation.
+    assert len(paragraphs) == 8
+    assert paragraphs[4].startswith("A change in a standing situation")
+    assert paragraphs[5].startswith(
+        "When this person asks that something not be recorded or remembered, reply with a forget operation"
+    )
     assert paragraphs[0].startswith("add or update is decided by the fact, not the wording.")
     assert paragraphs[-1].startswith("Newer state stands; older narratives only add to it.")
     assert paragraphs[-1].endswith("leave observed_at to the system.")
@@ -1911,20 +2013,27 @@ def test_how_to_update_holds_six_unnumbered_requirements() -> None:
 def test_how_to_compact_puts_the_one_ordering_that_matters_first() -> None:
     paragraphs = _HOW_TO_COMPACT.split("\n\n")
 
-    assert len(paragraphs) == 7
+    # COMPACT now replies with operations: one requirement per operation (delete, merge, split, move, update), then
+    # the preference for deleting a weak item; each operation's requirement opens with the operation's name.
+    assert len(paragraphs) == 6
+    operations = ["delete", "merge", "split", "move", "update"]
+    assert [paragraph.split(" ", 1)[0] for paragraph in paragraphs[:5]] == operations
     assert paragraphs[0] == (
-        "Delete everything on the <never_in_the_profile> list before merging anything: twelve such items become zero "
+        "delete everything on the <never_in_the_profile> list before merging anything: twelve such items become zero "
         "items, not one."
     )
 
 
-def test_how_to_regroup_holds_four_unnumbered_requirements() -> None:
+def test_how_to_regroup_holds_five_unnumbered_requirements() -> None:
     paragraphs = _HOW_TO_REGROUP.split("\n\n")
 
-    assert len(paragraphs) == 4
-    assert (
-        paragraphs[-1]
-        == "Keep every item in the bucket it came from; every claim and grounding comes from the shown items."
+    # REGROUP now replies with operations: one requirement per operation (merge, update, split, delete), then the
+    # rule that keeps every item in its bucket and names each index once.
+    assert len(paragraphs) == 5
+    assert [paragraph.split(" ", 1)[0] for paragraph in paragraphs[:4]] == ["merge", "update", "split", "delete"]
+    assert paragraphs[-1] == (
+        "Keep every item in the bucket it came from; every claim and grounding comes from the shown items. Each index "
+        "appears in one operation at most."
     )
 
 
@@ -1996,8 +2105,12 @@ def test_update_reply_format_says_only_what_index_means() -> None:
 def test_init_reply_format_allows_an_empty_profile() -> None:
     reply_format = _block(PROFILE_INITIAL_FROM_EPISODE_TEXTS_SYSTEM_PROMPT, "reply_format")
 
+    # The reply now also carries do_not_record, so the format says when it is filled and that it is empty otherwise.
     assert reply_format.startswith(
-        "Both lists may be empty when the narratives carry nothing about this person. "
+        "Both lists may be empty when the narratives carry nothing about this person. When this person asks that "
+        "something not be recorded or remembered, list the matter in do_not_record, named in a few words as narrowly "
+        "as they meant it, with its evidence, and write no item about it; the system keeps the list for every later "
+        "update. do_not_record is empty otherwise. "
         "Reply with one JSON object, nothing else. Write each item's fields in the order shown, evidence or basis "
         "first.\n\n"
     )
@@ -2007,8 +2120,10 @@ def test_episode_compact_corrects_bucket_without_inventing_grounding() -> None:
     """Full-profile compaction can rehome stored content but cannot manufacture it."""
     prompt = PROFILE_COMPACT_FROM_EPISODE_TEXTS_SYSTEM_PROMPT
 
-    assert "Move a trait that merely restates a fact a narrative states directly into explicit_info" in prompt
-    assert "every claim and grounding you keep comes from the items you were given" in prompt
+    # Rehoming is now the move operation, and what COMPACT writes (merged, split, moved items) must come from the
+    # items it was given; it used to say "keep" of a rewritten profile.
+    assert "move a trait that merely restates a fact a narrative states directly into explicit_info" in prompt
+    assert "every claim and grounding you write comes from the items you were given" in prompt
     assert "do not leave a copy behind" not in prompt
     assert "NEVER by inventing a claim or grounding" not in prompt
 
@@ -2065,9 +2180,11 @@ def test_every_tag_a_rule_names_is_given_to_the_model(system: str, user: str) ->
 
 def test_the_stage_blocks_point_at_the_blocks_that_state_the_rules() -> None:
     by_stage = dict(zip(_STAGE_IDS, _SYSTEM_PROMPTS, strict=True))
-    for stage in ("compact", "regroup"):
-        assert "in the form <what_the_profile_holds> gives" in _block(by_stage[stage], f"how_to_{stage}")
-        assert "as <what_the_profile_holds> defines" in _block(by_stage[stage], f"how_to_{stage}")
+    assert "in the form <what_the_profile_holds> gives" in _block(by_stage["regroup"], "how_to_regroup")
+    assert "as <what_the_profile_holds> defines" in _block(by_stage["regroup"], "how_to_regroup")
+    # COMPACT's operations carry grounding over from the items they name rather than rewriting it, so its block no
+    # longer points at the grounding form or the category definition; it names what a merge keeps instead.
+    assert "keeping the better wording and every occasion's grounding" in _block(by_stage["compact"], "how_to_compact")
     for stage in ("update", "compact", "regroup"):
         assert "the <never_in_the_profile> list" in _block(by_stage[stage], f"how_to_{stage}")
         assert "\n<never_in_the_profile>\n" in by_stage[stage]
@@ -2085,7 +2202,7 @@ async def _straddling_update_system_messages() -> tuple[str, str]:
             "implicit_traits": [],
         }
     )
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [
             _episode("Alice moved.", timestamp=1_900_000_000_000),
             _episode("Alice studied.", timestamp=1_700_000_000_000),
@@ -2175,7 +2292,8 @@ def test_each_stage_shows_only_its_own_examples_after_one_lead_sentence(
 @pytest.mark.parametrize(
     ("examples", "count", "callsite", "reply"),
     [
-        (_EXAMPLES_INIT, 2, _call_llm_for_profile_init, _ProfileItems),
+        # The Episode INIT reply now carries do_not_record, so its examples are held to that model.
+        (_EXAMPLES_INIT, 2, _call_llm_for_profile_init, _EpisodeInitOutput),
         (_EXAMPLES_UPDATE, 1, _call_llm_for_profile_update, _UpdateOutput),
     ],
     ids=["init", "update"],
@@ -2190,7 +2308,20 @@ async def test_every_example_reply_parses_and_passes_its_stage_reply_model(
     for text in replies:
         assert isinstance(json.loads(text), dict)
         validated = await callsite(FakeLLMClient(responses=[text]), [], reply=reply)
-        assert validated == json.loads(text)
+        assert _without_unset_reply_fields(validated) == json.loads(text)
+
+
+def _without_unset_reply_fields(value: Any) -> Any:
+    """``value`` without the item checks' optional fields (pattern, pending, quote, regular) where they are None."""
+    if isinstance(value, dict):
+        return {
+            key: _without_unset_reply_fields(item)
+            for key, item in value.items()
+            if not (key in ("pattern", "pending", "quote", "regular") and item is None)
+        }
+    if isinstance(value, list):
+        return [_without_unset_reply_fields(item) for item in value]
+    return value
 
 
 def test_init_examples_keep_an_empty_profile_and_leave_out_what_never_enters() -> None:
@@ -2201,7 +2332,8 @@ def test_init_examples_keep_an_empty_profile_and_leave_out_what_never_enters() -
     """
     operations_only, facts_and_a_pattern = (json.loads(text) for text in _example_replies(_EXAMPLES_INIT))
 
-    assert operations_only == {"explicit_info": [], "implicit_traits": []}
+    assert operations_only == {"explicit_info": [], "implicit_traits": [], "do_not_record": []}
+    assert facts_and_a_pattern["do_not_record"] == []
     assert "her cousin, a lawyer, handles the paperwork" in _EXAMPLES_INIT
     by_category = {item["category"]: item["description"] for item in facts_and_a_pattern["explicit_info"]}
     assert by_category == {
@@ -2212,6 +2344,8 @@ def test_init_examples_keep_an_empty_profile_and_leave_out_what_never_enters() -
     written = json.dumps(facts_and_a_pattern)
     for left_out in ("cousin", "lawyer", "paperwork", "formal", "advertisement"):
         assert left_out not in written
+    # The example still shows one trait, although the rules now say a first profile leaves implicit_traits empty and
+    # the program drops every trait an INIT reply holds; the example text was left as it was.
     (trait,) = facts_and_a_pattern["implicit_traits"]
     assert trait["basis"].count("2026-") == 2  # The pattern names a signal from each of two narratives.
 
@@ -2238,10 +2372,16 @@ def test_update_example_writes_the_named_language_over_a_stored_one_and_updates_
     ("stage", "bodies"), [("init", _INIT_EXAMPLE_BODIES), ("update", _UPDATE_EXAMPLE_BODIES)], ids=["init", "update"]
 )
 def test_example_inputs_open_the_blocks_the_stage_user_message_opens(stage: str, bodies: tuple[str, ...]) -> None:
-    """An example's input is marked up as the real input is: the same outer tags, in the same order, then its reply."""
+    """An example's input is marked up as the real input is: the same outer tags, in the same order, then its reply.
+
+    The exceptions: the UPDATE example shows no <do_not_record> block, which the real UPDATE user message opens
+    with, and no <pending_patterns> block, which closes it. The example predates both lists and its text was left
+    as it was; it is checked here as it stands rather than skipped.
+    """
     for body in bodies:
         opened, _ = _top_level_blocks(body)
-        assert opened == [*_USER_BLOCK_ORDER[stage], "reply"]
+        unshown = ("do_not_record", "pending_patterns")
+        assert opened == [*(tag for tag in _USER_BLOCK_ORDER[stage] if tag not in unshown), "reply"]
 
 
 def test_examples_show_their_input_as_the_production_renderer_does() -> None:
@@ -2297,8 +2437,14 @@ async def _messages_by_stage(
     Calls, in order: INIT; an UPDATE straddling the stored timestamp (historical, then current batch); an
     UPDATE that breaches the total cap, so COMPACT follows; an UPDATE that breaches a group cap, so REGROUP follows.
     """
-    regroup = json.dumps(
-        {"items": [{"evidence": "Alice selected Ruff.", "description": "Uses Ruff.", "category": "Environment"}]}
+    # REGROUP answers with operations on the group's indexed items: here it files the added item elsewhere.
+    regroup = _operations(
+        {
+            "action": "update",
+            "type": "explicit_info",
+            "index": 8,
+            "data": {"evidence": "Alice selected Ruff.", "description": "Uses Ruff.", "category": "Tooling"},
+        }
     )
     fake = FakeLLMClient(
         responses=[
@@ -2311,7 +2457,7 @@ async def _messages_by_stage(
             regroup,
         ]
     )
-    extractor = ProfileExtractor(llm=fake)
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
     crowded = [
         {"category": f"dimension-{index}", "description": f"Fact {index}.", "evidence": "E.", "observed_at": _EARLIER}
         for index in range(60)
@@ -2356,10 +2502,13 @@ async def test_a_named_language_holds_for_the_stored_items_too_in_every_stage(st
 
 @pytest.mark.parametrize("stage", _ALL_STAGES)
 async def test_additional_requirements_close_every_stage_system_message_after_the_categories(stage: str) -> None:
-    """One block, last, after <available_categories>, the lead-in on its first line and the text verbatim."""
+    """One block, last, the lead-in on its first line and the text verbatim.
+
+    It follows <available_categories>, or on INIT and UPDATE the <item_checks> block that closes their rules.
+    """
     system, user = (await _messages_by_stage(_ADDITIONAL_REQUIREMENTS))[stage]
 
-    assert system.endswith(f"\n</available_categories>{_ADDITIONAL_REQUIREMENTS_BLOCK}")
+    assert system.endswith(f"\n</{_SYSTEM_BLOCK_ORDER[stage][-1]}>{_ADDITIONAL_REQUIREMENTS_BLOCK}")
     assert system.count("<additional_requirements>") == 1
     assert _top_level_blocks(system)[0] == [*_SYSTEM_BLOCK_ORDER[stage], "additional_requirements"]
     assert _ADDITIONAL_REQUIREMENTS not in user
@@ -2377,10 +2526,10 @@ async def test_additional_requirements_add_to_the_bundled_blocks_and_replace_non
 
 @pytest.mark.parametrize("custom_instructions", [None, "", "  \n\t "], ids=["none", "empty", "blank"])
 async def test_no_additional_requirements_add_no_block_to_any_stage(custom_instructions: str | None) -> None:
-    for system, user in (await _messages_by_stage(custom_instructions)).values():
+    for stage, (system, user) in (await _messages_by_stage(custom_instructions)).items():
         assert "additional_requirements" not in system + user
         assert _ADDITIONAL_REQUIREMENTS_LEAD not in system + user
-        assert system.endswith("\n</available_categories>")
+        assert system.endswith(f"\n</{_SYSTEM_BLOCK_ORDER[stage][-1]}>")
 
 
 def test_additional_requirements_block_puts_the_lead_in_on_its_first_line() -> None:
@@ -2565,7 +2714,11 @@ async def test_the_definition_is_stated_once_and_portrait_is_retired(stage: str)
 
 
 async def test_regroup_user_message_wraps_the_items_in_the_group_element() -> None:
-    """The group's attributes, its bucket first, and its items are one element; the separate <items> block is gone."""
+    """The group's attributes, its bucket first, and its items are one element; the separate <items> block is gone.
+
+    The items are indexed, inside their bucket's element, as UPDATE shows stored items: REGROUP's operations name
+    them by index.
+    """
     _, user = (await _messages_by_stage(None))["regroup"]
     (group,) = ElementTree.fromstring(f"<root>{user}</root>").iter("group")
 
@@ -2575,8 +2728,10 @@ async def test_regroup_user_message_wraps_the_items_in_the_group_element() -> No
         ("label", "Environment"),
         ("count", "9"),
     ]
-    assert group.text is not None
-    assert [item["description"] for item in json.loads(group.text)][:2] == ["Fact 0.", "Fact 1."]
+    (bucket,) = list(group)
+    assert bucket.tag == "explicit_info"
+    assert [item.get("index") for item in bucket] == [str(index) for index in range(9)]
+    assert [json.loads(item.text or "")["description"] for item in bucket][:2] == ["Fact 0.", "Fact 1."]
     assert "items>" not in user
 
 
@@ -2596,8 +2751,9 @@ async def _regroup_messages(bucket: str, label: str) -> tuple[str, str]:
             "implicit_traits": crowded if bucket == "implicit_traits" else [],
         }
     )
-    fake = FakeLLMClient(responses=[_operations({"action": "none"}), json.dumps({"items": []})])
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    # REGROUP answers with operations; none is needed to read the messages it was sent.
+    fake = FakeLLMClient(responses=[_operations({"action": "none"}), _operations()])
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice selected Ruff.")], owner_id=_OWNER_ID, owner_name=_OWNER_NAME, old_profile=old
     )
     return _system_and_user(fake, 1)
@@ -2640,7 +2796,7 @@ async def test_stored_profile_renders_each_bucket_as_an_element_of_indexed_items
         }
     )
     fake = FakeLLMClient(responses=[_operations({"action": "none"})])
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice adopted uv.", timestamp=_LATER)], owner_id=_OWNER_ID, owner_name=_OWNER_NAME, old_profile=old
     )
 
@@ -2664,7 +2820,7 @@ async def test_stored_profile_renders_each_bucket_as_an_element_of_indexed_items
 
 async def test_an_empty_bucket_renders_as_an_empty_element() -> None:
     fake = FakeLLMClient(responses=[_operations({"action": "none"})])
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice adopted uv.")], owner_id=_OWNER_ID, owner_name=_OWNER_NAME, old_profile=_old_profile()
     )
 
@@ -2701,7 +2857,15 @@ async def test_every_stage_shows_stored_items_without_host_keys() -> None:
         {"category": "Environment", "description": f"Fact {index}.", "evidence": "E.", **_HOST_KEYS}
         for index in range(8)
     ]
-    regroup = json.dumps({"items": [{"evidence": "E.", "description": "Uses Ruff.", "category": "Environment"}]})
+    # REGROUP answers with operations: here it files the added item elsewhere.
+    regroup = _operations(
+        {
+            "action": "update",
+            "type": "explicit_info",
+            "index": 8,
+            "data": {"evidence": "E.", "description": "Uses Ruff.", "category": "Tooling"},
+        }
+    )
     fake = FakeLLMClient(
         responses=[
             _operations(_add("Prefers Ruff.", category="new")),
@@ -2710,7 +2874,7 @@ async def test_every_stage_shows_stored_items_without_host_keys() -> None:
             regroup,
         ]
     )
-    extractor = ProfileExtractor(llm=fake)
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
     for items in (crowded, grouped):
         await extractor.aextract_from_episodes(
             [_episode("Alice chose Ruff.")],
@@ -2736,7 +2900,7 @@ async def test_an_update_keeps_host_keys_it_never_showed() -> None:
         ]
     )
 
-    profile = await ProfileExtractor(llm=fake).aextract_from_episodes(
+    profile = await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode("Alice used Python again.")],
         owner_id=_OWNER_ID,
         owner_name=_OWNER_NAME,
@@ -2766,7 +2930,7 @@ async def test_a_closing_tag_in_a_narrative_is_defused_in_any_case(tag: str) -> 
     text = f"Alice typed {tag} and {tag.upper()} into the chat."
     fake = FakeLLMClient(responses=[_profile_payload()])
 
-    await ProfileExtractor(llm=fake).aextract_from_episodes(
+    await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
         [_episode(text)], owner_id=_OWNER_ID, owner_name=_OWNER_NAME
     )
 
@@ -2795,10 +2959,10 @@ def test_other_markup_in_a_stored_item_passes_as_written() -> None:
 async def test_maintenance_stages_show_items_in_declared_field_order() -> None:
     """COMPACT and REGROUP show the stored JSON too, so it reads in the order the reply is asked to write."""
     messages = await _messages_by_stage(None)
-    # COMPACT nests the items one level deeper (inside the bucket lists) than REGROUP (a bare list).
+    # Both now show indexed, dated items, one JSON object per <item>, as UPDATE does.
     expected = {
-        "compact": '"evidence": "E.",\n      "description": "Fact 0.",\n      "category": "dimension-0"\n',
-        "regroup": '"evidence": "E.",\n    "description": "Fact 0.",\n    "category": "Environment"\n',
+        "compact": '<item index="0">{"evidence": "E.", "description": "Fact 0.", "category": "dimension-0", "observed',
+        "regroup": '<item index="0">{"evidence": "E.", "description": "Fact 0.", "category": "Environment", "observed',
     }
     for stage, item in expected.items():
         assert item in messages[stage][1], stage
@@ -2886,7 +3050,7 @@ async def test_each_update_pass_logs_its_ops_its_date_and_the_profile_date_it_le
     fake = FakeLLMClient(responses=[historical_reply, current_reply])
 
     with caplog.at_level(logging.INFO, logger=_PROFILE_LOGGER):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [
                 _episode("Alice relocated to Hangzhou.", timestamp=_LATER),
                 _episode("Alice lived in Beijing and uses Ruff.", timestamp=_EARLIER),
@@ -2946,7 +3110,7 @@ async def test_entry_line_counts_the_normalised_category_snapshot(
     """The size of the snapshot the prompts carry, after stripping, blank removal and deduplication; never the names."""
     fake = FakeLLMClient(responses=[_profile_payload()])
     with caplog.at_level(logging.INFO, logger=_PROFILE_LOGGER):
-        await ProfileExtractor(llm=fake).aextract_from_episodes(
+        await ProfileExtractor(llm=fake, item_checks=False).aextract_from_episodes(
             [_episode("Alice works in Python.")], owner_id=_OWNER_ID, owner_name=_OWNER_NAME, categories=categories
         )
 
@@ -2957,9 +3121,9 @@ async def test_entry_line_counts_the_normalised_category_snapshot(
 
 async def test_episode_init_dedupe_is_one_summary_line(caplog: pytest.LogCaptureFixture) -> None:
     item = {"category": "Stack", "description": "Works in Python.", "evidence": "e"}
-    reply = json.dumps({"explicit_info": [item, item, item], "implicit_traits": []})
+    reply = json.dumps({"explicit_info": [item, item, item], "implicit_traits": [], "do_not_record": []})
     with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
-        await ProfileExtractor(llm=FakeLLMClient(responses=[reply])).aextract_from_episodes(
+        await ProfileExtractor(llm=FakeLLMClient(responses=[reply]), item_checks=False).aextract_from_episodes(
             [_episode("Alice works in Python.")], owner_id=_OWNER_ID, owner_name=_OWNER_NAME
         )
 
@@ -2976,6 +3140,7 @@ async def test_no_log_line_carries_narratives_or_profile_content(caplog: pytest.
                 {"category": f"Stack {marker}", "description": f"Works in Python {marker}.", "evidence": marker},
             ],
             "implicit_traits": [{"trait": marker, "description": f"Careful {marker}.", "basis": marker}],
+            "do_not_record": [],
         }
     )
     update_reply = _operations(
@@ -2983,7 +3148,7 @@ async def test_no_log_line_carries_narratives_or_profile_content(caplog: pytest.
         _delete(0),
         _add(f"Uses Ruff {marker}.", category=f"stack   {marker}", evidence=marker),
     )
-    extractor = ProfileExtractor(llm=FakeLLMClient(responses=[init_reply, update_reply]))
+    extractor = ProfileExtractor(llm=FakeLLMClient(responses=[init_reply, update_reply]), item_checks=False)
 
     with caplog.at_level(logging.DEBUG, logger=_PROFILE_LOGGER):
         profile = await extractor.aextract_from_episodes(
@@ -3009,7 +3174,7 @@ async def test_episode_entry_logs_the_validated_language_and_refuses_an_unknown_
 ) -> None:
     marker = "LANGUAGE-MARKER-77b2"
     fake = FakeLLMClient(responses=[_profile_payload()])
-    extractor = ProfileExtractor(llm=fake)
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
 
     with caplog.at_level(logging.DEBUG, logger=_PROFILE_LOGGER):
         await extractor.aextract_from_episodes(

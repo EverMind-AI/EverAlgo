@@ -1,7 +1,8 @@
 """The eight extraction stages, each its message templates, language rules and reply model.
 
 INIT, UPDATE, COMPACT and REGROUP on each path: the MemCell path's prompts are one user message, the Episode path's
-a system message of rules and a user message of data.
+a system message of rules and a user message of data. On the Episode path INIT's reply also lists the matters this
+person asked not to be recorded, and COMPACT and REGROUP reply with operations on indexed items rather than a rewrite.
 """
 
 from __future__ import annotations
@@ -23,12 +24,13 @@ from everalgo.user_memory._language import (
     build_language_rule,
 )
 from everalgo.user_memory.profile._replies import (
-    _CompactOutput,
+    _CompactOpsOutput,
+    _EpisodeInitOutput,
     _MemCellCompactOutput,
     _MemCellRegroupOutput,
     _MemCellUpdateOutput,
     _ProfileItems,
-    _RegroupOutput,
+    _RegroupOpsOutput,
     _UpdateOutput,
 )
 from everalgo.user_memory.prompts.en.profile import (
@@ -118,7 +120,7 @@ _MEMCELL_REGROUP = _StagePrompts(
 )
 _EPISODE_INIT = _StagePrompts(
     user=PROFILE_INITIAL_FROM_EPISODE_TEXTS_USER_PROMPT,
-    reply=_ProfileItems,
+    reply=_EpisodeInitOutput,
     language_fallback=EPISODE_PROFILE_INIT_LANGUAGE_RULE,
     system=PROFILE_INITIAL_FROM_EPISODE_TEXTS_SYSTEM_PROMPT,
 )
@@ -130,13 +132,13 @@ _EPISODE_UPDATE = _StagePrompts(
 )
 _EPISODE_COMPACT = _StagePrompts(
     user=PROFILE_COMPACT_FROM_EPISODE_TEXTS_USER_PROMPT,
-    reply=_CompactOutput,
+    reply=_CompactOpsOutput,
     language_fallback=COMPACTED_PROFILE_LANGUAGE_RULE,
     system=PROFILE_COMPACT_FROM_EPISODE_TEXTS_SYSTEM_PROMPT,
 )
 _EPISODE_REGROUP = _StagePrompts(
     user=PROFILE_REGROUP_FROM_EPISODE_TEXTS_USER_PROMPT,
-    reply=_RegroupOutput,
+    reply=_RegroupOpsOutput,
     language_fallback=REGROUPED_PROFILE_LANGUAGE_RULE,
     system=PROFILE_REGROUP_FROM_EPISODE_TEXTS_SYSTEM_PROMPT,
 )

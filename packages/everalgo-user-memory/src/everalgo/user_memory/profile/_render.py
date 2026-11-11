@@ -1,8 +1,10 @@
 """What the model is shown: the batch selection, the conversation, the narratives and the stored items.
 
-A narrative or item that spells out one of the prompts' own closing tags would end its element early, so every
-narrative and every item's JSON goes through :func:`_defuse_closing_tags`. Items are shown with their model-facing
-fields only (``_FIELD_ORDER``); a host's own keys stay in storage and out of the prompt.
+A narrative, item or do-not-record topic that spells out one of the prompts' own closing tags would end its element
+early, so every narrative, every item's JSON and every topic goes through :func:`_defuse_closing_tags`. Items are
+shown with their model-facing fields only (``_FIELD_ORDER``); a host's own keys stay in storage and out of the prompt.
+The Episode UPDATE prompt also shows the do-not-record list (:func:`_render_do_not_record`) and the pending
+pattern entries (:func:`_render_pending`).
 """
 
 from __future__ import annotations
@@ -16,14 +18,16 @@ from typing import Any, cast
 from everalgo.types import ChatMessage, Episode, MemCell, Profile
 from everalgo.user_memory._render import chat_messages
 from everalgo.user_memory.profile._items import _OBSERVED_AT, _dated_buckets, _Item, _item_label, _normalize
-from everalgo.utils import InvalidInputError, format_time, render_chat_line, speaker
+from everalgo.utils import InvalidInputError, format_date, format_time, render_chat_line, speaker
 
 # The fields an item shows the model, in this order: the declared order of both output item models, merged, then
 # the date. A host's own keys are not among them.
 _FIELD_ORDER = ("evidence", "basis", "description", "category", "trait", _OBSERVED_AT)
 # The prompts' own closing tags, in any case: the only strings in unescaped text that could end an element early.
 _CLOSING_TAGS = re.compile(
-    r"</(?:narrative|episode_narratives|item|explicit_info|implicit_traits|stored_profile|group)>", re.IGNORECASE
+    r"</(?:narrative|episode_narratives|item|explicit_info|implicit_traits|stored_profile|group|matter|do_not_record"
+    r"|entry|pending_patterns)>",
+    re.IGNORECASE,
 )
 _FULLWIDTH_LESS_THAN = "\uff1c"
 
@@ -156,7 +160,10 @@ def _render_profile_for_update(profile: Profile, *, tz: tzinfo = UTC) -> str:
 
 
 def _render_profile_for_episode_update(profile: Profile, *, tz: tzinfo = UTC) -> str:
-    """Render both buckets as XML, dated in ``tz``, without listing stored category names as preferred choices."""
+    """Render both buckets as XML, dated in ``tz``, without listing stored category names as preferred choices.
+
+    Episode-path COMPACT shows the profile the same way: its operations name items by these indices.
+    """
     explicit_info, implicit_traits = _dated_buckets(profile)
     return "\n".join(
         (
@@ -164,6 +171,37 @@ def _render_profile_for_episode_update(profile: Profile, *, tz: tzinfo = UTC) ->
             _render_bucket("implicit_traits", implicit_traits, tz=tz),
         )
     )
+
+
+def _render_do_not_record(entries: list[dict[str, Any]] | None) -> str:
+    """Render the do-not-record list for the Episode UPDATE prompt: one ``<matter>`` line per topic, or ``(none)``.
+
+    Only the topic is shown, its closing tags defused; the evidence stays in storage.
+    """
+    if not entries:
+        return "(none)"
+    return "\n".join(f"<matter>{_defuse_closing_tags(e['topic'])}</matter>" for e in entries)
+
+
+def _render_pending(entries: list[dict[str, Any]] | None, *, tz: tzinfo = UTC) -> str:
+    """Render the pending pattern entries for the Episode UPDATE prompt, or ``(none)``.
+
+    One ``<entry index="k" first_seen="YYYY-MM-DD">`` line per entry, the date a day in ``tz``, holding its description,
+    label and grounding as JSON, closing tags defused; ``k`` is the index a ``confirm`` operation names.
+    """
+    if not entries:
+        return "(none)"
+    lines = []
+    for k, entry in enumerate(entries):
+        shown = {
+            "description": entry["description"],
+            "category": entry.get("category") or entry.get("trait") or "",
+            "evidence": entry.get("evidence") or entry.get("basis") or "",
+        }
+        first_seen = format_date(entry["observed_at"], tz=tz)
+        body = _defuse_closing_tags(json.dumps(shown, ensure_ascii=False))
+        lines.append(f'<entry index="{k}" first_seen="{first_seen}">{body}</entry>')
+    return "\n".join(lines)
 
 
 def _render_label_inventory(explicit_info: Sequence[_Item], implicit_traits: Sequence[_Item]) -> str:
