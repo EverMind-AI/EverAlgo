@@ -8,14 +8,18 @@
 
 ```python
 from collections.abc import Sequence
+from datetime import UTC, tzinfo
 
 from asgiref.sync import async_to_sync
 
+from everalgo.llm import LLMClient
 from everalgo.types import Episode, Profile
 from everalgo.user_memory import OutputLanguage
 
 
 class ProfileExtractor:
+    def __init__(self, *, llm: LLMClient, item_checks: bool = True, new_traits: bool = False) -> None: ...
+
     async def aextract_from_episodes(
         self,
         episodes: Sequence[Episode],
@@ -26,6 +30,7 @@ class ProfileExtractor:
         categories: Sequence[str] | None = None,
         custom_instructions: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
         ...
 
@@ -68,7 +73,9 @@ class ProfileExtractor:
 - 传入 `None` 表示 INIT 模式，创建新的 Profile。
 - 传入 `Profile` 表示 UPDATE 模式，在已有 Profile 上执行新增、更新和删除。
 
-`old_profile.timestamp` 被读作已存 profile 所反映到的观察时间，见 [时间感知合并](#时间感知合并)。UPDATE 之后在同一次调用里把 profile 收回上限之内：总数超过 60 条先做 COMPACT，然后同一个分类名或特征名下超过 8 条的分组各做一次 REGROUP。做过 COMPACT 时，分组检查看的是 COMPACT 的结果，所以 COMPACT 留下的超限分组也会被重组。
+`old_profile.timestamp` 被读作已存 profile 所反映到的观察时间，见 [时间感知合并](#时间感知合并)。UPDATE 之后在同一次调用里把 profile 收回上限之内：总数超过 60 条先做 COMPACT，然后同一个分类名或特征名下超过 8 条的分组各做一次 REGROUP（见 [压缩与重组](#压缩与重组)）。做过 COMPACT 时，分组检查看的是 COMPACT 的结果，所以 COMPACT 留下的超限分组也会被重组。
+
+除两个桶外，`old_profile` 还可以带两个由 EverAlgo 自己使用的额外字段：`do_not_record`（见 [不记录清单](#不记录清单)）和 `pending`（见 [条目检查](#条目检查)）。返回的 Profile 以同样方式携带它们，作为额外字段（`Profile.model_extra`），`model_dump()` 会包含它们。宿主把它们和 profile 存在一起，不展示给终端用户，下次原样传回；只拷贝声明字段的宿主会丢掉它们，同时丢掉这个人提过的要求和所有等待确认的模式。
 
 两个桶里的条目都是 `everalgo.types` 中的类型化模型：
 
@@ -101,6 +108,10 @@ EverAlgo 会去除每个分类字符串两端的空白、忽略空白值，并�
 ### `output_language`
 
 期望的输出语言，可以传入 `OutputLanguage` 或等价的大小写不敏感字符串。传入 `None` 时，INIT 根据 Episode 叙事语言生成，UPDATE、COMPACT、REGROUP 沿用已有 Profile 多数内容所用的语言，所以已经混杂的 Profile 也会收敛到一种语言。指定语言后，每个阶段的所有字段都用它写，不管输入是什么语言，已存的内容也一样：它优先于用其他语言写成的存量 Profile，UPDATE 的提示词要求把用其他语言写成的存量条目改写成它，即使没有叙事提到那一条。
+
+### `tz`
+
+展示给模型的所有时间所用的时区，类型为 `datetime.tzinfo`（默认 UTC）：每段叙事的 `time` 属性、每条存量条目的 `observed_at`、每条待定条目的 `first_seen` 日期，都由 `everalgo.utils.format_time` / `format_date` 按该时区渲染并带上偏移（`2024-03-11 00:00 UTC+14:00`）。[条目检查](#条目检查) 把模型在依据里写的日期也当作该时区的日期。存储的值仍是 epoch 毫秒，变的只是模型看到的内容；UTC 的渲染与以前一致。
 
 ## 目标用户校验
 
@@ -137,9 +148,9 @@ Profile 是「这个人现在是什么样」的画像。EverOS 可能不按观�
 **两个时间**
 
 - `Profile.timestamp` 是 profile 所反映到的最新观察时间。INIT 取选中 Episode 中最新的一条；UPDATE 取 `max(old_profile.timestamp, 本批最新 Episode)`。它永不倒退。
-- 每条 `explicit_info` 和 `implicit_traits` 条目携带 `observed_at`（Unix 毫秒）：最后一次确立该条目 `description` 的叙事的观察时间。INIT 给所有条目打上本批最新时间；UPDATE 给每条新增条目和每条被改写 description 的条目打上本批最新时间，只改 grounding（`evidence` / `basis`）或分类的更新保留原时间；被 COMPACT 或 REGROUP 重写的条目取 `Profile.timestamp`。该字段出现之前写入的存量条目按 `old_profile.timestamp` 读取。
+- 每条 `explicit_info` 和 `implicit_traits` 条目携带 `observed_at`（Unix 毫秒）：最后一次确立该条目 `description` 的叙事的观察时间。INIT 给所有条目打上本批最新时间；UPDATE 给每条新增条目和每条被改写 description 的条目打上本批最新时间，只改 grounding（`evidence` / `basis`）或分类的更新保留原时间。COMPACT 和 REGROUP 以操作作答，没有被任何操作点名的条目保留原时间；合并得到的条目取被合并条目中最新的时间，被更新的条目和拆分出的每一块都保留原条目的时间，移入 `explicit_info` 的特质保留它自己的时间。该字段出现之前写入的存量条目按 `old_profile.timestamp` 读取。
 
-`observed_at` 只由 EverAlgo 写入。模型在每条存量条目的 JSON 里看到它，格式为精确到分钟的 UTC 时间（`2024-04-10 14:00 UTC`），与每段叙事的 `time` 属性同形；操作里写了 `observed_at` 的回复无法通过校验，抛出 `LLMOutputError`。
+`observed_at` 只由 EverAlgo 写入。模型在每条存量条目的 JSON 里看到它，格式为 `tz` 时区下精确到分钟的时间（默认 `2024-04-10 14:00 UTC`），与每段叙事的 `time` 属性同形；操作里写了 `observed_at` 的回复无法通过校验，抛出 `LLMOutputError`。
 
 **规则**
 
@@ -148,6 +159,10 @@ Profile 是「这个人现在是什么样」的画像。EverOS 可能不按观�
 **两遍处理**
 
 规则按批判定，以本批最新时间为准。跨越 `old_profile.timestamp` 的一批因此会被切分：早于它的 Episode 先跑历史遍（只能补缺），晚于它的 Episode 再跑正常遍。两遍发送同一份 system 消息；模型按它看到的时间逐条应用规则，切分只是为了让每一遍只有一个观察时间。实时摄入永远没有历史半批，不多付 LLM 调用；只有回填和乱序投递才会，且仅当同一批里两种都有时。
+
+## 压缩与重组
+
+COMPACT（总数超过 60 条）和 REGROUP（同一标签下超过 8 条的分组）像 UPDATE 一样带编号展示条目，回复是针对这些条目的一组操作：`merge`（把几个编号合成一条，放在第一个的位置）、`split`（把一条拆成几条）、`update`、`delete`，以及仅 COMPACT 有的 `move`（把一条特质移入 `explicit_info`）。模型从不整份重写 profile，所以没有被任何操作点名的条目原样保留，id、来源等宿主键也一并保留；时间规则见 [时间感知合并](#时间感知合并)。合并保留第一个被点名条目的宿主键；拆分时第一块保留原条目的宿主键，其余各块不带；移动后的条目不带宿主键，由宿主按新桶分配 id。每个编号只能被点名一次：重复点名、编号越界或条目形状属于另一个桶的操作单独被拒并记一条警告，其余操作照常生效。处理后仍超上限的 profile 会记日志并保留，同一次调用里两个阶段都不会重跑。
 
 ## 提取行为
 
@@ -160,9 +175,12 @@ Profile 是「这个人现在是什么样」的画像。EverOS 可能不按观�
 - 每条条目携带整数 `observed_at`，定义如上。
 - 由更晚 Episode 确立的条目不会被更早的 Episode 改写或删除。
 - 只提取目标用户的事实和特征，不混入其他参与人的 Profile。
+- 不新增 `implicit_traits` 条目，除非构造提取器时传入 `new_traits=True`：INIT 不保留回复里的任何特质，UPDATE 中往 `implicit_traits` 的新增会被拒并记一条警告，已存的特质仍可被更新、删除，或由 COMPACT 移入 `explicit_info`。这个人自己说出的价值观、原则、优先级、长期处境、爱好和习惯属于陈述而非推断，记为 `explicit_info` 条目。
 - 单个动作（或被改述成能力、技能、职责、兴趣、态度的单个动作）、一时的状态或此刻手头的工作、换谁坐在这个位子上都成立的规则、为某一个项目做过一次的决定、单个问题、助手或其他参与者说的话、关于 owner 以外任何人的事实（即使是 owner 自己说的，即使放在关于这段关系的条目里；关系只有作为 owner 自己生活里的长期组成部分才进，如伴侣、同住的人，且不带关于对方的任何东西，只剩「有某人」的空壳不成为条目）、单次的格式或操作要求，都不成为条目；归属、持久性或依据不确定的条目留在外面。
+- 同样不成为条目的还有：玩笑和假设、随口一次的自我评价或只坚持了几天的尝试、刚开始、刚恢复或只是打算的习惯、本人没有认可的或别人对他的评价、本人要求不记录的事（见 [不记录清单](#不记录清单)）、证件号和卡号以及单次的体检读数（见 [证件号与账号](#证件号与账号)）、给团队或文档定的工作规范、家人和同事的安排，以及助手或 agent 替他做的事。
+- 本人宣布的变化（明天离职、下个月搬家）在叙事说明它已经发生之前，描述现状的条目保持不变；在那之前它最多是一项计划。
 - `explicit_info` 条目是叙事明确归到 owner 身上的事实。`implicit_traits` 条目是没有哪一段叙事直接写出、但从多段叙事里看出的稳定模式，其 `basis` 点名具体信号——叙事记录的 owner 的选择或要求，而不是 owner 执行的操作。
-- INIT、UPDATE、合并和压缩语义与现有 `aextract` 一致。
+- INIT、UPDATE 的合并语义与现有 `aextract` 一致；COMPACT 和 REGROUP 以操作作答，不像 `aextract` 那样整份重写（见 [压缩与重组](#压缩与重组)）。
 - 校验或提取失败时不返回部分 Profile。
 
 INIT 与 UPDATE 的 system 消息在 `<never_in_the_profile>` 之后带一个 `<examples>` 块，用完整示例示范上面这些界线落在哪里：INIT 两个、UPDATE 一个，各按本阶段的回复形状，人物均为虚构。COMPACT 与 REGROUP 不带示例。
@@ -187,13 +205,32 @@ INIT 与 UPDATE 的 system 消息在 `<never_in_the_profile>` 之后带一个 `<
 Episode 路径无法访问原始对话，因此它的 evidence 规则与 `MemCell` 路径不同：
 
 - `explicit_info[].evidence` 必须是可在输入 Episode 叙事中核对的摘录或忠实转述。
-- evidence 不需要 Episode 编号或人为生成的标识。每条叙事以 `<narrative time="YYYY-MM-DD HH:MM UTC">…</narrative>` 的形式展示给模型，观察时间在属性里；模型可以引用该日期，但不得杜撰其他日期。叙事正文不做 XML 转义：只有 prompt 自身元素的闭合标签字面串（`</narrative>`、`</episode_narratives>`、`</item>`、`</explicit_info>`、`</implicit_traits>`、`</stored_profile>`、`</group>`，大小写不敏感）会把其中的 `<` 换成全角 `＜`（U+FF1C），叙事与已存条目同样处理，因此不会提前闭合元素。
+- evidence 不需要 Episode 编号或人为生成的标识。每条叙事以 `<narrative time="YYYY-MM-DD HH:MM UTC">…</narrative>` 的形式展示给模型，属性里是按 `tz` 显示的观察时间；模型可以引用该日期，但不得杜撰其他日期。叙事正文不做 XML 转义：只有 prompt 自身元素的闭合标签字面串（`</narrative>`、`</episode_narratives>`、`</item>`、`</explicit_info>`、`</implicit_traits>`、`</stored_profile>`、`</group>`、`</matter>`、`</do_not_record>`、`</entry>`、`</pending_patterns>`，大小写不敏感）会把其中的 `<` 换成全角 `＜`（U+FF1C），叙事与已存条目同样处理，因此不会提前闭合元素。
 - 除非输入 Episode 本身包含用户原话，否则 evidence 不得把叙事改写成用户直接引语。
 - 模型不得伪造用户措辞、日期或说话人归属。
 - `implicit_traits[].basis` 点名支撑该特质的信号——哪几段叙事里的哪些选择或要求——不得伪造用户引语；复述要求本身（「几个信号」）不算依据。
 - `evidence` 与 `basis` 都是单个 JSON 字符串，不是数组；允许忠实的叙事转述，但必须保留来源含义与归属。
+- 模型写的每条条目还带一个从本批某段叙事照抄的 `quote`，由程序核对（见 [条目检查](#条目检查)）；`quote` 只用于检查，不会进入存储的条目。
 
 EverOS 必须把这些证据视为 Episode 派生证据，而不是原始对话证据。
+
+## 条目检查
+
+两项检查在代码里针对模型的那一次回复执行，不额外调用模型；`ProfileExtractor(item_checks=...)` 同时开关这两项，默认开启。关闭时每条条目按回复原样写入、不放进待定清单，但 `confirm` 仍当作新增处理、检查字段仍会去掉；两种情况下提示词相同。
+
+**原话。** 回复写入的每条条目——INIT 的每条、UPDATE 的每次新增或 `confirm`、以及每次改了 description 的更新——都带 `quote`：从本批某段叙事照抄的文字。程序在本批叙事里查找它，比较时统一为 NFKC 形式、忽略大小写，并去掉标点和空白；被省略号隔开的几段分别查找，连续覆盖原话九成的片段也算找到。短于 6 个汉字单位（三个字母算一个）的原话不算。没有原话或原话找不到的条目被丢弃；被丢弃的更新让存量条目保持原样。
+
+**待定模式。** 声称这个人有某种稳定模式的条目——所有 `implicit_traits` 条目、习惯、爱好或情绪类分类下的条目，以及模型标了 `"pattern": true` 的条目（习惯、喜好、爱好、做事方式；身份、家人、工作、技能、健康、经历、目标不算）——只有原话能看出经常性时才直接写入：中文原话按中文词表判断（每周、一直、通常、以后……），英文原话按英文词表判断（every week、usually、three times a week、from now on……），英文词表查不到时再看模型从原话里抄进 `regular` 的词；其他语言的原话只看 `regular`，且这些词必须出现在原话里。其余模式条目放进 profile 的 `pending` 额外字段，每条记录模型可见的字段，外加 `bucket` 和 `observed_at`（本批最新时间）。之后每次 UPDATE 都以 `<pending_patterns>` 展示这些条目，各带 `first_seen` 日期；某一批再次出现同一模式时，模型回一个指向该条目的 `confirm` 操作（`{"action": "confirm", "type", "pending": <编号>, "data": <条目>}`），条目随即写入并移出清单。用 `"pending"` 指向某条目的新增、或几乎逐字重复某条目的新增也算，除非其依据里只写了本批以外的日期。超过 120 天的条目在给模型看之前删除，清单最多保留最新的 30 条。
+
+返回的 `pending` 是清单当前的全貌：空列表表示所有条目都已确认或删除，宿主若保留旧值，已经写入的条目会被再确认一次。检查字段 `pattern`、`quote`、`regular`、`pending` 不会进入存储的条目。
+
+## 不记录清单
+
+INIT 的回复有一个必填字段 `do_not_record`，UPDATE 有一种 `forget` 操作（`{"action": "forget", "topic", "evidence"}`），用来记下这个人要求不要记录的事。这些事作为 profile 的 `do_not_record` 额外字段保存，格式为 `[{"topic", "evidence", "observed_at"}]`，按时间先后排列；之后每次 UPDATE 都以 `<do_not_record>` 里的 `<matter>` 元素展示它们的 `topic`。规则要求：涉及清单上任何一件事的条目，无论换什么说法都不得进入 profile，已存的这类条目要删除。清单只增不减：程序没有把一件事移出清单的操作。
+
+## 证件号与账号
+
+description 里带证件号或账号的条目——12 位及以上数字，半角或全角，数字之间可以有空格或连字符，末尾可带 X——在两条路径的每个阶段都被丢弃，待定条目也一样。这类号码出现在 `evidence` 或 `basis` 里时被替换为 `***`，条目保留。带国家码的手机号、带区号的座机号或连写的年份也可能匹配这个规则，会被同样处理。
 
 ## 异常
 
@@ -211,7 +248,7 @@ EverOS 必须把这些证据视为 Episode 派生证据，而不是原始对话�
 - `old_profile.owner_id` 与 `owner_id` 不一致；
 - `output_language` 不受支持。
 
-LLM 的回复不是该阶段的合法输出时（不是可解析的 JSON；不符合 INIT、UPDATE、COMPACT、REGROUP 的结构；或条目形状与所属桶不符，即 UPDATE 操作的 `data` 与其 `type` 不一致、REGROUP 条目不是该组所属桶的形状），接口抛出 `LLMOutputError`（来自 `everalgo.llm`）。异常信息只指出每处校验失败的位置，不包含回复内容。
+LLM 的回复不是该阶段的合法输出时（不是可解析的 JSON，或不符合 INIT、UPDATE、COMPACT、REGROUP 的结构，包括缺少 `do_not_record` 的 INIT 回复），接口抛出 `LLMOutputError`（来自 `everalgo.llm`）。异常信息只指出每处校验失败的位置，不包含回复内容。条目形状属于另一个桶的操作（UPDATE 中 `data` 与 `type` 不一致的新增或更新、作用于另一个桶的 COMPACT 或 REGROUP 操作）不算错误：它单独被丢弃并记一条警告，回复的其余部分照常生效。
 
 注入的 LLM 客户端抛出的异常原样透传。
 
@@ -226,9 +263,10 @@ LLM 的回复不是该阶段的合法输出时（不是可解析的 JSON；不�
 3. 把每条映射为 `everalgo.types.Episode`，带上叙事和观察 `timestamp`。顺序无关。
 4. 从参与人元数据中解析权威的 `owner_id`，并在有姓名时解析 `owner_name`。
 5. 有准确姓名时传入 `owner_name`，否则依赖 `owner_id`；EverAlgo 会过滤不包含已确定值的叙事。
-6. 如果目标用户已有 Profile，加载后作为 `old_profile` 传入，包含条目及其 `observed_at`。
+6. 如果目标用户已有 Profile，加载后作为 `old_profile` 传入，包含条目、`observed_at` 以及 `do_not_record`、`pending` 两个额外字段。
 7. 组装并传入当前完整的 `explicit_info` 分类快照；当前没有可用分类时传入 `None`。
-8. 持久化返回的 Profile——包括 `timestamp` 和每条条目的 `observed_at`，下一次调用要读它们——并且只在持久化成功后推进水位线；EverAlgo 保持无状态。
+8. 持久化返回的 Profile——包括 `timestamp`、每条条目的 `observed_at` 和两个额外字段，下一次调用要读它们——并且只在持久化成功后推进水位线；EverAlgo 保持无状态。用返回的额外字段整体替换已存的值，空列表也一样。
+9. 不在任何展示给终端用户的内容里出现 `do_not_record` 和 `pending`，并在清空、导出或删除 profile 时一并处理它们：`pending` 里是从对话中读出、尚未写进 profile 的内容。
 
 现有 EverOS Episode 记录已经携带 Episode ID、叙事文本、观察时间戳和 `owner_id`，但不携带 `owner_name`。上游集成应在参与人元数据有姓名时解析并传入；无法获得姓名时依赖 `owner_id` 回退。
 
@@ -253,6 +291,7 @@ profile = await ProfileExtractor(llm=llm).aextract_from_episodes(
     categories=available_profile_categories,
     output_language=OutputLanguage.CHINESE,
 )
+await profile_repository.save(owner_id="user-123", profile=profile.model_dump())  # do_not_record 和 pending 随之保存
 ```
 
 如果希望由模型自行决定输出语言，可以省略 `output_language` 或显式传入 `None`：
@@ -286,6 +325,8 @@ EverOS 集成测试必须覆盖：
 - 构造批次前，已根据 Episode ID 完成去重。
 - 只传入已存 profile 尚未消费的 Episode，且水位线只在返回的 Profile 持久化后推进。
 - 持久化的 Profile 能把 `timestamp` 和每条条目的 `observed_at` 原样带入下一次调用的 `old_profile`。
+- 持久化的 Profile 能把 `do_not_record` 和 `pending` 两个额外字段带入下一次调用的 `old_profile`；返回的空 `pending` 会替换已存清单，两个额外字段都不展示给终端用户。
+- 删除或导出 profile 时，一并删除或导出它的 `do_not_record` 和 `pending`。
 - 观察时间早于已存状态的 Episode 可以新增事实，但不改动由更晚 Episode 确立的条目 description，且 `Profile.timestamp` 不倒退。
 - 同一个 generic Episode fanout 给两个 owner 时，分别调用接口并得到归属不同的 Profile。
 - evidence 能够追溯到 Episode 叙事，并且不包含伪造的用户引语。
@@ -293,4 +334,4 @@ EverOS 集成测试必须覆盖：
 
 ## 为什么选择这个接口
 
-接收 `Sequence[Episode]` 而不是裸字符串，让每条叙事的观察时间与叙事绑定，合并才能区分「更老的知识」与「更新的状态」；core 里已有 `Episode` 类型，不需要新造。`owner_id` 始终决定 Profile 归属，可选的 `owner_name` 用于在可能不包含 ID 的模型生成叙事中定位目标人物。提取前只确定一个目标引用并逐条筛选，既能阻止无关叙事影响 Profile，也不会因为一条无关 Episode 丢弃仍可使用的整批输入；全部未命中时继续拒绝抽取，避免在没有 owner 证据时生成 Profile。时间规则放在代码里而不只放在提示词里，因为它是确定性的：模型即使忽视指令也无法把 profile 倒回过去。「哪些 Episode 是新的」由拥有存储和水位线的 EverOS 决定，「这些 Episode 可以改什么」由拥有合并逻辑的 EverAlgo 决定。单独接收当前分类快照，可以让分类策略仍由调用方管理，同时让无状态的提取与维护阶段应用同一套语义规则。`custom_instructions` 采用追加而非替换：替换会连同规定输出结构、规定哪些内容能进入 profile 的规则一起丢掉，而追加的块让所有内置规则——以及共享的缓存前缀——保持不变。
+接收 `Sequence[Episode]` 而不是裸字符串，让每条叙事的观察时间与叙事绑定，合并才能区分「更老的知识」与「更新的状态」；core 里已有 `Episode` 类型，不需要新造。`owner_id` 始终决定 Profile 归属，可选的 `owner_name` 用于在可能不包含 ID 的模型生成叙事中定位目标人物。提取前只确定一个目标引用并逐条筛选，既能阻止无关叙事影响 Profile，也不会因为一条无关 Episode 丢弃仍可使用的整批输入；全部未命中时继续拒绝抽取，避免在没有 owner 证据时生成 Profile。时间规则放在代码里而不只放在提示词里，因为它是确定性的：模型即使忽视指令也无法把 profile 倒回过去。「哪些 Episode 是新的」由拥有存储和水位线的 EverOS 决定，「这些 Episode 可以改什么」由拥有合并逻辑的 EverAlgo 决定。单独接收当前分类快照，可以让分类策略仍由调用方管理，同时让无状态的提取与维护阶段应用同一套语义规则。`custom_instructions` 采用追加而非替换：替换会连同规定输出结构、规定哪些内容能进入 profile 的规则一起丢掉，而追加的块让所有内置规则——以及共享的缓存前缀——保持不变。原话与待定检查、证件号过滤和不新增特质都放在代码里，理由与时间规则相同：长跑评测中代价最大的错误是让人对这个人产生错误认识的条目——推断出的特质、没有依据的条目、被当成习惯的一次性行为——模型无法跳过的检查能去掉它们，且不需要第二次模型调用。COMPACT 和 REGROUP 以操作作答，是因为整份重写后的条目无法追溯到它来自哪条存量条目：宿主键和时间都丢了。

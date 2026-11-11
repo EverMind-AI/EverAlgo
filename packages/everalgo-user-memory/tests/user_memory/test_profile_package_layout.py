@@ -1,7 +1,9 @@
 """Checks that the ``everalgo.user_memory.profile`` package keeps the layout its docstring describes.
 
-- Its modules import one another in one direction only: ``_extractor`` over ``_stages``, ``_replies``, ``_render`` and
-  ``_merge``; ``_stages`` over ``_replies``; ``_render`` and ``_merge`` over ``_items`` alone, never each other.
+- Its modules import one another in one direction only: ``_extractor`` over ``_stages``, ``_replies``, ``_render``,
+  ``_pending``, ``_compact_ops`` and ``_merge``; ``_stages`` over ``_replies``; ``_compact_ops`` and ``_pending`` over
+  ``_merge`` and ``_items``;
+  ``_render`` and ``_merge`` over ``_items`` alone, never each other.
 - Every logger in the package is the package's own, the name hosts collect the log contract under.
 
 Imports are read from the source with ``ast``, so a check needs nothing importable beyond the package's location.
@@ -20,8 +22,12 @@ _PACKAGE_DIR = Path(profile_package.__file__).parent
 #: The sibling modules each module may import; ``__init__`` re-exports from ``_extractor`` only.
 _ALLOWED_SIBLINGS: dict[str, frozenset[str]] = {
     "__init__": frozenset({"_extractor"}),
-    "_extractor": frozenset({"_stages", "_replies", "_render", "_merge", "_items"}),
+    "_extractor": frozenset({"_stages", "_replies", "_render", "_pending", "_compact_ops", "_merge", "_items"}),
     "_stages": frozenset({"_replies"}),
+    # COMPACT and REGROUP operations, applied with _merge's item models, scrub and dedupe.
+    "_compact_ops": frozenset({"_merge", "_items"}),
+    # The Episode item checks (quote, pending patterns), held entries passing _merge's scrub.
+    "_pending": frozenset({"_merge", "_items"}),
     "_replies": frozenset(),
     "_render": frozenset({"_items"}),
     "_merge": frozenset({"_items"}),
@@ -36,7 +42,10 @@ def _tree(module: str) -> ast.Module:
 def _sibling_imports(module: str) -> set[str]:
     siblings = set()
     for node in ast.walk(_tree(module)):
-        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == _PACKAGE:
+            # ``from everalgo.user_memory.profile import _merge`` imports the sibling module itself.
+            names = [f"{_PACKAGE}.{alias.name}" for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             names = [node.module]
         elif isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]

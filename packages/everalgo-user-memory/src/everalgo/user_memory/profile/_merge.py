@@ -1,12 +1,14 @@
 """Merging an UPDATE reply's ops into the stored profile, deduplication, and the profile built from its buckets.
 
 Reply items become stored items here and take their ``observed_at``; a host's own keys on a stored item ride
-through every merge untouched.
+through every merge untouched. Every item a reply writes passes :func:`_scrub` on its way in, and an add into
+``implicit_traits`` is refused unless the caller allows new traits.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeGuard
@@ -40,10 +42,57 @@ _SENTENCE_STOPS = ".!?\u3002\uff01\uff1f"  # ASCII and fullwidth
 _HISTORY_OPENERS = ("(", "\uff08")  # ASCII and fullwidth
 
 
+# An identification or account number: twelve or more digits, a single space or hyphen allowed between them
+# (4111-1111-1111-1111), fullwidth digits too, an ID card's trailing X included; an eleven-digit mobile number does not
+# match. The prompts already tell the model to leave such numbers out, and the program enforces it, since one that
+# slips into a stored item stays there: see ``_scrub``.
+_ACCOUNT_NUMBER = re.compile(
+    r"(?<![0-9\uff10-\uff19])[0-9\uff10-\uff19](?:[ \-]?[0-9\uff10-\uff19]){11,}[Xx\uff38\uff58]?(?![0-9\uff10-\uff19])"
+)
+# The grounding fields, where a number is masked and the item kept; in a description it drops the item.
+_GROUNDING_KEYS = ("evidence", "basis")
+_NUMBER_MASK = "***"
+# Fields an Episode reply item carries for the program's checks only (``_pending``): the model's pattern flag, its
+# quote, the regular words in it and a pointer to a pending entry. They never reach a stored item.
+_REPLY_ONLY_FIELDS = ("pattern", "pending", "quote", "regular")
+
+
+def _scrub(fields: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Keep identification and account numbers (``_ACCOUNT_NUMBER``) out of an item the model wrote.
+
+    Args:
+        fields: The item's fields as the reply holds them.
+
+    Returns:
+        A copy of ``fields`` without the reply-only fields (``_REPLY_ONLY_FIELDS``) and with every such number in its
+        evidence or basis replaced by ``***``, or None, with a warning, when its description carries one: the item is
+        then dropped, since its fact is the number.
+    """
+    description = fields.get("description")
+    if isinstance(description, str) and _ACCOUNT_NUMBER.search(description):
+        logger.warning("profile item dropped: reason=description carries an account number")
+        return None
+    out = {key: value for key, value in fields.items() if key not in _REPLY_ONLY_FIELDS}
+    for key in _GROUNDING_KEYS:
+        value = out.get(key)
+        if isinstance(value, str):
+            out[key] = _mask_account_numbers(value)
+    return out
+
+
+def _mask_account_numbers(text: str) -> str:
+    """``text`` with every identification or account number (``_ACCOUNT_NUMBER``) replaced by ``***``."""
+    return _ACCOUNT_NUMBER.sub(_NUMBER_MASK, text)
+
+
 def _stored_items(bucket: str, replies: Iterable[Mapping[str, Any]], observed_at: int) -> list[_Item]:
-    """The bucket's stored items built from reply items, each dated ``observed_at`` whatever the reply held."""
+    """The bucket's stored items built from reply items, each dated ``observed_at`` whatever the reply held.
+
+    Each reply item passes :func:`_scrub` first; one whose description carries an account number is left out.
+    """
     model = _ITEM_MODELS[bucket]
-    return [model.model_validate({**reply, _OBSERVED_AT: observed_at}) for reply in replies]
+    scrubbed = (_scrub(reply) for reply in replies)
+    return [model.model_validate({**reply, _OBSERVED_AT: observed_at}) for reply in scrubbed if reply is not None]
 
 
 def _stale_since(item: _Item, observed_at: int) -> int | None:
@@ -118,18 +167,20 @@ class _CollectedOps:
     history_appended: int = 0
 
 
-def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: int, pass_name: str) -> Profile:
+def _apply_ops(
+    old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: int, pass_name: str, new_traits: bool = False
+) -> Profile:
     """Apply an UPDATE reply's ops to ``old_profile`` and return a new Profile, leaving ``old_profile`` untouched.
 
     Every ``index`` resolves against ``old_profile`` as rendered for the model; a refused op is logged and dropped.
     ``timestamp``, the source batch's observation date, dates added items and rewritten descriptions, refuses as
     stale a delete or a rewrite of an item established after it — earlier history added to its description is not
     one — and never moves the profile's timestamp back.
-    ``pass_name`` only labels the log line.
+    ``pass_name`` only labels the log line. Without ``new_traits`` an add into ``implicit_traits`` is refused.
     """
     explicit_items, implicit_items = _dated_buckets(old_profile)
     buckets = {"explicit_info": explicit_items, "implicit_traits": implicit_items}
-    collected = _collect_ops(ops, buckets, observed_at=timestamp)
+    collected = _collect_ops(ops, buckets, observed_at=timestamp, new_traits=new_traits)
     merged = _profile_from_buckets(
         owner_id=old_profile.owner_id,
         timestamp=max(old_profile.timestamp, timestamp),
@@ -145,7 +196,7 @@ def _apply_ops(old_profile: Profile, ops: list[dict[str, Any]], *, timestamp: in
 
 
 def _collect_ops(
-    ops: list[dict[str, Any]], buckets: Mapping[str, Sequence[_Item]], *, observed_at: int
+    ops: list[dict[str, Any]], buckets: Mapping[str, Sequence[_Item]], *, observed_at: int, new_traits: bool
 ) -> _CollectedOps:
     """Group ops by bucket, validating each against ``buckets``, whose keys are the only bucket names accepted."""
     collected = _CollectedOps(
@@ -155,7 +206,7 @@ def _collect_ops(
     for op in ops:
         if op.get("action") == "none":  # documented no-op: the conversation carried no user info
             continue
-        if not _collect_op(op, collected.slots, buckets, observed_at=observed_at):
+        if not _collect_op(op, collected.slots, buckets, observed_at=observed_at, new_traits=new_traits):
             collected.rejected += 1
 
     for slot in collected.slots.values():
@@ -167,13 +218,25 @@ def _collect_ops(
 
 
 def _collect_op(
-    op: dict[str, Any], slots: dict[str, _BucketOps], buckets: Mapping[str, Sequence[_Item]], *, observed_at: int
+    op: dict[str, Any],
+    slots: dict[str, _BucketOps],
+    buckets: Mapping[str, Sequence[_Item]],
+    *,
+    observed_at: int,
+    new_traits: bool,
 ) -> bool:
-    """Queue one op in its bucket's slot; False, with a warning, when it is refused."""
+    """Queue one op in its bucket's slot; False, with a warning, when it is refused.
+
+    Without ``new_traits`` an add into ``implicit_traits`` is refused; an update or delete of a stored trait is not. An op without a ``type`` (the Episode path's ``forget``, taken out before the merge) is refused as an
+    unknown type.
+    """
     action = op.get("action")
     op_type = op.get("type")
     if op_type not in slots:
         _log_rejected_op(op, "unknown type")
+        return False
+    if action == "add" and op_type == "implicit_traits" and not new_traits:
+        _log_rejected_op(op, "new traits disabled")
         return False
     if action == "add":
         return _collect_add(op, slots[op_type], items=buckets[op_type], label_field=_LABEL_FIELDS[op_type])
@@ -250,7 +313,8 @@ def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: Sequence[_I
 
     Against an item established after ``observed_at``, a delete or a description rewrite is stale evidence; an
     update that only adds grounding, or keeps the description and adds earlier history in a parenthesis after it,
-    still lands.
+    still lands. An update's data passes :func:`_scrub`: an account number in its grounding is masked, and one in
+    its description refuses the update, leaving the stored item as it was.
     """
     idx = op.get("index")
     if not _is_int(idx) or not 0 <= idx < len(items):
@@ -266,6 +330,10 @@ def _collect_indexed(op: dict[str, Any], slot: _BucketOps, *, items: Sequence[_I
     data = op.get("data")
     if not _is_object(data):
         _log_rejected_op(op, "data is not an object")
+        return False
+    data = _scrub(data)
+    if data is None:
+        _log_rejected_op(op, "description carries an account number")
         return False
     if stale_since is not None and _description_change(items[idx], data, observed_at=observed_at) == "rewrite":
         _log_stale_op(op, item_observed_at=stale_since, batch_observed_at=observed_at)
@@ -309,7 +377,9 @@ def _apply_bucket_ops(bucket: str, items: Sequence[_Item], bucket_ops: _BucketOp
     """Apply one bucket's ops: patch by original index, drop deletes in one pass, then append the new items.
 
     A rewritten description and every added item take ``observed_at``; a patch adding only grounding or earlier
-    history keeps the item's date, since the source that set the current value is still the one that dated it.
+    history keeps the item's date, since the source that set the current value is still the one that dated it. The
+    added items are built by :func:`_stored_items`, so an add whose description carries an account number is dropped
+    there.
     """
     patched = list(items)
     for idx, patch in bucket_ops.updates.items():

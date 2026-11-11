@@ -59,7 +59,8 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
 
     Verifies:
     1. Cluster MemCells land in the profile ``{conversation_text}`` placeholder.
-    2. ``explicit_info`` and ``implicit_traits`` come back as typed items on Profile.
+    2. ``explicit_info`` comes back as typed items on Profile; the reply's ``implicit_traits`` are dropped, since a
+       first profile keeps no traits.
     3. ``assert_profile_shape`` passes.
     """
     call_count = 0
@@ -114,7 +115,8 @@ async def test_boundary_to_profile_pipeline_e2e() -> None:
     assert pf.owner_id == "u_alice"
     assert "Python" in pf.summary
     assert pf.explicit_info[0].category == "Technical Skills"
-    assert pf.implicit_traits[0].trait == "[Pragmatic]"
+    # A first profile keeps no traits (``ProfileExtractor(new_traits=False)``, the default): the reply's one trait is dropped.
+    assert pf.implicit_traits == []
 
     # Cluster rendering reached the profile prompt
     prompt_text = captured_profile_prompt["text"]

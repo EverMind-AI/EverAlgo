@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
 from everalgo.user_memory._language import OutputLanguage, resolve_output_language
+from everalgo.user_memory.profile._compact_ops import apply_compact_ops
 from everalgo.user_memory.profile._items import (
     _ITEM_WIDTH_BACKSTOP,
     _LABEL_FIELDS,
     _PROFILE_MAX_ITEMS,
     _PROFILE_MAX_PER_CATEGORY,
+    _dated_buckets,
     _in_group,
     _Item,
     _item_label,
@@ -23,16 +26,27 @@ from everalgo.user_memory.profile._merge import (
     _apply_ops,
     _dedupe,
     _identity_key,
+    _mask_account_numbers,
     _overcrowded_labels,
     _profile_from_buckets,
     _stored_items,
 )
+from everalgo.user_memory.profile._pending import (
+    _expire_pending,
+    check_init_items,
+    check_update_ops,
+    unchecked_init_items,
+    unchecked_update_ops,
+)
 from everalgo.user_memory.profile._render import (
     _normalize_available_categories,
     _render_available_categories,
+    _render_bucket,
     _render_conversation,
+    _render_do_not_record,
     _render_episodes,
     _render_group,
+    _render_pending,
     _render_profile_for_compact,
     _render_profile_for_episode_update,
     _render_profile_for_update,
@@ -48,6 +62,8 @@ from everalgo.user_memory.profile._replies import (
     _call_llm_for_profile_init,
     _call_llm_for_profile_regroup,
     _call_llm_for_profile_update,
+    _CompactOpsOutput,
+    _RegroupOpsOutput,
 )
 from everalgo.user_memory.profile._stages import (
     _EPISODE_COMPACT,
@@ -64,7 +80,7 @@ from everalgo.user_memory.prompts.en.profile_from_episode_texts import REGROUP_R
 from everalgo.utils import InvalidInputError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from datetime import tzinfo
 
     from everalgo.llm.protocols import LLMClient
@@ -72,6 +88,62 @@ if TYPE_CHECKING:
 
 # The package's name rather than this module's: hosts collect the log contract under it.
 logger = logging.getLogger("everalgo.user_memory.profile")
+
+
+@dataclass(frozen=True)
+class _EpisodeLists:
+    """The two lists an Episode call carries beside the profile, changed in place by its stages.
+
+    ``aextract_from_episodes`` copies them from the stored profile's extra fields (empty for INIT), hands them to
+    every stage it runs, and writes them back onto the returned Profile. The MemCell path has neither.
+
+    Attributes:
+        do_not_record: The matters this person asked not to be recorded, each ``{"topic", "evidence",
+            "observed_at"}``; INIT and every UPDATE pass append the ones their reply names.
+        pending: The pattern entries waiting for a later batch to repeat them (``_pending``).
+    """
+
+    do_not_record: list[dict[str, Any]] = field(default_factory=list)
+    pending: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _remember_matters(
+    do_not_record: list[dict[str, Any]], named: Iterable[Mapping[str, Any]], *, observed_at: int, source: str
+) -> None:
+    """Add the matters a reply names to the do-not-record list in place.
+
+    Each topic enters once: a topic already listed, or named earlier in the same reply, is skipped. Account numbers in
+    the topic and the evidence are masked as in an item's grounding (``_merge._mask_account_numbers``), and the
+    masked topic is what is compared and kept.
+
+    Args:
+        do_not_record: The list of the call in progress.
+        named: The reply's matters, each with ``topic`` and ``evidence``: INIT's ``do_not_record`` entries or
+            UPDATE's ``forget`` operations.
+        observed_at: The date every added matter takes, the newest narrative of the batch.
+        source: ``init`` or ``update``, naming the stage in the log line.
+    """
+    named = list(named)
+    if not named:
+        return
+    known = {_mask_account_numbers(entry["topic"]) for entry in do_not_record}
+    added = 0
+    for matter in named:
+        topic = _mask_account_numbers(matter["topic"])
+        if topic in known:
+            continue
+        known.add(topic)
+        do_not_record.append(
+            {"topic": topic, "evidence": _mask_account_numbers(matter["evidence"]), "observed_at": observed_at}
+        )
+        added += 1
+    logger.info(
+        "profile do-not-record updated: source=%s named=%d added=%d matters=%d",
+        source,
+        len(named),
+        added,
+        len(do_not_record),
+    )
 
 
 class ProfileExtractor:
@@ -83,12 +155,27 @@ class ProfileExtractor:
     itself: an Episode observed before the stored profile's newest date can add to the profile but never
     rewrites or deletes what a later Episode established.
 
+    Unless ``new_traits`` is set, no new ``implicit_traits`` item is created on either path: INIT keeps none of the
+    traits its reply holds and UPDATE refuses an add into ``implicit_traits``, while a stored trait can still be
+    updated or deleted. On both paths an item whose description carries an identification or account number is
+    dropped and such a number in its evidence or basis is masked (``_merge._scrub``).
+
     Args:
         llm: The client every stage calls.
+        item_checks: Run the Episode path's item checks (``_pending``): an item whose quote is not found in the
+            batch is dropped and an unrepeated pattern item waits on the pending list. Off, every item is written as
+            the reply has it and nothing is held, while ``confirm`` is still read as an add and the reply-only fields
+            are still dropped; the prompts are the same either way.
+        new_traits: Let INIT keep the reply's traits and UPDATE add to ``implicit_traits``. Off by default: a trait
+            is the model's inference, and in long-run evaluation inferred traits accounted for about half of the
+            severe errors (items that give a wrong picture of the person); what a person says about their own values,
+            situation and habits is stated directly, so the prompts file it under ``explicit_info`` instead.
     """
 
-    def __init__(self, *, llm: LLMClient) -> None:
+    def __init__(self, *, llm: LLMClient, item_checks: bool = True, new_traits: bool = False) -> None:
         self._llm = llm
+        self._item_checks = item_checks
+        self._new_traits = new_traits
 
     async def aextract(
         self,
@@ -200,13 +287,24 @@ class ProfileExtractor:
         normally. Callers pass whatever Episodes are new to them, in any order. Exceptions raised by the LLM client
         propagate unchanged.
 
+        The profile keeps a do-not-record list: the matters this person asked not to be recorded, as INIT's
+        ``do_not_record`` field and UPDATE's ``forget`` operations name them. Every UPDATE shows the list to the model,
+        whose rules keep any item about a listed matter out of the profile.
+
+        Every item the model writes carries a quote the program finds in the batch's narratives, or it is dropped; an
+        item claiming a standing pattern (a habit, preference, way of working, trait) is written at once only when its
+        quote shows regularity, and otherwise waits on the profile's pending list until a later batch shows it again
+        (``_pending``). Neither check calls the model again.
+
         Args:
             episodes: Non-empty Episodes with non-blank narratives. Items that do not contain the resolved target
                 reference are excluded; at least one must contain it.
             owner_id: Authoritative owner identifier written to ``Profile.owner_id``.
             owner_name: Display name used to select narratives about the owner; blank or missing falls back to
                 ``owner_id``.
-            old_profile: Existing profile for UPDATE; None for INIT.
+            old_profile: Existing profile for UPDATE; None for INIT. Its ``do_not_record`` extra field, when present,
+                is the do-not-record list so far, and its ``pending`` extra field the pending pattern entries; the
+                host persists both with the profile and passes them back unchanged.
             categories: Complete current category snapshot for ``explicit_info``, stripped, blanks ignored and
                 exact duplicates removed in first-seen order. None or empty lets the model coin categories. It
                 does not constrain ``implicit_traits.trait``.
@@ -221,7 +319,10 @@ class ProfileExtractor:
         Returns:
             The extracted or updated Profile. ``Profile.timestamp`` is the newest observation date seen so far and
             never moves backwards; every item carries ``observed_at``, the observation date of the narrative that
-            last established its description.
+            last established its description. When the do-not-record list is not empty it is the extra field
+            ``do_not_record``: a list of ``{"topic", "evidence", "observed_at"}``, oldest first. When the pending
+            list is not empty, or ``old_profile`` carried one, it is the extra field ``pending``: a list of held items,
+            each its item fields plus ``bucket`` and ``observed_at``, oldest first, at most 30 once an UPDATE has run.
 
         Raises:
             TypeError: If an item of ``episodes`` is not an :class:`Episode`, or ``categories`` is not a sequence
@@ -242,6 +343,13 @@ class ProfileExtractor:
         language = resolve_output_language(output_language)
 
         mode = "INIT" if old_profile is None else "UPDATE"
+        # A copy: the stages append to it, and the caller's stored profile stays as it was.
+        stored_extra = (old_profile.model_extra or {}) if old_profile else {}
+        # Copies: the stages change them in place, and the caller's stored profile stays as it was.
+        lists = _EpisodeLists(
+            do_not_record=list(stored_extra.get("do_not_record") or []),
+            pending=[dict(entry) for entry in stored_extra.get("pending") or []],
+        )
         logger.info(
             "extracting profile from Episodes: mode=%s, %d/%d matching episodes observed at ms %d..%d, "
             "existing explicit=%d implicit=%d, output_language=%s, categories=%d, custom_instructions=%d chars",
@@ -265,6 +373,7 @@ class ProfileExtractor:
                 custom_instructions=custom_instructions,
                 output_language=language,
                 tz=tz,
+                lists=lists,
             )
         else:
             result = await self._update_extract_from_episodes(
@@ -276,7 +385,18 @@ class ProfileExtractor:
                 custom_instructions=custom_instructions,
                 output_language=language,
                 tz=tz,
+                lists=lists,
             )
+        # The stages build the Profile from its two buckets alone, so the lists are put back on it here. Only the
+        # fields that were set are carried over, so an item field never set does not come back as an explicit None.
+        extra: dict[str, Any] = {}
+        if lists.do_not_record:
+            extra["do_not_record"] = lists.do_not_record
+        # Written back even when emptied, so a host that keeps the stored field does not keep confirmed entries.
+        if lists.pending or "pending" in stored_extra:
+            extra["pending"] = lists.pending
+        if extra:
+            result = type(result).model_validate({**result.model_dump(exclude_unset=True), **extra})
         logger.info(
             "profile extracted from Episodes: mode=%s -> explicit=%d implicit=%d",
             mode,
@@ -310,13 +430,13 @@ class ProfileExtractor:
 
         data = await _call_llm_for_profile_init(self._llm, messages, reply=_MEMCELL_INIT.reply)
         observed_at = memcells[-1].timestamp
+        # Without new traits the reply's traits are not kept (the MemCell prompt still asks for them).
+        traits = data["implicit_traits"] if self._new_traits else []
         return _profile_from_buckets(
             owner_id=sender_id,
             timestamp=observed_at,
             explicit_info=_dedupe(_stored_items("explicit_info", data["explicit_info"], observed_at), source="init"),
-            implicit_traits=_dedupe(
-                _stored_items("implicit_traits", data["implicit_traits"], observed_at), source="init"
-            ),
+            implicit_traits=_dedupe(_stored_items("implicit_traits", traits, observed_at), source="init"),
         )
 
     async def _init_extract_from_episodes(
@@ -329,7 +449,15 @@ class ProfileExtractor:
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
         tz: tzinfo,
+        lists: _EpisodeLists,
     ) -> Profile:
+        """Build the first profile from ``episodes``, every item dated by the newest of them.
+
+        The reply's items pass the item checks first (``_pending.check_init_items``): an item whose quote is not
+        found is dropped and an unrepeated pattern item goes onto ``lists.pending``. The reply's ``do_not_record``
+        matters join ``lists.do_not_record`` (``_remember_matters``), dated like the items; without new traits the
+        reply's ``implicit_traits`` are not kept.
+        """
         messages = _EPISODE_INIT.render(
             custom_instructions=custom_instructions,
             episode_texts=_render_episodes(episodes, tz=tz),
@@ -339,16 +467,17 @@ class ProfileExtractor:
         )
 
         data = await _call_llm_for_profile_init(self._llm, messages, reply=_EPISODE_INIT.reply)
+        data = check_init_items(data, episodes, lists.pending) if self._item_checks else unchecked_init_items(data)
         observed_at = episodes[-1].timestamp
+        _remember_matters(lists.do_not_record, data.get("do_not_record") or [], observed_at=observed_at, source="init")
+        traits = data["implicit_traits"] if self._new_traits else []
         return _profile_from_buckets(
             owner_id=owner_id,
             timestamp=observed_at,
             explicit_info=_dedupe(
                 _stored_items("explicit_info", data["explicit_info"], observed_at), source="episode-init"
             ),
-            implicit_traits=_dedupe(
-                _stored_items("implicit_traits", data["implicit_traits"], observed_at), source="episode-init"
-            ),
+            implicit_traits=_dedupe(_stored_items("implicit_traits", traits, observed_at), source="episode-init"),
         )
 
     # ------------------------------------------------------------------
@@ -376,7 +505,11 @@ class ProfileExtractor:
 
         data = await _call_llm_for_profile_update(self._llm, messages, reply=_MEMCELL_UPDATE.reply)
         merged_profile = _apply_ops(
-            old_profile, data["operations"], timestamp=memcells[-1].timestamp, pass_name="single"
+            old_profile,
+            data["operations"],
+            timestamp=memcells[-1].timestamp,
+            pass_name="single",
+            new_traits=self._new_traits,
         )
 
         return await self._maintain_updated_profile(
@@ -388,6 +521,7 @@ class ProfileExtractor:
             compact_prompts=_MEMCELL_COMPACT,
             regroup_prompts=_MEMCELL_REGROUP,
             available_categories=None,
+            tz=tz,
         )
 
     async def _update_extract_from_episodes(
@@ -401,6 +535,7 @@ class ProfileExtractor:
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
         tz: tzinfo,
+        lists: _EpisodeLists,
     ) -> Profile:
         """Run UPDATE in up to two passes: Episodes older than the stored profile first, then the rest.
 
@@ -429,6 +564,7 @@ class ProfileExtractor:
                     custom_instructions=custom_instructions,
                     output_language=output_language,
                     tz=tz,
+                    lists=lists,
                 )
         return profile
 
@@ -444,9 +580,21 @@ class ProfileExtractor:
         custom_instructions: str | None,
         output_language: OutputLanguage | str | None,
         tz: tzinfo,
+        lists: _EpisodeLists,
     ) -> Profile:
+        """Run one UPDATE pass over ``episodes``, then COMPACT and REGROUP the merged profile as its caps require.
+
+        The model sees ``lists.do_not_record`` as ``<do_not_record>`` and ``lists.pending``, expired for this pass,
+        as ``<pending_patterns>``. The reply's operations pass the item checks (``_pending.check_update_ops``), which
+        turn ``confirm`` into ``add`` and hold or release pattern items. A ``forget`` operation adds its matter to the
+        list (``_remember_matters``), dated by the pass's newest narrative; it is taken out before the other
+        operations are merged, since it names no stored item.
+        """
+        _expire_pending(lists.pending, episodes[-1].timestamp)
         messages = _EPISODE_UPDATE.render(
             custom_instructions=custom_instructions,
+            do_not_record=_render_do_not_record(lists.do_not_record),
+            pending=_render_pending(lists.pending, tz=tz),
             stored_profile=_render_profile_for_episode_update(old_profile, tz=tz),
             episode_texts=_render_episodes(episodes, tz=tz),
             target_user=target_user,
@@ -455,8 +603,20 @@ class ProfileExtractor:
         )
 
         data = await _call_llm_for_profile_update(self._llm, messages, reply=_EPISODE_UPDATE.reply)
+        stored = dict(zip(("explicit_info", "implicit_traits"), _dated_buckets(old_profile), strict=True))
+        operations = (
+            check_update_ops(data["operations"], episodes, stored, lists.pending, tz=tz)
+            if self._item_checks
+            else unchecked_update_ops(data["operations"])
+        )
+        forget = [op for op in operations if op.get("action") == "forget"]
+        _remember_matters(lists.do_not_record, forget, observed_at=episodes[-1].timestamp, source="update")
         merged_profile = _apply_ops(
-            old_profile, data["operations"], timestamp=episodes[-1].timestamp, pass_name=pass_name
+            old_profile,
+            [op for op in operations if op.get("action") != "forget"],
+            timestamp=episodes[-1].timestamp,
+            pass_name=pass_name,
+            new_traits=self._new_traits,
         )
         return await self._maintain_updated_profile(
             merged_profile,
@@ -467,6 +627,7 @@ class ProfileExtractor:
             compact_prompts=_EPISODE_COMPACT,
             regroup_prompts=_EPISODE_REGROUP,
             available_categories=available_categories,
+            tz=tz,
         )
 
     async def _maintain_updated_profile[CompactT: _AnyCompactOutput, RegroupT: _AnyRegroupOutput](
@@ -480,6 +641,7 @@ class ProfileExtractor:
         compact_prompts: _StagePrompts[CompactT],
         regroup_prompts: _StagePrompts[RegroupT],
         available_categories: str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
         """COMPACT the whole profile past the total cap, then REGROUP each group still past a per-label cap.
 
@@ -502,6 +664,7 @@ class ProfileExtractor:
                 custom_instructions=custom_instructions,
                 prompts=compact_prompts,
                 available_categories=available_categories,
+                tz=tz,
             )
         return await self._regroup_overcrowded(
             profile,
@@ -511,6 +674,7 @@ class ProfileExtractor:
             custom_instructions=custom_instructions,
             prompts=regroup_prompts,
             available_categories=available_categories,
+            tz=tz,
         )
 
     async def _regroup_overcrowded[ReplyT: _AnyRegroupOutput](
@@ -523,6 +687,7 @@ class ProfileExtractor:
         custom_instructions: str | None,
         available_categories: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
         """REGROUP, once each, every group past its per-label cap or holding an item past the width backstop."""
         result = profile
@@ -537,6 +702,7 @@ class ProfileExtractor:
                 custom_instructions=custom_instructions,
                 prompts=prompts,
                 available_categories=available_categories,
+                tz=tz,
             )
         return result
 
@@ -552,10 +718,14 @@ class ProfileExtractor:
         custom_instructions: str | None,
         available_categories: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
         """Reorganise one overcrowded group in place; every other item passes through untouched.
 
-        A reply that still breaches the cap is accepted with a warning: regroup never loops.
+        The Episode path shows the group as indexed items and its reply is operations on them
+        (:func:`apply_compact_ops`): an item no operation names keeps its host keys and ``observed_at``. The MemCell
+        path's reply is the group rewritten, every item dated by the profile; a rewrite that still breaches the cap
+        is accepted with a warning. Either way regroup never loops.
         """
         wanted = _normalize(label)
         buckets: dict[str, Sequence[_Item]] = {
@@ -583,13 +753,42 @@ class ProfileExtractor:
             count=len(group),
             max_per_category=_PROFILE_MAX_PER_CATEGORY,
             other_labels=", ".join(other_labels) if other_labels else "(none)",
-            items_text=_render_group(group),
+            # An operations reply names items by index, so the group is shown indexed; a rewrite needs no index.
+            items_text=_render_bucket(bucket, group, tz=tz)
+            if prompts.reply is _RegroupOpsOutput
+            else _render_group(group),
             target_user=display_name,
             target_user_id=sender_id,
             available_categories=available_categories or "[]",
             language_rule=prompts.language_rule(output_language),
         )
         data = await _call_llm_for_profile_regroup(self._llm, messages, reply=prompts.reply, bucket=bucket)
+        if "operations" in data:
+            # An item stored undated takes the profile's date, as the merge and the renderers date it.
+            dated_group = [
+                item if item.observed_at is not None else item.model_copy(update={"observed_at": profile.timestamp})
+                for item in group
+            ]
+            new_group = apply_compact_ops({bucket: dated_group}, data["operations"], source="regroup")[bucket]
+            buckets[bucket] = _dedupe([*rest, *new_group], source="regroup")
+            still = sum(1 for item in buckets[bucket] if _in_group(item, wanted))
+            if still > _PROFILE_MAX_PER_CATEGORY:
+                logger.warning(
+                    "profile regroup left label over cap: bucket=%s label_len=%d count=%d", bucket, len(label), still
+                )
+            logger.info(
+                "profile regroup ops applied: bucket=%s label_len=%d group_before=%d group_after=%d",
+                bucket,
+                len(label),
+                len(group),
+                len(new_group),
+            )
+            return _profile_from_buckets(
+                owner_id=profile.owner_id,
+                timestamp=profile.timestamp,
+                explicit_info=buckets["explicit_info"],
+                implicit_traits=buckets["implicit_traits"],
+            )
         returned: list[dict[str, Any]] = data["items"]
         kept = [item for item in returned if _identity_key(item["description"]) is not None]
         dropped_malformed = len(returned) - len(kept)
@@ -631,14 +830,24 @@ class ProfileExtractor:
         custom_instructions: str | None,
         available_categories: str | None = None,
         output_language: OutputLanguage | str | None = None,
+        tz: tzinfo = UTC,
     ) -> Profile:
+        """Bring the whole profile back inside its caps in one call.
+
+        The Episode path shows both buckets as indexed items, as UPDATE does, and its reply is operations on them
+        (:func:`apply_compact_ops`): an item no operation names keeps its host keys and ``observed_at``. The MemCell
+        path's reply is the profile rewritten, every item dated by the profile.
+        """
         total_items = len(profile.explicit_info) + len(profile.implicit_traits)
         messages = prompts.render(
             custom_instructions=custom_instructions,
             total_items=total_items,
             max_items=_PROFILE_MAX_ITEMS,
             max_per_category=_PROFILE_MAX_PER_CATEGORY,
-            profile_text=_render_profile_for_compact(profile),
+            # An operations reply names items by index, so the profile is shown indexed; a rewrite needs no index.
+            profile_text=_render_profile_for_episode_update(profile, tz=tz)
+            if prompts.reply is _CompactOpsOutput
+            else _render_profile_for_compact(profile),
             target_user=display_name,
             target_user_id=sender_id,
             available_categories=available_categories or "[]",
@@ -646,6 +855,25 @@ class ProfileExtractor:
         )
 
         data = await _call_llm_for_profile_compact(self._llm, messages, reply=prompts.reply)
+        if "operations" in data:
+            # The same dated buckets the profile was rendered from, so every index resolves to the item shown.
+            explicit_items, implicit_items = _dated_buckets(profile)
+            new = apply_compact_ops(
+                {"explicit_info": explicit_items, "implicit_traits": implicit_items},
+                data["operations"],
+                source="compact",
+            )
+            logger.info(
+                "profile compact ops applied: items_before=%d items_after=%d",
+                total_items,
+                len(new["explicit_info"]) + len(new["implicit_traits"]),
+            )
+            return _profile_from_buckets(
+                owner_id=profile.owner_id,
+                timestamp=profile.timestamp,
+                explicit_info=new["explicit_info"],
+                implicit_traits=new["implicit_traits"],
+            )
         # A rewritten item cannot be traced to the ones it came from, so it takes the profile's own date.
         new_explicit = _dedupe(
             _stored_items("explicit_info", data["explicit_info"], profile.timestamp), source="compact"

@@ -2,7 +2,9 @@
 
 Design rationale and measurements: ``docs/concepts/profile-design-notes.md``. Modules, each importing only those
 below it: ``_extractor`` (:class:`ProfileExtractor`) wires ``_stages`` (prompt templates per stage, over
-``_replies``: reply models and LLM callsites), ``_render`` (what the model is shown) and ``_merge`` (UPDATE ops,
+``_replies``: reply models and LLM callsites), ``_render`` (what the model is shown), ``_compact_ops`` (COMPACT and
+REGROUP operations, over ``_merge``), ``_pending`` (the Episode item checks: a quote for every item, pattern items
+held on the ``pending`` list until repeated, over ``_merge``) and ``_merge`` (UPDATE ops, the account-number scrub,
 dedupe, the stored profile); ``_render`` and ``_merge`` share only ``_items``.
 
 Log lines:
@@ -32,6 +34,33 @@ Log lines:
     ``profile duplicates dropped: source= count=`` (WARNING)
         One per deduplicated list that lost items; ``source`` is ``init``, ``episode-init``, ``update``,
         ``compact`` or ``regroup``.
+    ``profile item dropped: reason=description carries an account number`` (WARNING)
+        One per model-written item left out because its description carries an identification or account number;
+        an UPDATE ``update`` dropped this way also logs ``profile update op rejected: ... reason=description carries
+        an account number``. An UPDATE add into implicit_traits is rejected with ``reason=new traits disabled``.
+    ``profile update ops dropped: count= reason=item shaped for the other bucket`` (WARNING)
+        Once per UPDATE reply holding adds or updates whose item is shaped for the other bucket; the reply's other
+        operations still apply. A ``confirm`` whose item is shaped for the other bucket logs
+        ``profile update ops dropped: count=1 reason=confirm item shaped for the other bucket``, once per such op.
+    ``profile item checks: stage= quote_dropped= held= confirmed= pending=`` (INFO)
+        Once per Episode INIT reply and UPDATE pass while the checks are on: ``stage`` is ``init`` or ``update``,
+        ``quote_dropped`` the items dropped for a quote not found, ``held`` the pattern items put on the pending
+        list, ``confirmed`` the entries written and taken off it, ``pending`` the list's size after it.
+    ``profile pending expired: removed= pending=`` (INFO)
+        Once per UPDATE pass that drops entries for age (over 120 days) or past the 30 newest, before the list is
+        shown.
+    ``profile compact ops applied: items_before= items_after=`` (INFO)
+        Once per Episode-path COMPACT: the profile's item count before and after its operations.
+    ``profile regroup ops applied: bucket= label_len= group_before= group_after=`` (INFO)
+        Once per Episode-path REGROUP: the group's item count before and after its operations. A group still over
+        its cap afterwards also logs ``profile regroup left label over cap: bucket= label_len= count=`` (WARNING),
+        as a MemCell-path rewrite does.
+    ``profile compact ops refused: count=`` / ``profile regroup ops refused: count=`` (WARNING)
+        Once per Episode-path COMPACT or REGROUP reply with refused operations.
+    ``profile do-not-record updated: source= named= added= matters=`` (INFO)
+        Once per Episode INIT or UPDATE reply that names matters not to record: ``source`` is ``init`` or
+        ``update``, ``named`` the matters the reply names, ``added`` those new to the list, ``matters`` the list's
+        size after it.
 
     The Episode-path entry line, ``extracting profile from Episodes: ...``, carries ``categories=``, the size of
     the caller's category snapshot after normalisation. Both entry lines log ``output_language`` once it is

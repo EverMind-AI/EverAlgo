@@ -52,11 +52,14 @@ from everalgo.user_memory.profile._items import _ITEM_WIDTH_BACKSTOP, _PROFILE_M
 from everalgo.user_memory.profile._merge import _apply_ops, _build_summary, _overcrowded_labels
 from everalgo.user_memory.profile._render import _render_conversation
 from everalgo.user_memory.profile._replies import (
+    _CompactOpsOutput,
     _CompactOutput,
+    _EpisodeInitOutput,
     _MemCellCompactOutput,
     _MemCellRegroupOutput,
     _MemCellUpdateOutput,
     _ProfileItems,
+    _RegroupOpsOutput,
     _RegroupOutput,
     _UpdateOutput,
 )
@@ -141,7 +144,11 @@ def _items(profile: Profile, bucket: str = "explicit_info") -> list[dict[str, An
 
 
 async def test_aextract_builds_profile_from_explicit_info() -> None:
-    """``summary`` derives from first explicit_info description; lists preserved as extras."""
+    """``summary`` derives from first explicit_info description; lists preserved as extras.
+
+    INIT creates no implicit_traits item by default (``ProfileExtractor(new_traits=False)``): the reply's trait is
+    not kept.
+    """
     payload = _payload(
         explicit_info=[
             {
@@ -166,19 +173,25 @@ async def test_aextract_builds_profile_from_explicit_info() -> None:
     assert "Python developer" in profile.summary
     # Extras preserved via Profile.model_config extra="allow"
     assert profile.explicit_info[0].category == "Technical Skills"
-    assert profile.implicit_traits[0].trait == "[Pragmatic]"
+    assert profile.implicit_traits == []
 
 
 async def test_aextract_summary_falls_back_to_implicit_trait_when_explicit_empty() -> None:
-    payload = _payload(
-        explicit_info=[],
-        implicit_traits=[
-            _implicit_trait(trait="[Pragmatic]", description="Prefers minimal-ceremony tooling."),
-        ],
+    """INIT keeps no trait any more, so the fallback is checked on a stored trait an UPDATE leaves in place."""
+    stored = Profile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "s",
+            "timestamp": _TS_OLD_1,
+            "explicit_info": [],
+            "implicit_traits": [
+                _implicit_trait(trait="[Pragmatic]", description="Prefers minimal-ceremony tooling."),
+            ],
+        }
     )
-    fake = FakeLLMClient(responses=[payload])
+    fake = FakeLLMClient(responses=[_NO_OPS])
 
-    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
+    profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=stored)
 
     assert profile.summary == "Prefers minimal-ceremony tooling."
 
@@ -1571,13 +1584,20 @@ def test_add_under_an_existing_category_lands_as_a_sibling_item() -> None:
 
 
 def test_sibling_add_applies_to_traits_by_their_own_label_field() -> None:
-    """`implicit_traits` is keyed by `trait`, not `category`, so the bucket's own field decides."""
+    """`implicit_traits` is keyed by `trait`, not `category`, so the bucket's own field decides.
+
+    An add into implicit_traits is refused unless new traits are allowed (off by default), so the label logic is
+    checked with them allowed.
+    """
     ops: list[dict[str, Any]] = [
         {"action": "add", "type": "implicit_traits", "data": {"trait": "c", "description": "second observation"}},
     ]
-    result = _apply_ops(
-        _profile_of(["first observation"], bucket="implicit_traits"), ops, timestamp=_TS, pass_name="single"
-    )
+    stored = _profile_of(["first observation"], bucket="implicit_traits")
+    assert _descriptions(_apply_ops(stored, ops, timestamp=_TS, pass_name="single"), "implicit_traits") == [
+        "first observation"
+    ]
+
+    result = _apply_ops(stored, ops, timestamp=_TS, pass_name="single", new_traits=True)
 
     assert _descriptions(result, "implicit_traits") == ["first observation", "second observation"]
 
@@ -1822,11 +1842,11 @@ async def test_init_deduplicates_what_the_llm_returns(caplog: pytest.LogCaptureF
         profile = await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice")
 
     assert _descriptions(profile) == ["loves kiwifruit"]
-    assert _descriptions(profile, "implicit_traits") == ["dup"]
+    # INIT keeps no trait any more, so only explicit_info has duplicates to drop.
+    assert _descriptions(profile, "implicit_traits") == []
     # One summary line per deduplicated bucket, not one per dropped item.
     assert _log_fields(caplog, "profile duplicates dropped:") == [
         {"source": "init", "count": "2"},
-        {"source": "init", "count": "1"},
     ]
 
 
@@ -2112,6 +2132,10 @@ _RESPONSE_FORMATS: tuple[type[StrictOutputModel], ...] = (
     _MemCellUpdateOutput,
     _MemCellCompactOutput,
     _MemCellRegroupOutput,
+    # The Episode path's INIT, COMPACT and REGROUP models: the do-not-record list and the operations replies.
+    _EpisodeInitOutput,
+    _CompactOpsOutput,
+    _RegroupOpsOutput,
 )
 _STAGES = ("init", "update", "compact", "regroup")
 _PATHS = ("memcell", "episode")
@@ -2121,18 +2145,47 @@ _STAGE_MODELS: dict[tuple[str, str], type[StrictOutputModel]] = {
     ("memcell", "update"): _MemCellUpdateOutput,
     ("memcell", "compact"): _MemCellCompactOutput,
     ("memcell", "regroup"): _MemCellRegroupOutput,
-    ("episode", "init"): _ProfileItems,
+    # The Episode INIT reply also lists the do-not-record matters; COMPACT and REGROUP reply with operations.
+    ("episode", "init"): _EpisodeInitOutput,
     ("episode", "update"): _UpdateOutput,
-    ("episode", "compact"): _CompactOutput,
-    ("episode", "regroup"): _RegroupOutput,
+    ("episode", "compact"): _CompactOpsOutput,
+    ("episode", "regroup"): _RegroupOpsOutput,
 }
 #: The note each MemCell maintenance reply carries; the Episode path's replies carry none.
 _NOTE_KEYS = ("update_note", "compact_note", "regroup_note")
-_VALID_REPLIES = {
-    "init": _payload([{"category": "Stack", "description": "Works mainly in Python.", "evidence": "e"}], []),
-    "update": _NO_OPS,
-    "compact": _compact_payload([{"category": "Stack", "description": "Works mainly in Python.", "evidence": "e"}], []),
-    "regroup": _regroup_payload([{"category": "crowd", "description": "fact 0", "evidence": "e"}]),
+#: A valid reply of each path for each stage, answering the stored profile ``_stage_setup`` routes to that stage.
+_VALID_REPLIES: dict[tuple[str, str], str] = {
+    ("memcell", "init"): _payload(
+        [{"category": "Stack", "description": "Works mainly in Python.", "evidence": "e"}], []
+    ),
+    ("memcell", "update"): _NO_OPS,
+    ("memcell", "compact"): _compact_payload(
+        [{"category": "Stack", "description": "Works mainly in Python.", "evidence": "e"}], []
+    ),
+    ("memcell", "regroup"): _regroup_payload([{"category": "crowd", "description": "fact 0", "evidence": "e"}]),
+    ("episode", "init"): json.dumps(
+        {
+            "explicit_info": [{"category": "Stack", "description": "Works mainly in Python.", "evidence": "e"}],
+            "implicit_traits": [],
+            "do_not_record": [],
+        }
+    ),
+    ("episode", "update"): json.dumps({"operations": [{"action": "none"}]}),
+    ("episode", "compact"): json.dumps(
+        {"operations": [{"action": "delete", "type": "explicit_info", "index": 0, "reason": "trivial"}]}
+    ),
+    ("episode", "regroup"): json.dumps(
+        {
+            "operations": [
+                {
+                    "action": "update",
+                    "type": "explicit_info",
+                    "index": 0,
+                    "data": {"evidence": "e", "description": "fact 0", "category": "elsewhere"},
+                }
+            ]
+        }
+    ),
 }
 #: What each prompt shows as its reply: one skeleton per stage, and two for UPDATE ("Nothing to do", "One or more
 #: operations"). The Episode INIT and UPDATE prompts add the replies of their worked examples, two and one.
@@ -2253,7 +2306,7 @@ def _models_reachable_from(model: type[BaseModel]) -> list[type[BaseModel]]:
 @pytest.mark.parametrize("stage", _STAGES)
 async def test_each_stage_requests_its_output_model(path: str, stage: str) -> None:
     """INIT, UPDATE, COMPACT and REGROUP each ask for their own model; maintenance follows an UPDATE call."""
-    fake = await _extract(path, stage, _VALID_REPLIES[stage])
+    fake = await _extract(path, stage, _VALID_REPLIES[path, stage])
 
     expected = [_STAGE_MODELS[path, "update"]] if stage in ("compact", "regroup") else []
     assert [call.response_format for call in fake.calls] == [*expected, _STAGE_MODELS[path, stage]]
@@ -2263,7 +2316,7 @@ async def test_each_stage_requests_its_output_model(path: str, stage: str) -> No
 @pytest.mark.parametrize("stage", _STAGES)
 async def test_every_prompt_example_validates_against_the_requested_model(path: str, stage: str) -> None:
     """The prompt is the only format constraint under prompt-only mode, so each example it shows must pass."""
-    fake = await _extract(path, stage, _VALID_REPLIES[stage])
+    fake = await _extract(path, stage, _VALID_REPLIES[path, stage])
     call = fake.calls[-1]
 
     examples = _json_examples(path, call.messages)
@@ -2271,6 +2324,17 @@ async def test_every_prompt_example_validates_against_the_requested_model(path: 
     assert len(examples) == _EXPECTED_EXAMPLE_COUNTS[path, stage]
     for example in examples:
         call.response_format.model_validate_json(example)
+
+
+# The Episode item checks' fields are optional on purpose (``_replies``: a missing one drops the item, not the reply).
+_OPTIONAL_REPLY_FIELDS = frozenset(
+    {
+        (model, field)
+        for model in ("_EpisodeExplicitItem", "_EpisodeImplicitTrait")
+        for field in ("pattern", "pending", "quote", "regular")
+    }
+    | {("_ConfirmOp", "bucket"), ("_ConfirmOp", "pending")}
+)
 
 
 @pytest.mark.parametrize("model", _RESPONSE_FORMATS, ids=lambda model: model.__name__)
@@ -2284,6 +2348,8 @@ def test_output_models_are_strict_one_level_and_default_free(model: type[StrictO
         assert sub_model.model_config.get("strict") is True, sub_model.__name__
         assert sub_model.model_config.get("extra") == "forbid", sub_model.__name__
         for name, field in sub_model.model_fields.items():
+            if (sub_model.__name__, name) in _OPTIONAL_REPLY_FIELDS:
+                continue
             assert field.is_required(), f"{sub_model.__name__}.{name} has a default"
         decorators = sub_model.__pydantic_decorators__
         assert not decorators.field_validators, sub_model.__name__
@@ -2364,7 +2430,11 @@ def _shaped_op(action: str, bucket: str, data: dict[str, Any]) -> dict[str, Any]
 
 
 async def _regroup_extract(path: str, bucket: str, items: list[dict[str, Any]]) -> Profile:
-    """Run an UPDATE whose ``bucket`` holds one over-cap group, answering the regroup call with ``items``."""
+    """Run an UPDATE whose ``bucket`` holds one over-cap group, answering the regroup call with ``items``.
+
+    The MemCell path's REGROUP replies with the kept items; the Episode path's replies with operations, so there the
+    group's nine items are merged into the first of ``items`` and each further one updates the next index.
+    """
     label_field = "category" if bucket == "explicit_info" else "trait"
     grounding = "evidence" if bucket == "explicit_info" else "basis"
     crowded = [{label_field: "crowd", "description": f"fact {i}", grounding: "g"} for i in range(9)]
@@ -2377,7 +2447,17 @@ async def _regroup_extract(path: str, bucket: str, items: list[dict[str, Any]]) 
             "implicit_traits": crowded if bucket == "implicit_traits" else [],
         }
     )
-    fake = FakeLLMClient(responses=[_reply_for(path, _NO_OPS), _reply_for(path, _regroup_payload(items))])
+    if path == "memcell":
+        regroup = _regroup_payload(items)
+    else:
+        first, *others = items
+        operations: list[dict[str, Any]] = [{"action": "merge", "type": bucket, "indices": [0, 1, 2], "data": first}]
+        operations += [_shaped_op("update", bucket, item) | {"index": 3 + n} for n, item in enumerate(others)]
+        operations += [
+            {"action": "delete", "type": bucket, "index": i, "reason": "trivial"} for i in range(3 + len(others), 9)
+        ]
+        regroup = json.dumps({"operations": operations})
+    fake = FakeLLMClient(responses=[_reply_for(path, _NO_OPS), _reply_for(path, regroup)])
     extractor = ProfileExtractor(llm=fake)
     if path == "memcell":
         profile = await extractor.aextract([_memcell()], sender_id="u_alice", old_profile=old)
@@ -2402,20 +2482,39 @@ async def test_update_op_shaped_for_its_bucket_is_applied(path: str, action: str
 @pytest.mark.parametrize("bucket", ["explicit_info", "implicit_traits"])
 @pytest.mark.parametrize("action", ["add", "update"])
 @pytest.mark.parametrize("path", _PATHS)
-async def test_update_op_shaped_for_the_other_bucket_raises_llm_output_error(
-    path: str, action: str, bucket: str
+async def test_update_op_shaped_for_the_other_bucket_is_dropped_and_the_rest_applies(
+    path: str, action: str, bucket: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An explicit_info op carrying a trait (or the reverse) passes the model and fails the bucket check."""
+    """An explicit_info op carrying a trait (or the reverse) passes the model and fails the bucket check.
+
+    It used to fail the whole reply with LLMOutputError; it is now dropped with a warning, and the reply's other
+    operations still apply.
+    """
     wrong = _BUCKET_DATA[_OTHER_BUCKET[bucket]]
     reply = _ops_payload(_shaped_op("add", "explicit_info", _EXPLICIT_DATA), _shaped_op(action, bucket, wrong))
+    old_profile, _ = _stage_setup("update")
+    assert old_profile is not None
+    fake = FakeLLMClient(responses=[_reply_for(path, reply)])
+    extractor = ProfileExtractor(llm=fake, item_checks=False)
 
-    with pytest.raises(LLMOutputError) as excinfo:
-        await _extract(path, "update", reply)
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        if path == "memcell":
+            profile = await extractor.aextract([_memcell()], sender_id="u_alice", old_profile=old_profile)
+        else:
+            episode = Episode(
+                owner_id=None, episode="Alice said she works mainly in Python.", summary="s", timestamp=_TS
+            )
+            profile = await extractor.aextract_from_episodes(
+                [episode], owner_id="u_alice", owner_name="Alice", old_profile=old_profile
+            )
 
-    assert excinfo.type is LLMOutputError
-    assert f"operations.1: {action} into {bucket}" in str(excinfo.value)
-    assert "operations.0" not in str(excinfo.value)  # the well-shaped op is not reported
-    assert _SECRET not in str(excinfo.value)
+    assert fake.call_count == 1
+    assert _descriptions(profile) == [*_descriptions(old_profile), _EXPLICIT_DATA["description"]]
+    assert _descriptions(profile, "implicit_traits") == _descriptions(old_profile, "implicit_traits")
+    assert _log_fields(caplog, "profile update ops dropped:") == [
+        {"count": "1", "reason": "item shaped for the other bucket"}
+    ]
+    assert _SECRET not in caplog.text
 
 
 @pytest.mark.parametrize("bucket", ["explicit_info", "implicit_traits"])
@@ -2427,9 +2526,13 @@ async def test_regroup_items_shaped_for_the_group_bucket_are_kept(path: str, buc
 
 
 @pytest.mark.parametrize("bucket", ["explicit_info", "implicit_traits"])
-@pytest.mark.parametrize("path", _PATHS)
+@pytest.mark.parametrize("path", ["memcell"])
 async def test_regroup_item_shaped_for_the_other_bucket_raises_llm_output_error(path: str, bucket: str) -> None:
-    """Regroup never moves an item across buckets, so an item of the other shape fails the bucket check."""
+    """Regroup never moves an item across buckets, so an item of the other shape fails the bucket check.
+
+    This holds for the MemCell path's rewrite reply; the Episode path's operations reply is checked per operation
+    (next test).
+    """
     items = [_BUCKET_DATA[bucket], _BUCKET_DATA[_OTHER_BUCKET[bucket]]]
 
     with pytest.raises(LLMOutputError) as excinfo:
@@ -2440,6 +2543,25 @@ async def test_regroup_item_shaped_for_the_other_bucket_raises_llm_output_error(
     assert "items.1" in str(excinfo.value)
     assert "items.0" not in str(excinfo.value)
     assert _SECRET not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("bucket", ["explicit_info", "implicit_traits"])
+async def test_episode_regroup_op_carrying_the_other_bucket_item_is_refused_alone(
+    bucket: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """On the Episode path an operation carrying the other bucket's item is refused alone, its item kept as stored.
+
+    REGROUP replies with operations there: the refusal is logged, and the reply's other operations still apply.
+    """
+    items = [_BUCKET_DATA[bucket], _BUCKET_DATA[_OTHER_BUCKET[bucket]]]
+
+    with caplog.at_level(logging.WARNING, logger=_PROFILE_LOGGER):
+        profile = await _regroup_extract("episode", bucket, items)
+
+    # Merged 0-2, refused update of 3 (kept as stored), deleted 4-8.
+    assert _descriptions(profile, bucket) == [_BUCKET_DATA[bucket]["description"], "fact 3"]
+    assert _log_fields(caplog, "profile regroup ops refused:") == [{"count": "1"}]
+    assert _SECRET not in caplog.text
 
 
 @pytest.mark.parametrize("stage", ["update", "compact", "regroup"])
@@ -2454,9 +2576,13 @@ async def test_episode_reply_carrying_a_note_raises_llm_output_error(stage: str)
 
 
 async def _episode_extract_with_note(stage: str) -> None:
-    """Drive the Episode path to ``stage`` and answer that call with a reply that carries the MemCell note."""
+    """Drive the Episode path to ``stage`` and answer that call with a reply that carries the MemCell note.
+
+    The reply is the stage's valid Episode reply plus the note, so the note is the only thing wrong with it.
+    """
     old_profile, lead = _stage_setup(stage)
-    fake = FakeLLMClient(responses=[*(_reply_for("episode", r) for r in lead), _VALID_REPLIES[stage]])
+    with_note = json.dumps({**json.loads(_VALID_REPLIES["episode", stage]), f"{stage}_note": "noted"})
+    fake = FakeLLMClient(responses=[*(_reply_for("episode", r) for r in lead), with_note])
     episode = Episode(owner_id=None, episode="Alice said she works mainly in Python.", summary="s", timestamp=_TS)
     await ProfileExtractor(llm=fake).aextract_from_episodes(
         [episode], owner_id="u_alice", owner_name="Alice", old_profile=old_profile
@@ -2468,7 +2594,7 @@ async def test_memcell_reply_still_requires_its_note(stage: str) -> None:
     """The MemCell prompts still show a note in their skeletons, so their models still require one."""
     with pytest.raises(LLMOutputError) as excinfo:
         old_profile, lead = _stage_setup(stage)
-        reply = _reply_for("episode", _VALID_REPLIES[stage])  # the same reply, note removed
+        reply = _reply_for("episode", _VALID_REPLIES["memcell", stage])  # the same reply, note removed
         fake = FakeLLMClient(responses=[*lead, reply])
         await ProfileExtractor(llm=fake).aextract([_memcell()], sender_id="u_alice", old_profile=old_profile)
 
@@ -2495,7 +2621,7 @@ _EPISODE_ONLY_WORDS = ("<stored_profile>", "<group>", "narratives")
 @pytest.mark.parametrize("stage", ["update", "compact", "regroup"])
 async def test_memcell_fallback_names_its_own_sections_and_no_episode_markup(stage: str) -> None:
     """Without a named language, a MemCell maintenance stage points at its own 【...】 section, head and tail."""
-    fake = await _extract("memcell", stage, _VALID_REPLIES[stage])
+    fake = await _extract("memcell", stage, _VALID_REPLIES["memcell", stage])
     (message,) = fake.calls[-1].messages
     prompt = cast("str", message.content)
 
@@ -2508,7 +2634,7 @@ async def test_memcell_fallback_names_its_own_sections_and_no_episode_markup(sta
 @pytest.mark.parametrize("stage", ["update", "compact", "regroup"])
 async def test_episode_fallback_names_its_own_element(stage: str) -> None:
     """Without a named language, an Episode maintenance stage points at its own element, in <output_language>."""
-    fake = await _extract("episode", stage, _VALID_REPLIES[stage])
+    fake = await _extract("episode", stage, _VALID_REPLIES["episode", stage])
     system = cast("str", fake.calls[-1].messages[0].content)
     language_block = system.split("\n<output_language>\n", maxsplit=1)[1].split("\n</output_language>", maxsplit=1)[0]
 
