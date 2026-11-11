@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0rc5] - 2026-11-11
+
 ### Added
 
 - `tz=` (a `datetime.tzinfo`, default UTC) on `aagentic_retrieve` / `agentic_retrieve`: the `Date` row of each retrieved document, in the sufficiency, multi-query and refined-query prompts alike, shows its time in that zone with its offset, `2024-04-10 22:00 UTC+08:00`, through `everalgo.utils.format_time`; the date follows that zone. UTC renders exactly as before, and a missing or invalid timestamp still renders `N/A`. Requires `everalgo-core` with `format_time`.
@@ -13,6 +15,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - The `Date` row is rendered with `everalgo.utils.format_time` instead of `format_utc_time`, which core deprecates (it warns `DeprecationWarning`); the rendered text is unchanged.
+- Requires `everalgo-core>=0.7.0rc1` (the floor was `0.6.0rc3`): the package imports `everalgo.utils.format_time`, which `0.6.0` does not define.
 
 ## [0.5.0rc4] - 2026-10-30
 
@@ -132,7 +135,8 @@ result = await SkillRanker(llm=...).arank(
 
 - `arerank` (and the sync `rerank` bridge): `json.dumps` of the candidates payload now passes `default=str`, so candidates whose `metadata` contains non-JSON-native values (e.g. `datetime` from LanceDB rows) no longer raise `TypeError: Object of type datetime is not JSON serializable`. Previously the `enable_llm_rerank=True` path crashed whenever a caller forwarded raw storage rows (such as EverOS's `row_to_candidate`) without first ISO-serializing date/time fields. The serialized fallback uses Python's `str()` representation, which is sufficient for prompting an LLM but is not guaranteed to round-trip; callers needing strict round-trip should ISO-serialize before constructing the `Candidate`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc4...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc5...HEAD
+[0.5.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc4...everalgo-rank/v0.5.0rc5
 [0.5.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc3...everalgo-rank/v0.5.0rc4
 [0.5.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc2...everalgo-rank/v0.5.0rc3
 [0.5.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-rank/v0.5.0rc1...everalgo-rank/v0.5.0rc2

@@ -13,14 +13,28 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.6.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.4.2 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-core` | 0.7.0rc1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.5.0rc1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.5.0rc4 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.9.0rc4 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.6.0rc3 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-rank` | 0.5.0rc5 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.9.0rc5 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.6.0rc4 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Release candidate — 2026-11-11 (core 0.7.0rc1, boundary 0.5.0rc1, user-memory 0.9.0rc5, agent-memory 0.6.0rc4, rank 0.5.0rc5)
+
+Five distributions move to the next release candidate together, because their changes depend on each other. Time zones: core's new `format_time` / `format_date` and `render_chat_line(message, tz=)` show prompt times in a caller-chosen `datetime.tzinfo` (UTC renders exactly as before), and boundary, user-memory, agent-memory and rank take `tz=` on every entry point that shows the model a time. **Breaking in boundary:** both `BoundaryDetector` paths, `adetect_batch` and `adetect_step(items)`, return `Cuts`, indices into the caller's own input, and `to_memcells` builds the cells; `DetectionResult` and the module-level detection functions leave the public surface. The step reply is `{"reasoning", "should_end"}`, the step hard limits return to 8,192 tokens / 50 messages, and the batch prompt is rebuilt on the step prompt's rules with a time-gap line between records. User-memory's episode prompt is the EverAlgo LoCoMo reference run's, `Episode.summary` is the content's first 200 characters, and the new `EpisodeSummarizer.asummarize_memcell` writes the model's preview from the memcell beside extraction; with no language named, output follows the input's language. Core also sends `json_schema` reply schemas without the titles and descriptions pydantic derives. Dependency floors move: boundary, user-memory, agent-memory and rank require `everalgo-core>=0.7.0rc1`, and user-memory and agent-memory require `everalgo-boundary>=0.5.0rc1`. Clustering, knowledge and parser have no change and keep their versions; core 0.7.0rc1 meets their core floors, and none of them uses the newly deprecated `format_utc_time` / `format_utc_date`.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.7.0rc1 | caller-chosen zone for prompt times; reply schemas without derived titles and descriptions; `format_utc_time` / `format_utc_date` deprecated |
+| `everalgo-boundary` | 0.5.0rc1 | **breaking:** `Cuts` from both paths and `to_memcells`; two-field step reply; step limits 8,192 / 50; batch prompt on the step rules with gap lines; `tz=`; core floor `>=0.7.0rc1` |
+| `everalgo-user-memory` | 0.9.0rc5 | reference-run episode prompt; `asummarize_memcell`; `tz=`; language follows the input; re-exports `Cuts`; floors core `>=0.7.0rc1`, boundary `>=0.5.0rc1` |
+| `everalgo-agent-memory` | 0.6.0rc4 | `tz=` on `AgentProfileExtractor`; re-exports `Cuts`; floors core `>=0.7.0rc1`, boundary `>=0.5.0rc1` |
+| `everalgo-rank` | 0.5.0rc5 | `tz=` on `aagentic_retrieve`; core floor `>=0.7.0rc1` |
+
+Detail in [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md), [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md), [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md), [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) and [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md).
 
 ## [everalgo-boundary/0.4.2] - 2026-10-30
 

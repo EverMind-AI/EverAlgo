@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0rc1] - 2026-11-11
+
 ### Added
 
 - `everalgo.utils.format_time(timestamp_ms, *, tz=UTC, weekday=False)` and `format_date(value, *, tz=UTC)`: the caller picks the zone an instant or date is shown in, as a `datetime.tzinfo` (no new dependency: a host builds it, for example `zoneinfo.ZoneInfo("Asia/Shanghai")`). UTC renders exactly as before, `2024-04-10 14:00 UTC`; another zone renders its local time with the offset in force at that instant, `2024-04-10 22:00 UTC+08:00`, and the date and weekday are read in that zone. `render_chat_line(message, *, tz=UTC)` passes the zone through.
@@ -150,7 +152,8 @@ Promotes 0.6.0rc3 unchanged; see the release-candidate entries below for the cha
 
 - LLM binding simplified to instance-only injection: `build_client` / constructor `llm=` parameter is the sole binding path. The prior 4-layer resolution (configure / use / current / resolve) was removed in favour of the pattern used by `openai-python`, `anthropic-sdk-python`, LangChain, and Instructor.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.7.0rc1...HEAD
+[0.7.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0...everalgo-core/v0.7.0rc1
 [0.6.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0rc3...everalgo-core/v0.6.0
 [0.6.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0rc2...everalgo-core/v0.6.0rc3
 [0.6.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-core/v0.6.0rc1...everalgo-core/v0.6.0rc2
