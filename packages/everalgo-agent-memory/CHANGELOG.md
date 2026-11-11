@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0rc4] - 2026-11-11
+
 ### Added
 
 - `Cuts` and `to_memcells`, re-exported unchanged from `everalgo.boundary` beside `BoundaryDetector`: the indices `adetect_batch` returns count the tool items of a trajectory, and `to_memcells` keeps them in the cells. Requires `everalgo-boundary` with `Cuts`.
@@ -14,6 +16,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - **BREAKING:** the re-exported `BoundaryDetector` changed: `adetect` / `detect` are `adetect_batch` / `detect_batch`, `adetect_step` takes `items`, and both return `Cuts` instead of `DetectionResult`. See `everalgo-boundary`'s changelog.
+- Requires `everalgo-core>=0.7.0rc1` (the floor was `0.6.0rc2`): conversation lines are rendered by core's `render_chat_line(message, tz=)`, which `0.6.0` does not accept.
+- Requires `everalgo-boundary>=0.5.0rc1` (the floor was `0.4.0rc1`): the package re-exports `Cuts` and `to_memcells`, which `0.4.2` does not define.
 
 ## [0.6.0rc3] - 2026-10-22
 
@@ -120,7 +124,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc3...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc4...HEAD
+[0.6.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc3...everalgo-agent-memory/v0.6.0rc4
 [0.6.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc2...everalgo-agent-memory/v0.6.0rc3
 [0.6.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc1...everalgo-agent-memory/v0.6.0rc2
 [0.6.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.5.1...everalgo-agent-memory/v0.6.0rc1

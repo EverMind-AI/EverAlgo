@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0rc1] - 2026-11-11
+
 ### Added
 
 - `Cuts(ends, tail_start)`, what both `BoundaryDetector` methods now return: indices into the caller's input, half-open like Python slices. Segment `i` is `items[ends[i-1]:ends[i]]` (the first starts at 0) and the part to carry into the next call is `items[tail_start:]`; indices count tool items too. `ends` is strictly increasing with `0 < ends[0] <= ends[-1] <= len(items)`, and `0 <= tail_start <= len(items)`.
@@ -22,6 +24,7 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - The step prompt's rules add nothing to the EverAlgo LoCoMo reference run's (everalgo-boundary 0.2.1). The role sentence no longer says where the data sits, and `<reply_format>` is that run's sentence and field skeleton (`"should_end": true/false`), cut to its first two fields as above, replacing 0.4.0's rewrite, which added "nothing else" and showed one continuing example (`"should_end": false`). The skeleton does not parse, a deliberate exception to the LLM contract's parseable-example obligation (§4.3, which now names it): every example reply tried moved the step decisions away from the reference run's. The system/user split, the tags, the rule sentences and the message lines are unchanged.
 - The step time-gap labels are the reference run's, unit always plural (`Time gap: 1 minutes (recent conversation)`).
 - The batch prompt is rewritten on the step prompt's rules: `<analysis_aspects>`, `<special_rules_for_common_patterns>` and `<decision_principles>` are the step prompt's word for word, and `<notes>` replaces only the step's first note with "Message [0] always belongs to the current episode, so it is never a boundary". A new role sentence and `<input>` frame them for a numbered window that more messages may follow, and `<reply_format>` shows a parseable `{"reasoning", "boundaries"}` skeleton, reasoning first. It replaces 0.4.2's episode-continuity rules, index contract and worked example; custom batch instructions written against those rules should be reviewed. The user message puts a `<time_gap>` line between consecutive records, worded as the step path's gap label (`<time_gap>Time gap: 2 days (long gap, likely new conversation)</time_gap>`), and `<input>` says what it is. The record count moves from the `<messages count="N">` attribute to a `<message_count>` block after the records, so the request is laid out by how often its parts change: the count changes on every call, and in front of the records it ended at the system message the prefix that two calls could share with a prompt cache; after them, a window that only grew shares the previous call's records too. `BATCH_BOUNDARY_DETECT_USER_PROMPT` changes accordingly. The reply model and the label semantics (zero-based first-message labels, out-of-range labels dropped) are unchanged. Measured on LoCoMo end to end (three runs each, gpt-4.1-mini, prompt-only, 50 messages per call, one flush at the end of each conversation, everything else as in the step-path runs compared): no measurable difference from the step path with the two-field reply above (−0.11 points on the re-judged answers, 95% CI [−0.84, +0.63]) or from the EverAlgo LoCoMo reference run (+0.26, [−0.54, +1.04]), and none from moving the count behind the records (+0.15, [−0.52, +0.82], against the count in front). Without the gap lines the same prompt, count in front, scored 0.82 points lower ([−1.54, −0.11]) and let one episode grow to 499 messages: days of same-topic talk stayed unsplit until the hard limit. With a flush after every LoCoMo session the two variants scored the same, so a test that flushes every session hides the difference. In these runs no batch reply named label 0, an out-of-range label or an unsorted list.
+- Requires `everalgo-core>=0.7.0rc1` (the floor was `0.6.0`): message lines are rendered by core's `render_chat_line(message, tz=)`, which `0.6.0` does not accept.
 
 ### Removed
 
@@ -165,7 +168,8 @@ Promotes 0.4.0rc5 unchanged apart from the core floor below; see the release-can
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.5.0rc1...HEAD
+[0.5.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2...everalgo-boundary/v0.5.0rc1
 [0.4.2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2rc0...everalgo-boundary/v0.4.2
 [0.4.2rc0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.1...everalgo-boundary/v0.4.2rc0
 [0.4.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.0...everalgo-boundary/v0.4.1

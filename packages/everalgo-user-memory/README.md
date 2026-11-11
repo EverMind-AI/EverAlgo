@@ -7,8 +7,7 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Install
 
 ```bash
-pip install everalgo-user-memory everalgo-boundary==0.4.2
-# Select boundary 0.4.2 for the two-field batch reply below.
+pip install everalgo-user-memory==0.9.0rc5
 ```
 
 ## Quick start
