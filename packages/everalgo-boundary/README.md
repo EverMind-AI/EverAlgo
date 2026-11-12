@@ -95,19 +95,26 @@ Batch labels start at **0**. Each boundary `b` names the first message of a new 
 slice is `messages[:b]`. For example, `[2]` groups messages 0 and 1, then starts the next episode at 2.
 The valid range is `1 <= b < N`; the final input message can start a new episode, and labels outside the range
 are dropped. Tool items are not numbered. The strict batch response contains only `reasoning`, then
-`boundaries`; `<reply_format>` shows it as a parseable skeleton,
-`{"reasoning": "A brief summary of your reasoning process", "boundaries": [7, 15]}`. It does not predict whether
-the trailing episode has finished.
+`boundaries`; `<reply_format>` shows it as a parseable skeleton, `{"reasoning": "One sentence of at most 25 words
+naming the label of each message that starts a new episode, or none, and why", "boundaries": []}`. It does not
+predict whether the trailing episode has finished.
 
 The step prompt's rules and its time-gap labels are the EverAlgo LoCoMo reference run's (everalgo-boundary 0.2.1):
-the rules sentence for sentence in tags instead of Markdown, the role sentence word for word, nothing added; the time
-gap keeps that run's wording, unit always plural (`1 minutes`). Its reply format is that run's sentence and field
-skeleton cut to the first two fields, `{"reasoning", "should_end"}`: a deliberate, measured departure from that run,
+the rules sentence for sentence in tags instead of Markdown, nothing added; the time gap keeps that run's wording,
+unit always plural (`1 minutes`). Its reply format is that run's sentence and field skeleton cut to the first two
+fields, `{"reasoning", "should_end"}`: a deliberate, measured departure from that run,
 which also asked for `confidence` and `topic_summary` (on LoCoMo, three runs each, the two-field reply scored the
 same within noise and cost fewer output tokens per call). The skeleton (`"should_end": true/false`) is not a
 parseable example reply: a deliberate exception to the LLM contract (§4.3), since every example tried moved the
 decisions. The step reply model accepts those two keys only; `should_end` is required and `reasoning` defaults to
 `""`. The message lines keep the shared chat-line shape above.
+
+Both role sentences ask whether a message starts a new episode, and both ask for `reasoning` in one sentence of at
+most 25 words: the batch prompt for the label of each message that starts a new episode, or none, and why; the step
+prompt for whether the new dialogue starts a new episode, and why (`"should_end": true` means it does). The cap keeps
+replies short (a median of 38–78 output tokens per batch call for qwen3-4b-instruct-2507, against 299 uncapped); the
+role sentences, the labels in the batch `reasoning` and its `[]` example keep a small model's cuts where they were
+without the cap. See the CHANGELOG for the measurements.
 
 `custom_instructions=` on both `BoundaryDetector` methods and their sync bridges adds the host's text to the bundled
 rules, never replacing them: it is placed verbatim, never rendered as a template, in a

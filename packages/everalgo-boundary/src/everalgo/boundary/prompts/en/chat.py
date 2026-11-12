@@ -13,14 +13,23 @@ episode: the same prompt without it scored 0.82 points lower on the re-judged an
 one episode grow to 499 messages. With a flush after every session the two scored the same. The caller owns final or
 idle flushing.
 
-The incremental step prompt's role sentence is the reference run's word for word. ``<reply_format>`` is that
-run's sentence and field skeleton cut to its first two fields, ``reasoning`` and ``should_end``: a deliberate, measured
-departure from that run, which also asked for ``confidence`` and ``topic_summary``. On LoCoMo (three runs each,
-gpt-4.1-mini) the two-field reply scored the same within noise and cost fewer output tokens per call, and the model
-always wrote exactly those two fields. The skeleton's ``true/false`` does not parse as JSON, a deliberate exception to
-the LLM contract's parseable-example obligation (``llm-contract.md`` §4.3): every example reply tried moved the step
-decisions away from the reference run's. Its message lines keep the shared chat line shape rather than the reference
-run's ``[YYYY-MM-DD HH:MM:SS]``.
+The incremental step prompt's ``<reply_format>`` is the reference run's sentence and field skeleton cut to its first two
+fields, ``reasoning`` and ``should_end``: a deliberate, measured departure from that run, which also asked for
+``confidence`` and ``topic_summary``. On LoCoMo (three runs each, gpt-4.1-mini) the two-field reply scored the same
+within noise and cost fewer output tokens per call, and the model always wrote exactly those two fields. The skeleton's
+``true/false`` does not parse as JSON, a deliberate exception to the LLM contract's parseable-example obligation
+(``llm-contract.md`` §4.3): every example reply tried moved the step decisions away from the reference run's. Its message
+lines keep the shared chat line shape rather than the reference run's ``[YYYY-MM-DD HH:MM:SS]``.
+
+Both role sentences ask whether a message starts a new episode, and both ``reasoning`` slots ask for one sentence of at
+most 25 words: the batch one naming the label of each message that starts a new episode, or none, and why; the step one
+saying whether the new dialogue starts a new episode, and why. The batch skeleton's example ``boundaries`` is ``[]``.
+Without the cap the reply walked through every analysis aspect: a median of 299 output tokens per batch call for
+qwen3-4b-instruct-2507 and 108 for gpt-4.1-mini. The cap alone made the small model list the message that ends an
+episode instead of the one that starts the next, the reading the earlier role sentences ("should end the current
+episode and start a new one") allow; asking about starts and naming the start label in ``reasoning`` fixed that. Once
+``reasoning`` named labels, gpt-4.1-mini copied the earlier example ``[7, 15]`` into windows with no new episode, hence
+``[]`` and "or none". The measurements are in the CHANGELOG.
 
 User-template placeholders:
 - batch: ``{{messages}}``, the numbered timestamped records with their gap lines, then ``{{count}}``, how many
@@ -99,8 +108,7 @@ _MEMORY_UNIT_NOTES = """\
 
 _BATCH_ROLE = (
     "You are an episodic memory boundary detection expert. You are given a numbered window of a conversation; going "
-    "through it in order, you need to determine, for each message, whether it should end the current episode and "
-    "start a new one."
+    "through it in order, you need to determine, for each message, whether it starts a new episode."
 )
 
 _BATCH_INPUT = """\
@@ -113,7 +121,7 @@ _BATCH_NOTES = "- Message [0] always belongs to the current episode, so it is ne
 
 _BATCH_REPLY_FORMAT = """\
 Please return your judgment in JSON format:
-{"reasoning": "A brief summary of your reasoning process", "boundaries": [7, 15]}
+{"reasoning": "One sentence of at most 25 words naming the label of each message that starts a new episode, or none, and why", "boundaries": []}
 boundaries lists, in increasing order, the label of every message that starts a new episode; it is [] when every message continues the current episode"""
 
 BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT = paragraphs(
@@ -136,8 +144,8 @@ BATCH_BOUNDARY_DETECT_USER_PROMPT = paragraphs(
 # --------------------------------------------------------------------------------------------------
 
 _STEP_ROLE = (
-    "You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue should "
-    "end the current episode and start a new one."
+    "You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue starts a "
+    "new episode."
 )
 
 _STEP_NOTES = "- If conversation history is empty, this is the first message, return false\n" + _MEMORY_UNIT_NOTES
@@ -145,7 +153,7 @@ _STEP_NOTES = "- If conversation history is empty, this is the first message, re
 _STEP_REPLY_FORMAT = """\
 Please return your judgment in JSON format:
 {
-    "reasoning": "One sentence summary of your reasoning process",
+    "reasoning": "One sentence of at most 25 words saying whether the newly added dialogue starts a new episode, and why",
     "should_end": true/false
 }"""
 

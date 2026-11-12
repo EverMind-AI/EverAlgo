@@ -113,6 +113,10 @@ _STEP_RESTRUCTURED = {
     "Please return your judgment in JSON format:": "F5",
 }
 
+_REFERENCE_STEP_TASK = (
+    "You need to determine if the newly added dialogue should end the current episode and start a new one."
+)
+
 _SYSTEM = {"batch": BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, "step": STEP_BOUNDARY_DETECT_SYSTEM_PROMPT}
 _USER = {"batch": BATCH_BOUNDARY_DETECT_USER_PROMPT, "step": STEP_BOUNDARY_DETECT_USER_PROMPT}
 _REPLY_MODEL: dict[str, type[StrictOutputModel]] = {"batch": Reply, "step": _StepReply}
@@ -176,14 +180,14 @@ def test_step_keeps_its_historical_rule_sentences() -> None:
         if sentence not in STEP_BOUNDARY_DETECT_SYSTEM_PROMPT
     ]
     assert kept
-    assert not missing
+    assert missing == [_REFERENCE_STEP_TASK]
     assert set(_STEP_RESTRUCTURED) <= set(_old_lines(_OLD_STEP_PROMPT))
 
 
 def test_batch_request_uses_the_evaluated_prompt_and_schema() -> None:
     """Guard the evaluated prompt and the schema the model sees: structure only, no docstring or derived title."""
     assert hashlib.sha256(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT.encode()).hexdigest() == (
-        "bb78874505b8f0e2c117a643687bf1664ce20acc8bfc83d538f205990fe1a5d2"
+        "cbee45b8b9c688964cc0731248719ce8aff8fd60e4305633918ba8a73da286fc"
     )
     assert to_openai_response_format(Reply) == {
         "type": "json_schema",
@@ -242,14 +246,19 @@ def test_system_prompt_blocks_are_closed(path: str) -> None:
     assert sorted(opened) == sorted(re.findall(r"^</([a-z_]+)>$", system, re.MULTILINE))
 
 
-def test_the_step_role_sentence_is_the_reference_runs_and_names_no_block() -> None:
-    """The step role sentence is the EverAlgo LoCoMo reference run's word for word; it names no data block."""
+def test_the_step_role_sentence_asks_whether_the_new_dialogue_starts_an_episode() -> None:
+    """The step role sentence asks whether the new dialogue starts an episode, as the batch one does.
+
+    The reference run's task sentence asked whether it should end the current episode; ``should_end`` reports the start.
+    The sentence names no data block.
+    """
     role = _SYSTEM["step"].split("\n", 1)[0]
 
     assert role == (
         "You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue "
-        "should end the current episode and start a new one."
+        "starts a new episode."
     )
+    assert _REFERENCE_STEP_TASK in _OLD_STEP_PROMPT
     assert not re.findall(r"<([a-z_]+)>", role)
 
 
@@ -266,6 +275,14 @@ def test_user_prompt_carries_only_data_slots(path: str) -> None:
     assert re.sub(r"</?[a-z_]+[^>]*>|\{\{[a-z_]+\}\}", "", user).strip() == ""
 
 
+def test_the_batch_reply_skeleton_shows_no_example_label() -> None:
+    """The batch skeleton's example ``boundaries`` is ``[]``.
+
+    With ``reasoning`` naming start labels, a model copied the former ``[7, 15]`` into windows with no new episode.
+    """
+    assert json.loads(_block("batch", "reply_format").splitlines()[1])["boundaries"] == []
+
+
 def test_the_batch_reply_skeleton_parses_reasoning_first_and_validates() -> None:
     """The skeleton is what the model imitates; it must parse and pass the model requested (llm-contract §4.3)."""
     skeleton = _block("batch", "reply_format").splitlines()[1]
@@ -277,7 +294,7 @@ def test_the_batch_reply_skeleton_parses_reasoning_first_and_validates() -> None
 _STEP_REPLY_FORMAT = """\
 Please return your judgment in JSON format:
 {
-    "reasoning": "One sentence summary of your reasoning process",
+    "reasoning": "One sentence of at most 25 words saying whether the newly added dialogue starts a new episode, and why",
     "should_end": true/false
 }"""
 
@@ -295,12 +312,17 @@ def test_the_step_reply_format_is_the_measured_two_field_skeleton_and_shows_no_e
     assert not _REPLY.findall(_SYSTEM["step"])
 
 
-def test_the_step_reply_format_is_the_reference_skeleton_cut_to_its_first_two_fields() -> None:
-    """The departure from the reference run is the two dropped fields, ``confidence`` and ``topic_summary``, only."""
+def test_the_step_reply_format_departs_from_the_reference_skeleton_in_two_measured_ways_only() -> None:
+    """The reference run's skeleton with ``confidence`` and ``topic_summary`` dropped and ``reasoning`` reworded."""
     reference = _OLD_STEP_PROMPT.split("Please return your judgment in JSON format:\n{\n", 1)[1].split("\n}", 1)[0]
     reasoning, should_end, *dropped = reference.splitlines()
+    capped = (
+        '    "reasoning": "One sentence of at most 25 words saying whether the newly added dialogue starts a new '
+        'episode, and why",'
+    )
 
-    assert _block("step", "reply_format").splitlines()[2:] == [reasoning, should_end.rstrip(","), "}"]
+    assert reasoning == '    "reasoning": "One sentence summary of your reasoning process",'
+    assert _block("step", "reply_format").splitlines()[2:] == [capped, should_end.rstrip(","), "}"]
     assert [line.split(":", 1)[0].strip() for line in dropped] == ['"confidence"', '"topic_summary"']
 
 
