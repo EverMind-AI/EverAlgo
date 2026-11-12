@@ -234,7 +234,7 @@ class _ClientError(Exception):
 @pytest.mark.parametrize(
     ("reply", "failing_location"),
     [
-        pytest.param(f"not json {_SECRET}", "<root>", id="not-json"),
+        pytest.param(f"boundaries: [1 {_SECRET}", "<root>", id="not-json"),
         pytest.param(
             json.dumps({"reasoning": _SECRET, "boundaries": "not-a-list"}),
             "boundaries:",
@@ -292,6 +292,27 @@ async def test_client_exception_propagates_unchanged() -> None:
         await adetect_batch(_dialogue(2), llm=FakeLLMClient(responses=[error]))
 
     assert excinfo.value is error
+
+
+async def test_plain_text_response_falls_back_to_empty_boundaries() -> None:
+    """Non-JSON plain-text response explicitly indicating no boundary falls back to empty boundaries."""
+    msgs = _dialogue(2)
+    fake = FakeLLMClient(responses=["No boundaries found; single episode continues."])
+
+    cuts = await adetect_batch(msgs, llm=fake)
+
+    assert cuts == Cuts(ends=[], tail_start=0)
+
+
+async def test_windows_backslash_in_batch_boundary_json_sanitized() -> None:
+    r"""Unescaped Windows backslash in reasoning field is sanitized rather than failing JSON validation."""
+    msgs = _dialogue(3)
+    win = r'{"reasoning": "edited C:\Users\test\file.py", "boundaries": [2]}'
+    fake = FakeLLMClient(responses=[win])
+
+    cuts = await adetect_batch(msgs, llm=fake)
+
+    assert cuts == Cuts(ends=[2], tail_start=2)
 
 
 # ===========================================================================
