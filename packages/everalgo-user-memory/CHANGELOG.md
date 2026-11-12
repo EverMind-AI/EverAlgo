@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Episode-path profile calls work under strict structured outputs (`response_format_mode="json_schema"`). The reply-only fields of INIT and UPDATE (`pattern`, `pending`, `quote`, `regular`, and on `forget`, `allow` and `do_not_record` entries `quote`, `pending`, `evidence`, `matter`, `part`) were untyped in the schema, which OpenAI refuses with a 400 (`schema must have a 'type' key`), so every 0.9.0rc6 Episode INIT and UPDATE call failed there. Their schema now declares the type the prompt asks for, nullable; validation still accepts any value, so a stray one is dropped by the item checks as before.
+
 ### Added
 
 - Episode-path do-not-record withdrawal: an UPDATE `allow` operation (`{"action": "allow", "matter": <index>, "quote"}`, optionally with `"part"`) takes a listed matter off the list, or allows a part of it as the entry's `except`. It is accepted only when its index names an entry shown to that pass and its quote is found in a narrative later than the request; within one reply requests are applied first, so whichever was said later stands.
