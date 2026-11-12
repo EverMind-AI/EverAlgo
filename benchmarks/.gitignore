@@ -7,7 +7,15 @@ results/*
 # reproduction note (REPRODUCTION.md) are committed. Everything else stays gitignored —
 # re-run from source to regenerate (eval_results.json + stage intermediate outputs).
 #
-# CURRENT canonical: 7-stage pipeline, 93.51% majority-vote / 93.33% mean-of-runs (1440/1540).
+# CURRENT canonical: 7-stage pipeline on c073a97, 94.94% majority-vote / 94.78% mean-of-runs (1462/1540).
+!results/locomo-94.94
+results/locomo-94.94/*
+!results/locomo-94.94/report.txt
+!results/locomo-94.94/report.json
+!results/locomo-94.94/profile.json
+!results/locomo-94.94/REPRODUCTION.md
+#
+# HISTORICAL: 7-stage pipeline, 93.51% majority-vote / 93.33% mean-of-runs (1440/1540).
 # Peak of 4 runs (4-run mean 92.95%); see its REPRODUCTION.md for the reproducibility caveats.
 !results/locomo-93.51
 results/locomo-93.51/*
