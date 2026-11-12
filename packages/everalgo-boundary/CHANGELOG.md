@@ -6,8 +6,13 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
+Shorter replies on both paths, and the core floor below, on top of 0.5.0rc1; see the 0.5.0rc1 entry for the changes since 0.4.2.
+
 ### Changed
 
+- The minimum `everalgo-core` version is now `0.7.0`, the final release of the core 0.5.0rc1 required (`>=0.7.0rc1`). A floor that names a pre-release lets a resolver pick a core release candidate; this one does not.
 - The batch prompt asks for a one-sentence `reasoning` and asks it the right question. The role sentence asks whether each message starts a new episode (it asked whether one "should end the current episode and start a new one"), and `<reply_format>` shows `{"reasoning": "One sentence of at most 25 words naming the label of each message that starts a new episode, or none, and why", "boundaries": []}` instead of `{"reasoning": "A brief summary of your reasoning process", "boundaries": [7, 15]}`. Uncapped, the reasoning walked through every analysis aspect: a median of 299 output tokens per batch call for qwen3-4b-instruct-2507 and 108 for gpt-4.1-mini on 33 windows (14 production windows and the 19 sessions of LoCoMo conversation 0); now a median of 38–78 and 31–39 across the gold sets' feeds. The cap alone moved the small model's cuts: its one-sentence reasoning rarely named a label, and it often listed the message that ends an episode, which the old role sentence allows. Once the reasoning named labels, gpt-4.1-mini copied the example's `[7, 15]` into windows with no new episode. Asking about starts, naming the start labels and showing `[]` put the cuts back. Fed one message per call, qwen3-4b cut 22 of 23 Muggle runs exactly (0.5.0rc1: 21, and 17 on a second run) and got 24 of 39 production-window calls right (22 and 23); gpt-4.1-mini cut 23 of 23 (23) and got 21 of 39 (14). Fed a whole run per call, qwen3-4b over-cut Muggle 11 times against 1, each time at the run's closing `Summary:` message, and gpt-4.1-mini missed 4 more cuts with a whole run or a whole case per call. On LoCoMo end to end (three runs each, gpt-4.1-mini, batch path, one flush at the end of each conversation, everything else as in EverOS's benchmark at the same commit) the score did not change measurably: −0.15 points on the re-judged answers (95% CI [−0.87, +0.52]) and −0.02 on the original ones, with about a quarter fewer cells (321 against 437 per run on average).
 - The step prompt asks the same question. Its role sentence asks whether the newly added dialogue starts a new episode (the reference run's asked whether it "should end the current episode and start a new one"), and `<reply_format>` asks for `reasoning` as "One sentence of at most 25 words saying whether the newly added dialogue starts a new episode, and why" instead of "One sentence summary of your reasoning process"; `should_end` keeps its name and meaning, and the rule sentences are unchanged. With prompt-only replies, output tokens per step call fell to a median of 41 for qwen3-4b-instruct-2507 and 39 for gpt-4.1-mini (80 and 43 before), and the step decisions on the gold sets stayed within noise of 0.5.0rc1. On LoCoMo end to end (three runs, gpt-4.1-mini, step path, prompt-only boundary replies, everything else as in EverOS's benchmark at the same commit) it scored 94.03% on the re-judged answers, +0.37 points against the batch path of 0.5.0rc1 (95% CI [−0.28, +1.04]); no step-path run of 0.5.0rc1 was made under the same conditions.
 
@@ -173,7 +178,8 @@ Promotes 0.4.0rc5 unchanged apart from the core floor below; see the release-can
 
 - 5-retry loop in the internal `_detect_boundaries` helper: the function now raises `ValueError` immediately on malformed LLM JSON instead of silently retrying.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.5.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.5.0...HEAD
+[0.5.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.5.0rc1...everalgo-boundary/v0.5.0
 [0.5.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2...everalgo-boundary/v0.5.0rc1
 [0.4.2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.2rc0...everalgo-boundary/v0.4.2
 [0.4.2rc0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-boundary/v0.4.1...everalgo-boundary/v0.4.2rc0
