@@ -1,6 +1,8 @@
 # LoCoMo Benchmark Reproduction Guide
 
-EverAlgo on the [LoCoMo](https://github.com/silin159/locomo) long-conversation benchmark: **93.51%** majority-vote accuracy (1440/1540), on the current **7-stage** pipeline. This supersedes the historical 5-stage `locomo-93.05` run as the current canonical reference.
+> **Historical.** Superseded by `locomo-94.94` as the current reference.
+
+EverAlgo on the [LoCoMo](https://github.com/silin159/locomo) long-conversation benchmark: **93.51%** majority-vote accuracy (1440/1540), on the **7-stage** pipeline. This superseded the historical 5-stage `locomo-93.05` run.
 
 ## Quick Start — Full Run from Scratch
 

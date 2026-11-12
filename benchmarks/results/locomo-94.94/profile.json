@@ -1,0 +1,26 @@
+{
+  "search": {
+    "duration_seconds": 1006.1141033330932,
+    "prompt_tokens": 4241690,
+    "completion_tokens": 269067,
+    "http_calls": 0,
+    "success": 1540,
+    "failed": 0
+  },
+  "answer": {
+    "duration_seconds": 414.1389507080894,
+    "prompt_tokens": 5566061,
+    "completion_tokens": 808042,
+    "http_calls": 0,
+    "success": 1540,
+    "failed": 0
+  },
+  "evaluate": {
+    "duration_seconds": 179.60728591587394,
+    "prompt_tokens": 2157135,
+    "completion_tokens": 179185,
+    "http_calls": 0,
+    "success": 1460,
+    "failed": 80
+  }
+}
