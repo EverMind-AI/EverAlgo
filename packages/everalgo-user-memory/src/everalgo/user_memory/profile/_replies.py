@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import Field, WithJsonSchema
 
 from everalgo.llm import LLMMessage, LLMOutputError, StrictOutputModel, parse_reply
 
@@ -42,6 +42,21 @@ class _ImplicitTrait(StrictOutputModel):
 # §2.2): the evaluated replies leave them out now and then, and a required field would fail the whole reply where the
 # checks only drop the one item (a missing quote counts as not found). None of them is stored
 # (``_merge._REPLY_ONLY_FIELDS``). COMPACT, REGROUP and the MemCell path keep the plain items.
+#
+# They stay ``Any`` to validation, so a stray value (an index written as "0", a list of quotes) reaches the checks,
+# which drop the one item, instead of failing the reply. Their schema still declares the type the prompt asks for:
+# strict structured outputs refuse an untyped value schema with a 400 ("schema must have a 'type' key").
+
+
+def _nullable(schema: dict[str, Any]) -> WithJsonSchema:
+    """The schema of an optional reply-only field: ``schema``, or ``null`` when the reply leaves it out."""
+    return WithJsonSchema({"anyOf": [schema, {"type": "null"}]})
+
+
+_Flag = Annotated[Any, _nullable({"type": "boolean"})]
+_Index = Annotated[Any, _nullable({"type": "integer"})]
+_Indices = Annotated[Any, _nullable({"type": "array", "items": {"type": "integer"}})]
+_Text = Annotated[Any, _nullable({"type": "string"})]
 
 
 class _EpisodeExplicitItem(StrictOutputModel):
@@ -50,10 +65,10 @@ class _EpisodeExplicitItem(StrictOutputModel):
     evidence: str
     description: str
     category: str
-    pattern: Any = None
-    pending: Any = None
-    quote: Any = None
-    regular: Any = None
+    pattern: _Flag = None
+    pending: _Index = None
+    quote: _Text = None
+    regular: _Text = None
 
 
 class _EpisodeImplicitTrait(StrictOutputModel):
@@ -62,10 +77,10 @@ class _EpisodeImplicitTrait(StrictOutputModel):
     basis: str
     description: str
     trait: str
-    pattern: Any = None
-    pending: Any = None
-    quote: Any = None
-    regular: Any = None
+    pattern: _Flag = None
+    pending: _Index = None
+    quote: _Text = None
+    regular: _Text = None
 
 
 class _ProfileItems(StrictOutputModel):
@@ -179,9 +194,9 @@ class _EpisodeForgetOp(StrictOutputModel):
 
     action: Literal["forget"]
     topic: str
-    quote: Any = None
-    pending: Any = None
-    evidence: Any = None
+    quote: _Text = None
+    pending: _Indices = None
+    evidence: _Text = None
 
 
 class _AllowOp(StrictOutputModel):
@@ -192,17 +207,17 @@ class _AllowOp(StrictOutputModel):
     """
 
     action: Literal["allow"]
-    matter: Any = None
-    part: Any = None
-    quote: Any = None
+    matter: _Index = None
+    part: _Text = None
+    quote: _Text = None
 
 
 class _DoNotRecordEntry(StrictOutputModel):
     """A matter this person asked not to be recorded, as the Episode INIT reply lists it: ``{"topic", "quote"}``."""
 
     topic: str
-    quote: Any = None
-    evidence: Any = None
+    quote: _Text = None
+    evidence: _Text = None
 
 
 class _EpisodeInitOutput(StrictOutputModel):
@@ -242,7 +257,7 @@ class _ConfirmOp(StrictOutputModel):
 
     action: Literal["confirm"]
     bucket: _Bucket | None = Field(default=None, alias="type")
-    pending: Any = None
+    pending: _Index = None
     data: _EpisodeExplicitItem | _EpisodeImplicitTrait
 
 

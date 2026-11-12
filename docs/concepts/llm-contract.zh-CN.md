@@ -285,7 +285,7 @@ check_business_rules(output)                       # 不过 → 抛 LLMOutputErr
 | **prompt 写明输出 JSON，并给可解析的示例** | 模型要靠 prompt 才知道该输出什么；实现方若不发格式参数，prompt 就是唯一的约束。发 JSON 模式时也必须写：openai SDK 2.35.1 的参数说明（`openai/types/beta/assistant_create_params.py:93-99`）要求另外在消息里让模型输出 JSON，否则模型可能输出 "unending stream of whitespace" 直到撞上 token 上限 | 渲染后的 prompt 含格式说明；示例能被对应模型 `model_validate_json` 通过 |
 | **模型只写结构约束** | 2.2 | 模型上没有自定义校验器 |
 | **模型（含嵌套子模型）继承 `StrictOutputModel`，字段不设默认值；例外须有意为之** | 2.2：否则算子拿到的东西随实现方的手段变化 | 遍历每个 `response_format` 模型及其全部子模型，断言都是 `StrictOutputModel` 的子类、没有字段带默认值；有例外的算子，单测覆盖「只靠 prompt」路径 |
-| **模型顶层是 object，且落在 strict 子集内** | 2.2 / 8.2 | 对每个 `response_format` 模型跑 `to_openai_response_format`，不抛错 |
+| **模型顶层是 object，且落在 strict 子集内** | 2.2 / 8.2 | 对每个 `response_format` 模型跑 `to_openai_response_format`，不抛错，且 schema 里每个值都声明了类型（`tests/test_reply_schemas.py`：没有类型的 `Any` 字段能通过构造函数，却会被上游拒收） |
 | **自己解析，失败与业务校验不过都抛 `LLMOutputError`，不抛裸 `ValueError`，不自行重试** | 4.1 / 第 5 节 | 算子单测 |
 | **实现方抛的异常原样透传，不包装、不改类型** | 宿主要靠自己的类型认出调用失败（2.5）。明确的降级点可以接住异常，但必须是有意为之 | 算子单测：替身抛一个自定义异常，断言它原样冒出来 |
 
