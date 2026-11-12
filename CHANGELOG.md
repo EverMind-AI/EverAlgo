@@ -13,14 +13,25 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 
 | Distribution | Version | Changelog |
 |---|---|---|
-| `everalgo-core` | 0.7.0rc1 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
-| `everalgo-boundary` | 0.5.0rc1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
+| `everalgo-core` | 0.7.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
+| `everalgo-boundary` | 0.5.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc5 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
 | `everalgo-user-memory` | 0.9.0rc8 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc4 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Coordinated release — 2026-11-13 (core 0.7.0, boundary 0.5.0)
+
+Two distributions leave release candidate: `everalgo-core` 0.7.0rc1 becomes 0.7.0 unchanged, and `everalgo-boundary` becomes 0.5.0. Boundary's reply is shorter on both paths. Both role sentences ask whether a message starts a new episode, and `reasoning` is one sentence of at most 25 words, which cuts the median batch reply from 299 to 38–78 output tokens on qwen3-4b-instruct-2507. On LoCoMo the score is unchanged within noise. Boundary's core floor is raised from `>=0.7.0rc1` to the final `>=0.7.0`, so a resolver no longer picks a core release candidate for it. The other six distributions have no change and keep their versions; their core floors (`>=0.7.0rc1` for agent-memory, rank and user-memory) and boundary floors (`>=0.5.0rc1` for agent-memory and user-memory) are already met by these releases.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-core` | 0.7.0 | 0.7.0rc1 promoted unchanged |
+| `everalgo-boundary` | 0.5.0 | shorter replies on both paths; core floor `>=0.7.0` |
+
+Detail in [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) and [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md).
 
 ## [everalgo-user-memory/0.9.0rc8] - 2026-11-12
 

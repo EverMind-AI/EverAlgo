@@ -7,7 +7,7 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Install
 
 ```bash
-pip install everalgo-boundary==0.5.0rc1
+pip install everalgo-boundary==0.5.0
 ```
 
 [`everalgo-user-memory`](../everalgo-user-memory/) and [`everalgo-agent-memory`](../everalgo-agent-memory/) both depend on this package and re-export `BoundaryDetector`, `Cuts` and `to_memcells` unchanged.
