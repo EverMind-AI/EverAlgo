@@ -226,7 +226,15 @@ The returned `pending` is the whole list as it now stands: an empty list means e
 
 ## Do-not-record list
 
-INIT's reply has a required `do_not_record` field, and UPDATE a `forget` operation (`{"action": "forget", "topic", "evidence"}`), naming a matter the person asked not to be recorded. The matters are kept as the profile's `do_not_record` extra, `[{"topic", "evidence", "observed_at"}]`, oldest first, and every UPDATE shows their topics as `<matter>` elements in `<do_not_record>`; the rules keep any item about a listed matter out of the profile in any wording and remove one already stored. The list only grows: the program has no operation that takes a matter off it.
+INIT's reply has a required `do_not_record` field, `[{"topic", "quote"}]` (empty when there is none), and UPDATE a `forget` operation, `{"action": "forget", "topic", "quote"}` with an optional `"pending": [<index>]`, naming a matter the person asked not to be recorded and the words of the request copied from one narrative of the batch. With the item checks on, a matter enters only when the program finds its quote, dated by the narrative holding it; a topic already listed is not added again and its date moves to the newer request. Entering a matter drops the pending entries the operation names and those whose description holds the topic.
+
+The matters are kept as the profile's `do_not_record` extra, oldest first: `[{"topic", "observed_at"}]`, an entry with allowed parts carrying `"except": [{"topic", "observed_at"}]`. An entry stored with `evidence`, as earlier versions kept it, is read without it, and its topic is masked for account numbers. Every UPDATE shows the list in `<do_not_record>` as `<matter index="i" since="...">topic<except>part</except></matter>`, `since` in `tz` and left out for an undated entry; the rules keep any item directly about a listed matter out of the profile until the person withdraws it, and delete one already stored.
+
+An UPDATE `allow` operation, `{"action": "allow", "matter": <index>, "quote"}` with an optional `"part"`, withdraws a listed matter. It is accepted only when its index names an entry shown to that pass and its quote is found in a narrative later than the entry's date, so an older narrative arriving late never lifts a newer request; within one reply the requests are applied first, so whichever was said later stands. A whole withdrawal removes the entry and leaves no trace. A `part` is added to the entry's `except` and the rest stays listed; a newer request for that part takes the exception back.
+
+Entries never expire. When a call leaves the list longer than it started and past 30 entries, the extractor makes one more model call, shown only the entries without exceptions, that names redundant ones: the same matter in other words (`same`) or wholly inside a wider entry already listed (`inside`). The program removes them and keeps the remaining entry word for word, dated by the newest of those merged, so the list never keeps out more than the person asked. An invalid merge reply leaves the list as it is; a list still past 30 entries is kept whole and logged as `profile do-not-record over cap`.
+
+The returned `do_not_record` is the whole list as it now stands. It is returned when it is not empty or when `old_profile` carried the field, so an empty list means every matter was withdrawn: the host replaces the stored list with it, since keeping or merging the old value would go on keeping out what the person allowed.
 
 ## Identification numbers
 
@@ -248,7 +256,7 @@ The method raises `InvalidInputError` (a `ValueError` subclass, from `everalgo.u
 - `old_profile.owner_id` differs from `owner_id`; or
 - `output_language` is unsupported.
 
-The method raises `LLMOutputError` (from `everalgo.llm`) when an LLM reply is not a valid output of its stage: not parseable JSON, or not the INIT, UPDATE, COMPACT or REGROUP shape — an INIT reply without `do_not_record` included. Its message names each failing location, never the reply's content. An operation whose item is shaped for the other bucket (an UPDATE add or update whose `data` does not match its `type`, a COMPACT or REGROUP operation on the other bucket) is not an error: it is dropped alone with a warning and the rest of the reply applies.
+The method raises `LLMOutputError` (from `everalgo.llm`) when an LLM reply is not a valid output of its stage: not parseable JSON, or not the INIT, UPDATE, COMPACT or REGROUP shape — an INIT reply without `do_not_record` included. Its message names each failing location, never the reply's content. A do-not-record merge reply that is not valid raises nothing: the list is left as it is. An operation whose item is shaped for the other bucket (an UPDATE add or update whose `data` does not match its `type`, a COMPACT or REGROUP operation on the other bucket) is not an error: it is dropped alone with a warning and the rest of the reply applies.
 
 Exceptions raised by the injected LLM client propagate unchanged.
 
@@ -325,7 +333,7 @@ The EverOS integration is ready when all of the following are covered by tests:
 - Duplicate Episode IDs are removed upstream before the batch is built.
 - Only Episodes not yet consumed by the stored profile are passed, and the watermark advances only after the returned Profile is persisted.
 - The persisted Profile round-trips `timestamp` and every item's `observed_at` unchanged into the next call's `old_profile`.
-- The persisted Profile round-trips the `do_not_record` and `pending` extras into the next call's `old_profile`; a returned empty `pending` replaces the stored list, and neither extra is shown to the end user.
+- The persisted Profile round-trips the `do_not_record` and `pending` extras into the next call's `old_profile`; a returned empty `do_not_record` or `pending` replaces the stored list, and neither extra is shown to the end user.
 - Deleting or exporting a profile deletes or exports its `do_not_record` and `pending` with it.
 - An Episode observed before the stored state adds facts but leaves later-established items' descriptions in place, and `Profile.timestamp` does not move backwards.
 - Two owners fanned out from one generic Episode are extracted in separate calls and produce separately owned Profiles.

@@ -1,8 +1,8 @@
 """Checks that the ``everalgo.user_memory.profile`` package keeps the layout its docstring describes.
 
 - Its modules import one another in one direction only: ``_extractor`` over ``_stages``, ``_replies``, ``_render``,
-  ``_pending``, ``_compact_ops`` and ``_merge``; ``_stages`` over ``_replies``; ``_compact_ops`` and ``_pending`` over
-  ``_merge`` and ``_items``;
+  ``_do_not_record``, ``_pending``, ``_compact_ops`` and ``_merge``; ``_stages`` over ``_replies``; ``_do_not_record``
+  over ``_pending`` and ``_merge``; ``_compact_ops`` and ``_pending`` over ``_merge`` and ``_items``;
   ``_render`` and ``_merge`` over ``_items`` alone, never each other.
 - Every logger in the package is the package's own, the name hosts collect the log contract under.
 
@@ -22,10 +22,14 @@ _PACKAGE_DIR = Path(profile_package.__file__).parent
 #: The sibling modules each module may import; ``__init__`` re-exports from ``_extractor`` only.
 _ALLOWED_SIBLINGS: dict[str, frozenset[str]] = {
     "__init__": frozenset({"_extractor"}),
-    "_extractor": frozenset({"_stages", "_replies", "_render", "_pending", "_compact_ops", "_merge", "_items"}),
+    "_extractor": frozenset(
+        {"_stages", "_replies", "_render", "_do_not_record", "_pending", "_compact_ops", "_merge", "_items"}
+    ),
     "_stages": frozenset({"_replies"}),
     # COMPACT and REGROUP operations, applied with _merge's item models, scrub and dedupe.
     "_compact_ops": frozenset({"_merge", "_items"}),
+    # The do-not-record list, its quotes found as _pending finds an item's and its topics masked by _merge.
+    "_do_not_record": frozenset({"_pending", "_merge"}),
     # The Episode item checks (quote, pending patterns), held entries passing _merge's scrub.
     "_pending": frozenset({"_merge", "_items"}),
     "_replies": frozenset(),

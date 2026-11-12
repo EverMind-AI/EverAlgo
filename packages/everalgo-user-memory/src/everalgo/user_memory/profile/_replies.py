@@ -152,10 +152,10 @@ class _DeleteOp(StrictOutputModel):
 
 
 class _ForgetOp(StrictOutputModel):
-    """Episode UPDATE ``forget`` operation: this person asked that the matter ``topic`` not be recorded.
+    """A ``forget`` operation as the MemCell UPDATE reply would parse one: ``{"action", "topic", "evidence"}``.
 
-    It names no stored item and has no ``type``. The extractor adds the matter to the profile's do-not-record list,
-    which every later UPDATE shows the model; the stored items about it are removed by the reply's own deletes.
+    The MemCell prompt asks for none and keeps no do-not-record list; one that arrives is refused by the merge as an
+    op without a ``type``. The Episode path's is :class:`_EpisodeForgetOp`.
     """
 
     action: Literal["forget"]
@@ -163,11 +163,46 @@ class _ForgetOp(StrictOutputModel):
     evidence: str
 
 
+# ``quote`` on a matter, like the reply-only fields of an item above, is optional so that a reply leaving it out loses
+# the one matter (a missing quote counts as not found) instead of failing whole. ``evidence`` is what the reply carried
+# before ``quote``; it is still accepted, and ignored.
+
+
+class _EpisodeForgetOp(StrictOutputModel):
+    """Episode UPDATE ``forget`` operation: this person asked that the matter ``topic`` not be recorded from now on.
+
+    It names no stored item and has no ``type``. ``quote`` is the request in the narrative's words and ``pending`` the
+    ``<pending_patterns>`` entries about the matter. The extractor adds the matter to the profile's do-not-record
+    list when it finds the quote (``_do_not_record.enter_matters``); the stored items about it are removed by the
+    reply's own deletes.
+    """
+
+    action: Literal["forget"]
+    topic: str
+    quote: Any = None
+    pending: Any = None
+    evidence: Any = None
+
+
+class _AllowOp(StrictOutputModel):
+    """Episode UPDATE ``allow`` operation: this person withdrew the request listed at index ``matter``.
+
+    ``quote`` is the withdrawal in the narrative's words. With ``part`` only that part of the matter is allowed again
+    and the rest stays listed (``_do_not_record.withdraw_matters``).
+    """
+
+    action: Literal["allow"]
+    matter: Any = None
+    part: Any = None
+    quote: Any = None
+
+
 class _DoNotRecordEntry(StrictOutputModel):
-    """A matter this person asked not to be recorded, as the Episode INIT reply lists it: ``{"topic", "evidence"}``."""
+    """A matter this person asked not to be recorded, as the Episode INIT reply lists it: ``{"topic", "quote"}``."""
 
     topic: str
-    evidence: str
+    quote: Any = None
+    evidence: Any = None
 
 
 class _EpisodeInitOutput(StrictOutputModel):
@@ -220,9 +255,11 @@ class _NoneOp(StrictOutputModel):
 # Shared by both UPDATE replies. Only the Episode prompt asks for ``forget``; on the MemCell path one would parse and
 # then be refused by the merge as an op without a ``type``.
 _Operation = Annotated[_AddOp | _UpdateOp | _DeleteOp | _ForgetOp | _NoneOp, Field(discriminator="action")]
-# The Episode UPDATE reply also takes ``confirm``; the MemCell prompt has no pending list.
+# The Episode UPDATE reply also takes ``confirm`` and ``allow``; the MemCell prompt has no pending list and no
+# do-not-record list.
 _EpisodeOperation = Annotated[
-    _EpisodeAddOp | _EpisodeUpdateOp | _DeleteOp | _ForgetOp | _NoneOp | _ConfirmOp, Field(discriminator="action")
+    _EpisodeAddOp | _EpisodeUpdateOp | _DeleteOp | _EpisodeForgetOp | _AllowOp | _NoneOp | _ConfirmOp,
+    Field(discriminator="action"),
 ]
 
 
@@ -285,6 +322,25 @@ class _RegroupOpsOutput(StrictOutputModel):
     """REGROUP reply on the Episode path: operations on the group's indexed items."""
 
     operations: list[_RegroupOperation]
+
+
+class _MatterMergeOp(StrictOutputModel):
+    """One merge of the do-not-record list: the entries at ``drop`` are redundant beside the entry at ``keep``.
+
+    ``relation`` says how: ``same`` or ``inside``. Its value is read after parsing
+    (``_do_not_record.apply_merge_ops``), so a merge of any other kind is refused alone and the reply's other merges
+    still apply.
+    """
+
+    keep: int
+    drop: list[int]
+    relation: str
+
+
+class _MatterMergeOutput(StrictOutputModel):
+    """Reply of the do-not-record merge call: the merges to make, an empty list when no entry is redundant."""
+
+    operations: list[_MatterMergeOp]
 
 
 # Each path validates against its own models, repeated rather than extended (docs/concepts/llm-contract.md §2.2).
@@ -365,6 +421,17 @@ async def _call_llm_for_profile_regroup[ReplyT: _AnyRegroupOutput](
     if not isinstance(output, _RegroupOpsOutput):
         _check_item_shapes(output, bucket=bucket)
     return output.model_dump(by_alias=True)
+
+
+async def _call_llm_for_do_not_record_merge(llm: LLMClient, messages: list[LLMMessage]) -> list[dict[str, Any]]:
+    """Request the do-not-record merge reply and return its operations, validated and dumped to dicts.
+
+    Raises:
+        LLMOutputError: If the reply is not a valid merge output.
+    """
+    text = await llm.achat(messages=messages, response_format=_MatterMergeOutput)
+    output = parse_reply(_MatterMergeOutput, text, operator="profile do-not-record merge")
+    return [op.model_dump() for op in output.operations]
 
 
 def _check_item_shapes(output: _RegroupOutput | _MemCellRegroupOutput, *, bucket: str) -> None:

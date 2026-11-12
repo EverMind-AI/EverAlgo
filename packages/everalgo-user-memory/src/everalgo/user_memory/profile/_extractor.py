@@ -9,8 +9,17 @@ from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
+from everalgo.llm import LLMOutputError
 from everalgo.user_memory._language import OutputLanguage, resolve_output_language
 from everalgo.user_memory.profile._compact_ops import apply_compact_ops
+from everalgo.user_memory.profile._do_not_record import (
+    DO_NOT_RECORD_MAX_ENTRIES,
+    apply_merge_ops,
+    enter_matters,
+    load_matters,
+    mergeable,
+    withdraw_matters,
+)
 from everalgo.user_memory.profile._items import (
     _ITEM_WIDTH_BACKSTOP,
     _LABEL_FIELDS,
@@ -26,7 +35,6 @@ from everalgo.user_memory.profile._merge import (
     _apply_ops,
     _dedupe,
     _identity_key,
-    _mask_account_numbers,
     _overcrowded_labels,
     _profile_from_buckets,
     _stored_items,
@@ -58,6 +66,7 @@ from everalgo.user_memory.profile._render import (
 from everalgo.user_memory.profile._replies import (
     _AnyCompactOutput,
     _AnyRegroupOutput,
+    _call_llm_for_do_not_record_merge,
     _call_llm_for_profile_compact,
     _call_llm_for_profile_init,
     _call_llm_for_profile_regroup,
@@ -75,12 +84,13 @@ from everalgo.user_memory.profile._stages import (
     _MEMCELL_REGROUP,
     _MEMCELL_UPDATE,
     _StagePrompts,
+    render_do_not_record_merge,
 )
 from everalgo.user_memory.prompts.en.profile_from_episode_texts import REGROUP_REPLY_SKELETONS
 from everalgo.utils import InvalidInputError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Sequence
     from datetime import tzinfo
 
     from everalgo.llm.protocols import LLMClient
@@ -98,52 +108,14 @@ class _EpisodeLists:
     every stage it runs, and writes them back onto the returned Profile. The MemCell path has neither.
 
     Attributes:
-        do_not_record: The matters this person asked not to be recorded, each ``{"topic", "evidence",
-            "observed_at"}``; INIT and every UPDATE pass append the ones their reply names.
+        do_not_record: The matters this person asked not to be recorded, each ``{"topic", "observed_at"}`` plus the
+            parts since allowed (``_do_not_record``); INIT and every UPDATE pass add the matters their reply names,
+            and an UPDATE pass also takes off the ones withdrawn.
         pending: The pattern entries waiting for a later batch to repeat them (``_pending``).
     """
 
     do_not_record: list[dict[str, Any]] = field(default_factory=list)
     pending: list[dict[str, Any]] = field(default_factory=list)
-
-
-def _remember_matters(
-    do_not_record: list[dict[str, Any]], named: Iterable[Mapping[str, Any]], *, observed_at: int, source: str
-) -> None:
-    """Add the matters a reply names to the do-not-record list in place.
-
-    Each topic enters once: a topic already listed, or named earlier in the same reply, is skipped. Account numbers in
-    the topic and the evidence are masked as in an item's grounding (``_merge._mask_account_numbers``), and the
-    masked topic is what is compared and kept.
-
-    Args:
-        do_not_record: The list of the call in progress.
-        named: The reply's matters, each with ``topic`` and ``evidence``: INIT's ``do_not_record`` entries or
-            UPDATE's ``forget`` operations.
-        observed_at: The date every added matter takes, the newest narrative of the batch.
-        source: ``init`` or ``update``, naming the stage in the log line.
-    """
-    named = list(named)
-    if not named:
-        return
-    known = {_mask_account_numbers(entry["topic"]) for entry in do_not_record}
-    added = 0
-    for matter in named:
-        topic = _mask_account_numbers(matter["topic"])
-        if topic in known:
-            continue
-        known.add(topic)
-        do_not_record.append(
-            {"topic": topic, "evidence": _mask_account_numbers(matter["evidence"]), "observed_at": observed_at}
-        )
-        added += 1
-    logger.info(
-        "profile do-not-record updated: source=%s named=%d added=%d matters=%d",
-        source,
-        len(named),
-        added,
-        len(do_not_record),
-    )
 
 
 class ProfileExtractor:
@@ -288,8 +260,12 @@ class ProfileExtractor:
         propagate unchanged.
 
         The profile keeps a do-not-record list: the matters this person asked not to be recorded, as INIT's
-        ``do_not_record`` field and UPDATE's ``forget`` operations name them. Every UPDATE shows the list to the model,
-        whose rules keep any item about a listed matter out of the profile.
+        ``do_not_record`` field and UPDATE's ``forget`` operations name them, each kept only when the program finds
+        the quoted request in the batch's narratives. Every UPDATE shows the list to the model, whose rules keep any
+        item about a listed matter out of the profile. A matter leaves the list, whole or in part, when an UPDATE's
+        ``allow`` operation quotes a withdrawal from a narrative later than the request; it never expires. A list
+        that a call leaves longer than before and past 30 entries gets one extra call that removes redundant entries
+        (``_do_not_record``); no entry is ever dropped for the cap.
 
         Every item the model writes carries a quote the program finds in the batch's narratives, or it is dropped; an
         item claiming a standing pattern (a habit, preference, way of working, trait) is written at once only when its
@@ -304,7 +280,8 @@ class ProfileExtractor:
                 ``owner_id``.
             old_profile: Existing profile for UPDATE; None for INIT. Its ``do_not_record`` extra field, when present,
                 is the do-not-record list so far, and its ``pending`` extra field the pending pattern entries; the
-                host persists both with the profile and passes them back unchanged.
+                host persists both with the profile, replacing the stored field with the returned one each time, and
+                passes them back unchanged.
             categories: Complete current category snapshot for ``explicit_info``, stripped, blanks ignored and
                 exact duplicates removed in first-seen order. None or empty lets the model coin categories. It
                 does not constrain ``implicit_traits.trait``.
@@ -319,8 +296,9 @@ class ProfileExtractor:
         Returns:
             The extracted or updated Profile. ``Profile.timestamp`` is the newest observation date seen so far and
             never moves backwards; every item carries ``observed_at``, the observation date of the narrative that
-            last established its description. When the do-not-record list is not empty it is the extra field
-            ``do_not_record``: a list of ``{"topic", "evidence", "observed_at"}``, oldest first. When the pending
+            last established its description. When the do-not-record list is not empty, or ``old_profile`` carried
+            one, it is the extra field ``do_not_record``: a list of ``{"topic", "observed_at"}``, oldest first, an
+            entry with parts since allowed also carrying ``"except"``, a list of the same shape. When the pending
             list is not empty, or ``old_profile`` carried one, it is the extra field ``pending``: a list of held items,
             each its item fields plus ``bucket`` and ``observed_at``, oldest first, at most 30 once an UPDATE has run.
 
@@ -343,13 +321,14 @@ class ProfileExtractor:
         language = resolve_output_language(output_language)
 
         mode = "INIT" if old_profile is None else "UPDATE"
-        # A copy: the stages append to it, and the caller's stored profile stays as it was.
         stored_extra = (old_profile.model_extra or {}) if old_profile else {}
-        # Copies: the stages change them in place, and the caller's stored profile stays as it was.
+        # Copies, do_not_record in the current shape: the stages change them in place, and the caller's stored
+        # profile stays as it was.
         lists = _EpisodeLists(
-            do_not_record=list(stored_extra.get("do_not_record") or []),
+            do_not_record=load_matters(stored_extra.get("do_not_record")),
             pending=[dict(entry) for entry in stored_extra.get("pending") or []],
         )
+        matters_before = len(lists.do_not_record)
         logger.info(
             "extracting profile from Episodes: mode=%s, %d/%d matching episodes observed at ms %d..%d, "
             "existing explicit=%d implicit=%d, output_language=%s, categories=%d, custom_instructions=%d chars",
@@ -387,12 +366,16 @@ class ProfileExtractor:
                 tz=tz,
                 lists=lists,
             )
+        # Only a list this call left longer is merged: one that no safe merge shortened costs no call on every batch.
+        if len(lists.do_not_record) > max(matters_before, DO_NOT_RECORD_MAX_ENTRIES):
+            await self._merge_do_not_record(lists.do_not_record, target_user=target_user)
         # The stages build the Profile from its two buckets alone, so the lists are put back on it here. Only the
         # fields that were set are carried over, so an item field never set does not come back as an explicit None.
         extra: dict[str, Any] = {}
-        if lists.do_not_record:
+        # Both are written back even when emptied, so a host that keeps the stored field does not keep a withdrawn
+        # matter or a confirmed entry.
+        if lists.do_not_record or "do_not_record" in stored_extra:
             extra["do_not_record"] = lists.do_not_record
-        # Written back even when emptied, so a host that keeps the stored field does not keep confirmed entries.
         if lists.pending or "pending" in stored_extra:
             extra["pending"] = lists.pending
         if extra:
@@ -455,8 +438,8 @@ class ProfileExtractor:
 
         The reply's items pass the item checks first (``_pending.check_init_items``): an item whose quote is not
         found is dropped and an unrepeated pattern item goes onto ``lists.pending``. The reply's ``do_not_record``
-        matters join ``lists.do_not_record`` (``_remember_matters``), dated like the items; without new traits the
-        reply's ``implicit_traits`` are not kept.
+        matters join ``lists.do_not_record`` when their quote is found (``_do_not_record.enter_matters``), each dated
+        by the narrative holding it; without new traits the reply's ``implicit_traits`` are not kept.
         """
         messages = _EPISODE_INIT.render(
             custom_instructions=custom_instructions,
@@ -469,7 +452,14 @@ class ProfileExtractor:
         data = await _call_llm_for_profile_init(self._llm, messages, reply=_EPISODE_INIT.reply)
         data = check_init_items(data, episodes, lists.pending) if self._item_checks else unchecked_init_items(data)
         observed_at = episodes[-1].timestamp
-        _remember_matters(lists.do_not_record, data.get("do_not_record") or [], observed_at=observed_at, source="init")
+        enter_matters(
+            lists.do_not_record,
+            data.get("do_not_record") or [],
+            episodes,
+            source="init",
+            item_checks=self._item_checks,
+            pending=lists.pending,
+        )
         traits = data["implicit_traits"] if self._new_traits else []
         return _profile_from_buckets(
             owner_id=owner_id,
@@ -587,13 +577,14 @@ class ProfileExtractor:
         The model sees ``lists.do_not_record`` as ``<do_not_record>`` and ``lists.pending``, expired for this pass,
         as ``<pending_patterns>``. The reply's operations pass the item checks (``_pending.check_update_ops``), which
         turn ``confirm`` into ``add`` and hold or release pattern items. A ``forget`` operation adds its matter to the
-        list (``_remember_matters``), dated by the pass's newest narrative; it is taken out before the other
-        operations are merged, since it names no stored item.
+        list and drops the pending entries about it (``_do_not_record.enter_matters``); an ``allow`` takes a listed
+        matter, or a part of one, off the list (``_do_not_record.withdraw_matters``). Both are taken out before the
+        other operations are merged, since they name no stored item.
         """
         _expire_pending(lists.pending, episodes[-1].timestamp)
         messages = _EPISODE_UPDATE.render(
             custom_instructions=custom_instructions,
-            do_not_record=_render_do_not_record(lists.do_not_record),
+            do_not_record=_render_do_not_record(lists.do_not_record, tz=tz),
             pending=_render_pending(lists.pending, tz=tz),
             stored_profile=_render_profile_for_episode_update(old_profile, tz=tz),
             episode_texts=_render_episodes(episodes, tz=tz),
@@ -604,16 +595,34 @@ class ProfileExtractor:
 
         data = await _call_llm_for_profile_update(self._llm, messages, reply=_EPISODE_UPDATE.reply)
         stored = dict(zip(("explicit_info", "implicit_traits"), _dated_buckets(old_profile), strict=True))
+        # The lists as the model was shown them: the indices of its reply resolve against these.
+        shown_pending = list(lists.pending)
+        shown_matters = len(lists.do_not_record)
         operations = (
             check_update_ops(data["operations"], episodes, stored, lists.pending, tz=tz)
             if self._item_checks
             else unchecked_update_ops(data["operations"])
         )
-        forget = [op for op in operations if op.get("action") == "forget"]
-        _remember_matters(lists.do_not_record, forget, observed_at=episodes[-1].timestamp, source="update")
+        enter_matters(
+            lists.do_not_record,
+            [op for op in operations if op.get("action") == "forget"],
+            episodes,
+            source="update",
+            item_checks=self._item_checks,
+            pending=lists.pending,
+            shown_pending=shown_pending,
+        )
+        # After the requests: a request repeated later than a withdrawal in this batch then refuses it.
+        withdraw_matters(
+            lists.do_not_record,
+            [op for op in operations if op.get("action") == "allow"],
+            episodes,
+            item_checks=self._item_checks,
+            shown=shown_matters,
+        )
         merged_profile = _apply_ops(
             old_profile,
-            [op for op in operations if op.get("action") != "forget"],
+            [op for op in operations if op.get("action") not in ("forget", "allow")],
             timestamp=episodes[-1].timestamp,
             pass_name=pass_name,
             new_traits=self._new_traits,
@@ -629,6 +638,29 @@ class ProfileExtractor:
             available_categories=available_categories,
             tz=tz,
         )
+
+    async def _merge_do_not_record(self, do_not_record: list[dict[str, Any]], *, target_user: str) -> None:
+        """Ask the model which entries of a do-not-record list past its cap are redundant, and remove those, in place.
+
+        The model is shown the entries a merge may name (``_do_not_record.mergeable``) and replies with merges that
+        each keep one entry word for word (``_do_not_record.apply_merge_ops``). With fewer than two such entries no
+        call is made. A reply that is not a valid merge output leaves the list as it is: nothing is dropped for the
+        cap, and a list still past it afterwards is logged.
+        """
+        shown = mergeable(do_not_record)
+        operations: list[dict[str, Any]] = []
+        if len(shown) > 1:
+            messages = render_do_not_record_merge(
+                do_not_record=_render_do_not_record(do_not_record, only=shown, dated=False),
+                count=len(do_not_record),
+                cap=DO_NOT_RECORD_MAX_ENTRIES,
+                target_user=target_user,
+            )
+            try:
+                operations = await _call_llm_for_do_not_record_merge(self._llm, messages)
+            except LLMOutputError:
+                logger.warning("profile do-not-record merge reply invalid: matters=%d", len(do_not_record))
+        apply_merge_ops(do_not_record, operations)
 
     async def _maintain_updated_profile[CompactT: _AnyCompactOutput, RegroupT: _AnyRegroupOutput](
         self,

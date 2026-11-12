@@ -2334,6 +2334,10 @@ _OPTIONAL_REPLY_FIELDS = frozenset(
         for field in ("pattern", "pending", "quote", "regular")
     }
     | {("_ConfirmOp", "bucket"), ("_ConfirmOp", "pending")}
+    # A matter's quote is optional the same way: a missing one refuses the matter, not the reply.
+    | {("_EpisodeForgetOp", field) for field in ("quote", "pending", "evidence")}
+    | {("_AllowOp", field) for field in ("matter", "part", "quote")}
+    | {("_DoNotRecordEntry", field) for field in ("quote", "evidence")}
 )
 
 

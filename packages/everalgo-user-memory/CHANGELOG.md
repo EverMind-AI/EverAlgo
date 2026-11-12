@@ -6,6 +6,16 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Episode-path do-not-record withdrawal: an UPDATE `allow` operation (`{"action": "allow", "matter": <index>, "quote"}`, optionally with `"part"`) takes a listed matter off the list, or allows a part of it as the entry's `except`. It is accepted only when its index names an entry shown to that pass and its quote is found in a narrative later than the request; within one reply requests are applied first, so whichever was said later stands.
+- Do-not-record cap: when a call leaves the list longer than it started and past 30 entries, one more model call (reply `_MatterMergeOutput`) names redundant entries, `same` or `inside` a wider listed one, and the program removes them, rewording none and keeping the newest date; entries with exceptions take no part. An invalid reply leaves the list as it is, and a list still past 30 is kept whole and logged as `profile do-not-record over cap`.
+
+### Changed
+
+- **BREAKING:** do-not-record entries need a `quote` the program finds in the batch (INIT's `do_not_record` entries and UPDATE's `forget` are `{"topic", "quote"}`; `forget` may name `pending` entries), are dated by the narrative holding it, and are stored as `{"topic", "observed_at"}` plus `except`, without `evidence`; an entry stored with `evidence` is read without it and its topic masked for account numbers. The returned `do_not_record` is the whole list, returned even when emptied if `old_profile` carried the field: a host replaces the stored list with it.
+- Entering a do-not-record matter drops the pending entries about it, and a repeated topic takes the newer date. `<do_not_record>` shows each entry's index and request time (in `tz=`) and its exceptions. The UPDATE rules say once that a listed matter stays out until withdrawn, delete only stored items directly about it, and leave out a matter asked to be skipped this time without listing it, as well as requests made on the person's behalf or in jest.
+
 ## [0.9.0rc6] - 2026-11-12
 
 ### Added
