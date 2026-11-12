@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0rc8] - 2026-11-12
+
 ### Fixed
 
 - Episode-path INIT and UPDATE no longer stall under strict structured outputs. Their reply skeletons and worked examples showed items with three fields while the strict schema requires every reply-only field, so a model that ended an item early could only emit whitespace until `max_tokens` (seen on about 1 in 15 `gpt-4.1-mini` calls, each about 16k tokens). The skeletons and examples now write every field in schema order (`"pattern": false, "pending": null, "quote": "...", "regular": ""`, and the matching fields of `forget`, `allow` and `do_not_record` entries); 0 of 27 calls stalled on the same episodes. COMPACT and REGROUP keep the plain items.
@@ -396,7 +398,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc7...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc8...HEAD
+[0.9.0rc8]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc7...everalgo-user-memory/v0.9.0rc8
 [0.9.0rc7]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc6...everalgo-user-memory/v0.9.0rc7
 [0.9.0rc6]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc5...everalgo-user-memory/v0.9.0rc6
 [0.9.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc4...everalgo-user-memory/v0.9.0rc5
