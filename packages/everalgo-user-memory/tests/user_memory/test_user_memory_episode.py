@@ -280,6 +280,20 @@ async def test_client_exception_propagates_unchanged() -> None:
     assert fake.call_count == 1
 
 
+async def test_aextract_timeout_falls_back_to_deterministic_episode() -> None:
+    """When the LLM call times out, EpisodeExtractor falls back deterministically from the rendered conversation."""
+    fake = FakeLLMClient(responses=[TimeoutError("llm timed out after 25s")])
+
+    episode = await EpisodeExtractor(llm=fake).aextract(_memcell(), sender_id="u_alice")
+
+    assert episode.owner_id == "u_alice"
+    assert episode.subject == "Schedule a meeting with Alice at 3pm"
+    assert "Alice: Schedule a meeting with Alice at 3pm" in episode.episode
+    assert "assistant: Done. Sent invite for 3pm." in episode.episode
+    assert episode.summary == episode.episode[:200]
+    assert fake.call_count == 1
+
+
 # ===========================================================================
 # Signature — prompt= is gone, custom_instructions replaces the default principles, sender_id only sets owner_id
 # ===========================================================================
