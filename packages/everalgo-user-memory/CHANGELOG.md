@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0rc7] - 2026-11-12
+
 ### Fixed
 
 - Episode-path profile calls work under strict structured outputs (`response_format_mode="json_schema"`). The reply-only fields of INIT and UPDATE (`pattern`, `pending`, `quote`, `regular`, and on `forget`, `allow` and `do_not_record` entries `quote`, `pending`, `evidence`, `matter`, `part`) were untyped in the schema, which OpenAI refuses with a 400 (`schema must have a 'type' key`), so every 0.9.0rc6 Episode INIT and UPDATE call failed there. Their schema now declares the type the prompt asks for, nullable; validation still accepts any value, so a stray one is dropped by the item checks as before.
@@ -390,7 +392,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc6...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc7...HEAD
+[0.9.0rc7]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc6...everalgo-user-memory/v0.9.0rc7
 [0.9.0rc6]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc5...everalgo-user-memory/v0.9.0rc6
 [0.9.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc4...everalgo-user-memory/v0.9.0rc5
 [0.9.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc3...everalgo-user-memory/v0.9.0rc4
