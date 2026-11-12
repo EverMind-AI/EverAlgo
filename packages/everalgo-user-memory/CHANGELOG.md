@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Episode-path INIT and UPDATE no longer stall under strict structured outputs. Their reply skeletons and worked examples showed items with three fields while the strict schema requires every reply-only field, so a model that ended an item early could only emit whitespace until `max_tokens` (seen on about 1 in 15 `gpt-4.1-mini` calls, each about 16k tokens). The skeletons and examples now write every field in schema order (`"pattern": false, "pending": null, "quote": "...", "regular": ""`, and the matching fields of `forget`, `allow` and `do_not_record` entries); 0 of 27 calls stalled on the same episodes. COMPACT and REGROUP keep the plain items.
+
 ## [0.9.0rc7] - 2026-11-12
 
 ### Fixed

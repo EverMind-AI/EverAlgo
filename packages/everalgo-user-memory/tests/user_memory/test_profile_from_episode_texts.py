@@ -34,6 +34,8 @@ from everalgo.user_memory.profile._render import _render_episodes, _render_item,
 from everalgo.user_memory.profile._replies import (
     _call_llm_for_profile_init,
     _call_llm_for_profile_update,
+    _EpisodeExplicitItem,
+    _EpisodeImplicitTrait,
     _EpisodeInitOutput,
     _ExplicitItem,
     _ImplicitTrait,
@@ -1948,7 +1950,13 @@ def test_every_item_skeleton_lists_grounding_first_and_label_last(prompt: str) -
         system = render_prompt(prompt, None, **{**_RENDER_FIELDS, "reply_skeleton": REGROUP_REPLY_SKELETONS[bucket]})
         for block in _line_start_json_blocks(system):
             for item in _items_in(json.loads(block)):
-                assert list(item) in (list(_ExplicitItem.model_fields), list(_ImplicitTrait.model_fields)), item
+                assert list(item) in _ITEM_FIELD_ORDERS, item
+
+
+# The plain items, and the Episode replies' items with every reply-only field written in schema order.
+_ITEM_FIELD_ORDERS = tuple(
+    list(model.model_fields) for model in (_ExplicitItem, _ImplicitTrait, _EpisodeExplicitItem, _EpisodeImplicitTrait)
+)
 
 
 def _items_in(reply: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2102,7 +2110,8 @@ def test_update_reply_format_says_only_what_index_means() -> None:
     assert "\n\nOne or more operations:\n{" in reply_format
     expected_update = (
         '{"action": "update", "type": "explicit_info", "index": 0, '
-        '"data": {"evidence": "...", "description": "...", "category": "..."}}'
+        '"data": {"evidence": "...", "description": "...", "category": "...", "pattern": false, "pending": null, '
+        '"quote": "...", "regular": ""}}'
     )
     assert expected_update in reply_format
 
@@ -2317,7 +2326,7 @@ async def test_every_example_reply_parses_and_passes_its_stage_reply_model(
     for text in replies:
         assert isinstance(json.loads(text), dict)
         validated = await callsite(FakeLLMClient(responses=[text]), [], reply=reply)
-        assert _without_unset_reply_fields(validated) == json.loads(text)
+        assert _without_unset_reply_fields(validated) == _without_unset_reply_fields(json.loads(text))
 
 
 def _without_unset_reply_fields(value: Any) -> Any:

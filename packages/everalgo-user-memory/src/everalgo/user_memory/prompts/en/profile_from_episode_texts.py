@@ -148,6 +148,16 @@ _REPLY_RULES = f"{_JSON_OUTPUT_RULE} {_FIELD_ORDER_RULE}"
 
 _EXPLICIT_ITEM_SKELETON = '{"evidence": "...", "description": "...", "category": "..."}'
 _IMPLICIT_ITEM_SKELETON = '{"basis": "...", "description": "...", "trait": "..."}'
+# Episode replies write every field of their items, in the order of the reply schema: a strict schema requires each
+# one, and a skeleton that leaves some out invites the model to end the item early, which strict mode cannot accept.
+_EPISODE_EXPLICIT_ITEM_SKELETON = (
+    '{"evidence": "...", "description": "...", "category": "...", "pattern": false, "pending": null, '
+    '"quote": "...", "regular": ""}'
+)
+_EPISODE_IMPLICIT_ITEM_SKELETON = (
+    '{"basis": "...", "description": "...", "trait": "...", "pattern": true, "pending": null, '
+    '"quote": "...", "regular": ""}'
+)
 
 _OUTPUT_LANGUAGE = tagged("output_language", "{{language_rule}}")
 
@@ -271,8 +281,7 @@ _ITEM_CHECKS_INIT = tagged(
         _QUOTE_RULE,
         _ANNOUNCED_CHANGE_RULE,
         _NO_GENDER_RULE,
-        'An explicit_info item then reads: {"evidence": "...", "description": "...", "category": "...", '
-        '"pattern": false, "quote": "...", "regular": ""}',
+        f"An explicit_info item then reads: {_EPISODE_EXPLICIT_ITEM_SKELETON}",
     ),
 )
 
@@ -285,7 +294,7 @@ _ITEM_CHECKS_UPDATE = tagged(
         _ANNOUNCED_CHANGE_RULE,
         _NO_GENDER_RULE,
         'An add then reads: {"action": "add", "type": "explicit_info", "data": {"evidence": "...", "description": '
-        '"...", "category": "...", "pattern": true, "quote": "...", "regular": "..."}}.',
+        '"...", "category": "...", "pattern": true, "pending": null, "quote": "...", "regular": "..."}}.',
     ),
 )
 
@@ -319,10 +328,10 @@ _REPLY_FORMAT_INIT = paragraphs(
     "request they withdraw later in these narratives is not listed either. do_not_record is empty otherwise. "
     f"{_REPLY_RULES}",
     '{"explicit_info": ['
-    + _EXPLICIT_ITEM_SKELETON
+    + _EPISODE_EXPLICIT_ITEM_SKELETON
     + '], "implicit_traits": ['
-    + _IMPLICIT_ITEM_SKELETON
-    + '], "do_not_record": [{"topic": "...", "quote": "..."}]}',
+    + _EPISODE_IMPLICIT_ITEM_SKELETON
+    + '], "do_not_record": [{"topic": "...", "quote": "...", "evidence": null}]}',
 )
 
 _EXAMPLE_OPERATIONS_ONLY = """\
@@ -342,12 +351,12 @@ _EXAMPLE_FACTS_AND_A_PATTERN = """\
 <reply>
 {
   "explicit_info": [
-    {"evidence": "2026-01-10: said she runs a small bookshop in Lisbon", "description": "Runs a small bookshop in Lisbon.", "category": "Identity"},
-    {"evidence": "2026-02-14: said she wants to open a second shop one day", "description": "Wants to open a second shop one day.", "category": "Goals"},
-    {"evidence": "2026-02-14: said she lives with her mother", "description": "Lives with her mother.", "category": "Relationships"}
+    {"evidence": "2026-01-10: said she runs a small bookshop in Lisbon", "description": "Runs a small bookshop in Lisbon.", "category": "Identity", "pattern": false, "pending": null, "quote": "she runs a small bookshop in Lisbon", "regular": ""},
+    {"evidence": "2026-02-14: said she wants to open a second shop one day", "description": "Wants to open a second shop one day.", "category": "Goals", "pattern": false, "pending": null, "quote": "She mentioned she wants to open a second shop one day", "regular": ""},
+    {"evidence": "2026-02-14: said she lives with her mother", "description": "Lives with her mother.", "category": "Relationships", "pattern": false, "pending": null, "quote": "She mentioned she lives with her mother", "regular": ""}
   ],
   "implicit_traits": [
-    {"basis": "2026-01-10: asked to see last quarter's sales before accepting a proposed price; 2026-02-14: wanted the spreadsheet figures checked before sending the email", "description": "Checks the numbers before acting on advice.", "trait": "Verifies before deciding"}
+    {"basis": "2026-01-10: asked to see last quarter's sales before accepting a proposed price; 2026-02-14: wanted the spreadsheet figures checked before sending the email", "description": "Checks the numbers before acting on advice.", "trait": "Verifies before deciding", "pattern": true, "pending": null, "quote": "she asked to see last quarter's sales first", "regular": ""}
   ],
   "do_not_record": []
 }
@@ -454,12 +463,12 @@ Nothing to do:
 One or more operations:
 {{
   "operations": [
-    {{"action": "add", "type": "explicit_info", "data": {_EXPLICIT_ITEM_SKELETON}}},
-    {{"action": "add", "type": "implicit_traits", "data": {_IMPLICIT_ITEM_SKELETON}}},
-    {{"action": "update", "type": "explicit_info", "index": 0, "data": {_EXPLICIT_ITEM_SKELETON}}},
+    {{"action": "add", "type": "explicit_info", "data": {_EPISODE_EXPLICIT_ITEM_SKELETON}}},
+    {{"action": "add", "type": "implicit_traits", "data": {_EPISODE_IMPLICIT_ITEM_SKELETON}}},
+    {{"action": "update", "type": "explicit_info", "index": 0, "data": {_EPISODE_EXPLICIT_ITEM_SKELETON}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}},
-    {{"action": "forget", "topic": "...", "quote": "..."}},
-    {{"action": "allow", "matter": 0, "quote": "..."}}
+    {{"action": "forget", "topic": "...", "quote": "...", "pending": null, "evidence": null}},
+    {{"action": "allow", "matter": 0, "part": null, "quote": "..."}}
   ]
 }}""",
 )
@@ -479,7 +488,7 @@ With <output_language> naming English:
 <reply>
 {
   "operations": [
-    {"action": "update", "type": "explicit_info", "index": 0, "data": {"evidence": "2025-11-03: said she runs a flower shop in Kyoto; 2026-01-12: said the shop is in the Gion district", "description": "Runs a flower shop in Kyoto's Gion district.", "category": "Identity"}}
+    {"action": "update", "type": "explicit_info", "index": 0, "data": {"evidence": "2025-11-03: said she runs a flower shop in Kyoto; 2026-01-12: said the shop is in the Gion district", "description": "Runs a flower shop in Kyoto's Gion district.", "category": "Identity", "pattern": false, "pending": null, "quote": "her flower shop in Kyoto is in the Gion district", "regular": ""}}
   ]
 }
 </reply>"""

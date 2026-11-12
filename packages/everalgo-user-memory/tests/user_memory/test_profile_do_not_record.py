@@ -148,7 +148,7 @@ async def test_init_keeps_the_matters_its_reply_lists_dated_by_the_newest_narrat
     # One entry per topic, and nothing kept but the topic and its date.
     assert _do_not_record_of(profile) == [_matter("her mother's health", _TS + _DAY)]
     system = str(fake.calls[0].messages[0].content)
-    assert '"do_not_record": [{"topic": "...", "quote": "..."}]' in system
+    assert '"do_not_record": [{"topic": "...", "quote": "...", "evidence": null}]' in system
 
 
 async def test_an_empty_list_adds_no_field() -> None:
@@ -728,8 +728,8 @@ def test_the_update_rules_say_how_a_request_stands_and_how_it_is_withdrawn_witho
     assert "Asking the assistant to remember a listed matter is a withdrawal, not a mention of it." in system
     assert "an allow is the opposite of a forget" in system
     assert "Only their own request counts" in system
-    assert '{"action": "forget", "topic": "...", "quote": "..."}' in system
-    assert '{"action": "allow", "matter": 0, "quote": "..."}' in system
+    assert '{"action": "forget", "topic": "...", "quote": "...", "pending": null, "evidence": null}' in system
+    assert '{"action": "allow", "matter": 0, "part": null, "quote": "..."}' in system
 
 
 def test_the_reply_models_take_the_new_operations_and_the_earlier_evidence_key() -> None:
