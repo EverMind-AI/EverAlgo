@@ -8,7 +8,7 @@ No API key is needed: all LLM calls are handled by `FakeLLMClient`.
 ## 1. Install
 
 ```bash
-pip install everalgo-user-memory==0.9.0rc5 everalgo-clustering
+pip install everalgo-user-memory==0.9.0rc6 everalgo-clustering
 ```
 
 `everalgo-user-memory` pulls `everalgo-core` and `everalgo-boundary` automatically. The explicit `everalgo-clustering` install is needed by the example below. The user-memory pin selects the release candidate whose `Cuts` API this example uses.
