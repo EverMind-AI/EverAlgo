@@ -1,8 +1,9 @@
-"""The eight extraction stages, each its message templates, language rules and reply model.
+"""The extraction stages, each its message templates, language rules and reply model.
 
 INIT, UPDATE, COMPACT and REGROUP on each path: the MemCell path's prompts are one user message, the Episode path's
 a system message of rules and a user message of data. On the Episode path INIT's reply also lists the matters this
 person asked not to be recorded, and COMPACT and REGROUP reply with operations on indexed items rather than a rewrite.
+The Episode path also has the merge call of a do-not-record list past its cap (:func:`render_do_not_record_merge`).
 """
 
 from __future__ import annotations
@@ -43,6 +44,8 @@ from everalgo.user_memory.prompts.en.profile import (
 from everalgo.user_memory.prompts.en.profile_from_episode_texts import (
     PROFILE_COMPACT_FROM_EPISODE_TEXTS_SYSTEM_PROMPT,
     PROFILE_COMPACT_FROM_EPISODE_TEXTS_USER_PROMPT,
+    PROFILE_DO_NOT_RECORD_MERGE_SYSTEM_PROMPT,
+    PROFILE_DO_NOT_RECORD_MERGE_USER_PROMPT,
     PROFILE_INITIAL_FROM_EPISODE_TEXTS_SYSTEM_PROMPT,
     PROFILE_INITIAL_FROM_EPISODE_TEXTS_USER_PROMPT,
     PROFILE_REGROUP_FROM_EPISODE_TEXTS_SYSTEM_PROMPT,
@@ -142,3 +145,16 @@ _EPISODE_REGROUP = _StagePrompts(
     language_fallback=REGROUPED_PROFILE_LANGUAGE_RULE,
     system=PROFILE_REGROUP_FROM_EPISODE_TEXTS_SYSTEM_PROMPT,
 )
+
+
+def render_do_not_record_merge(*, do_not_record: str, count: int, cap: int, target_user: str) -> list[LLMMessage]:
+    """The two messages of the do-not-record merge call.
+
+    Not a :class:`_StagePrompts`: the call names entries and writes no text, so it has no language rule, and the
+    host's additional requirements, which are about what the profile says, are not added.
+    """
+    fields = {"do_not_record": do_not_record, "count": count, "cap": cap, "target_user": target_user}
+    return [
+        LLMMessage(role="system", content=render_prompt(PROFILE_DO_NOT_RECORD_MERGE_SYSTEM_PROMPT, None, **fields)),
+        LLMMessage(role="user", content=render_prompt(PROFILE_DO_NOT_RECORD_MERGE_USER_PROMPT, None, **fields)),
+    ]

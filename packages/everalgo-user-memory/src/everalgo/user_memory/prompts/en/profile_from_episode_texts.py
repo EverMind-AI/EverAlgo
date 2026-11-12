@@ -17,8 +17,8 @@ languages and owners.
 The USER message opens with ``<target_person>`` naming the person and then carries only the per-request data,
 marked up the same way: narratives as ``<narrative time="...">`` elements, stored items as
 ``<item index="...">`` elements holding JSON, and in UPDATE the matters this person asked not to be recorded as
-``<matter>`` elements in ``<do_not_record>``. A rule appears once and never names the person: the rules say "the
-target person", so the system text is the same for every owner and every request.
+``<matter index="...">`` elements in ``<do_not_record>``. A rule appears once and never names the person: the rules
+say "the target person", so the system text is the same for every owner and every request.
 
 One prompt, one delimiter format. Both messages delimit every block and every input element with an XML-style
 tag, carry times and indices as attributes, and keep JSON for data inside a tag; no rule text uses Markdown
@@ -27,6 +27,9 @@ That is what the prompting guides of the current model generation do: the OpenAI
 instruction block in a descriptive snake_case tag, Anthropic's best practices ask for XML tags wherever a prompt
 mixes instructions, context and variable input, and Gemini's guidance asks for one format per prompt. With the
 input marked up this way it explains itself, so no block describes how to read it.
+
+The do-not-record merge call (``PROFILE_DO_NOT_RECORD_MERGE_*``) is the one stage that reads no profile and writes no
+text: its system message is its role, ``<how_to_merge>`` and ``<reply_format>`` alone.
 
 This path owns its blocks; the MemCell prompts are a separate path with their own definitions.
 """
@@ -231,7 +234,8 @@ _PENDING_RULE_UPDATE = (
     '"confirm", "type": "explicit_info", "pending": <entry index>, "data": <the item in full, as an add writes it, '
     "its evidence naming the earlier occasion and the new one, its quote taken from these narratives>}. Never add an "
     "item that repeats a pending entry: confirm it instead. An entry these narratives only share a topic with, "
-    "contradict, or that this person negated or asked not to record, is left alone."
+    "contradict, or that this person negated, is left alone; one this person asked not to record is not confirmed "
+    "either, and the forget operation names it."
 )
 
 _QUOTE_RULE = (
@@ -294,18 +298,31 @@ _ROLE_INIT = (
     "person is named in <target_person>. The Episode narratives are in <episode_narratives>. Follow the rules below."
 )
 
-# INIT lists the matters this person asked not to be recorded in do_not_record; the extractor keeps them on the
-# profile and every later UPDATE shows them in <do_not_record>.
+# What a matter's quote is, said where a request or its withdrawal is named; the program looks for it as it does for
+# an item's quote (``profile/_do_not_record.py``).
+_MATTER_QUOTE = "copied character for character from the narrative, 10 to 60 characters"
+# Whose request counts, said in INIT and UPDATE alike.
+_OWN_REQUEST_ONLY = (
+    "Only their own request counts: one that someone else makes for them, or that is said as a joke, lists nothing."
+)
+# A request for this one time is no standing request: it keeps the matter out of this reply and off the list.
+_FOR_NOW_EXAMPLES = '("don\'t write this down yet", "leave it out this time")'
+
+# INIT lists the matters this person asked not to be recorded in do_not_record; the extractor keeps those whose quote
+# it finds on the profile and every later UPDATE shows them in <do_not_record>.
 _REPLY_FORMAT_INIT = paragraphs(
     "Both lists may be empty when the narratives carry nothing about this person. When this person asks that "
-    "something not be recorded or remembered, list the matter in do_not_record, named in a few words as narrowly as "
-    "they meant it, with its evidence, and write no item about it; the system keeps the list for every later update. "
-    f"do_not_record is empty otherwise. {_REPLY_RULES}",
+    "something not be recorded or remembered from now on, list the matter in do_not_record, named in a few words as "
+    f'narrowly as they meant it, with "quote": the words of the request {_MATTER_QUOTE}; write no item about it. The '
+    f"system looks for the quote and keeps a matter it finds for every later update. {_OWN_REQUEST_ONLY} A request "
+    f"for this one time or for now {_FOR_NOW_EXAMPLES} is not listed, and no item about the matter is written; a "
+    "request they withdraw later in these narratives is not listed either. do_not_record is empty otherwise. "
+    f"{_REPLY_RULES}",
     '{"explicit_info": ['
     + _EXPLICIT_ITEM_SKELETON
     + '], "implicit_traits": ['
     + _IMPLICIT_ITEM_SKELETON
-    + '], "do_not_record": [{"topic": "...", "evidence": "..."}]}',
+    + '], "do_not_record": [{"topic": "...", "quote": "..."}]}',
 )
 
 _EXAMPLE_OPERATIONS_ONLY = """\
@@ -387,10 +404,32 @@ _HOW_TO_UPDATE = paragraphs(
     "of work, routines tied to the old home or job, the old name, care arranged at the old place) and update or "
     "delete each, so that no item still describes the old situation as the current one. A temporary "
     "interruption — an injury, a trip, a busy month — is not such a change.",
-    "When this person asks that something not be recorded or remembered, reply with a forget operation naming the "
-    "matter in a few words as narrowly as they meant it — the thing they asked about, not its whole area — and delete every stored item that touches it. The system keeps each such matter in "
-    "<do_not_record> for every later update: an item about a matter listed there never enters, in any wording and "
-    "however it is mentioned again, and a stored item that touches one is deleted.",
+    "When this person asks that something not be recorded or remembered from now on, reply with a forget operation "
+    "naming the matter in a few words as narrowly as they meant it — the thing they asked about, not its whole area — "
+    f'and carrying "quote": the words of the request {_MATTER_QUOTE}. Delete every stored item that is directly '
+    "about the matter; an item that only touches the same area stays (asked not to record what they earn: the item "
+    "about their job stays). When an entry of <pending_patterns> is about the matter, list its index in the forget's "
+    '"pending": [<entry index>]. The system looks for the quote and keeps a matter it finds in <do_not_record> for '
+    f"every later update. {_OWN_REQUEST_ONLY} A request for this one time or for now {_FOR_NOW_EXAMPLES} is "
+    "different: write no item about the matter from these narratives and reply with no forget.",
+    "A matter listed in <do_not_record> stays out until this person withdraws the request: no item about it enters, "
+    "in any wording and however it is mentioned again, and a stored item directly about it is deleted. Mentioning "
+    "the matter again withdraws nothing, and neither does anyone else saying it may be recorded.",
+    'This person withdraws a request in one of two ways: by saying that the matter may be recorded now ("you can '
+    'record my salary now"), or by asking themselves that the same matter be remembered, noted or kept in mind '
+    '(their morning runs are listed; "remember that I run every morning"). Asking the assistant to remember a '
+    "listed matter is a withdrawal, not a mention of it. Before writing your operations, go through <do_not_record> "
+    "one matter at a time and ask whether a narrative later than its since, the time of the request, holds such a "
+    "withdrawal. For each matter that has one, reply with an allow operation naming the matter's index attribute and "
+    'carrying "quote", the words of the withdrawal copied the same way, and with no forget for that matter: an '
+    "allow is the opposite of a forget. The matter is from then on treated like any other, and an item about it may "
+    'be added in the same reply. When they allow only a part of a listed matter (their finances are listed; "you '
+    'can note my mortgage now"), the allow also carries "part", that part in a few words: the system then shows '
+    "the part inside the matter, marked except; what is marked except is recorded like anything else, and the rest "
+    "stays out. A narrative earlier than since withdraws nothing, and when these narratives hold both a request and "
+    "a withdrawal of the same matter, only the later of the two counts. An item about a listed matter is never "
+    "written without its allow: either these narratives hold a withdrawal and the reply carries the allow, or they "
+    "hold none and the item is not written.",
     "none is often the right answer. Narratives made only of operations contain nothing about who this person is, "
     "however many there are; manufacturing an operation is not.",
     "Newer state stands; older narratives only add to it. Every stored item shows observed_at, the time of the "
@@ -419,7 +458,8 @@ One or more operations:
     {{"action": "add", "type": "implicit_traits", "data": {_IMPLICIT_ITEM_SKELETON}}},
     {{"action": "update", "type": "explicit_info", "index": 0, "data": {_EXPLICIT_ITEM_SKELETON}}},
     {{"action": "delete", "type": "implicit_traits", "index": 1, "reason": "..."}},
-    {{"action": "forget", "topic": "...", "evidence": "..."}}
+    {{"action": "forget", "topic": "...", "quote": "..."}},
+    {{"action": "allow", "matter": 0, "quote": "..."}}
   ]
 }}""",
 )
@@ -460,7 +500,8 @@ PROFILE_UPDATE_FROM_EPISODE_TEXTS_SYSTEM_PROMPT = (
     + f"\n\n{_ITEM_CHECKS_UPDATE}"
 )
 
-# <do_not_record> comes before the stored profile and narratives it governs; "(none)" when the list is empty.
+# <do_not_record> comes before the stored profile and narratives it governs, one <matter index="i" since="..."> per
+# entry with the parts since allowed as <except> inside it; "(none)" when the list is empty.
 # <pending_patterns> closes the message: the pattern items held for a second occasion, "(none)" when there are none.
 PROFILE_UPDATE_FROM_EPISODE_TEXTS_USER_PROMPT = "\n\n".join(
     (
@@ -470,6 +511,64 @@ PROFILE_UPDATE_FROM_EPISODE_TEXTS_USER_PROMPT = "\n\n".join(
         tagged("episode_narratives", "{{episode_texts}}"),
         tagged("pending_patterns", "{{pending}}"),
     )
+)
+
+# --------------------------------------------------------------------------------------------------
+# DO-NOT-RECORD MERGE — the do-not-record list is over its cap. The reply only names redundant entries: one entry of
+# each merge stays word for word and the others go, so the list never keeps out more than this person asked. No entry
+# is reworded and none is written (``profile/_do_not_record.py`` applies the reply). The call reads no profile and no
+# narrative, so its system message carries none of the profile blocks.
+# --------------------------------------------------------------------------------------------------
+
+_ROLE_DO_NOT_RECORD_MERGE = (
+    "You are a user-profile analyst. The target person asked that the matters in <do_not_record> never be recorded, "
+    "and the list has grown past its cap. Find the entries that are redundant beside another entry and express the "
+    "result as merge operations; every entry you do not name stays exactly as it is. The target person is named in "
+    "<target_person>. Follow the rules below."
+)
+
+_HOW_TO_MERGE_DO_NOT_RECORD = paragraphs(
+    'An entry is redundant in two cases only. same: it names the same matter as another entry in other words ("what '
+    'I earn" beside "my salary"). inside: it lies wholly inside another entry that is itself on the list, so that '
+    'everything it keeps out the wider entry keeps out too ("my salary" beside "my finances").',
+    'A merge keeps one entry and drops the entries redundant beside it: "keep" is the index of the entry that stays, '
+    '"drop" the indices of the redundant ones, "relation" is "same" or "inside". For same, keep the entry that names '
+    "the matter most plainly. For inside, keep the wider entry; a wider entry is never dropped for a narrower one.",
+    "The kept entry stays word for word. You cannot reword an entry or write a new one, and no merge needs it: two "
+    "entries that only belong to one area (a bonus and a mortgage are both money) are not redundant, because no "
+    "entry on the list covers both, and they stay as they are. Entries that overlap in part stay too. After your "
+    "merges the list must keep out exactly what it kept out before, nothing more and nothing less; when you are not "
+    "sure, leave both entries.",
+    "Finding nothing to merge is a normal answer: the list then stays over its cap and nothing is lost. Each index "
+    "appears in one operation at most.",
+)
+
+_REPLY_FORMAT_DO_NOT_RECORD_MERGE = paragraphs(
+    f"keep and drop name entries by their index attribute in <do_not_record>. {_JSON_OUTPUT_RULE}",
+    """\
+No entry is redundant:
+{
+  "operations": []
+}""",
+    """\
+One or more merges:
+{
+  "operations": [
+    {"keep": 2, "drop": [5, 9], "relation": "inside"}
+  ]
+}""",
+)
+
+PROFILE_DO_NOT_RECORD_MERGE_SYSTEM_PROMPT = "\n\n".join(
+    (
+        _ROLE_DO_NOT_RECORD_MERGE,
+        tagged("how_to_merge", _HOW_TO_MERGE_DO_NOT_RECORD),
+        tagged("reply_format", _REPLY_FORMAT_DO_NOT_RECORD_MERGE),
+    )
+)
+
+PROFILE_DO_NOT_RECORD_MERGE_USER_PROMPT = "\n\n".join(
+    (_TARGET_LINE, tagged("do_not_record", "{{do_not_record}}", count="{{count}}", cap="{{cap}}"))
 )
 
 # --------------------------------------------------------------------------------------------------

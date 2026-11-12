@@ -3,9 +3,11 @@
 Design rationale and measurements: ``docs/concepts/profile-design-notes.md``. Modules, each importing only those
 below it: ``_extractor`` (:class:`ProfileExtractor`) wires ``_stages`` (prompt templates per stage, over
 ``_replies``: reply models and LLM callsites), ``_render`` (what the model is shown), ``_compact_ops`` (COMPACT and
-REGROUP operations, over ``_merge``), ``_pending`` (the Episode item checks: a quote for every item, pattern items
-held on the ``pending`` list until repeated, over ``_merge``) and ``_merge`` (UPDATE ops, the account-number scrub,
-dedupe, the stored profile); ``_render`` and ``_merge`` share only ``_items``.
+REGROUP operations, over ``_merge``), ``_do_not_record`` (the do-not-record list: how a matter enters and leaves it
+and how redundant entries are merged past its cap, over ``_pending`` and ``_merge``), ``_pending`` (the Episode item
+checks: a quote for every item, pattern items held on the ``pending`` list until repeated, over ``_merge``) and
+``_merge`` (UPDATE ops, the account-number scrub, dedupe, the stored profile); ``_render`` and ``_merge`` share only
+``_items``.
 
 Log lines:
     The lines below are a contract: each starts with ``profile <event>:`` followed by space-separated
@@ -57,10 +59,22 @@ Log lines:
         as a MemCell-path rewrite does.
     ``profile compact ops refused: count=`` / ``profile regroup ops refused: count=`` (WARNING)
         Once per Episode-path COMPACT or REGROUP reply with refused operations.
-    ``profile do-not-record updated: source= named= added= matters=`` (INFO)
+    ``profile do-not-record updated: source= named= added= refreshed= refused= pending_dropped= matters=`` (INFO)
         Once per Episode INIT or UPDATE reply that names matters not to record: ``source`` is ``init`` or
-        ``update``, ``named`` the matters the reply names, ``added`` those new to the list, ``matters`` the list's
-        size after it.
+        ``update``, ``named`` the matters the reply names, ``added`` those new to the list, ``refreshed`` those
+        already listed (their date moved to the newer request), ``refused`` those whose quote was not found in the
+        batch or that a newer allowance overrides, ``pending_dropped`` the pending entries about them taken off the
+        pending list, ``matters`` the list's size after it.
+    ``profile do-not-record withdrawn: named= whole= part= refused= matters=`` (INFO)
+        Once per Episode UPDATE reply with ``allow`` operations: ``named`` the operations, ``whole`` the entries
+        removed, ``part`` the parts added to an entry's exceptions, ``refused`` those naming no shown entry, quoting
+        nothing found in the batch or not later than the request, ``matters`` the list's size after it.
+    ``profile do-not-record merged: matters_before= merges= refused= removed= matters= cap=`` (WARNING)
+        Once per call that leaves the list longer than it was and past its cap of 30: the merges applied and
+        refused, the entries removed as redundant and the list's size after it. A list still past the cap then also
+        logs ``profile do-not-record over cap: matters= cap=`` (WARNING): no entry is dropped for the cap. A merge
+        reply that is not valid logs ``profile do-not-record merge reply invalid: matters=`` (WARNING) and leaves
+        the list as it is.
 
     The Episode-path entry line, ``extracting profile from Episodes: ...``, carries ``categories=``, the size of
     the caller's category snapshot after normalisation. Both entry lines log ``output_language`` once it is

@@ -226,7 +226,15 @@ EverOS 必须把这些证据视为 Episode 派生证据，而不是原始对话�
 
 ## 不记录清单
 
-INIT 的回复有一个必填字段 `do_not_record`，UPDATE 有一种 `forget` 操作（`{"action": "forget", "topic", "evidence"}`），用来记下这个人要求不要记录的事。这些事作为 profile 的 `do_not_record` 额外字段保存，格式为 `[{"topic", "evidence", "observed_at"}]`，按时间先后排列；之后每次 UPDATE 都以 `<do_not_record>` 里的 `<matter>` 元素展示它们的 `topic`。规则要求：涉及清单上任何一件事的条目，无论换什么说法都不得进入 profile，已存的这类条目要删除。清单只增不减：程序没有把一件事移出清单的操作。
+INIT 的回复有一个必填字段 `do_not_record`，格式为 `[{"topic", "quote"}]`（没有时为空数组）；UPDATE 有一种 `forget` 操作，格式为 `{"action": "forget", "topic", "quote"}`，可带 `"pending": [<编号>]`。两者都写下这个人要求不要记录的事，以及从本批某条叙事里逐字抄下的要求原话。开启条目检查时，程序在本批叙事里找到原话，这件事才进清单，日期取原话所在叙事的时间；已在清单上的话题不重复加入，只把日期改为较新的那次要求。一件事进清单时，操作里点名的待定条目，以及描述里包含这个话题的待定条目，会一并删除。
+
+这些事作为 profile 的 `do_not_record` 额外字段保存，按时间先后排列，每条为 `{"topic", "observed_at"}`；放开过部分内容的条目多一个 `"except": [{"topic", "observed_at"}]`。早先版本存下的带 `evidence` 的条目照常读取，读取时去掉 `evidence`，话题里的账号会被打码。之后每次 UPDATE 都在 `<do_not_record>` 里以 `<matter index="i" since="...">话题<except>例外</except></matter>` 的形式展示清单，`since` 按 `tz` 显示，没有日期的条目不带 `since`。规则要求：直接讲清单上某件事的条目，在这个人撤回之前不得进入 profile，已存的这类条目要删除。
+
+UPDATE 的 `allow` 操作（`{"action": "allow", "matter": <编号>, "quote"}`，可带 `"part"`）用来撤回清单上的一件事。只有同时满足以下条件才会生效：编号指向这一轮展示给模型的条目；原话能在本批叙事里找到；原话所在叙事的时间晚于这一条的日期。因此，晚到的旧叙事不能撤回较新的要求。同一个回复里，程序先处理要求、再处理撤回，所以哪句话说得晚，就以哪句为准。整条撤回会把这一条从清单删除，不留痕迹；带 `part` 时，只把这一部分加入这一条的 `except`，其余内容仍在清单上；之后对这一部分重新提出的、更晚的要求会去掉这个例外。
+
+清单不过期。一次调用结束时，如果清单比调用开始时长并且超过 30 条，extractor 会多调一次模型，只给它看没有例外的条目，让它找出多余的条目：换了说法的同一件事（`same`），或整个落在清单上另一条更宽条目里的事（`inside`）。程序删掉这些条目，留下的那条一字不改，日期取被合并的几条里最新的一个，所以清单挡住的范围不会比这个人要求的更宽。合并回复不合格式时清单不变；合并后仍超过 30 条时整份保留，并记一条日志 `profile do-not-record over cap`。
+
+返回的 `do_not_record` 是清单当前的完整内容。清单非空，或者 `old_profile` 带有这个字段时都会返回，所以空数组表示所有事都已撤回：调用方要用它整份替换已存的清单；保留旧值或把新旧合并，都会让这个人已经放开的事继续被挡住。
 
 ## 证件号与账号
 
@@ -248,7 +256,7 @@ description 里带证件号或账号的条目——12 位及以上数字，半�
 - `old_profile.owner_id` 与 `owner_id` 不一致；
 - `output_language` 不受支持。
 
-LLM 的回复不是该阶段的合法输出时（不是可解析的 JSON，或不符合 INIT、UPDATE、COMPACT、REGROUP 的结构，包括缺少 `do_not_record` 的 INIT 回复），接口抛出 `LLMOutputError`（来自 `everalgo.llm`）。异常信息只指出每处校验失败的位置，不包含回复内容。条目形状属于另一个桶的操作（UPDATE 中 `data` 与 `type` 不一致的新增或更新、作用于另一个桶的 COMPACT 或 REGROUP 操作）不算错误：它单独被丢弃并记一条警告，回复的其余部分照常生效。
+LLM 的回复不是该阶段的合法输出时（不是可解析的 JSON，或不符合 INIT、UPDATE、COMPACT、REGROUP 的结构，包括缺少 `do_not_record` 的 INIT 回复），接口抛出 `LLMOutputError`（来自 `everalgo.llm`）。异常信息只指出每处校验失败的位置，不包含回复内容。条目形状属于另一个桶的操作（UPDATE 中 `data` 与 `type` 不一致的新增或更新、作用于另一个桶的 COMPACT 或 REGROUP 操作）不算错误：它单独被丢弃并记一条警告，回复的其余部分照常生效。不记录清单的合并回复不合格式时不抛异常，清单保持不变。
 
 注入的 LLM 客户端抛出的异常原样透传。
 
@@ -325,7 +333,7 @@ EverOS 集成测试必须覆盖：
 - 构造批次前，已根据 Episode ID 完成去重。
 - 只传入已存 profile 尚未消费的 Episode，且水位线只在返回的 Profile 持久化后推进。
 - 持久化的 Profile 能把 `timestamp` 和每条条目的 `observed_at` 原样带入下一次调用的 `old_profile`。
-- 持久化的 Profile 能把 `do_not_record` 和 `pending` 两个额外字段带入下一次调用的 `old_profile`；返回的空 `pending` 会替换已存清单，两个额外字段都不展示给终端用户。
+- 持久化的 Profile 能把 `do_not_record` 和 `pending` 两个额外字段带入下一次调用的 `old_profile`；返回的空 `do_not_record` 或空 `pending` 会替换已存清单，两个额外字段都不展示给终端用户。
 - 删除或导出 profile 时，一并删除或导出它的 `do_not_record` 和 `pending`。
 - 观察时间早于已存状态的 Episode 可以新增事实，但不改动由更晚 Episode 确立的条目 description，且 `Profile.timestamp` 不倒退。
 - 同一个 generic Episode fanout 给两个 owner 时，分别调用接口并得到归属不同的 Profile。

@@ -3,8 +3,8 @@
 A narrative, item or do-not-record topic that spells out one of the prompts' own closing tags would end its element
 early, so every narrative, every item's JSON and every topic goes through :func:`_defuse_closing_tags`. Items are
 shown with their model-facing fields only (``_FIELD_ORDER``); a host's own keys stay in storage and out of the prompt.
-The Episode UPDATE prompt also shows the do-not-record list (:func:`_render_do_not_record`) and the pending
-pattern entries (:func:`_render_pending`).
+The Episode UPDATE prompt also shows the do-not-record list (:func:`_render_do_not_record`), as the merge prompt of
+that list does, and the pending pattern entries (:func:`_render_pending`).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ _FIELD_ORDER = ("evidence", "basis", "description", "category", "trait", _OBSERV
 # The prompts' own closing tags, in any case: the only strings in unescaped text that could end an element early.
 _CLOSING_TAGS = re.compile(
     r"</(?:narrative|episode_narratives|item|explicit_info|implicit_traits|stored_profile|group|matter|do_not_record"
-    r"|entry|pending_patterns)>",
+    r"|entry|pending_patterns|except)>",
     re.IGNORECASE,
 )
 _FULLWIDTH_LESS_THAN = "\uff1c"
@@ -173,14 +173,34 @@ def _render_profile_for_episode_update(profile: Profile, *, tz: tzinfo = UTC) ->
     )
 
 
-def _render_do_not_record(entries: list[dict[str, Any]] | None) -> str:
-    """Render the do-not-record list for the Episode UPDATE prompt: one ``<matter>`` line per topic, or ``(none)``.
+def _render_do_not_record(
+    entries: list[dict[str, Any]] | None,
+    *,
+    tz: tzinfo = UTC,
+    only: Sequence[int] | None = None,
+    dated: bool = True,
+) -> str:
+    """Render the do-not-record list: one ``<matter index="i" since="...">`` line per entry, or ``(none)``.
 
-    Only the topic is shown, its closing tags defused; the evidence stays in storage.
+    ``i`` is the entry's place in the list, the index an ``allow`` or a merge names, and ``since`` the time of the
+    request in ``tz``, as :func:`~everalgo.utils.format_time` renders it, left out for an entry stored without a
+    date. The topic follows, closing tags defused, and then each part this person has since allowed, as
+    ``<except>part</except>``.
+
+    Args:
+        entries: The list of the call in progress.
+        tz: The zone ``since`` is shown in, the one the narratives' times are shown in.
+        only: The indices to show, for the merge prompt, which leaves out entries with exceptions; None shows all.
+        dated: False leaves ``since`` out, for the merge prompt, where no date matters.
     """
-    if not entries:
-        return "(none)"
-    return "\n".join(f"<matter>{_defuse_closing_tags(e['topic'])}</matter>" for e in entries)
+    shown = range(len(entries or [])) if only is None else only
+    lines = []
+    for i in shown:
+        entry = (entries or [])[i]
+        since = f' since="{format_time(entry["observed_at"], tz=tz)}"' if dated and entry.get("observed_at") else ""
+        parts = "".join(f"<except>{_defuse_closing_tags(part['topic'])}</except>" for part in entry.get("except") or [])
+        lines.append(f'<matter index="{i}"{since}>{_defuse_closing_tags(entry["topic"])}{parts}</matter>')
+    return "\n".join(lines) if lines else "(none)"
 
 
 def _render_pending(entries: list[dict[str, Any]] | None, *, tz: tzinfo = UTC) -> str:
