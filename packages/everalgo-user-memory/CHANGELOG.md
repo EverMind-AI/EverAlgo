@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0rc6] - 2026-11-12
+
 ### Added
 
 - Episode-path item checks (`ProfileExtractor.aextract_from_episodes`), switched by the new keyword `ProfileExtractor(item_checks=True)`: every item the model writes carries a `quote` found in the batch's narratives (punctuation, case and width folded; a run covering nine tenths counts; under 6 Han units does not), or it is dropped. An item the model flags `pattern` (a habit, preference, hobby, way of working, trait) whose quote shows no regularity (a Chinese or English word list, else the model's `regular` words checked against the quote) waits on the profile's `pending` extra until a later batch repeats it, through UPDATE's new `confirm` operation or a matching add; entries expire after 120 days and at most the newest 30 are kept. The check fields never reach a stored item.
@@ -374,7 +376,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc5...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc6...HEAD
+[0.9.0rc6]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc5...everalgo-user-memory/v0.9.0rc6
 [0.9.0rc5]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc4...everalgo-user-memory/v0.9.0rc5
 [0.9.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc3...everalgo-user-memory/v0.9.0rc4
 [0.9.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc2...everalgo-user-memory/v0.9.0rc3

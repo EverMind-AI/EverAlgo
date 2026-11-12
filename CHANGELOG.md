@@ -17,10 +17,14 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 | `everalgo-boundary` | 0.5.0rc1 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
 | `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
 | `everalgo-rank` | 0.5.0rc5 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.9.0rc5 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.9.0rc6 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
 | `everalgo-agent-memory` | 0.6.0rc4 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
 | `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
 | `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## [everalgo-user-memory/0.9.0rc6] - 2026-11-12
+
+The Episode path of the profile (`ProfileExtractor.aextract_from_episodes`) grounds every item in a quote from the batch's narratives and holds a pattern the batch does not show to be regular on a `pending` list until a later batch repeats it (`ProfileExtractor(item_checks=True)`, the default). It also keeps a `do_not_record` list of matters the person asked not to be recorded. Both lists ride on the returned profile as extras the host stores and passes back in `old_profile`. **Breaking:** an Episode-path INIT reply without `do_not_record` raises `LLMOutputError`, COMPACT / REGROUP reply with operations on indexed items, and no new `implicit_traits` item is created on either path unless the extractor is built with `new_traits=True`. Items carrying an identification or account number of 12 or more digits are dropped. No dependency floor changes. Detail in [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md).
 
 ## Release candidate — 2026-11-11 (core 0.7.0rc1, boundary 0.5.0rc1, user-memory 0.9.0rc5, agent-memory 0.6.0rc4, rank 0.5.0rc5)
 
