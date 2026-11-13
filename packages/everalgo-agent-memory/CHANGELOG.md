@@ -6,6 +6,16 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-13
+
+Promotes 0.6.0rc4 unchanged apart from the dependency floors below; see the release-candidate entries below for the changes.
+
+### Changed
+
+- The minimum `everalgo-core` version is now `0.7.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+- The minimum `everalgo-boundary` version is now `0.5.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+- The minimum `everalgo-clustering` version is now `0.3.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+
 ## [0.6.0rc4] - 2026-11-11
 
 ### Added
@@ -124,7 +134,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - `asyncio.gather(return_exceptions=True)` in `_pre_compress_to_list`: individual compression errors now propagate instead of being swallowed.
 - Fail-open path in `_is_worth_extracting`: the function raises on LLM error instead of returning `True` unconditionally.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc4...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0...HEAD
+[0.6.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc4...everalgo-agent-memory/v0.6.0
 [0.6.0rc4]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc3...everalgo-agent-memory/v0.6.0rc4
 [0.6.0rc3]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc2...everalgo-agent-memory/v0.6.0rc3
 [0.6.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-agent-memory/v0.6.0rc1...everalgo-agent-memory/v0.6.0rc2

@@ -6,6 +6,15 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-13
+
+Promotes 0.9.0rc8 unchanged apart from the dependency floors below; see the release-candidate entries below for the changes.
+
+### Changed
+
+- The minimum `everalgo-core` version is now `0.7.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+- The minimum `everalgo-boundary` version is now `0.5.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+
 ## [0.9.0rc8] - 2026-11-12
 
 ### Fixed
@@ -398,7 +407,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc8...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0...HEAD
+[0.9.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc8...everalgo-user-memory/v0.9.0
 [0.9.0rc8]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc7...everalgo-user-memory/v0.9.0rc8
 [0.9.0rc7]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc6...everalgo-user-memory/v0.9.0rc7
 [0.9.0rc6]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc5...everalgo-user-memory/v0.9.0rc6
