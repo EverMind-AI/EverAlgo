@@ -6,6 +6,15 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+Promotes 0.3.0rc2 unchanged apart from the dependency floors below; see the release-candidate entries below for the changes.
+
+### Changed
+
+- The minimum `everalgo-core` version is now `0.6.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+- The minimum `everalgo-parser` version is now `0.3.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+
 ## [0.3.0rc2] - 2026-10-13
 
 ### Changed
@@ -65,7 +74,8 @@ Previously a reserved namespace with `Private :: Do Not Upload`.
 [0.2.0]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0
 [0.2.0rc1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.2.0rc1
 [0.1.1]: https://github.com/EverMind-AI/EverAlgo/releases/tag/everalgo-knowledge/v0.1.1
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0rc2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0...HEAD
+[0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0rc2...everalgo-knowledge/v0.3.0
 [0.3.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.3.0rc1...everalgo-knowledge/v0.3.0rc2
 [0.3.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.1...everalgo-knowledge/v0.3.0rc1
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-knowledge/v0.2.0...everalgo-knowledge/v0.2.1

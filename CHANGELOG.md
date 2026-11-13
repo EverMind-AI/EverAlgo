@@ -15,12 +15,27 @@ The table tracks the current version declared in each `packages/everalgo-*/pypro
 |---|---|---|
 | `everalgo-core` | 0.7.0 | [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md) |
 | `everalgo-boundary` | 0.5.0 | [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md) |
-| `everalgo-clustering` | 0.3.0rc2 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
-| `everalgo-rank` | 0.5.0rc5 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
-| `everalgo-user-memory` | 0.9.0rc8 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
-| `everalgo-agent-memory` | 0.6.0rc4 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
-| `everalgo-parser` | 0.3.0rc2 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
-| `everalgo-knowledge` | 0.3.0rc2 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+| `everalgo-clustering` | 0.3.0 | [packages/everalgo-clustering/CHANGELOG.md](packages/everalgo-clustering/CHANGELOG.md) |
+| `everalgo-rank` | 0.5.0 | [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md) |
+| `everalgo-user-memory` | 0.9.0 | [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md) |
+| `everalgo-agent-memory` | 0.6.0 | [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) |
+| `everalgo-parser` | 0.3.0 | [packages/everalgo-parser/CHANGELOG.md](packages/everalgo-parser/CHANGELOG.md) |
+| `everalgo-knowledge` | 0.3.0 | [packages/everalgo-knowledge/CHANGELOG.md](packages/everalgo-knowledge/CHANGELOG.md) |
+
+## Coordinated release — 2026-11-13 (user-memory 0.9.0, agent-memory 0.6.0, rank 0.5.0, clustering 0.3.0, parser 0.3.0, knowledge 0.3.0)
+
+The six distributions still in release candidate leave it with no code change, so every distribution of the 2026-11 contract line is now a final release. Each one's dependency floors on its siblings now name final releases, so a resolver no longer picks a release candidate for them.
+
+| Distribution | Version | Bump |
+|---|---|---|
+| `everalgo-user-memory` | 0.9.0 | 0.9.0rc8 promoted unchanged; floors core `>=0.7.0`, boundary `>=0.5.0` |
+| `everalgo-agent-memory` | 0.6.0 | 0.6.0rc4 promoted unchanged; floors core `>=0.7.0`, boundary `>=0.5.0`, clustering `>=0.3.0` |
+| `everalgo-rank` | 0.5.0 | 0.5.0rc5 promoted unchanged; floor core `>=0.7.0` |
+| `everalgo-clustering` | 0.3.0 | 0.3.0rc2 promoted unchanged; floor core `>=0.6.0` |
+| `everalgo-parser` | 0.3.0 | 0.3.0rc2 promoted unchanged; floor core `>=0.6.0` |
+| `everalgo-knowledge` | 0.3.0 | 0.3.0rc2 promoted unchanged; floors core `>=0.6.0`, parser `>=0.3.0` |
+
+Detail in each package's CHANGELOG.
 
 ## Coordinated release — 2026-11-13 (core 0.7.0, boundary 0.5.0)
 
@@ -54,8 +69,8 @@ Five distributions move to the next release candidate together, because their ch
 | `everalgo-core` | 0.7.0rc1 | caller-chosen zone for prompt times; reply schemas without derived titles and descriptions; `format_utc_time` / `format_utc_date` deprecated |
 | `everalgo-boundary` | 0.5.0rc1 | **breaking:** `Cuts` from both paths and `to_memcells`; two-field step reply; step limits 8,192 / 50; batch prompt on the step rules with gap lines; `tz=`; core floor `>=0.7.0rc1` |
 | `everalgo-user-memory` | 0.9.0rc5 | reference-run episode prompt; `asummarize_memcell`; `tz=`; language follows the input; re-exports `Cuts`; floors core `>=0.7.0rc1`, boundary `>=0.5.0rc1` |
-| `everalgo-agent-memory` | 0.6.0rc4 | `tz=` on `AgentProfileExtractor`; re-exports `Cuts`; floors core `>=0.7.0rc1`, boundary `>=0.5.0rc1` |
-| `everalgo-rank` | 0.5.0rc5 | `tz=` on `aagentic_retrieve`; core floor `>=0.7.0rc1` |
+| `everalgo-agent-memory` | 0.6.0 | `tz=` on `AgentProfileExtractor`; re-exports `Cuts`; floors core `>=0.7.0rc1`, boundary `>=0.5.0rc1` |
+| `everalgo-rank` | 0.5.0 | `tz=` on `aagentic_retrieve`; core floor `>=0.7.0rc1` |
 
 Detail in [packages/everalgo-core/CHANGELOG.md](packages/everalgo-core/CHANGELOG.md), [packages/everalgo-boundary/CHANGELOG.md](packages/everalgo-boundary/CHANGELOG.md), [packages/everalgo-user-memory/CHANGELOG.md](packages/everalgo-user-memory/CHANGELOG.md), [packages/everalgo-agent-memory/CHANGELOG.md](packages/everalgo-agent-memory/CHANGELOG.md) and [packages/everalgo-rank/CHANGELOG.md](packages/everalgo-rank/CHANGELOG.md).
 
@@ -136,8 +151,8 @@ Six distributions move to the next release candidate for one refactor: the `<cus
 | `everalgo-boundary` | 0.4.0rc3 | calls the core function; core floor `>=0.6.0rc3` |
 | `everalgo-rank` | 0.5.0rc3 | calls the core function, private `_render.py` removed; core floor `>=0.6.0rc3` |
 | `everalgo-user-memory` | 0.9.0rc3 | calls the core function, private `nonblank` removed; core floor `>=0.6.0rc3` |
-| `everalgo-knowledge` | 0.3.0rc2 | calls the core function, private `_render.py` removed; core floor `>=0.6.0rc3` |
-| `everalgo-clustering` | 0.3.0rc2 | calls the core function; core floor `>=0.6.0rc3` |
+| `everalgo-knowledge` | 0.3.0 | calls the core function, private `_render.py` removed; core floor `>=0.6.0rc3` |
+| `everalgo-clustering` | 0.3.0 | calls the core function; core floor `>=0.6.0rc3` |
 
 Detail in each `packages/everalgo-<dist>/CHANGELOG.md`.
 
@@ -152,7 +167,7 @@ Six distributions move to `rc2` for two changes; `everalgo-knowledge` and `evera
 | `everalgo-rank` | 0.5.0rc2 | raises `InvalidInputError` for the missing `llm`, an unsupported `fusion_mode` and an empty candidate; core floor `>=0.6.0rc2` |
 | `everalgo-user-memory` | 0.9.0rc2 | raises `InvalidInputError` for every caller precondition; new `EpisodeSummarizer` and `EPISODE_SUMMARY_FIELD_RULE`; core floor `>=0.6.0rc2` |
 | `everalgo-agent-memory` | 0.6.0rc2 | raises `InvalidInputError` for a message with no timestamp; core floor `>=0.6.0rc2` |
-| `everalgo-parser` | 0.3.0rc2 | raises `InvalidInputError` for an unusable `RawFile` or uri, and quotes a uri without its query, fragment or credentials; core floor `>=0.6.0rc2` |
+| `everalgo-parser` | 0.3.0 | raises `InvalidInputError` for an unusable `RawFile` or uri, and quotes a uri without its query, fragment or credentials; core floor `>=0.6.0rc2` |
 
 Detail in each `packages/everalgo-<dist>/CHANGELOG.md`.
 

@@ -7,7 +7,7 @@ See the umbrella project: [EverAlgo monorepo](../../README.md) and the architect
 ## Install
 
 ```bash
-pip install everalgo-user-memory==0.9.0rc8
+pip install everalgo-user-memory==0.9.0
 ```
 
 ## Quick start

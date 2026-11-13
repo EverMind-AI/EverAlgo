@@ -6,6 +6,14 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+Promotes 0.3.0rc2 unchanged apart from the dependency floors below; see the release-candidate entries below for the changes.
+
+### Changed
+
+- The minimum `everalgo-core` version is now `0.6.0`, a final release; a floor that names a pre-release lets a resolver pick a release candidate.
+
 ## [0.3.0rc2] - 2026-10-13
 
 ### Changed
@@ -51,7 +59,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 - Geometric fallback path inside `cluster_by_llm`: the function raises on LLM failure rather than silently falling back to geometry.
 - 3-retry loop in `cluster_by_llm`: the function raises `ValueError` immediately on bad LLM JSON.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.3.0rc2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.3.0...HEAD
+[0.3.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.3.0rc2...everalgo-clustering/v0.3.0
 [0.3.0rc2]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.3.0rc1...everalgo-clustering/v0.3.0rc2
 [0.3.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.2.1...everalgo-clustering/v0.3.0rc1
 [0.2.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-clustering/v0.2.0...everalgo-clustering/v0.2.1
