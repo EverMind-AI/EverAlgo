@@ -1,4 +1,4 @@
-"""User-side memory extractors — 4 Extractors + EpisodeReflector + EpisodeSummarizer + boundary re-exports.
+"""User-side memory operators: 4 Extractors, EpisodeReflector, EpisodeSummarizer, LanguageDetector, boundary re-exports.
 
 :class:`BoundaryDetector`, :class:`Cuts` and :func:`to_memcells` are ``everalgo.boundary``'s own, re-exported
 unchanged; ``everalgo.agent_memory`` re-exports the same three.
@@ -11,6 +11,7 @@ from everalgo.user_memory.atomic_fact import AtomicFactExtractor
 from everalgo.user_memory.boundary import BoundaryDetector, Cuts, to_memcells
 from everalgo.user_memory.episode import EpisodeExtractor, EpisodeSummarizer
 from everalgo.user_memory.foresight import ForesightExtractor
+from everalgo.user_memory.language import LanguageDetector
 from everalgo.user_memory.profile import ProfileExtractor
 from everalgo.user_memory.reflect import EpisodeReflector
 
@@ -22,6 +23,7 @@ __all__ = [
     "EpisodeReflector",
     "EpisodeSummarizer",
     "ForesightExtractor",
+    "LanguageDetector",
     "OutputLanguage",
     "ProfileExtractor",
     "to_memcells",

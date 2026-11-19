@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `LanguageDetector`: names the primary language of a window of conversation in one short model call, for a host to run beside boundary detection and pass to the extractors as `output_language`. It returns Chinese, Japanese or English, and English for any other language; a window with no chat text returns `None` without a call. It reads chat messages only, without sender names, a long one cut to windows at its head, middle and tail (`user_chars=200`, `assistant_chars=100` per window). On 219 hand-labelled production conversations `qwen3-4b-instruct-2507` named the labelled language in all five runs of 155 of the 157 scored ones, development-set figures still to be confirmed on held-out data.
+
 ## [0.9.0] - 2026-11-13
 
 Promotes 0.9.0rc8 unchanged apart from the dependency floors below; see the release-candidate entries below for the changes.
