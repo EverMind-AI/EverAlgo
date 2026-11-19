@@ -8,7 +8,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 
 
 def test_public_symbols_exported() -> None:
-    """4 Extractors + EpisodeReflector + EpisodeSummarizer + OutputLanguage + the boundary re-exports."""
+    """4 Extractors + EpisodeReflector + EpisodeSummarizer + LanguageDetector + OutputLanguage + the boundary re-exports."""
     for name in (
         "AtomicFactExtractor",
         "BoundaryDetector",
@@ -17,6 +17,7 @@ def test_public_symbols_exported() -> None:
         "EpisodeReflector",
         "EpisodeSummarizer",
         "ForesightExtractor",
+        "LanguageDetector",
         "OutputLanguage",
         "ProfileExtractor",
         "to_memcells",
@@ -35,6 +36,7 @@ def test_dunder_all_lists_exactly_the_public_symbols() -> None:
             "EpisodeReflector",
             "EpisodeSummarizer",
             "ForesightExtractor",
+            "LanguageDetector",
             "OutputLanguage",
             "ProfileExtractor",
             "to_memcells",
@@ -56,6 +58,7 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
         EpisodeReflector,
         EpisodeSummarizer,
         ForesightExtractor,
+        LanguageDetector,
         ProfileExtractor,
     )
 
@@ -65,6 +68,7 @@ def test_user_memory_extractors_instantiable_with_llm() -> None:
     assert EpisodeReflector(llm=fake).__class__.__name__ == "EpisodeReflector"
     assert EpisodeSummarizer(llm=fake).__class__.__name__ == "EpisodeSummarizer"
     assert ForesightExtractor(llm=fake).__class__.__name__ == "ForesightExtractor"
+    assert LanguageDetector(llm=fake).__class__.__name__ == "LanguageDetector"
     assert ProfileExtractor(llm=fake).__class__.__name__ == "ProfileExtractor"
 
 

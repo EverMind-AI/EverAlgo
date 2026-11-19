@@ -1,6 +1,6 @@
 # everalgo-user-memory
 
-User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, an `EpisodeSummarizer` that writes an episode's summary from its memcell (beside extraction) or from an episode text already stored, plus `BoundaryDetector`, its `Cuts` result and the `to_memcells` helper, re-exported unchanged from `everalgo-boundary`.
+User-side memory products for EverAlgo — four LLM-backed extractors (`EpisodeExtractor`, `ForesightExtractor`, `AtomicFactExtractor`, `ProfileExtractor`), an `EpisodeReflector` that merges several episodes into one narrative, an `EpisodeSummarizer` that writes an episode's summary from its memcell (beside extraction) or from an episode text already stored, a `LanguageDetector` that names the language a conversation is carried on in, plus `BoundaryDetector`, its `Cuts` result and the `to_memcells` helper, re-exported unchanged from `everalgo-boundary`.
 
 See the umbrella project: [EverAlgo monorepo](../../README.md) and the architecture document at [`docs/concepts/architecture.md`](../../docs/concepts/architecture.md).
 
@@ -91,6 +91,25 @@ episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice")
 
 Plain strings work too, in any casing (`"chinese"`, `"German"`) — convenient when the value comes from
 config. An unrecognised name raises `everalgo.utils.InvalidInputError` (a `ValueError`) rather than reaching the prompt.
+
+To have that value decided for you, `LanguageDetector` names the primary language of a window of conversation in one
+short model call: run it beside boundary detection on the same items, then pass its result to every extractor. It
+returns Chinese, Japanese or English, and English for any other language, so Korean, German, Spanish and Russian
+conversations come back as English too; a host that wants those written in their own language passes
+`output_language` itself. A window with no chat text returns `None` without a call, which leaves each extractor to
+its own rule:
+
+```python
+from everalgo.user_memory import LanguageDetector
+
+language = await LanguageDetector(llm=small_client).adetect(window)  # OutputLanguage | None
+episode = await EpisodeExtractor(llm=client).aextract(mc, sender_id="u_alice", output_language=language)
+```
+
+It judges the conversation as a whole — the users first, the assistant's replies to them when the users' own text
+cannot show it — and ignores pasted material, its working notes and sender names, which it never sees. A long message
+is shown as three windows, at its head, middle and tail, so words a person wrote into the middle of a template still
+reach the model.
 
 **Decide the language once, upstream, and pass the same value to every call.** The alternative — deriving
 one extractor's language from another's output — inherits that extractor's error rate, and for profiles the
@@ -226,6 +245,15 @@ class EpisodeReflector:
         output_language: OutputLanguage | str | None = None,   # None → inherited from the input
     ) -> Episode: ...
 
+class LanguageDetector:
+    def __init__(self, *, llm: LLMClient) -> None: ...
+    async def adetect(
+        self, items: Sequence[ConversationItem], *,   # ChatMessage text only; none → None, no model call
+        custom_instructions: str | None = None,   # host's instructions, the closing block; none → no block
+        user_chars: int = 200,           # a user message over 3 × user_chars shows head, middle and tail windows of it
+        assistant_chars: int = 100,      # the same cut for an assistant message
+    ) -> OutputLanguage | None: ...      # Chinese / Japanese / English, English for any other; None → no chat text
+
 class EpisodeSummarizer:
     def __init__(self, *, llm: LLMClient) -> None: ...
     async def asummarize(
@@ -298,7 +326,7 @@ episode = episode.model_copy(update={"summary": summary})
 
 The merge is time-aware. Every profile item carries `observed_at`, the observation date of the narrative that last established it, and `Profile.timestamp` never moves backwards. An Episode observed before an item was established may add facts and evidence but cannot rewrite or delete that item — the rule is stated in the UPDATE prompt and enforced in code — so a backfilled older Episode arriving after a newer one cannot turn the profile back in time. Callers pass only the Episodes new to the profile; a batch that straddles the stored `Profile.timestamp` is split into a historical pass and a current pass. See the [Episode integration contract](../../docs/api/profile-from-episode-texts.md).
 
-All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, the Episode Profile method is exposed as `extract_from_episodes(...)`, and `EpisodeSummarizer.asummarize` / `asummarize_memcell` as `summarize(...)` / `summarize_memcell(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
+All class methods have a sync bridge: `extractor.extract(...)` is `async_to_sync(aextract)`, the Episode Profile method is exposed as `extract_from_episodes(...)`, `EpisodeSummarizer.asummarize` / `asummarize_memcell` as `summarize(...)` / `summarize_memcell(...)`, and `LanguageDetector.adetect` as `detect(...)` — only for non-event-loop callers (CLI scripts, plain unit tests).
 
 ## Testing
 
