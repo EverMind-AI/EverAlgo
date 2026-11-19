@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0rc1] - 2026-11-19
+
 ### Added
 
 - `LanguageDetector`: names the primary language of a window of conversation in one short model call, for a host to run beside boundary detection and pass to the extractors as `output_language`. It returns Chinese, Japanese or English, and English for any other language; a window with no chat text returns `None` without a call. It reads chat messages only, without sender names, a long one cut to windows at its head, middle and tail (`user_chars=200`, `assistant_chars=100` per window). On 219 hand-labelled production conversations `qwen3-4b-instruct-2507` named the labelled language in all five runs of 155 of the 157 scored ones, development-set figures still to be confirmed on held-out data.
@@ -411,7 +413,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0rc1...HEAD
+[0.10.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0...everalgo-user-memory/v0.10.0rc1
 [0.9.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc8...everalgo-user-memory/v0.9.0
 [0.9.0rc8]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc7...everalgo-user-memory/v0.9.0rc8
 [0.9.0rc7]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc6...everalgo-user-memory/v0.9.0rc7
