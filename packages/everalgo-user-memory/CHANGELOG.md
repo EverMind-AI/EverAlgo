@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-19
+
+Promotes 0.10.0rc1 unchanged; see the release-candidate entry below for the change. On 33 further hand-labelled production conversations collected after the prompt was fixed, `qwen3-4b-instruct-2507` named the labelled language in all five runs of all 33 (30 Chinese, 3 English).
+
 ## [0.10.0rc1] - 2026-11-19
 
 ### Added
@@ -413,7 +417,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0...HEAD
+[0.10.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0rc1...everalgo-user-memory/v0.10.0
 [0.10.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0...everalgo-user-memory/v0.10.0rc1
 [0.9.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc8...everalgo-user-memory/v0.9.0
 [0.9.0rc8]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc7...everalgo-user-memory/v0.9.0rc8
