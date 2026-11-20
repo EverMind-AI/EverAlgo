@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `LanguageDetector`: a few words of another language no longer decide the language. The prompt's rule now says that names, places, brands, terms and short phrases from another language do not change the conversation's language, and a worked example shows an English exchange carrying two Chinese words named English. Before, English conversations carrying a Chinese address, company, landmark or phrase were named Chinese. On 271 hand-labelled production conversations and 13 written mixed-language ones, `qwen3-4b-instruct-2507` fixed 7 scored records against 0.10.0 and broke 1: a Chinese conversation dense with English technical terms is now named English.
+
 ## [0.10.0] - 2026-11-19
 
 Promotes 0.10.0rc1 unchanged; see the release-candidate entry below for the change. On 33 further hand-labelled production conversations collected after the prompt was fixed, `qwen3-4b-instruct-2507` named the labelled language in all five runs of all 33 (30 Chinese, 3 English).

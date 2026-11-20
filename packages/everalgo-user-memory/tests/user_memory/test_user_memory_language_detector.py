@@ -6,6 +6,7 @@ Coverage layers:
 - Result    — a label maps to OutputLanguage, ``Other`` to English; a record without text gives None with no call
 - Errors    — an invalid reply raises LLMOutputError, client exceptions propagate, a cut below 1 is rejected
 - Labels    — the reply accepts Chinese, English, Japanese and ``Other``, and the prompt lists exactly those
+- Example   — the worked example is a record as the detector renders one, answered with a valid reply
 - Log lines — counts and the label, never the conversation
 """
 
@@ -20,7 +21,7 @@ from everalgo.llm import LLMOutputError
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import ChatMessage, ConversationItem, ToolCall, ToolCallFunction, ToolCallRequest, ToolCallResult
 from everalgo.user_memory import LanguageDetector, OutputLanguage
-from everalgo.user_memory.language import _LanguageReply
+from everalgo.user_memory.language import _cuts, _LanguageReply, _render_chat_record
 from everalgo.user_memory.prompts.en.language import LANGUAGE_LABELS, LANGUAGE_SYSTEM_PROMPT
 from everalgo.utils import InvalidInputError
 
@@ -258,6 +259,32 @@ def test_prompt_lists_every_label_once() -> None:
     listed = reply_line.removeprefix('Reply as JSON, {"language": "Chinese"}, using one of: ').removesuffix(".")
 
     assert listed.split(", ") == list(LANGUAGE_LABELS)
+
+
+# ── Worked example ─────────────────────────────────────────────────────────
+
+
+def _example() -> tuple[str, str]:
+    """The prompt's worked example: its record body and its answer line."""
+    body, rest = LANGUAGE_SYSTEM_PROMPT.split("<chat_record>\n", 1)[1].split("\n</chat_record>\n", 1)
+    return body, rest.split("\n", 1)[0]
+
+
+def test_example_record_is_rendered_as_the_detector_renders_a_record() -> None:
+    body, _ = _example()
+    user_block, assistant_block = body.split("\n\n")
+    messages = [
+        _message("user", user_block.removeprefix("[user] "), n=0),
+        _message("assistant", assistant_block.removeprefix("[assistant] "), n=1),
+    ]
+
+    assert _render_chat_record(messages, keep=_cuts(user_chars=200, assistant_chars=100)) == body
+
+
+def test_example_answer_is_a_valid_reply() -> None:
+    _, answer = _example()
+
+    assert _LanguageReply.model_validate_json(answer).language == "English"
 
 
 # ── Log lines ──────────────────────────────────────────────────────────────
