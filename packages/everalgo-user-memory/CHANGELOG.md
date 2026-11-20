@@ -6,6 +6,10 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-20
+
+Promotes 0.10.1rc1 unchanged; see the release-candidate entry below for the change. In cloud's dev acceptance, 19 conversations run twice end to end, it named the expected language for 17 every time. The two misses: an English conversation carrying a whole Chinese address line, named Chinese; and a Chinese request around a pasted English email, named English, which 0.10.0 named Chinese. On 190 scored production conversations it differs from 0.10.0 on 3: it fixes an English conversation naming a Chinese company and a Persian one (now English), and names one Chinese conversation dense with English technical terms English.
+
 ## [0.10.1rc1] - 2026-11-20
 
 ### Changed
@@ -423,7 +427,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.1rc1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.1...HEAD
+[0.10.1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.1rc1...everalgo-user-memory/v0.10.1
 [0.10.1rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0...everalgo-user-memory/v0.10.1rc1
 [0.10.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0rc1...everalgo-user-memory/v0.10.0
 [0.10.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0...everalgo-user-memory/v0.10.0rc1
