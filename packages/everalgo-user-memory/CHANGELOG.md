@@ -6,6 +6,8 @@ follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.1rc1] - 2026-11-20
+
 ### Changed
 
 - `LanguageDetector`: a few words of another language no longer decide the language. The prompt's rule now says that names, places, brands, terms and short phrases from another language do not change the conversation's language, and a worked example shows an English exchange carrying two Chinese words named English. Before, English conversations carrying a Chinese address, company, landmark or phrase were named Chinese. On 271 hand-labelled production conversations and 13 written mixed-language ones, `qwen3-4b-instruct-2507` fixed 7 scored records against 0.10.0 and broke 1: a Chinese conversation dense with English technical terms is now named English.
@@ -421,7 +423,8 @@ The first release candidate of 0.9.0, and the first release since the 0.8.0 rele
 - `ProfileExtractor` signature changed from separate `memcell` + `cluster_episodes` parameters to a single `memcells: Sequence[MemCell]` list, matching the other extractor contracts.
 - `Episode`, `Foresight`, `AtomicFact`, `Profile` schemas dropped `parent_id` / `parent_type` fields and the `id` field; schemas now carry only the minimal required fields plus `ConfigDict(extra="allow")`.
 
-[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.1rc1...HEAD
+[0.10.1rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0...everalgo-user-memory/v0.10.1rc1
 [0.10.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.10.0rc1...everalgo-user-memory/v0.10.0
 [0.10.0rc1]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0...everalgo-user-memory/v0.10.0rc1
 [0.9.0]: https://github.com/EverMind-AI/EverAlgo/compare/everalgo-user-memory/v0.9.0rc8...everalgo-user-memory/v0.9.0
